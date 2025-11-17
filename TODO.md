@@ -1,0 +1,116 @@
+# Py_artnet - TODO Liste
+
+## Geplante Features
+
+### Performance-Optimierung
+- [ ] Video-Optimierungs-Script erstellen
+  - [ ] Automatische Skalierung auf Canvas-Größe
+  - [ ] Hardware-Codec Encoding (H.264 mit NVENC/QSV)
+  - [ ] Bitrate-Optimierung für schnelleres Decoding
+  - [ ] Keyframe-Intervall anpassen (g=30 für bessere Loop-Performance)
+  - [ ] Batch-Processing für alle Videos in Kanal-Ordnern
+- [ ] RGB-Daten-Vorberechnung als Alternative
+  - [ ] Video zu komprimierten RGB-Arrays konvertieren
+  - [ ] Player-Modus für vorberechnete Daten
+  - [ ] Speicherformat optimieren (z.B. mit msgpack/pickle)
+
+### Weitere Verbesserungen
+- [ ] Logging in Datei implementieren
+- [ ] Unit Tests erweitern
+- [ ] API-Authentifizierung (Basic Auth/Token)
+- [ ] PyInstaller EXE Build Setup
+  - [ ] Spec-Datei erstellen mit allen Dependencies
+  - [ ] Static files, config.json, data/video Ordner inkludieren
+  - [ ] Single-File oder Folder-basierte Distribution testen
+- [ ] Web-Interface Verbesserungen
+  - [ ] Console Component in separates JS-Modul auslagern
+  - [ ] Responsive Design für Mobile optimieren
+  - [ ] LocalStorage für Settings Persistence (Brightness, Speed)
+- [ ] Konfiguration erweitern
+  - [ ] Environment Variable Support (target_ip, ports)
+  - [ ] JSON Schema Validation für config.json
+  - [ ] Hot-Reload (config.json watcher)
+- [ ] Projekt-Struktur
+  - [ ] CDN für Bootstrap Icons
+  - [ ] Dockerfile erstellen
+  - [ ] requirements-lock.txt (pip freeze)
+
+## Abgeschlossen ✓
+- ✓ CLI-Steuerung implementiert
+- ✓ DMX-Input über Art-Net (Universum 100)
+- ✓ DMX-Test-App erstellt
+- ✓ Video-Player mit Art-Net Output
+- ✓ Numpy-Optimierung für RGB-Extraktion
+- ✓ 8-Universen-Grenze Logik
+- ✓ Brightness/Speed/Loop Steuerung
+- ✓ Pause/Resume Funktionalität
+- ✓ Blackout Funktion
+- ✓ Code-Refactoring (Module-Struktur)
+- ✓ Konfigurationsdatei (config.json)
+- ✓ Video-Slot System (4 Kanäle, 1020 Videos, DMX Ch6-9)
+- ✓ Hardware-Beschleunigung aktiviert mit Status-Ausgabe
+- ✓ Kanal-Ordner System (kanal_1 bis kanal_4)
+- ✓ Testmuster (Farben)
+- ✓ RGB-Aufzeichnung
+- ✓ Live-Statistiken
+- ✓ Canvas-Größe Skalierung
+- ✓ Multi-JSON Punkte-Verwaltung (list/validate/switch/reload)
+- ✓ JSON Schema Validierung mit jsonschema
+- ✓ Flask REST API komplett implementiert
+  - ✓ Alle Playback Endpoints (play/stop/pause/resume/restart)
+  - ✓ Settings Endpoints (brightness/speed/fps/loop)
+  - ✓ Art-Net Endpoints (blackout/test)
+  - ✓ Video Management (list/load)
+  - ✓ Points Management (list/switch/reload/validate/current)
+  - ✓ Status & Info & Stats Endpoints
+  - ✓ Recording Endpoints (start/stop)
+  - ✓ Console Endpoints (log/command/clear)
+  - ✓ CORS Support aktiviert
+- ✓ Web-Interfaces implementiert
+  - ✓ Bootstrap GUI (index.html) - Canvas Editor
+  - ✓ Control Panel (controls.html) - Playback Steuerung
+  - ✓ Dark Mode mit LocalStorage
+  - ✓ Externe CSS-Datei (styles.css)
+  - ✓ Externe JS-Dateien (editor.js, controls.js)
+  - ✓ Navigation zwischen GUIs
+- ✓ WebSocket Support für Live-Updates
+  - ✓ Flask-SocketIO Integration
+  - ✓ Status Broadcasting (alle 2s)
+  - ✓ Console Live-Updates
+  - ✓ Fallback auf REST Polling
+- ✓ Points Switch/Reload via REST API
+  - ✓ /api/points/switch mit Validierung
+  - ✓ /api/points/reload für aktuelles File
+  - ✓ Auto-restart bei laufendem Video
+- ✓ Bessere Error Handling & Validierung
+  - ✓ Try/Except in allen API Endpoints
+  - ✓ HTTP Status Codes (200, 400, 404, 500)
+  - ✓ JSON Schema Validierung vor Points-Switch
+- ✓ API Modularisierung
+  - ✓ api_routes.py (Playback, Settings, Art-Net)
+  - ✓ api_points.py (Points Management)
+  - ✓ api_videos.py (Video Management)
+  - ✓ api_console.py (Console & Commands)
+- ✓ Dokumentation
+  - ✓ docs/API.md (500+ Zeilen, alle Endpoints)
+  - ✓ WebSocket Events dokumentiert
+- ✓ Testing
+  - ✓ tests/test_main.py (4 Test-Klassen)
+  - ✓ Validator, ArtNetManager, Cache, Error Tests
+- ✓ RGB Cache Infrastruktur
+  - ✓ cache/ Ordner erstellt
+  - ✓ cache clear/info CLI Befehle
+  - ✓ config.json Einträge
+  - ✓ .gitignore Patterns
+- ✓ Art-Net Code Separation
+  - ✓ artnet_manager.py Modul
+  - ✓ Test-Pattern mit Gradient
+  - ✓ Automatischer Art-Net Start
+- ✓ Konfigurationswerte ausgelagert
+  - ✓ API Host/Port/Secret Key in config.json
+  - ✓ Art-Net FPS/Even Packet/Broadcast
+  - ✓ Video Delays (shutdown/frame_wait/recording_stop)
+  - ✓ Console Log Buffer Size
+  - ✓ Status Broadcast Interval
+  - ✓ Frontend Polling Interval
+  - ✓ Frontend-Config API Endpoint (/api/config/frontend)

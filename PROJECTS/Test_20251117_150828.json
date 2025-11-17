@@ -1,0 +1,25 @@
+{
+  "projectName": "Test",
+  "version": "1.0",
+  "savedAt": "2025-11-17T15:08:28.071906",
+  "canvas": {
+    "width": 1024,
+    "height": 768
+  },
+  "backgroundImage": null,
+  "shapes": [
+    {
+      "type": "rect",
+      "name": "Shape 1",
+      "id": "shape-1",
+      "x": 300,
+      "y": 200,
+      "size": 120,
+      "rotation": 0.8830522840583537,
+      "scaleX": 1,
+      "scaleY": 0.6521994903260413,
+      "color": "cyan",
+      "pointCount": 20
+    }
+  ]
+}

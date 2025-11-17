@@ -1,0 +1,24 @@
+{
+  "projectName": "Mein Projekt",
+  "version": "1.0",
+  "savedAt": "2025-11-17T15:07:44.494841",
+  "canvas": {
+    "width": 1024,
+    "height": 768
+  },
+  "backgroundImage": null,
+  "shapes": [
+    {
+      "type": "rect",
+      "id": "shape-1",
+      "x": 300,
+      "y": 200,
+      "size": 120,
+      "rotation": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 20
+    }
+  ]
+}
