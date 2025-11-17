@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Ignore video, cache, and data folders
+video/
+.cache/
+data/
+
 # C extensions
 *.so
 
