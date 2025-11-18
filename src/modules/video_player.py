@@ -865,6 +865,38 @@ class VideoPlayer:
         else:
             print("Art-Net nicht aktiv!")
     
+    def reload_artnet(self):
+        """Lädt Art-Net mit neuer IP neu."""
+        try:
+            # Prüfe ob erforderliche Attribute existieren
+            if not hasattr(self, 'total_points') or not hasattr(self, 'channels_per_universe'):
+                print("⚠️ Art-Net kann nicht neu geladen werden - Player nicht vollständig initialisiert")
+                return False
+            
+            # Stoppe altes Art-Net
+            if self.artnet_manager:
+                self.artnet_manager.stop()
+            
+            # Erstelle neues Art-Net mit aktueller IP
+            self.artnet_manager = ArtNetManager(
+                self.target_ip, 
+                self.start_universe, 
+                self.total_points, 
+                self.channels_per_universe
+            )
+            
+            # Starte mit Config
+            artnet_config = self.config.get('artnet', {})
+            self.artnet_manager.start(artnet_config)
+            
+            print(f"✅ Art-Net neu geladen mit IP: {self.target_ip}")
+            return True
+        except Exception as e:
+            print(f"❌ Fehler beim Neuladen von Art-Net: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def test_pattern(self, color='red'):
         """Sendet Testmuster (stoppt Video-Wiedergabe)."""
         if self.artnet_manager:

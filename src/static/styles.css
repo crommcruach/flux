@@ -706,6 +706,69 @@ body.editor-page {
     padding: 0.4rem 0.75rem;
 }
 
+.menu-bar .menu-btn {
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.menu-bar .menu-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.menu-bar .menu-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.menu-bar .btn-success {
+    background: var(--btn-primary);
+    color: white;
+}
+
+.menu-bar .btn-success:hover {
+    background: var(--btn-primary-hover);
+}
+
+.menu-bar .btn-info {
+    background: var(--btn-info);
+    color: white;
+}
+
+.menu-bar .btn-info:hover {
+    background: var(--btn-info-hover);
+}
+
+.menu-bar .btn-warning {
+    background: var(--btn-warning);
+    color: white;
+}
+
+.menu-bar .btn-warning:hover {
+    background: var(--btn-warning-hover);
+}
+
+.menu-bar .btn-secondary {
+    background: var(--btn-secondary);
+    color: white;
+}
+
+.menu-bar .btn-secondary:hover {
+    background: var(--btn-secondary-hover);
+}
+
+.menu-bar .btn-primary {
+    background: var(--accent-color);
+    color: white;
+}
+
+.menu-bar .btn-primary:hover {
+    background: var(--btn-info-hover);
+}
+
 .menu-bar .form-control,
 .menu-bar .form-select {
     font-size: 0.85rem;

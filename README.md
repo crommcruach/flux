@@ -7,13 +7,17 @@ Video-to-Art-Net DMX Control System mit Web-Interface und Multi-Kanal Unterstüt
 - 🎥 **Video Playback** - OpenCV mit Hardware-Beschleunigung (NVDEC/QSV/VAAPI)
 - 🎞️ **GIF Support** - Animated GIFs mit Transparenz und Frame-Timing
 - 🌐 **Art-Net Output** - Multi-Universe Support mit automatischer Grenzlogik
-- 🎛️ **DMX Input Control** - 9-Kanal Steuerung (Ch1-5: Control, Ch6-9: Video Slots)
+- 🎨 **RGB Channel Mapping** - Konfigurierbare Kanal-Reihenfolge pro Universum (RGB, GRB, BGR, etc.)
+- 🏛️ **DMX Input Control** - 9-Kanal Steuerung (Ch1-5: Control, Ch6-9: Video Slots)
 - 📡 **REST API** - Flask-basierte API mit CORS Support
 - 🖥️ **Web Interfaces** - Bootstrap GUI Editor + Control Panel
 - 🎨 **Multi-JSON Support** - Flexible Punkte-Konfigurationen mit Validierung
 - 🔄 **4-Kanal Video System** - Bis zu 1020 Videos (255 pro Kanal)
 - 🌙 **Dark Mode** - Vollständiges Theme-System mit LocalStorage
 - ⚡ **Performance** - Numpy-optimierte RGB-Extraktion, Hardware-Decoding, RGB-Cache
+- 💾 **Server-Projektverwaltung** - Projekte speichern/laden/löschen im Backend, Download & Modal-UI
+- 🔍 **Canvas-Zoom & Scrollbars** - Zoom per Maus & Buttons, automatische Scrollbalken
+- 🛎️ **Toast-Benachrichtigungen** - Eigene Benachrichtigungen statt alert(), Theme-aware
 
 ## Installation
 
@@ -151,7 +155,12 @@ Py_artnet/
     "start_universe": 1,
     "dmx_control_universe": 100,
     "dmx_listen_ip": "0.0.0.0",
-    "dmx_listen_port": 6454
+    "dmx_listen_port": 6454,
+    "universe_configs": {
+      "default": "RGB",
+      "0": "GRB",
+      "1": "BGR"
+    }
   },
   "video": {
     "extensions": [".mp4", ".avi", ".mov", ".mkv", ".wmv", ".gif"],
@@ -184,6 +193,31 @@ Py_artnet/
 - **Kanal 6**: Video-Kanal Auswahl (0-63=K1, 64-127=K2, 128-191=K3, 192-255=K4)
 - **Kanal 7-9**: Video-Slot Auswahl (0-255 pro Kanal)
 
+## RGB-Kanal-Reihenfolge (Channel Mapping)
+
+Pro Art-Net Universum kann die Farb-Kanal-Reihenfolge konfiguriert werden. Dies ist nötig wenn LEDs nicht die Standard-RGB Reihenfolge verwenden.
+
+### Unterstützte Formate
+- **RGB** - Standard (z.B. WS2812B) 
+- **GRB** - Häufig bei WS2811
+- **BGR** - Manche China-LEDs
+- **RBG**, **GBR**, **BRG** - Weitere Permutationen
+
+### Konfiguration
+```json
+"universe_configs": {
+  "default": "RGB",     // Standard für alle nicht spezifizierten Universen
+  "0": "GRB",          // Universum 0 verwendet GRB
+  "1": "BGR",          // Universum 1 verwendet BGR
+  "5": "RBG"           // Universum 5 verwendet RBG
+}
+```
+
+**Hinweise:**
+- Die Umordnung erfolgt automatisch bei der Ausgabe
+- Testmuster berücksichtigen die konfigurierte Reihenfolge
+- Bei fehlender Konfiguration wird "RGB" verwendet
+
 ## GIF Support
 
 Das System unterstützt animated GIFs mit folgenden Features:
@@ -193,6 +227,67 @@ Das System unterstützt animated GIFs mit folgenden Features:
 - **Konfiguration**:
   - `gif_transparency_bg`: RGB-Werte für Transparenz-Hintergrund (Standard: [0,0,0])
   - `gif_respect_frame_timing`: Variable Frame-Delays aktivieren (Standard: true)
+
+## Prozedural generierte Grafiken (Scripts)
+
+Neben Video-Dateien können auch Python-Scripts als Videoquellen verwendet werden. Diese generieren Frames prozedural in Echtzeit und laufen endlos.
+
+### Features
+- **Infinite Content**: Scripts laufen ohne Wiederholung
+- **Python-basiert**: Volle Flexibilität mit NumPy, Math, etc.
+- **Hot-Loading**: Scripts können zur Laufzeit gewechselt werden
+- **Standard-Controls**: Brightness, Speed, etc. funktionieren mit Scripts
+
+### Verwendung
+
+**CLI:**
+```bash
+> scripts list              # Alle verfügbaren Scripts anzeigen
+> script:rainbow_wave       # Script laden und starten
+> script:plasma             # Anderes Script laden
+```
+
+**API:**
+```bash
+GET  /api/scripts           # Liste aller Scripts
+POST /api/load_script       # Body: {"script": "rainbow_wave"}
+```
+
+### Eigene Scripts erstellen
+
+Scripts liegen im `scripts/` Ordner und müssen folgende Struktur haben:
+
+```python
+import numpy as np
+
+METADATA = {
+    'name': 'My Script',
+    'description': 'Does something cool',
+    'parameters': {
+        'speed': 1.0
+    }
+}
+
+def generate_frame(frame_number, width, height, time, fps):
+    """
+    Generiert einen Frame als NumPy-Array.
+    
+    Args:
+        frame_number: Frame-Index (0, 1, 2, ...)
+        width: Canvas-Breite
+        height: Canvas-Höhe
+        time: Zeit in Sekunden seit Start
+        fps: Ziel-FPS
+    
+    Returns:
+        np.array: RGB-Array mit shape (height, width, 3), dtype=uint8
+    """
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    # ... generiere Grafik ...
+    return frame
+```
+
+Siehe `scripts/README.md` für detaillierte Dokumentation und Beispiele.
 
 ## Hardware-Beschleunigung
 

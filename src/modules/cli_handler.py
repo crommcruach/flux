@@ -32,7 +32,10 @@ class CLIHandler:
             tuple: (continue_loop, new_player) - continue_loop=False bei Exit, new_player wenn Player ersetzt wurde
         """
         # Playback-Befehle
-        if command == "restart":
+        if command == "start":
+            self.player.start()
+        
+        elif command == "restart":
             self.player.restart()
             
         elif command == "stop":
@@ -90,6 +93,9 @@ class CLIHandler:
         elif command == "universe":
             self._handle_universe(args)
         
+        elif command == "artnet":
+            self._handle_artnet(args)
+        
         # Info
         elif command == "status":
             self._handle_status()
@@ -107,6 +113,13 @@ class CLIHandler:
         # Cache
         elif command == "cache":
             self._handle_cache(args)
+        
+        # Scripts
+        elif command == "scripts":
+            self._handle_scripts(args)
+            
+        elif command.startswith("script:"):
+            return self._handle_load_script(command)
         
         # System
         elif command == "help":
@@ -385,6 +398,145 @@ class CLIHandler:
         else:
             print(f"Aktuelles Start-Universum: {self.player.start_universe}")
     
+    def _handle_artnet(self, args):
+        """Verwaltet Art-Net Konfiguration (Subcommands: map, show)."""
+        if not args:
+            print("❌ Verwendung: artnet <subcommand> [args]")
+            print("")
+            print("Subcommands:")
+            print("  artnet map <format> <universes>  - Setzt RGB-Kanal-Reihenfolge")
+            print("  artnet show                      - Zeigt aktuelle Kanal-Mappings")
+            print("")
+            print("Formate: RGB, GRB, BGR, RBG, GBR, BRG")
+            print("")
+            print("Beispiele:")
+            print("  artnet map rgb 0-4       - Universen 0-4 auf RGB setzen")
+            print("  artnet map grb 5         - Universum 5 auf GRB setzen")
+            print("  artnet map bgr 6-10      - Universen 6-10 auf BGR setzen")
+            print("  artnet show              - Zeigt alle Mappings")
+            return
+        
+        parts = args.split(maxsplit=2)
+        subcommand = parts[0].lower()
+        
+        if subcommand == "map":
+            if len(parts) < 3:
+                print("❌ Verwendung: artnet map <format> <universes>")
+                print("Beispiel: artnet map grb 0-5")
+                return
+            self._handle_artnet_map(parts[1], parts[2])
+        
+        elif subcommand == "show":
+            self._handle_artnet_show()
+        
+        else:
+            print(f"❌ Unbekanntes Subcommand: {subcommand}")
+            print("Verfügbar: map, show")
+    
+    def _handle_artnet_map(self, format_str, universes_str):
+        """Setzt RGB-Kanal-Reihenfolge für Universen."""
+        # Validiere Format
+        format_str = format_str.upper()
+        valid_formats = ['RGB', 'GRB', 'BGR', 'RBG', 'GBR', 'BRG']
+        if format_str not in valid_formats:
+            print(f"❌ Ungültiges Format: {format_str}")
+            print(f"Verfügbar: {', '.join(valid_formats)}")
+            return
+        
+        # Parse Universum-Bereich (z.B. "0-5" oder "3")
+        try:
+            if '-' in universes_str:
+                start, end = universes_str.split('-')
+                start_uni = int(start)
+                end_uni = int(end)
+                if start_uni > end_uni:
+                    print("❌ Start-Universum muss kleiner als End-Universum sein")
+                    return
+                universe_list = list(range(start_uni, end_uni + 1))
+            else:
+                universe_list = [int(universes_str)]
+        except ValueError:
+            print(f"❌ Ungültiger Universum-Bereich: {universes_str}")
+            print("Verwende Format: '0-5' oder '3'")
+            return
+        
+        # Lade config.json
+        config_path = os.path.join(self.base_path, "config.json")
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+            else:
+                config_data = {}
+            
+            # Stelle Struktur sicher
+            if 'artnet' not in config_data:
+                config_data['artnet'] = {}
+            if 'universe_configs' not in config_data['artnet']:
+                config_data['artnet']['universe_configs'] = {'default': 'RGB'}
+            
+            # Setze Mapping für alle Universen im Bereich
+            for uni in universe_list:
+                config_data['artnet']['universe_configs'][str(uni)] = format_str
+            
+            # Speichere config.json
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, indent=2, ensure_ascii=False)
+            
+            # Erfolgsausgabe
+            if len(universe_list) == 1:
+                print(f"✅ Universum {universe_list[0]} auf {format_str} gesetzt")
+            else:
+                print(f"✅ Universen {universe_list[0]}-{universe_list[-1]} auf {format_str} gesetzt")
+            print("💾 Konfiguration gespeichert in config.json")
+            print("⚠️  HINWEIS: Starte Video neu, damit die Änderung wirksam wird")
+            
+        except Exception as e:
+            print(f"❌ Fehler beim Speichern: {e}")
+    
+    def _handle_artnet_show(self):
+        """Zeigt aktuelle RGB-Kanal-Mappings."""
+        config_path = os.path.join(self.base_path, "config.json")
+        try:
+            if not os.path.exists(config_path):
+                print("⚠️  Keine config.json gefunden")
+                return
+            
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            
+            universe_configs = config_data.get('artnet', {}).get('universe_configs', {})
+            
+            if not universe_configs:
+                print("⚠️  Keine Universe-Konfigurationen gefunden")
+                return
+            
+            print("")
+            print("🎨 Art-Net RGB-Kanal-Mappings:")
+            print("=" * 40)
+            
+            # Default zuerst
+            default = universe_configs.get('default', 'RGB')
+            print(f"Default:  {default}")
+            print("-" * 40)
+            
+            # Sortiere Universen numerisch
+            universe_nums = [k for k in universe_configs.keys() if k.isdigit()]
+            universe_nums.sort(key=int)
+            
+            if not universe_nums:
+                print("Keine spezifischen Universen konfiguriert")
+            else:
+                for uni in universe_nums:
+                    format_str = universe_configs[uni]
+                    print(f"Universum {uni:>3}: {format_str}")
+            
+            print("=" * 40)
+            print("")
+            
+        except Exception as e:
+            print(f"❌ Fehler beim Laden: {e}")
+    
     # === Info ===
     
     def _handle_status(self):
@@ -585,6 +737,89 @@ class CLIHandler:
         """Zeigt Hilfe."""
         from .utils import print_help
         print_help()
+    
+    # === Scripts ===
+    
+    def _handle_scripts(self, args):
+        """Verwaltet Scripts."""
+        from .script_generator import ScriptGenerator
+        
+        scripts_dir = self.config.get('paths', {}).get('scripts_dir', 'scripts')
+        script_gen = ScriptGenerator(scripts_dir)
+        
+        if not args or args == "list":
+            self._handle_scripts_list(script_gen)
+        else:
+            print("Verwendung: scripts [list]")
+    
+    def _handle_scripts_list(self, script_gen):
+        """Listet alle Scripts auf."""
+        scripts = script_gen.list_scripts()
+        
+        if not scripts:
+            print("\nKeine Scripts gefunden!")
+            return
+        
+        print(f"\n{'='*60}")
+        print(f"{'Script':<30} {'Beschreibung':<30}")
+        print(f"{'='*60}")
+        
+        for script in scripts:
+            name = script['name'][:28]
+            desc = script.get('description', 'Keine Beschreibung')[:28]
+            print(f"{name:<30} {desc:<30}")
+        
+        print(f"{'='*60}")
+        print(f"\nInsgesamt {len(scripts)} Script(s)")
+        print("Verwendung: script:<name>  (z.B. script:rainbow_wave)")
+    
+    def _handle_load_script(self, command):
+        """Lädt und startet ein Script."""
+        from .script_player import ScriptPlayer
+        
+        # Extrahiere Script-Namen
+        script_name = command.split(':', 1)[1].strip()
+        if not script_name.endswith('.py'):
+            script_name += '.py'
+        
+        # Stoppe aktuellen Player wenn er läuft
+        was_playing = self.player.is_playing
+        if was_playing:
+            self.player.stop()
+        
+        try:
+            # Erstelle neuen ScriptPlayer
+            new_player = ScriptPlayer(
+                script_name,
+                self.player.points_json_path,
+                self.player.target_ip,
+                self.player.start_universe,
+                self.player.fps_limit,
+                self.config
+            )
+            
+            # Übernehme Einstellungen vom alten Player
+            new_player.brightness = self.player.brightness
+            new_player.speed_factor = self.player.speed_factor
+            
+            # Zeige Info
+            info = new_player.get_info()
+            print(f"\n✓ Script geladen: {info.get('name', script_name)}")
+            if 'description' in info:
+                print(f"  {info['description']}")
+            if 'parameters' in info:
+                print(f"  Parameter: {', '.join(info['parameters'].keys())}")
+            
+            # Starte automatisch
+            new_player.start()
+            
+            return (True, new_player)
+            
+        except Exception as e:
+            print(f"Fehler beim Laden des Scripts: {e}")
+            import traceback
+            traceback.print_exc()
+            return (True, None)
     
     def _handle_open(self):
         """Öffnet Web-Interface im Browser (undokumentiert)."""

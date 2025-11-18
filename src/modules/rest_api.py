@@ -86,7 +86,8 @@ class RestAPI:
             register_artnet_routes,
             register_info_routes,
             register_recording_routes,
-            register_cache_routes
+            register_cache_routes,
+            register_script_routes
         )
         from .api_points import register_points_routes
         from .api_videos import register_video_routes
@@ -98,6 +99,7 @@ class RestAPI:
         register_settings_routes(self.app, self.player)
         register_artnet_routes(self.app, self.player)
         register_info_routes(self.app, self.player)
+        register_script_routes(self.app, self.player, self.config)
         register_recording_routes(self.app, self.player)
         register_cache_routes(self.app)
         register_points_routes(self.app, self.player, self.data_dir)

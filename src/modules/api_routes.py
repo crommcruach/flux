@@ -124,25 +124,34 @@ def register_artnet_routes(app, player):
     @app.route('/api/ip', methods=['GET'])
     def get_ip():
         """Gibt aktuelle Art-Net Ziel-IP zurück."""
-        return jsonify({"status": "success", "ip": player.target_ip})
+        try:
+            return jsonify({"status": "success", "ip": player.target_ip})
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
     
     @app.route('/api/universe', methods=['POST'])
     def set_universe():
         """Setzt Art-Net Start-Universum."""
-        data = request.get_json()
-        universe = data.get('universe')
-        if universe is not None:
-            try:
-                player.start_universe = int(universe)
-                return jsonify({"status": "success", "universe": player.start_universe, "message": "HINWEIS: Starte Video neu für Änderung"})
-            except ValueError:
-                return jsonify({"status": "error", "message": "Ungültiger Wert"}), 400
-        return jsonify({"status": "error", "message": "Kein Universum angegeben"}), 400
+        try:
+            data = request.get_json()
+            universe = data.get('universe')
+            if universe is not None:
+                try:
+                    player.start_universe = int(universe)
+                    return jsonify({"status": "success", "universe": player.start_universe, "message": "HINWEIS: Starte Video neu für Änderung"})
+                except ValueError:
+                    return jsonify({"status": "error", "message": "Ungültiger Wert"}), 400
+            return jsonify({"status": "error", "message": "Kein Universum angegeben"}), 400
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
     
     @app.route('/api/universe', methods=['GET'])
     def get_universe():
         """Gibt aktuelles Art-Net Start-Universum zurück."""
-        return jsonify({"status": "success", "universe": player.start_universe})
+        try:
+            return jsonify({"status": "success", "universe": player.start_universe})
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
 
 
 def register_info_routes(app, player):
@@ -241,3 +250,82 @@ def register_cache_routes(app):
             "message": f"Cache geleert ({file_count} Dateien gelöscht)",
             "deleted_files": file_count
         })
+
+
+def register_script_routes(app, player, config):
+    """Registriert Script-Management Endpunkte."""
+    
+    @app.route('/api/scripts', methods=['GET'])
+    def list_scripts():
+        """Listet alle verfügbaren Scripts."""
+        from .script_generator import ScriptGenerator
+        
+        scripts_dir = config.get('paths', {}).get('scripts_dir', 'scripts')
+        script_gen = ScriptGenerator(scripts_dir)
+        scripts = script_gen.list_scripts()
+        
+        return jsonify({
+            "status": "success",
+            "scripts": scripts,
+            "count": len(scripts)
+        })
+    
+    @app.route('/api/load_script', methods=['POST'])
+    def load_script():
+        """Lädt und startet ein Script."""
+        from .script_player import ScriptPlayer
+        
+        data = request.get_json()
+        script_name = data.get('script')
+        
+        if not script_name:
+            return jsonify({
+                "status": "error",
+                "message": "Kein Script-Name angegeben"
+            }), 400
+        
+        if not script_name.endswith('.py'):
+            script_name += '.py'
+        
+        try:
+            # Stoppe aktuellen Player
+            was_playing = player.is_playing
+            if was_playing:
+                player.stop()
+            
+            # Erstelle ScriptPlayer
+            new_player = ScriptPlayer(
+                script_name,
+                player.points_json_path,
+                player.target_ip if hasattr(player, 'target_ip') else '127.0.0.1',
+                player.start_universe if hasattr(player, 'start_universe') else 0,
+                player.fps_limit if hasattr(player, 'fps_limit') else 30,
+                config
+            )
+            
+            # Übernehme Einstellungen
+            new_player.brightness = player.brightness if hasattr(player, 'brightness') else 1.0
+            new_player.speed_factor = player.speed_factor if hasattr(player, 'speed_factor') else 1.0
+            
+            # Starte Script
+            new_player.start()
+            
+            # Info
+            info = new_player.get_info()
+            
+            # TODO: Player-Referenz in rest_api aktualisieren
+            # Das muss im Haupt-Code gemacht werden, hier nur Response
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Script geladen: {info.get('name', script_name)}",
+                "info": info
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+                "traceback": traceback.format_exc()
+            }), 500

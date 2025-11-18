@@ -84,6 +84,56 @@ Response: {"status": "success", "message": "Testmuster 'red' gesendet"}
 ```
 **Colors:** red, green, blue, white, yellow, cyan, magenta, gradient
 
+#### GET /api/local_ips
+Gibt alle lokalen IP-Adressen zurück (für Art-Net Konfiguration).
+```json
+Response: {
+  "status": "success",
+  "ips": ["2.255.255.255", "255.255.255.255", "127.0.0.1", "192.168.1.100"],
+  "current": "192.168.1.11"
+}
+```
+
+#### POST /api/ip
+Setzt Art-Net Ziel-IP und speichert in config.json.
+```json
+Request: {"ip": "192.168.1.11"}
+Response: {
+  "status": "success",
+  "ip": "192.168.1.11",
+  "message": "✅ Art-Net IP geändert...\n🔄 Art-Net wurde automatisch neu geladen"
+}
+```
+
+#### GET /api/ip
+Gibt aktuelle Art-Net Ziel-IP zurück.
+```json
+Response: {"status": "success", "ip": "192.168.1.11"}
+```
+
+---
+
+### RGB Channel Mapping
+
+Das System unterstützt pro Universum unterschiedliche RGB-Kanal-Reihenfolgen.
+
+**Unterstützte Formate:**
+- `RGB` - Standard (WS2812B)
+- `GRB` - Häufig bei WS2811
+- `BGR` - Manche China-LEDs
+- `RBG`, `GBR`, `BRG` - Weitere Permutationen
+
+**Konfiguration in config.json:**
+```json
+"artnet": {
+  "universe_configs": {
+    "default": "RGB",
+    "0": "GRB",
+    "1": "BGR"
+  }
+}
+```
+
 ---
 
 ### Info & Status
@@ -340,6 +390,54 @@ Console Log Update.
   "append": true  // true = append, false = replace
 }
 ```
+
+---
+
+### Scripts (Prozedural)
+
+#### GET /api/scripts
+Listet alle verfügbaren Python-Scripts.
+```json
+Response: {
+  "status": "success",
+  "scripts": [
+    {
+      "name": "rainbow_wave.py",
+      "description": "Animated rainbow wave",
+      "parameters": {
+        "speed": 1.0,
+        "wave_length": 200
+      }
+    },
+    {
+      "name": "plasma.py",
+      "description": "Classic plasma effect",
+      "parameters": {}
+    }
+  ],
+  "count": 2
+}
+```
+
+#### POST /api/load_script
+Lädt und startet ein Python-Script als Videoquelle.
+```json
+Request: {"script": "rainbow_wave"}
+Response: {
+  "status": "success",
+  "message": "Script geladen: rainbow_wave.py",
+  "info": {
+    "name": "rainbow_wave.py",
+    "description": "Animated rainbow wave",
+    "parameters": {...},
+    "canvas_width": 1920,
+    "canvas_height": 1080,
+    "total_points": 150
+  }
+}
+```
+
+**Hinweis:** Scripts laufen endlos und generieren Frames prozedural. Der ScriptPlayer ersetzt den VideoPlayer während der Laufzeit. Alle Standard-Befehle (brightness, speed, etc.) funktionieren weiterhin.
 
 ---
 

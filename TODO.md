@@ -22,10 +22,13 @@
   - [ ] Spec-Datei erstellen mit allen Dependencies
   - [ ] Static files, config.json, data/video Ordner inkludieren
   - [ ] Single-File oder Folder-basierte Distribution testen
-- [ ] Web-Interface Verbesserungen
-  - [ ] Console Component in separates JS-Modul auslagern
-  - [ ] Responsive Design für Mobile optimieren
-  - [ ] LocalStorage für Settings Persistence (Brightness, Speed)
+  - ✓ Web-Interface Verbesserungen
+    - ✓ Console Component in separates JS-Modul ausgelagert
+    - ✓ Responsive Design für Mobile optimiert
+    - ✓ LocalStorage für Settings Persistence (Brightness, Speed)
+    - ✓ Canvas-Zoom & Scrollbars (Zoom per Maus & Buttons, automatische Scrollbalken)
+    - ✓ Toast-Benachrichtigungen (statt alert, Theme-aware)
+    - ✓ Server-Projektverwaltung (CRUD, Download, Modal-UI)
 - [ ] Konfiguration erweitern
   - [ ] Environment Variable Support (target_ip, ports)
   - [ ] JSON Schema Validation für config.json
@@ -114,3 +117,22 @@
   - ✓ Status Broadcast Interval
   - ✓ Frontend Polling Interval
   - ✓ Frontend-Config API Endpoint (/api/config/frontend)
+- ✓ RGB-Kanal-Reihenfolge pro Universum (Channel Mapping)
+  - ✓ Unterstützt alle 6 Permutationen (RGB, GRB, BGR, RBG, GBR, BRG)
+  - ✓ universe_configs in config.json
+  - ✓ _reorder_channels() Methode in ArtNetManager
+  - ✓ CLI-Befehle: artnet map/show mit Range-Syntax
+  - ✓ Testmuster berücksichtigen Channel Mapping
+  - ✓ Dokumentation in README und API.md
+- ✓ Prozedural generierte Grafiken (Script Generator)
+  - ✓ ScriptGenerator Klasse (list/load/generate)
+  - ✓ ScriptPlayer Klasse (kompatibel mit VideoPlayer API)
+  - ✓ Python Script API: generate_frame(frame_number, width, height, time, fps)
+  - ✓ 3 Beispiel-Shaders (rainbow_wave, plasma, pulse)
+  - ✓ METADATA-System für Script-Infos
+  - ✓ CLI-Befehle: scripts list, script:<name>
+  - ✓ REST API Endpoints: GET /api/scripts, POST /api/load_script
+  - ✓ Vollständige Dokumentation (scripts/README.md)
+  - ✓ Error Handling mit Traceback
+  - ✓ Lazy Module Loading (__init__.py __getattr__)
+  - ✓ Dokumentation in README und API.md

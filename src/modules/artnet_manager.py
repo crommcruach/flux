@@ -20,8 +20,19 @@ class ArtNetManager:
         self.required_universes = (total_channels + channels_per_universe - 1) // channels_per_universe
         
         self.universes = []
+        self.universe_channel_orders = {}  # Universe-Index -> channel_order (z.B. "GRB")
         self.is_active = False
         self.test_mode = False  # True wenn Testmuster aktiv
+        
+        # RGB-Kanal-Mapping: Definiert Reihenfolge für jede Permutation
+        self.channel_mappings = {
+            'RGB': [0, 1, 2],  # Standard: R=0, G=1, B=2
+            'GRB': [1, 0, 2],  # G=0, R=1, B=2
+            'BGR': [2, 1, 0],  # B=0, G=1, R=2
+            'RBG': [0, 2, 1],  # R=0, B=1, G=2
+            'GBR': [1, 2, 0],  # G=0, B=1, R=2
+            'BRG': [2, 0, 1]   # B=0, R=1, G=2
+        }
         
     def start(self, artnet_config=None):
         """Startet Art-Net Universen."""
@@ -30,9 +41,20 @@ class ArtNetManager:
         
         # Lade Werte aus config oder verwende defaults
         config = artnet_config or {}
-        fps = config.get('fps', 30)
+        # Höhere FPS für flüssigere Ausgabe (wird von show() überschrieben)
+        fps = config.get('fps', 60)
         even_packet = config.get('even_packet', True)
         broadcast = config.get('broadcast', True)
+        
+        # Lade Universe-spezifische Kanal-Reihenfolgen
+        universe_configs = config.get('universe_configs', {})
+        default_order = universe_configs.get('default', 'RGB')
+        
+        # Konfiguriere Kanal-Reihenfolge pro Universum
+        for i in range(self.required_universes):
+            universe_num = str(self.start_universe + i)
+            channel_order = universe_configs.get(universe_num, default_order)
+            self.universe_channel_orders[i] = channel_order.upper()
         
         print("Starte Art-Net...")
         for i in range(self.required_universes):
@@ -44,9 +66,10 @@ class ArtNetManager:
                 even_packet,
                 broadcast
             )
-            universe.start()
+            # WICHTIG: start() nicht aufrufen - wir senden manuell mit show()
+            # Der interne Thread von stupidArtnet kann Flackern verursachen
             self.universes.append(universe)
-            print(f"  Art-Net Universum {self.start_universe + i} gestartet")
+            print(f"  Art-Net Universum {self.start_universe + i} initialisiert (manueller Modus)")
         
         self.is_active = True
     
@@ -59,8 +82,7 @@ class ArtNetManager:
         self.blackout()
         time.sleep(0.1)
         
-        for universe in self.universes:
-            universe.stop()
+        # Kein universe.stop() nötig da wir keinen Thread gestartet haben
         
         self.universes = []
         self.is_active = False
@@ -75,10 +97,15 @@ class ArtNetManager:
             end_channel = min(start_channel + self.channels_per_universe, len(rgb_data))
             universe_data = rgb_data[start_channel:end_channel]
             
+            # Wende Kanal-Umordnung für dieses Universum an
+            universe_data = self._reorder_channels(universe_data, universe_idx)
+            
             if len(universe_data) < self.channels_per_universe:
                 universe_data.extend([0] * (self.channels_per_universe - len(universe_data)))
             
+            # Setze Daten UND sende sofort (flush=True umgeht FPS-Limiting)
             universe.set(universe_data)
+            universe.show()  # Explizit senden ohne FPS-Wartezeit
     
     def blackout(self):
         """Sendet Blackout (alle Kanäle auf 0)."""
@@ -88,6 +115,7 @@ class ArtNetManager:
         zero_data = [0] * self.channels_per_universe
         for universe in self.universes:
             universe.set(zero_data)
+            universe.show()  # Explizit senden
         
         self.test_mode = False
         print("Blackout gesendet")
@@ -127,10 +155,14 @@ class ArtNetManager:
             end_channel = min(start_channel + self.channels_per_universe, len(test_data))
             universe_data = test_data[start_channel:end_channel]
             
+            # Wende Kanal-Umordnung für dieses Universum an
+            universe_data = self._reorder_channels(universe_data, universe_idx)
+            
             if len(universe_data) < self.channels_per_universe:
                 universe_data.extend([0] * (self.channels_per_universe - len(universe_data)))
             
             universe.set(universe_data)
+            universe.show()  # Explizit senden
         
         print(f"Testmuster '{color}' gesendet (Video pausiert)")
     
@@ -162,10 +194,14 @@ class ArtNetManager:
             end_channel = min(start_channel + self.channels_per_universe, len(test_data))
             universe_data = test_data[start_channel:end_channel]
             
+            # Wende Kanal-Umordnung für dieses Universum an
+            universe_data = self._reorder_channels(universe_data, universe_idx)
+            
             if len(universe_data) < self.channels_per_universe:
                 universe_data.extend([0] * (self.channels_per_universe - len(universe_data)))
             
             universe.set(universe_data)
+            universe.show()  # Explizit senden
         
         print(f"RGB-Gradient Testmuster gesendet ({self.total_points} Punkte, Video pausiert)")
     
@@ -173,3 +209,31 @@ class ArtNetManager:
         """Deaktiviert Testmuster-Modus, erlaubt Video-Wiedergabe."""
         self.test_mode = False
         print("Video-Modus aktiviert")
+    
+    def _reorder_channels(self, data, universe_idx):
+        """Ordnet RGB-Kanäle entsprechend der Universum-Konfiguration um."""
+        channel_order = self.universe_channel_orders.get(universe_idx, 'RGB')
+        
+        # Wenn RGB (Standard), keine Umordnung nötig
+        if channel_order == 'RGB':
+            return data
+        
+        # Hole Mapping für diese Reihenfolge
+        mapping = self.channel_mappings.get(channel_order)
+        if not mapping:
+            return data  # Fallback bei ungültiger Konfiguration
+        
+        # Erstelle neues Array mit umgeordneten Kanälen
+        reordered = []
+        for i in range(0, len(data), 3):
+            if i + 2 < len(data):
+                # Lese RGB aus Original-Daten
+                rgb = [data[i], data[i+1], data[i+2]]
+                # Schreibe in neuer Reihenfolge
+                reordered.extend([rgb[mapping[0]], rgb[mapping[1]], rgb[mapping[2]]])
+            else:
+                # Rest beibehalten falls nicht vollständig
+                reordered.extend(data[i:])
+                break
+        
+        return reordered

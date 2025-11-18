@@ -76,11 +76,11 @@ def main():
     """Hauptfunktion der Anwendung mit erweiteter CLI."""
     # Logging initialisieren
     FluxLogger()
-    logger.info("Flux startet...")
+    logger.debug("Flux startet...")
     
     # Konfiguration laden
     config = load_config()
-    logger.info("Konfiguration geladen")
+    logger.debug("Konfiguration geladen")
     
     # Pfade
     base_path = os.path.dirname(os.path.dirname(__file__))

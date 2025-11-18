@@ -1,16 +1,28 @@
 {
   "artnet": {
-    "target_ip": "127.0.0.1",
+    "target_ip": "192.168.1.11",
     "start_universe": 0,
     "dmx_control_universe": 100,
     "dmx_listen_ip": "0.0.0.0",
     "dmx_listen_port": 6454,
     "fps": 30,
     "even_packet": true,
-    "broadcast": true
+    "broadcast": true,
+    "universe_configs": {
+      "_comment": "Pro Universum Kanal-Reihenfolge festlegen. Mögliche Werte: RGB, GRB, BGR, RBG, GBR, BRG",
+      "default": "RGB",
+      "0": "GRB"
+    }
   },
   "video": {
-    "extensions": [".mp4", ".avi", ".mov", ".mkv", ".wmv", ".gif"],
+    "extensions": [
+      ".mp4",
+      ".avi",
+      ".mov",
+      ".mkv",
+      ".wmv",
+      ".gif"
+    ],
     "max_per_channel": 255,
     "default_fps": null,
     "default_brightness": 100,
@@ -18,7 +30,11 @@
     "shutdown_delay": 0.5,
     "frame_wait_delay": 0.1,
     "recording_stop_delay": 0.3,
-    "gif_transparency_bg": [0, 0, 0],
+    "gif_transparency_bg": [
+      0,
+      0,
+      0
+    ],
     "gif_respect_frame_timing": true
   },
   "paths": {

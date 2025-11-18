@@ -1,3 +1,31 @@
+// ========================================
+// TASTATUR-SHORTCUTS
+// ========================================
+// Entf/Backspace: Ausgewählte Form(en) löschen
+// Strg+D: Ausgewählte Form(en) duplizieren
+// Strg+S: Projekt speichern (lokal)
+
+document.addEventListener('keydown', function(e) {
+    // Fokus auf Input-Felder ignorieren
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+
+    // Löschen
+    if ((e.key === 'Delete' || e.key === 'Backspace') && (selectedShape || selectedShapes.length > 0)) {
+        e.preventDefault();
+        deleteSelectedShape();
+    }
+    // Duplizieren (Strg+D)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && (selectedShape || selectedShapes.length > 0)) {
+        e.preventDefault();
+        duplicateSelectedShape();
+    }
+    // Speichern (Strg+S)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveProject();
+        showToast('Projekt lokal gespeichert', 'success');
+    }
+});
 
 // ========================================
 // CONSTANTS & CONFIGURATION
@@ -117,6 +145,11 @@ let isPanning = false;
 let panStartX = 0;
 let panStartY = 0;
 
+// Freehand drawing
+let isFreehandMode = false;
+let freehandPoints = [];
+let isDrawing = false;
+
 // Load flip icon
 const flipIcon = new Image();
 flipIcon.src = 'bootstrap-icons/symmetry-vertical.svg';
@@ -231,8 +264,9 @@ function applyCustomCanvasSize() {
 const themeToggle = document.getElementById('themeToggle');
 const themeLabel = document.getElementById('themeLabel');
 
-// Load saved theme preference or default to light
-const savedTheme = localStorage.getItem('theme') || 'light';
+
+// Load saved theme preference or default to dark
+const savedTheme = localStorage.getItem('theme') || 'dark';
 if (savedTheme === 'dark') {
     document.documentElement.setAttribute('data-theme', 'dark');
     themeToggle.checked = true;
@@ -309,6 +343,10 @@ pointCountInput.addEventListener('input', e => {
     pointCountNumber.value = value;
     if (selectedShape && selectedShape.type !== 'matrix') {
         selectedShape.pointCount = value;
+        // Für Freihand-Formen: Punkte neu samplen
+        if (selectedShape.type === 'freehand' && selectedShape.freehandPoints) {
+            selectedShape.freehandPoints = resampleFreehandPoints(selectedShape.freehandPoints, value);
+        }
         markForRedraw(); updateObjectList();
     }
 });
@@ -320,19 +358,23 @@ pointCountNumber.addEventListener('input', e => {
     pointCountInput.value = value;
     if (selectedShape && selectedShape.type !== 'matrix') {
         selectedShape.pointCount = value;
+        // Für Freihand-Formen: Punkte neu samplen
+        if (selectedShape.type === 'freehand' && selectedShape.freehandPoints) {
+            selectedShape.freehandPoints = resampleFreehandPoints(selectedShape.freehandPoints, value);
+        }
         markForRedraw(); updateObjectList();
     }
 });
 
 document.getElementById('matrixRows').addEventListener('input', e => {
     if (selectedShape && selectedShape.type === 'matrix') {
-        selectedShape.rows = Math.max(1, Math.min(64, parseInt(e.target.value) || 1));
+        selectedShape.rows = Math.max(1, Math.min(128, parseInt(e.target.value) || 1));
         markForRedraw(); updateObjectList();
     }
 });
 document.getElementById('matrixCols').addEventListener('input', e => {
     if (selectedShape && selectedShape.type === 'matrix') {
-        selectedShape.cols = Math.max(1, Math.min(64, parseInt(e.target.value) || 1));
+        selectedShape.cols = Math.max(1, Math.min(128, parseInt(e.target.value) || 1));
         markForRedraw(); updateObjectList();
     }
 });
@@ -446,6 +488,7 @@ function resetSelectedShape() {
         }
     }
 
+    showToast('Form(en) zurückgesetzt', 'success');
     markForRedraw(); updateObjectList();
 }
 
@@ -474,6 +517,34 @@ function deleteSelectedShape() {
     }
     updateToolbarSections();
     markForRedraw(); updateObjectList();
+}
+
+function fitToCanvas() {
+    const shapesToFit = selectedShapes.length > 0 ? selectedShapes : (selectedShape ? [selectedShape] : []);
+
+    if (shapesToFit.length === 0) {
+        showToast('Keine Form ausgewählt!', 'warning');
+        return;
+    }
+
+    for (const s of shapesToFit) {
+        // Position in center of canvas
+        s.x = canvas.width / 2;
+        s.y = canvas.height / 2;
+        
+        // Calculate required scale to fit canvas (asymmetric)
+        // Scale X to fit canvas width
+        const scaleX = canvas.width / s.size;
+        // Scale Y to fit canvas height
+        const scaleY = canvas.height / s.size;
+        
+        s.scaleX = scaleX;
+        s.scaleY = scaleY;
+    }
+
+    showToast(`${shapesToFit.length} Form(en) an Canvas angepasst`, 'success');
+    markForRedraw();
+    updateObjectList();
 }
 
 function duplicateSelectedShape() {
@@ -512,6 +583,113 @@ function duplicateSelectedShape() {
     }
 
     updateToolbarSections();
+    markForRedraw();
+    updateObjectList();
+}
+
+// ========================================
+// FREEHAND DRAWING [Freihand-Zeichnen]
+// ========================================
+function toggleFreehandDrawing() {
+    isFreehandMode = !isFreehandMode;
+    const btn = document.getElementById('freehandBtn');
+    
+    if (isFreehandMode) {
+        btn.classList.remove('btn-warning');
+        btn.classList.add('btn-success');
+        selectedShape = null;
+        selectedShapes = [];
+        canvas.style.cursor = 'crosshair';
+        showToast('Freihand-Modus aktiviert. Zeichnen Sie mit der Maus.', 'info');
+    } else {
+        btn.classList.remove('btn-success');
+        btn.classList.add('btn-warning');
+        canvas.style.cursor = 'default';
+        showToast('Freihand-Modus deaktiviert', 'info');
+    }
+    
+    markForRedraw();
+    updateObjectList();
+}
+
+function startFreehandDrawing(mx, my) {
+    isDrawing = true;
+    freehandPoints = [{ x: mx, y: my }];
+}
+
+function continueFreehandDrawing(mx, my) {
+    if (!isDrawing) return;
+    
+    const lastPoint = freehandPoints[freehandPoints.length - 1];
+    const distance = Math.sqrt(Math.pow(mx - lastPoint.x, 2) + Math.pow(my - lastPoint.y, 2));
+    
+    // Only add point if moved at least 2 pixels (to reduce clutter)
+    if (distance > 2) {
+        freehandPoints.push({ x: mx, y: my });
+        markForRedraw();
+    }
+}
+
+function finishFreehandDrawing() {
+    if (!isDrawing || freehandPoints.length < 2) {
+        isDrawing = false;
+        freehandPoints = [];
+        return;
+    }
+    
+    isDrawing = false;
+    
+    // Calculate bounding box
+    const minX = Math.min(...freehandPoints.map(p => p.x));
+    const maxX = Math.max(...freehandPoints.map(p => p.x));
+    const minY = Math.min(...freehandPoints.map(p => p.y));
+    const maxY = Math.max(...freehandPoints.map(p => p.y));
+    
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    
+    // Convert absolute coordinates to relative (centered around origin)
+    const relativePoints = freehandPoints.map(p => ({
+        x: p.x - centerX,
+        y: p.y - centerY
+    }));
+    
+    // Get desired point count from slider
+    const desiredPointCount = parseInt(pointCountInput.value, 10) || freehandPoints.length;
+    
+    // Resample points to match desired count
+    const resampledPoints = resampleFreehandPoints(relativePoints, desiredPointCount);
+    
+    // Create a new freehand shape
+    const freehandShape = {
+        id: `shape-${shapeCounter++}`,
+        type: 'freehand',
+        name: `Freihand ${shapeCounter - 1}`,
+        x: centerX,
+        y: centerY,
+        size: Math.max(width, height),
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+        color: 'cyan',
+        pointCount: desiredPointCount,
+        freehandPoints: resampledPoints
+    };
+    
+    shapes.push(freehandShape);
+    selectedShape = freehandShape;
+    freehandPoints = [];
+    
+    // Deaktiviere Freihand-Modus nach jeder Zeichnung
+    isFreehandMode = false;
+    const btn = document.getElementById('freehandBtn');
+    btn.classList.remove('btn-success');
+    btn.classList.add('btn-warning');
+    canvas.style.cursor = 'default';
+    
+    showToast(`Freihand-Form mit ${desiredPointCount} Punkten erstellt`, 'success');
     markForRedraw();
     updateObjectList();
 }
@@ -563,7 +741,8 @@ function saveProject() {
             innerRatio: s.innerRatio,
             control: s.control,
             controls: s.controls,
-            controlPoints: s.controlPoints
+            controlPoints: s.controlPoints,
+            freehandPoints: s.freehandPoints
         }))
     };
 
@@ -625,7 +804,8 @@ async function saveProjectToServer() {
             innerRatio: s.innerRatio,
             control: s.control,
             controls: s.controls,
-            controlPoints: s.controlPoints
+            controlPoints: s.controlPoints,
+            freehandPoints: s.freehandPoints
         }))
     };
 
@@ -841,6 +1021,9 @@ function loadProject(projectData) {
                     s.controls = shapeData.controls || [{ x: 0, y: -s.size / 2 }];
                     s.control = shapeData.control || s.controls[0];
                 }
+                if (shapeData.type === 'freehand') {
+                    s.freehandPoints = shapeData.freehandPoints || [];
+                }
 
                 shapes.push(s);
             });
@@ -878,7 +1061,10 @@ function exportPoints() {
 
     for (let i = 0; i < shapes.length; i++) {
         const s = shapes[i];
-        const pts = (s.type === 'line') ? getLinePoints(s) : (s.type === 'arc') ? getArcPoints(s) : getShapePoints(s);
+        const pts = (s.type === 'line') ? getLinePoints(s) : 
+                    (s.type === 'arc') ? getArcPoints(s) : 
+                    (s.type === 'freehand') ? getFreehandPoints(s) : 
+                    getShapePoints(s);
 
         const points = pts.map((pt, j) => {
             const [gx, gy] = localToWorld(s, pt[0], pt[1]);
@@ -1020,10 +1206,22 @@ function draw() {
             ctx.closePath();
             ctx.stroke();
         }
+        else if (s.type === 'freehand') {
+            // draw freehand path
+            if (s.freehandPoints && s.freehandPoints.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(s.freehandPoints[0].x, s.freehandPoints[0].y);
+                for (let i = 1; i < s.freehandPoints.length; i++) {
+                    ctx.lineTo(s.freehandPoints[i].x, s.freehandPoints[i].y);
+                }
+                ctx.stroke();
+            }
+        }
 
         if (s.type === 'line') drawPoints(getLinePoints(s), s);
         else if (s.type === 'arc') drawPoints(getArcPoints(s), s);
         else if (s.type === 'matrix') drawPoints(getShapePoints(s), s);
+        else if (s.type === 'freehand') drawPoints(getFreehandPoints(s), s);
         else drawPoints(getShapePoints(s), s);
 
         if (selectedShape === s) {
@@ -1052,10 +1250,12 @@ function draw() {
             let currentPoints, nextPoints;
             if (currentShape.type === 'line') currentPoints = getLinePoints(currentShape);
             else if (currentShape.type === 'arc') currentPoints = getArcPoints(currentShape);
+            else if (currentShape.type === 'freehand') currentPoints = getFreehandPoints(currentShape);
             else currentPoints = getShapePoints(currentShape);
 
             if (nextShape.type === 'line') nextPoints = getLinePoints(nextShape);
             else if (nextShape.type === 'arc') nextPoints = getArcPoints(nextShape);
+            else if (nextShape.type === 'freehand') nextPoints = getFreehandPoints(nextShape);
             else nextPoints = getShapePoints(nextShape);
 
             if (currentPoints.length > 0 && nextPoints.length > 0) {
@@ -1130,6 +1330,20 @@ function draw() {
         
         ctx.fillRect(x, y, w, h);
         ctx.strokeRect(x, y, w, h);
+        ctx.restore();
+    }
+
+    // Draw freehand drawing in progress
+    if (isFreehandMode && isDrawing && freehandPoints.length > 1) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(freehandPoints[0].x, freehandPoints[0].y);
+        for (let i = 1; i < freehandPoints.length; i++) {
+            ctx.lineTo(freehandPoints[i].x, freehandPoints[i].y);
+        }
+        ctx.stroke();
         ctx.restore();
     }
 }
@@ -1673,6 +1887,64 @@ function getArcPoints(s) {
     return pts;
 }
 
+function getFreehandPoints(s) {
+    if (!s.freehandPoints || s.freehandPoints.length === 0) {
+        return [];
+    }
+    
+    // Return the freehand points as-is (they're already in local coordinates)
+    return s.freehandPoints.map(p => [p.x, p.y]);
+}
+
+function resampleFreehandPoints(points, targetCount) {
+    if (points.length === 0 || targetCount < 2) return points;
+    if (points.length === targetCount) return points;
+    
+    // Calculate cumulative distances
+    const distances = [0];
+    for (let i = 1; i < points.length; i++) {
+        const dx = points[i].x - points[i - 1].x;
+        const dy = points[i].y - points[i - 1].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        distances.push(distances[i - 1] + dist);
+    }
+    
+    const totalLength = distances[distances.length - 1];
+    if (totalLength === 0) return points.slice(0, targetCount);
+    
+    // Resample points evenly along the path
+    const resampled = [];
+    for (let i = 0; i < targetCount; i++) {
+        const targetDist = (i / (targetCount - 1)) * totalLength;
+        
+        // Find the segment containing this distance
+        let segmentIndex = 0;
+        while (segmentIndex < distances.length - 1 && distances[segmentIndex + 1] < targetDist) {
+            segmentIndex++;
+        }
+        
+        // Interpolate within the segment
+        if (segmentIndex >= points.length - 1) {
+            resampled.push({ ...points[points.length - 1] });
+        } else {
+            const segmentStart = distances[segmentIndex];
+            const segmentEnd = distances[segmentIndex + 1];
+            const segmentLength = segmentEnd - segmentStart;
+            
+            const t = segmentLength === 0 ? 0 : (targetDist - segmentStart) / segmentLength;
+            const p1 = points[segmentIndex];
+            const p2 = points[segmentIndex + 1];
+            
+            resampled.push({
+                x: p1.x + t * (p2.x - p1.x),
+                y: p1.y + t * (p2.y - p1.y)
+            });
+        }
+    }
+    
+    return resampled;
+}
+
 /* Handles & interaction */
 function drawHandles(s) {
     // Calculate handle size based on canvas display size (not canvas resolution)
@@ -1724,7 +1996,7 @@ function drawHandles(s) {
         
         // Use filter to colorize the icon to cyan
         ctx.filter = 'brightness(0) saturate(100%) invert(70%) sepia(100%) saturate(2000%) hue-rotate(160deg)';
-        ctx.drawImage(rotateIconImage, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
+               ctx.drawImage(rotateIconImage, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
         ctx.restore();
     } else {
         // Fallback to orange circle if icon not loaded
@@ -1738,7 +2010,7 @@ function drawHandles(s) {
         ctx.fill();
         ctx.restore();
     }
-    // X-axis scale handle (SVG icon) - right middle
+    // X-axis scale handle (cyan) - right middle
     if (scaleXIconImage) {
         const iconX = s.size / 2 + HANDLE.DISTANCE / s.scaleX;
         const iconY = 0;
@@ -1877,6 +2149,12 @@ canvas.addEventListener('mousedown', e => {
     dragStartX = mx;
     dragStartY = my;
 
+    // Handle freehand drawing mode
+    if (isFreehandMode) {
+        startFreehandDrawing(mx, my);
+        return;
+    }
+
     // First, check if we clicked on any handle (top-down): this should not deselect shapes
     const hit = findHandleAcrossShapes(mx, my);
     if (hit) {
@@ -1952,6 +2230,12 @@ canvas.addEventListener('mousemove', e => {
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const [mx, my] = screenToCanvas((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY);
+
+    // Handle freehand drawing mode
+    if (isFreehandMode && isDrawing) {
+        continueFreehandDrawing(mx, my);
+        return;
+    }
 
     // Check for point hover (for tooltip)
     const prevHoveredPoint = hoveredPoint;
@@ -2152,6 +2436,12 @@ canvas.addEventListener('mouseup', () => {
     // Ignore canvas events if an input field is focused
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
 
+    // Handle freehand drawing mode
+    if (isFreehandMode && isDrawing) {
+        finishFreehandDrawing();
+        return;
+    }
+
     if (dragMode === 'marquee' && selectionBox) {
         // Select all shapes within the selection box
         const minX = Math.min(selectionBox.startX, selectionBox.endX);
@@ -2262,6 +2552,11 @@ function updateObjectList() {
         div.draggable = true;
         div.dataset.shapeIndex = i;
         div.onclick = (e) => {
+            // Ignore clicks on input fields
+            if (e.target.tagName === 'INPUT') {
+                return;
+            }
+            
             if (e.ctrlKey || e.metaKey) {
                 // Strg+Klick: Multi-Selektion
                 if (selectedShapes.includes(s)) {
@@ -2442,9 +2737,15 @@ function updateObjectList() {
                 input.style.height = '1.5rem';
                 input.style.width = '4rem'; // Width for 5 digits
                 input.style.boxSizing = 'border-box';
-                input.addEventListener('change', (e) => {
+                input.addEventListener('input', (e) => {
                     onChange(parseFloat(e.target.value));
                     markForRedraw();
+                });
+                input.addEventListener('focus', (e) => {
+                    e.stopPropagation();
+                });
+                input.addEventListener('click', (e) => {
+                    e.stopPropagation();
                 });
 
                 wrapper.appendChild(labelEl);
@@ -2512,7 +2813,7 @@ function groupSelectedShapes() {
     const shapesToGroup = selectedShapes.length > 0 ? selectedShapes : (selectedShape ? [selectedShape] : []);
     
     if (shapesToGroup.length < 2) {
-        console.log('Mindestens 2 Objekte zum Gruppieren erforderlich');
+        showToast('Mindestens 2 Objekte zum Gruppieren erforderlich', 'warning');
         return;
     }
     
@@ -2530,7 +2831,7 @@ function groupSelectedShapes() {
     
     groups.push(group);
     
-    console.log(`Gruppe ${groupId} erstellt mit ${shapesToGroup.length} Objekten`);
+    showToast(`Gruppe mit ${shapesToGroup.length} Objekten erstellt`, 'success');
     
     markForRedraw();
     updateObjectList();
@@ -2540,7 +2841,7 @@ function ungroupSelectedShapes() {
     const shapesToUngroup = selectedShapes.length > 0 ? selectedShapes : (selectedShape ? [selectedShape] : []);
     
     if (shapesToUngroup.length === 0) {
-        console.log('Keine Gruppe zum Auflösen ausgewählt');
+        showToast('Keine Gruppe zum Auflösen ausgewählt', 'warning');
         return;
     }
     
@@ -2560,11 +2861,11 @@ function ungroupSelectedShapes() {
     groups = groups.filter(g => !groupIdsToRemove.has(g.id));
     
     if (ungroupedCount > 0) {
-        console.log(`${ungroupedCount} Objekte aus Gruppen entfernt`);
+        showToast(`${ungroupedCount} Objekte aus Gruppe(n) entfernt`, 'success');
         markForRedraw();
         updateObjectList();
     } else {
-        console.log('Keine gruppierten Objekte ausgewählt');
+        showToast('Keine gruppierten Objekte ausgewählt', 'warning');
     }
 }
 
@@ -2583,10 +2884,10 @@ function selectGroup(shape) {
     const groupShapes = getShapesInSameGroup(shape);
     selectedShapes = groupShapes;
     selectedShape = groupShapes[0];
+    
+    markForRedraw();
+    updateObjectList();
 }
-
-markForRedraw();
-updateObjectList();
 
 // ========================================
 // TEXT TOOL [Stroke Font Text Generation]
@@ -2604,7 +2905,7 @@ function toggleTextTool() {
 function addTextToCanvas() {
     const text = document.getElementById('textInput').value.toUpperCase();
     if (!text) {
-        console.log('Kein Text eingegeben');
+        showToast('Bitte Text eingeben', 'warning');
         return;
     }
 
@@ -2702,7 +3003,9 @@ function addTextToCanvas() {
     // Add group to groups list if shapes were created
     if (textGroup.shapes.length > 0) {
         groups.push(textGroup);
-        console.log(`Text "${text}" als Gruppe hinzugefügt (${textGroup.shapes.length} Objekte)`);
+        showToast(`Text "${text}" mit ${textGroup.shapes.length} Objekten hinzugefügt`, 'success');
+    } else {
+        showToast('Keine gültigen Zeichen im Text gefunden', 'warning');
     }
 
     // Clear input and hide panel

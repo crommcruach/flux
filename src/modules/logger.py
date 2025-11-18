@@ -79,11 +79,15 @@ class FluxLogger:
         logging.getLogger('socketio').setLevel(logging.WARNING)
         logging.getLogger('engineio').setLevel(logging.WARNING)
         
-        # Startup-Log
+        # Startup-Log (nur in Datei, nicht auf Konsole)
+        # Temporär Console-Handler entfernen
+        root_logger.removeHandler(console_handler)
         root_logger.info("=" * 80)
         root_logger.info("Flux Video Art-Net Controller gestartet")
         root_logger.info(f"Log-Datei: {log_file}")
         root_logger.info("=" * 80)
+        # Console-Handler wieder hinzufügen
+        root_logger.addHandler(console_handler)
     
     @staticmethod
     def get_logger(name):
