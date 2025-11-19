@@ -4,20 +4,30 @@ Video-to-Art-Net DMX Control System mit Web-Interface und Multi-Kanal Unterstüt
 
 ## Features
 
+### Video & Content
 - 🎥 **Video Playback** - OpenCV mit Hardware-Beschleunigung (NVDEC/QSV/VAAPI)
 - 🎞️ **GIF Support** - Animated GIFs mit Transparenz und Frame-Timing
+- 🎨 **Script Generator** - Prozedurale Grafiken via Python (Shader-ähnlich)
+- 💾 **RGB Cache** - msgpack-basiertes Caching für schnelle Wiedergabe
+- 🔄 **4-Kanal Video System** - Bis zu 1020 Videos (255 pro Kanal)
+
+### Art-Net & DMX
 - 🌐 **Art-Net Output** - Multi-Universe Support mit automatischer Grenzlogik
 - 🎨 **RGB Channel Mapping** - Konfigurierbare Kanal-Reihenfolge pro Universum (RGB, GRB, BGR, etc.)
 - 🏛️ **DMX Input Control** - 9-Kanal Steuerung (Ch1-5: Control, Ch6-9: Video Slots)
-- 📡 **REST API** - Flask-basierte API mit CORS Support
-- 🖥️ **Web Interfaces** - Bootstrap GUI Editor + Control Panel
-- 🎨 **Multi-JSON Support** - Flexible Punkte-Konfigurationen mit Validierung
-- 🔄 **4-Kanal Video System** - Bis zu 1020 Videos (255 pro Kanal)
+
+### Web Interface
+- 📡 **REST API** - Flask-basierte API mit WebSocket, CORS Support
+- 🖥️ **Bootstrap GUI** - Canvas Editor + Control Panel + Config Manager
 - 🌙 **Dark Mode** - Vollständiges Theme-System mit LocalStorage
-- ⚡ **Performance** - Numpy-optimierte RGB-Extraktion, Hardware-Decoding, RGB-Cache
-- 💾 **Server-Projektverwaltung** - Projekte speichern/laden/löschen im Backend, Download & Modal-UI
+- 🛎️ **Toast-Benachrichtigungen** - Theme-aware Notifications
 - 🔍 **Canvas-Zoom & Scrollbars** - Zoom per Maus & Buttons, automatische Scrollbalken
-- 🛎️ **Toast-Benachrichtigungen** - Eigene Benachrichtigungen statt alert(), Theme-aware
+
+### Konfiguration & Verwaltung
+- ⚙️ **Dynamic Config UI** - Web-basierte config.json Verwaltung
+- 🎨 **Multi-JSON Support** - Flexible Punkte-Konfigurationen mit Validierung
+- 💾 **Server-Projektverwaltung** - Projekte speichern/laden/löschen im Backend, Download & Modal-UI
+- ⚡ **Performance** - NumPy-optimierte RGB-Extraktion, Hardware-Decoding
 
 ## Installation
 
@@ -64,6 +74,11 @@ python src/main.py
 - `points switch <name>` - Punkte-Liste wechseln
 - `points reload` - Aktuelle Liste neu laden
 
+### Script Generator
+- `scripts list` - Alle verfügbaren Scripts anzeigen
+- `script:<name>` - Script laden und starten (z.B. `script:rainbow_wave`)
+- `load script:<name>` - Alternatives Format zum Laden
+
 ### Einstellungen
 - `brightness <0-100>` - Helligkeit setzen
 - `speed <faktor>` - Geschwindigkeit (0.1-3.0)
@@ -72,7 +87,9 @@ python src/main.py
 
 ### Art-Net
 - `blackout` - Alle DMX-Kanäle auf 0
-- `test <farbe>` - Testmuster (red/green/blue/white)
+- `test <farbe>` - Testmuster (red/green/blue/white/gradient)
+- `ip <adresse>` - Art-Net Ziel-IP setzen
+- `universe <nummer>` - Start-Universum setzen
 
 ### REST API
 - `api start [port]` - Server starten (Standard: 5000)
@@ -102,9 +119,24 @@ python src/main.py
 - `GET /api/videos` - Liste aller Videos
 - `POST /api/video/load` - Body: `{"path": "video.mp4"}`
 
+### Script Generator
+- `GET /api/scripts` - Liste aller Scripts
+- `POST /api/load_script` - Body: `{"script": "rainbow_wave"}`
+- `GET /api/script/info/<name>` - Script-Metadaten
+
 ### Art-Net
 - `POST /api/blackout` - Blackout aktivieren
 - `POST /api/test` - Body: `{"color": "red"}`
+- `GET /api/local_ips` - Verfügbare lokale IPs
+- `POST /api/ip` - Body: `{"ip": "192.168.1.11"}`
+
+### Configuration
+- `GET /api/config` - Aktuelle Konfiguration
+- `POST /api/config` - Konfiguration speichern (mit automatischer Validierung & Backup)
+- `POST /api/config/validate` - Konfiguration validieren (ohne speichern)
+- `POST /api/config/restore` - Von Backup wiederherstellen
+- `GET /api/config/schema` - JSON-Schema abrufen
+- `GET /api/config/default` - Standard-Konfiguration generieren
 
 ### Info
 - `GET /api/status` - Aktueller Status
@@ -116,6 +148,10 @@ python src/main.py
 - `POST /api/record/start` - Aufzeichnung starten
 - `POST /api/record/stop` - Aufzeichnung stoppen
 
+### Cache Management
+- `POST /api/cache/clear` - Cache leeren
+- `GET /api/cache/stats` - Cache-Statistiken
+
 ## Projektstruktur
 
 ```
@@ -124,16 +160,31 @@ Py_artnet/
 │   ├── main.py                    # Haupteinstiegspunkt
 │   ├── modules/
 │   │   ├── video_player.py        # Video-Playback Engine
+│   │   ├── script_player.py       # Script-Playback Engine
+│   │   ├── script_generator.py    # Script Loader & Manager
+│   │   ├── points_loader.py       # Points-JSON Parser (NEU)
+│   │   ├── cache_manager.py       # RGB Cache Manager (NEU)
+│   │   ├── artnet_manager.py      # Art-Net Output Handler
 │   │   ├── dmx_controller.py      # DMX Input Handler
 │   │   ├── rest_api.py            # Flask REST API
+│   │   ├── api_*.py               # API Route Modules
+│   │   ├── cli_handler.py         # CLI Command Handler
 │   │   ├── validator.py           # JSON Schema Validierung
+│   │   ├── logger.py              # Logging System
 │   │   └── utils.py               # CLI Hilfsfunktionen
 │   └── static/                    # Web-Interface Assets
 │       ├── index.html             # Bootstrap Canvas Editor
 │       ├── controls.html          # Control Panel
+│       ├── config.html            # Dynamic Config Manager (NEU)
 │       ├── styles.css             # Gemeinsame Styles
-│       ├── gui-editor.js          # Editor Logic
+│       ├── editor.js              # Editor Logic
+│       ├── controls.js            # Control Panel Logic
 │       └── bootstrap-icons/       # Icon Library
+├── scripts/                       # Prozedurale Shader-Scripts (NEU)
+│   ├── rainbow_wave.py
+│   ├── plasma.py
+│   ├── pulse.py
+│   └── line_*.py                  # Line-based Scripts
 ├── video/
 │   ├── kanal_1/                   # Video-Slots 0-254
 │   ├── kanal_2/                   # Video-Slots 255-509
@@ -141,6 +192,13 @@ Py_artnet/
 │   ├── kanal_4/                   # Video-Slots 765-1019
 │   └── testbild.mp4              # Test Pattern
 ├── data/                          # JSON Punkte-Konfigurationen
+├── cache/                         # RGB Cache Dateien (.msgpack)
+├── PROJECTS/                      # Gespeicherte Projekte
+├── docs/                          # Erweiterte Dokumentation
+│   ├── API.md                     # API Reference
+│   ├── SCRIPTS.md                 # Script Generator Docs
+│   ├── USAGE.md                   # Usage Examples
+│   └── LOGGING.md                 # Logging Configuration
 ├── config.json                    # Zentrale Konfiguration
 ├── requirements.txt               # Python Dependencies
 └── TODO.md                        # Feature Roadmap

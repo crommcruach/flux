@@ -3,6 +3,7 @@ Flux Module Package
 """
 # Lazy imports to avoid circular dependencies
 __all__ = ['VideoPlayer', 'ScriptPlayer', 'DMXController', 'ArtNetManager', 'RestAPI', 'ScriptGenerator',
+           'PointsLoader', 'CacheManager', 'ConfigValidator',
            'list_videos', 'print_help', 'list_points_files', 'validate_points_file', 'validate_points_json']
 
 def __getattr__(name):
@@ -24,6 +25,15 @@ def __getattr__(name):
     elif name == 'ScriptGenerator':
         from .script_generator import ScriptGenerator
         return ScriptGenerator
+    elif name == 'PointsLoader':
+        from .points_loader import PointsLoader
+        return PointsLoader
+    elif name == 'CacheManager':
+        from .cache_manager import CacheManager
+        return CacheManager
+    elif name == 'ConfigValidator':
+        from .config_schema import ConfigValidator
+        return ConfigValidator
     elif name == 'list_videos':
         from .utils import list_videos
         return list_videos

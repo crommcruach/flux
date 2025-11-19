@@ -27,6 +27,7 @@
     "default_fps": null,
     "default_brightness": 100,
     "default_speed": 1.0,
+    "default_video": null,
     "shutdown_delay": 0.5,
     "frame_wait_delay": 0.1,
     "recording_stop_delay": 0.3,
@@ -41,7 +42,9 @@
     "video_dir": "video",
     "data_dir": "data",
     "cache_dir": "cache",
-    "points_json": "punkte_export.json"
+    "scripts_dir": "scripts",
+    "points_json": "punkte_export.json",
+    "default_points_json": null
   },
   "channels": {
     "max_per_universe": 510,

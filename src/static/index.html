@@ -20,12 +20,12 @@
     <!-- Project Controls -->
     <div class="menu-section">
       <input type="text" id="projectName" class="form-control form-control-sm" placeholder="Projektname" value="Mein Projekt" style="width: 150px;">
-      <button class="btn btn-success btn-sm menu-btn" onclick="saveProjectToServer()" title="Auf Server speichern">💾 Speichern</button>
-      <button class="btn btn-success btn-sm menu-btn" onclick="saveProject()" title="Lokal herunterladen">⬇️ Download</button>
-      <button class="btn btn-info btn-sm menu-btn" onclick="showProjectManager()" title="Projekte verwalten">📂 Projekte</button>
+      <button class="btn btn-success btn-sm menu-btn" onclick="saveProjectToServer()" title="Auf Server speichern">💾</button>
+      <button class="btn btn-success btn-sm menu-btn" onclick="saveProject()" title="Lokal herunterladen">⬇️</button>
+      <button class="btn btn-info btn-sm menu-btn" onclick="showProjectManager()" title="Projekte verwalten">📂</button>
       <input type="file" id="projectFileInput" class="form-control form-control-sm" accept=".json" style="display: none;">
-      <button class="btn btn-info btn-sm menu-btn" onclick="document.getElementById('projectFileInput').click()" title="Lokale Datei laden">⬆️ Upload</button>
-      <button class="btn btn-warning btn-sm menu-btn ms-2" onclick="exportPoints()" title="Punkte exportieren">📤 Export</button>
+      <button class="btn btn-info btn-sm menu-btn" onclick="document.getElementById('projectFileInput').click()" title="Lokale Datei laden">⬆️</button>
+      <button class="btn btn-warning btn-sm menu-btn ms-2" onclick="exportPoints()" title="Punkte exportieren">📤</button>
     </div>
 
     <!-- Background Image -->
@@ -57,7 +57,8 @@
 
     <!-- Theme Toggle & Controls Link (right side) -->
     <div class="menu-section right">
-      <a href="/controls" class="btn btn-primary btn-sm menu-btn" style="text-decoration: none;">🎛️ Controls</a>
+      <a href="/controls" class="btn btn-primary btn-sm menu-btn" style="text-decoration: none;" title="Controls">🎛️</a>
+      <a href="/config" class="btn btn-secondary btn-sm menu-btn" style="text-decoration: none;" title="Config">⚙️</a>
       <div class="form-check form-switch">
         <input class="form-check-input" type="checkbox" id="themeToggle">
         <label class="form-check-label" for="themeToggle" id="themeLabel">Hell</label>
@@ -77,16 +78,16 @@
       <div class="toolbar-section">
         <label class="form-label">Formen</label>
         <div class="shape-grid">
-          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('rect')">📦 Quadrat</button>
-          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('circle')">⭕ Kreis</button>
-          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('triangle')">△ Dreieck</button>
-          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('polygon')">⬡ Polygon</button>
-          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('line')">— Linie</button>
-          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('arc')">⌢ Bogen</button>
-          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('matrix')">⊞ Matrix</button>
-          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('star')">★ Stern</button>
-          <button class="btn btn-success btn-shape btn-sm" onclick="toggleTextTool()">🔤 Text</button>
-          <button class="btn btn-warning btn-shape btn-sm" onclick="toggleFreehandDrawing()" id="freehandBtn">✏️ Freihand</button>
+          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('rect')" title="Quadrat">📦</button>
+          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('circle')" title="Kreis">⭕</button>
+          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('triangle')" title="Dreieck">△</button>
+          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('polygon')" title="Polygon">⬡</button>
+          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('line')" title="Linie">—</button>
+          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('arc')" title="Bogen">⌢</button>
+          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('matrix')" title="Matrix">⊞</button>
+          <button class="btn btn-primary btn-shape btn-sm" onclick="addShape('star')" title="Stern">★</button>
+          <button class="btn btn-success btn-shape btn-sm" onclick="toggleTextTool()" title="Text">🔤</button>
+          <button class="btn btn-warning btn-shape btn-sm" onclick="toggleFreehandDrawing()" id="freehandBtn" title="Freihand">✏️</button>
         </div>
       </div>
 
@@ -99,7 +100,7 @@
         <input id="letterSpacing" type="number" class="form-control form-control-sm" min="0" max="100" value="20">
         <label for="letterPoints" class="form-label mt-2">Punkte pro Buchstabe</label>
         <input id="letterPoints" type="number" class="form-control form-control-sm" min="5" max="100" value="20">
-        <button class="btn btn-success btn-sm w-100 mt-2" onclick="addTextToCanvas()">✓ Text hinzufügen</button>
+        <button class="btn btn-success btn-sm w-100 mt-2" onclick="addTextToCanvas()" title="Text hinzufügen">✓</button>
       </div>
 
       <div class="toolbar-section">
@@ -149,13 +150,13 @@
       </div>
 
       <div class="toolbar-section">
-        <button class="btn btn-info btn-sm" onclick="selectAllShapes()">☑ Alle auswählen</button>
-        <button class="btn btn-success btn-sm" onclick="groupSelectedShapes()">📦 Gruppieren</button>
-        <button class="btn btn-secondary btn-sm" onclick="ungroupSelectedShapes()">📂 Gruppe auflösen</button>
-        <button class="btn btn-primary btn-sm" onclick="duplicateSelectedShape()">📋 Duplizieren</button>
-        <button class="btn btn-warning btn-sm" onclick="resetSelectedShape()">↺ Zurücksetzen</button>
-        <button class="btn btn-info btn-sm" onclick="fitToCanvas()">⤢ Fit to Canvas</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteSelectedShape()">🗑️ Löschen</button>
+        <button class="btn btn-info btn-sm" onclick="selectAllShapes()" title="Alle auswählen">☑</button>
+        <button class="btn btn-success btn-sm" onclick="groupSelectedShapes()" title="Gruppieren">📦</button>
+        <button class="btn btn-secondary btn-sm" onclick="ungroupSelectedShapes()" title="Gruppe auflösen">📂</button>
+        <button class="btn btn-primary btn-sm" onclick="duplicateSelectedShape()" title="Duplizieren">📋</button>
+        <button class="btn btn-warning btn-sm" onclick="resetSelectedShape()" title="Zurücksetzen">↺</button>
+        <button class="btn btn-info btn-sm" onclick="fitToCanvas()" title="Fit to Canvas">⤢</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSelectedShape()" title="Löschen">🗑️</button>
 
       </div>
     </div>
@@ -192,7 +193,7 @@
         <div class="modal-body">
           <div class="d-flex justify-content-between align-items-center mb-3">
             <h6>Gespeicherte Projekte</h6>
-            <button class="btn btn-primary btn-sm" onclick="refreshProjectList()">🔄 Aktualisieren</button>
+            <button class="btn btn-primary btn-sm" onclick="refreshProjectList()" title="Aktualisieren">🔄</button>
           </div>
           <div id="projectListContainer">
             <div class="text-center py-4">

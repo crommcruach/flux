@@ -9,10 +9,14 @@
 <body>
     <div class="container">
         <div class="header">
-                    <div class="text-center mb-4">
-            <img src="/static/logo.svg" alt="Flux Logo" style="width: 120px; height: 120px; margin-bottom: 1rem;">
-            <h1>Flux Control Panel</h1>
-        </div>
+            <div class="text-center mb-4">
+                <img src="/static/logo.svg" alt="Flux Logo" style="width: 120px; height: 120px; margin-bottom: 1rem;">
+                <h1>Flux Control Panel</h1>
+                <div style="display: flex; gap: 10px; justify-content: center; margin-top: 10px;">
+                    <a href="/" style="color: var(--text-color); text-decoration: none; padding: 5px 10px; border: 1px solid var(--border-color); border-radius: 4px;">📝 Editor</a>
+                    <a href="/config" style="color: var(--text-color); text-decoration: none; padding: 5px 10px; border: 1px solid var(--border-color); border-radius: 4px;">⚙️ Config</a>
+                </div>
+            </div>
             <div class="theme-toggle">
                 <label for="themeToggle" id="themeLabel">Hell</label>
                 <input type="checkbox" id="themeToggle">
@@ -40,24 +44,29 @@
                 </div>
                 <pre id="consoleOutput" style="height: 200px; overflow-y: auto; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; margin-bottom: 10px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4;"></pre>
                 <div style="display: flex; gap: 10px; align-items: center;">
-                    <input type="text" id="consoleCommand" placeholder="Befehl eingeben (z.B. status, help)" style="flex: 1; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg); color: var(--text-color);" onkeypress="if(event.key==='Enter') executeCommand()">
-                    <button class="btn btn-primary" onclick="executeCommand()" style="flex: none; width: auto; min-width: auto;">Execute</button>
+                    <span style="color: var(--text-color); font-weight: bold;">&gt;</span>
+                    <input type="text" id="consoleCommand" placeholder="Befehl eingeben (z.B. status, help, videos, test red)" style="flex: 1; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg); color: var(--text-color); font-family: 'Courier New', monospace;" onkeypress="if(event.key==='Enter') executeCommand()" autofocus>
+                    <button class="btn btn-primary" onclick="executeCommand()" style="flex: none; width: auto; min-width: auto;">▶️</button>
                 </div>
             </div>
             
             <!-- Playback Control -->
             <div class="control-panel">
-                <h2>Wiedergabe</h2>
+                <h2>Playback</h2>
                 <div class="button-group">
-                    <button class="btn btn-primary" onclick="playVideo()">▶️ Start</button>
-                    <button class="btn btn-danger" onclick="stopVideo()">⏹️ Stop</button>
+                    <button class="btn btn-primary" onclick="executeCliCommand('start')" title="start">▶️ Start</button>
+                    <button class="btn btn-danger" onclick="executeCliCommand('stop')" title="stop">⏹️ Stop</button>
                 </div>
                 <div class="button-group">
-                    <button class="btn btn-warning" onclick="pauseVideo()">⏸️ Pause</button>
-                    <button class="btn btn-info" onclick="resumeVideo()">▶️ Resume</button>
+                    <button class="btn btn-warning" onclick="executeCliCommand('pause')" title="pause">⏸️ Pause</button>
+                    <button class="btn btn-info" onclick="executeCliCommand('resume')" title="resume">▶️ Resume</button>
                 </div>
                 <div class="button-group">
-                    <button class="btn btn-secondary" onclick="restartVideo()">🔄 Restart</button>
+                    <button class="btn btn-secondary" onclick="executeCliCommand('restart')" title="restart">🔄 Restart</button>
+                </div>
+                <div class="button-group">
+                    <button class="btn btn-secondary" onclick="executeCliCommand('back')" title="back">⏮️ Back</button>
+                    <button class="btn btn-secondary" onclick="executeCliCommand('next')" title="next">⏭️ Next</button>
                 </div>
             </div>
             
@@ -102,12 +111,15 @@
                 </div>
             </div>
             
-            <!-- Videos -->
+            <!-- Media -->
             <div class="control-panel">
-                <h2>Videos</h2>
-                <button class="btn btn-info" style="width: 100%; margin-bottom: 15px;" onclick="loadVideos()">🔄 Videos laden</button>
-                <div class="video-list" id="videoList">
-                    <p style="text-align: center; color: #999;">Klicke auf "Videos laden"</p>
+                <h2>Media</h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button class="btn btn-info" style="flex: 1;" onclick="loadVideos()" title="videos">🎬 Videos</button>
+                    <button class="btn btn-info" style="flex: 1;" onclick="loadScripts()" title="scripts">📜 Scripts</button>
+                </div>
+                <div class="media-list" id="mediaList">
+                    <p style="text-align: center; color: #999;">Wähle Videos oder Scripts</p>
                 </div>
             </div>
             

@@ -98,6 +98,145 @@ Response: {
 Setzt Art-Net Ziel-IP und speichert in config.json.
 ```json
 Request: {"ip": "192.168.1.11"}
+Response: {"status": "success", "ip": "192.168.1.11"}
+```
+
+---
+
+### Script Generator
+
+#### GET /api/scripts
+Gibt Liste aller verfügbaren Scripts zurück.
+```json
+Response: {
+  "status": "success",
+  "scripts": ["rainbow_wave", "plasma", "pulse", "line_vertical", "line_horizontal"],
+  "count": 5
+}
+```
+
+#### POST /api/load_script
+Lädt und startet ein prozedurales Script.
+```json
+Request: {"script": "rainbow_wave"}
+Response: {"status": "success", "message": "Script 'rainbow_wave' geladen"}
+```
+
+#### GET /api/script/info/<script_name>
+Gibt Metadaten eines Scripts zurück.
+```json
+Response: {
+  "status": "success",
+  "name": "Rainbow Wave",
+  "description": "Animierte Regenbogen-Welle",
+  "parameters": {
+    "speed": 1.0,
+    "wavelength": 100
+  }
+}
+```
+
+---
+
+### Configuration Management
+
+#### GET /api/config
+Gibt die aktuelle Konfiguration zurück.
+```json
+Response: {
+  "status": "success",
+  "config": {
+    "artnet": {...},
+    "video": {...},
+    "paths": {...}
+  }
+}
+```
+
+#### POST /api/config
+Speichert neue Konfiguration (erstellt automatisch Backup).
+```json
+Request: {
+  "artnet": {...},
+  "video": {...},
+  "paths": {...}
+}
+Response: {
+  "status": "success",
+  "message": "Konfiguration gespeichert",
+  "backup_created": true
+}
+```
+
+#### POST /api/config/validate
+Validiert Konfiguration ohne zu speichern.
+```json
+Request: {"artnet": {...}, "video": {...}}
+Response: {
+  "status": "success",
+  "valid": true,
+  "errors": []
+}
+```
+
+#### POST /api/config/restore
+Stellt Konfiguration von Backup wieder her.
+```json
+Response: {
+  "status": "success",
+  "message": "Konfiguration von Backup wiederhergestellt"
+}
+```
+
+#### GET /api/config/schema
+Gibt das vollständige JSON-Schema zurück.
+```json
+Response: {
+  "status": "success",
+  "schema": {
+    "type": "object",
+    "properties": { ... }
+  }
+}
+```
+
+#### GET /api/config/default
+Gibt Standard-Konfiguration zurück.
+```json
+Response: {
+  "status": "success",
+  "config": {
+    "artnet": { ... },
+    "video": { ... },
+    "paths": { ... }
+  }
+}
+```
+
+**Hinweis:** Die Config wird beim Speichern automatisch gegen das Schema validiert. Siehe `docs/CONFIG_SCHEMA.md` für Details.
+
+---
+
+### Cache Management
+
+#### POST /api/cache/clear
+Löscht alle Cache-Dateien.
+```json
+Response: {
+  "status": "success",
+  "deleted_files": 15,
+  "message": "15 Cache-Dateien gelöscht"
+}
+```
+
+#### GET /api/cache/stats
+Gibt Cache-Statistiken zurück.
+```json
+Response: {
+  "status": "success",
+  "total_files": 15,
+  "total_size_mb": 234.5
+}
 Response: {
   "status": "success",
   "ip": "192.168.1.11",

@@ -2,8 +2,12 @@
 Art-Net Manager - Verwaltet Art-Net Ausgabe und Testmuster
 """
 import time
+import threading
 import numpy as np
 from stupidArtnet import StupidArtnet
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ArtNetManager:
@@ -23,6 +27,9 @@ class ArtNetManager:
         self.universe_channel_orders = {}  # Universe-Index -> channel_order (z.B. "GRB")
         self.is_active = False
         self.test_mode = False  # True wenn Testmuster aktiv
+        self.test_pattern_data = None  # Gespeicherte Testmuster-Daten
+        self.test_thread = None  # Thread für kontinuierliches Testmuster-Senden
+        self.test_thread_running = False
         
         # RGB-Kanal-Mapping: Definiert Reihenfolge für jede Permutation
         self.channel_mappings = {
@@ -56,7 +63,7 @@ class ArtNetManager:
             channel_order = universe_configs.get(universe_num, default_order)
             self.universe_channel_orders[i] = channel_order.upper()
         
-        print("Starte Art-Net...")
+        logger.debug("Starte Art-Net...")
         for i in range(self.required_universes):
             universe = StupidArtnet(
                 self.target_ip, 
@@ -69,23 +76,31 @@ class ArtNetManager:
             # WICHTIG: start() nicht aufrufen - wir senden manuell mit show()
             # Der interne Thread von stupidArtnet kann Flackern verursachen
             self.universes.append(universe)
-            print(f"  Art-Net Universum {self.start_universe + i} initialisiert (manueller Modus)")
-        
+            logger.debug(f"  Art-Net Universum {self.start_universe + i} initialisiert (manueller Modus)")
         self.is_active = True
     
     def stop(self):
-        """Stoppt Art-Net und sendet Blackout."""
+        """Stoppt Art-Net und sendet finalen Blackout."""
         if not self.is_active:
             return
         
-        print("Stoppe Art-Net...")
-        self.blackout()
+        # Stoppe Test-Thread falls aktiv
+        self._stop_test_thread()
+        
+        # Sende finalen Blackout (direkt, ohne Thread)
+        logger.debug("Sende finalen Blackout...")
+        zero_data = [0] * self.channels_per_universe
+        for universe in self.universes:
+            universe.set(zero_data)
+            universe.show()
+        
         time.sleep(0.1)
         
         # Kein universe.stop() nötig da wir keinen Thread gestartet haben
         
         self.universes = []
         self.is_active = False
+        logger.debug("Art-Net gestoppt")
     
     def send_frame(self, rgb_data):
         """Sendet RGB-Frame über Art-Net (nur wenn kein Testmuster aktiv)."""
@@ -107,17 +122,50 @@ class ArtNetManager:
             universe.set(universe_data)
             universe.show()  # Explizit senden ohne FPS-Wartezeit
     
+    def _stop_test_thread(self):
+        """Stoppt den Test-Thread."""
+        if self.test_thread and self.test_thread_running:
+            self.test_thread_running = False
+            if self.test_thread.is_alive():
+                self.test_thread.join(timeout=1.0)
+            self.test_thread = None
+    
+    def _test_pattern_loop(self):
+        """Thread-Funktion: Sendet Testmuster kontinuierlich (~40 Hz)."""
+        while self.test_thread_running and self.is_active:
+            if self.test_pattern_data:
+                for universe_idx, universe in enumerate(self.universes):
+                    start_channel = universe_idx * self.channels_per_universe
+                    end_channel = min(start_channel + self.channels_per_universe, len(self.test_pattern_data))
+                    universe_data = self.test_pattern_data[start_channel:end_channel]
+                    
+                    # Wende Kanal-Umordnung für dieses Universum an
+                    universe_data = self._reorder_channels(universe_data, universe_idx)
+                    
+                    if len(universe_data) < self.channels_per_universe:
+                        universe_data.extend([0] * (self.channels_per_universe - len(universe_data)))
+                    
+                    universe.set(universe_data)
+                    universe.show()
+            
+            time.sleep(0.025)  # 40 Hz Refresh-Rate
+    
     def blackout(self):
         """Sendet Blackout (alle Kanäle auf 0)."""
         if not self.is_active:
             return
         
-        zero_data = [0] * self.channels_per_universe
-        for universe in self.universes:
-            universe.set(zero_data)
-            universe.show()  # Explizit senden
+        # Stoppe alten Test-Thread
+        self._stop_test_thread()
         
-        self.test_mode = False
+        # Setze Blackout-Daten und starte Thread
+        self.test_mode = True
+        self.test_pattern_data = [0] * (self.total_points * 3)
+        
+        self.test_thread_running = True
+        self.test_thread = threading.Thread(target=self._test_pattern_loop, daemon=True)
+        self.test_thread.start()
+        
         print("Blackout gesendet")
     
     def test_pattern(self, color='red'):
@@ -125,6 +173,9 @@ class ArtNetManager:
         if not self.is_active:
             print("Art-Net nicht aktiv!")
             return
+        
+        # Stoppe alten Test-Thread
+        self._stop_test_thread()
         
         self.test_mode = True
         
@@ -148,27 +199,18 @@ class ArtNetManager:
             return
         
         r, g, b = colors[color]
-        test_data = [r, g, b] * self.total_points
+        self.test_pattern_data = [r, g, b] * self.total_points
         
-        for universe_idx, universe in enumerate(self.universes):
-            start_channel = universe_idx * self.channels_per_universe
-            end_channel = min(start_channel + self.channels_per_universe, len(test_data))
-            universe_data = test_data[start_channel:end_channel]
-            
-            # Wende Kanal-Umordnung für dieses Universum an
-            universe_data = self._reorder_channels(universe_data, universe_idx)
-            
-            if len(universe_data) < self.channels_per_universe:
-                universe_data.extend([0] * (self.channels_per_universe - len(universe_data)))
-            
-            universe.set(universe_data)
-            universe.show()  # Explizit senden
+        # Starte Thread für kontinuierliches Senden
+        self.test_thread_running = True
+        self.test_thread = threading.Thread(target=self._test_pattern_loop, daemon=True)
+        self.test_thread.start()
         
-        print(f"Testmuster '{color}' gesendet (Video pausiert)")
+        print(f"Testmuster '{color}' gesendet (Video gestoppt)")
     
     def _gradient_pattern(self):
         """Erzeugt RGB-Farbverlauf über alle Punkte."""
-        test_data = []
+        self.test_pattern_data = []
         for i in range(self.total_points):
             # Position im Verlauf (0.0 bis 1.0)
             pos = i / max(self.total_points - 1, 1)
@@ -187,28 +229,21 @@ class ArtNetManager:
             else:  # Magenta -> Rot
                 r, g, b = 255, 0, int(255 * (1 - (pos - 5/6) * 6))
             
-            test_data.extend([r, g, b])
+            self.test_pattern_data.extend([r, g, b])
         
-        for universe_idx, universe in enumerate(self.universes):
-            start_channel = universe_idx * self.channels_per_universe
-            end_channel = min(start_channel + self.channels_per_universe, len(test_data))
-            universe_data = test_data[start_channel:end_channel]
-            
-            # Wende Kanal-Umordnung für dieses Universum an
-            universe_data = self._reorder_channels(universe_data, universe_idx)
-            
-            if len(universe_data) < self.channels_per_universe:
-                universe_data.extend([0] * (self.channels_per_universe - len(universe_data)))
-            
-            universe.set(universe_data)
-            universe.show()  # Explizit senden
+        # Starte Thread für kontinuierliches Senden
+        self.test_thread_running = True
+        self.test_thread = threading.Thread(target=self._test_pattern_loop, daemon=True)
+        self.test_thread.start()
         
-        print(f"RGB-Gradient Testmuster gesendet ({self.total_points} Punkte, Video pausiert)")
+        logger.debug(f"RGB-Gradient Testmuster gesendet ({self.total_points} Punkte, Video gestoppt)")
     
     def resume_video_mode(self):
         """Deaktiviert Testmuster-Modus, erlaubt Video-Wiedergabe."""
+        self._stop_test_thread()
         self.test_mode = False
-        print("Video-Modus aktiviert")
+        self.test_pattern_data = None
+        logger.debug("Video-Modus aktiviert")
     
     def _reorder_channels(self, data, universe_idx):
         """Ordnet RGB-Kanäle entsprechend der Universum-Konfiguration um."""

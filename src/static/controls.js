@@ -89,34 +89,14 @@ async function apiCall(endpoint, method = 'GET', data = null) {
 // PLAYBACK CONTROLS
 // ========================================
 
-async function playVideo() {
-    const result = await apiCall('/play', 'POST');
-    if (result) showToast(result.message);
-    updateStatus();
-}
-
-async function stopVideo() {
-    const result = await apiCall('/stop', 'POST');
-    if (result) showToast(result.message);
-    updateStatus();
-}
-
-async function pauseVideo() {
-    const result = await apiCall('/pause', 'POST');
-    if (result) showToast(result.message);
-    updateStatus();
-}
-
-async function resumeVideo() {
-    const result = await apiCall('/resume', 'POST');
-    if (result) showToast(result.message);
-    updateStatus();
-}
-
-async function restartVideo() {
-    const result = await apiCall('/restart', 'POST');
-    if (result) showToast(result.message);
-    updateStatus();
+async function executeCliCommand(command) {
+    const result = await apiCall('/console', 'POST', { command: command });
+    if (result && result.status === 'success') {
+        showToast(`Befehl '${command}' ausgeführt`);
+        updateStatus();
+    } else if (result) {
+        showToast(`Fehler: ${result.message}`, 'error');
+    }
 }
 
 // ========================================
@@ -158,14 +138,14 @@ async function testPattern(color) {
 
 
 // ========================================
-// VIDEOS
+// MEDIA (VIDEOS & SCRIPTS)
 // ========================================
 
 async function loadVideos() {
     const result = await apiCall('/videos', 'GET');
     if (result && result.videos) {
-        const videoList = document.getElementById('videoList');
-        videoList.innerHTML = '';
+        const mediaList = document.getElementById('mediaList');
+        mediaList.innerHTML = '<h3 style="margin-top: 0;">🎬 Videos</h3>';
         
         // Gruppiere Videos nach Kanal
         const grouped = {};
@@ -189,7 +169,7 @@ async function loadVideos() {
                 <span class="kanal-count">${videos.length}</span>
             `;
             header.onclick = () => toggleKanal(kanalId);
-            videoList.appendChild(header);
+            mediaList.appendChild(header);
             
             // Video Container (collapsible content)
             const container = document.createElement('div');
@@ -207,7 +187,7 @@ async function loadVideos() {
                 container.appendChild(div);
             });
             
-            videoList.appendChild(container);
+            mediaList.appendChild(container);
         });
         
         showToast(`${result.videos.length} Videos in ${Object.keys(grouped).length} Kanälen geladen`);
@@ -229,10 +209,55 @@ function toggleKanal(kanalId) {
 }
 
 async function loadVideo(path, name) {
-    const result = await apiCall('/video/load', 'POST', { path: path });
+    // Verwende video:<relativePath> CLI-Befehl (mit Kanal-Ordner)
+    // path enthält bereits den relativen Pfad (z.B. "kanal_1/test.mp4")
+    const relativePath = path.replace(/\\/g, '/');  // Normalisiere Backslashes zu Forward Slashes
+    const result = await apiCall('/console', 'POST', { command: `video:${relativePath}` });
     if (result && result.status === 'success') {
         showToast(`Video geladen: ${name}`);
         updateStatus();
+    } else if (result) {
+        showToast(`Fehler: ${result.message}`, 'error');
+    }
+}
+
+async function loadScripts() {
+    const result = await apiCall('/scripts', 'GET');
+    if (result && result.scripts) {
+        const mediaList = document.getElementById('mediaList');
+        mediaList.innerHTML = '<h3 style="margin-top: 0;">📜 Scripts</h3>';
+        
+        if (result.scripts.length === 0) {
+            mediaList.innerHTML += '<p style="text-align: center; color: #999;">Keine Scripts gefunden</p>';
+            return;
+        }
+        
+        result.scripts.forEach(script => {
+            const div = document.createElement('div');
+            div.className = 'video-item';
+            div.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>${script.filename}</strong>
+                        ${script.description ? `<br><small style="color: #999;">${script.description}</small>` : ''}
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="loadScript('${script.filename}')" title="script:${script.filename}">▶️</button>
+                </div>
+            `;
+            mediaList.appendChild(div);
+        });
+    }
+}
+
+async function loadScript(scriptName) {
+    // Entferne .py Endung falls vorhanden
+    const cleanName = scriptName.endsWith('.py') ? scriptName.slice(0, -3) : scriptName;
+    const result = await apiCall('/console', 'POST', { command: `script:${cleanName}` });
+    if (result && result.status === 'success') {
+        showToast(`Script '${cleanName}' geladen`);
+        updateStatus();
+    } else if (result) {
+        showToast(`Fehler: ${result.message}`, 'error');
     }
 }
 
@@ -392,30 +417,58 @@ async function executeCommand() {
     const command = input.value.trim();
     if (!command) return;
     
+    const consoleOutput = document.getElementById('consoleOutput');
+    
+    // Zeige Befehl in Console
+    const cmdLine = document.createElement('div');
+    cmdLine.style.color = '#4CAF50';
+    cmdLine.style.fontWeight = 'bold';
+    cmdLine.textContent = `> ${command}`;
+    consoleOutput.appendChild(cmdLine);
+    consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    
     try {
-        const response = await fetch(`${API_BASE}/console/command`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command })
-        });
-        if (response.ok) {
-            const result = await response.json();
+        const result = await apiCall('/console', 'POST', { command });
+        
+        if (result) {
+            // Zeige Output
+            if (result.output) {
+                const outputDiv = document.createElement('div');
+                outputDiv.style.whiteSpace = 'pre-wrap';
+                outputDiv.textContent = result.output;
+                consoleOutput.appendChild(outputDiv);
+            }
+            
+            // Zeige Status-Meldung
+            if (result.status === 'success') {
+                if (!result.output && result.message) {
+                    const msgDiv = document.createElement('div');
+                    msgDiv.style.color = '#4CAF50';
+                    msgDiv.textContent = result.message;
+                    consoleOutput.appendChild(msgDiv);
+                }
+            } else {
+                const errorDiv = document.createElement('div');
+                errorDiv.style.color = '#f44336';
+                errorDiv.textContent = `Fehler: ${result.message || 'Unbekannter Fehler'}`;
+                consoleOutput.appendChild(errorDiv);
+            }
+            
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
             input.value = '';
-            setTimeout(fetchConsole, 300);
             updateStatus();
         }
     } catch (error) {
-        showToast('Console-Befehl fehlgeschlagen', 'error');
+        const errorDiv = document.createElement('div');
+        errorDiv.style.color = '#f44336';
+        errorDiv.textContent = `Fehler: ${error.message}`;
+        consoleOutput.appendChild(errorDiv);
+        consoleOutput.scrollTop = consoleOutput.scrollHeight;
     }
 }
 
 async function clearConsole() {
-    try {
-        await fetch(`${API_BASE}/console/clear`, { method: 'POST' });
-        document.getElementById('consoleOutput').textContent = '';
-    } catch (error) {
-        // Stiller Fehler
-    }
+    document.getElementById('consoleOutput').textContent = '';
 }
 
 // ========================================

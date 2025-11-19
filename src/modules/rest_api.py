@@ -37,10 +37,23 @@ class RestAPI:
         self.app = Flask(__name__, static_folder=static_path, static_url_path='')
         secret_key = self.config.get('api', {}).get('secret_key', 'flux_secret_key_2025')
         self.app.config['SECRET_KEY'] = secret_key
+        
+        # Deaktiviere Flask/Werkzeug Logger komplett um write() Konflikte zu vermeiden
+        import logging
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+        log.disabled = True
+        
         CORS(self.app)  # CORS für alle Routen aktivieren
         
-        # Socket.IO initialisieren
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
+        # Socket.IO initialisieren mit engineio_logger aus
+        self.socketio = SocketIO(
+            self.app, 
+            cors_allowed_origins="*", 
+            async_mode='threading',
+            logger=False,  # Deaktiviert Socket.IO Logger
+            engineio_logger=False  # Deaktiviert Engine.IO Logger (verhindert write() Fehler)
+        )
         
         # Routen registrieren
         self._register_routes()
@@ -63,6 +76,11 @@ class RestAPI:
         def controls():
             """Serve the control panel."""
             return send_from_directory(self.app.static_folder, 'controls.html')
+        
+        @self.app.route('/config')
+        def config_page():
+            """Serve the configuration page."""
+            return send_from_directory(self.app.static_folder, 'config.html')
         
         @self.app.route('/static/<path:filename>')
         def serve_static(filename):
@@ -87,12 +105,14 @@ class RestAPI:
             register_info_routes,
             register_recording_routes,
             register_cache_routes,
-            register_script_routes
+            register_script_routes,
+            register_console_command_routes
         )
         from .api_points import register_points_routes
         from .api_videos import register_video_routes
         from .api_console import register_console_routes
         from .api_projects import register_project_routes
+        from .api_config import register_config_routes
         
         # Registriere alle Routen
         register_playback_routes(self.app, self.player)
@@ -105,7 +125,9 @@ class RestAPI:
         register_points_routes(self.app, self.player, self.data_dir)
         register_video_routes(self.app, self.player, self.video_dir)
         register_console_routes(self.app, self)
+        register_console_command_routes(self.app, self.player, self.dmx_controller, self, self.video_dir, self.data_dir, self.config)
         register_project_routes(self.app, self.logger)
+        register_config_routes(self.app)
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
@@ -113,18 +135,37 @@ class RestAPI:
         @self.socketio.on('connect')
         def handle_connect():
             """Client verbunden."""
-            print(f"WebSocket Client verbunden: {threading.current_thread().name}")
-            emit('status', self._get_status_data())
+            try:
+                self.logger.debug(f"WebSocket Client verbunden: {threading.current_thread().name}")
+                try:
+                    emit('status', self._get_status_data())
+                except:
+                    # Stiller Fehler bei emit - kann bei disconnect passieren
+                    pass
+            except Exception as e:
+                self.logger.error(f"Fehler bei WebSocket connect: {e}")
         
         @self.socketio.on('disconnect')
         def handle_disconnect():
             """Client getrennt."""
-            print(f"WebSocket Client getrennt: {threading.current_thread().name}")
+            try:
+                # Verwende logger statt print - print kann während disconnect problematisch sein
+                self.logger.debug(f"WebSocket Client getrennt: {threading.current_thread().name}")
+            except:
+                # Stiller Fehler - disconnect kann in ungültigem Kontext passieren
+                pass
         
         @self.socketio.on('request_status')
         def handle_status_request():
             """Client fordert Status an."""
-            emit('status', self._get_status_data())
+            try:
+                try:
+                    emit('status', self._get_status_data())
+                except:
+                    # Stiller Fehler bei emit - kann bei disconnect passieren
+                    pass
+            except Exception as e:
+                self.logger.error(f"Fehler bei status request: {e}")
         
         @self.socketio.on('request_console')
         def handle_console_request(data):
@@ -160,7 +201,7 @@ class RestAPI:
                 self.socketio.emit('status', status_data, namespace='/')
                 time.sleep(interval)
             except Exception as e:
-                print(f"Fehler beim Status-Broadcast: {e}")
+                self.logger.debug(f"Fehler beim Status-Broadcast: {e}")
                 time.sleep(interval)
     
     def add_log(self, message):
@@ -312,7 +353,7 @@ class RestAPI:
     def start(self, host='0.0.0.0', port=5000):
         """Startet REST API & WebSocket Server."""
         if self.is_running:
-            print("REST API läuft bereits!")
+            self.logger.debug("REST API läuft bereits!")
             return
         
 
@@ -337,7 +378,15 @@ class RestAPI:
         
         # Server Thread starten
         self.server_thread = threading.Thread(
-            target=lambda: self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True),
+            target=lambda: self.socketio.run(
+                self.app, 
+                host=host, 
+                port=port, 
+                debug=False, 
+                use_reloader=False, 
+                allow_unsafe_werkzeug=True,
+                log_output=False  # Completely suppress Werkzeug output
+            ),
             daemon=True
         )
         self.server_thread.start()

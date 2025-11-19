@@ -20,9 +20,24 @@ class ConsoleCapture:
     
     def write(self, text):
         """Schreibt Text sowohl in Terminal als auch in Console Log."""
+        import threading
+        
+        # Schreibe immer ins Terminal
         self.original_stdout.write(text)
-        if self.rest_api and text.strip():
-            self.rest_api.add_log(text.rstrip())
+        
+        # Sende NUR zu REST API wenn:
+        # 1. REST API existiert
+        # 2. Text nicht leer ist
+        # 3. Wir sind NICHT in einem Flask/Werkzeug Thread (verhindert write() before start_response Fehler)
+        thread_name = threading.current_thread().name
+        is_flask_thread = 'werkzeug' in thread_name.lower() or 'dummy' in thread_name.lower()
+        
+        if self.rest_api and text.strip() and not is_flask_thread:
+            try:
+                self.rest_api.add_log(text.rstrip())
+            except:
+                # Stiller Fehler - verhindert Endlosschleife bei Problemen
+                pass
     
     def flush(self):
         """Flush für stdout Kompatibilität."""
@@ -34,42 +49,27 @@ class ConsoleCapture:
 
 
 def load_config():
-    """Lädt Konfiguration aus config.json."""
+    """Lädt und validiert Konfiguration aus config.json."""
+    from modules.config_schema import validate_config_file, ConfigValidator
+    
     config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
     
-    # Standardwerte falls config.json nicht existiert
-    default_config = {
-        "artnet": {
-            "target_ip": "127.0.0.1",
-            "start_universe": 0,
-            "dmx_control_universe": 100,
-            "dmx_listen_ip": "0.0.0.0",
-            "dmx_listen_port": 6454
-        },
-        "video": {
-            "extensions": [".mp4", ".avi", ".mov", ".mkv", ".wmv"],
-            "max_per_channel": 255,
-            "default_fps": None,
-            "default_brightness": 100,
-            "default_speed": 1.0
-        },
-        "paths": {
-            "video_dir": "video",
-            "data_dir": "data",
-            "points_json": "punkte_export.json"
-        }
-    }
+    # Versuche Config zu laden und validieren
+    is_valid, errors, config = validate_config_file(config_path)
     
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"⚠️  config.json nicht gefunden, verwende Standardwerte")
-        return default_config
-    except json.JSONDecodeError as e:
-        print(f"⚠️  Fehler beim Lesen von config.json: {e}")
-        print("Verwende Standardwerte")
-        return default_config
+    if not is_valid:
+        print(f"⚠️  Config-Validierung fehlgeschlagen:")
+        for error in errors:
+            print(f"    - {error}")
+        
+        # Verwende Default-Config bei Fehler
+        validator = ConfigValidator()
+        config = validator.get_default_config()
+        print(f"⚠️  Verwende Standard-Konfiguration")
+    else:
+        logger.info("Konfiguration erfolgreich geladen und validiert")
+    
+    return config
 
 
 def main():
@@ -122,14 +122,19 @@ def main():
     json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')] if os.path.exists(data_dir) else []
     
     if json_files:
-        # Prüfe ob default aus config existiert
-        default_points = config['paths']['points_json']
-        if default_points in json_files:
+        # 1. Priorität: Konfigurierte Standard-Punkte
+        default_points = config['paths'].get('default_points_json')
+        if default_points and default_points in json_files:
             points_json_path = os.path.join(data_dir, default_points)
+            print(f"Punkte-Liste (config): {default_points}")
+        # 2. Fallback: Legacy points_json Setting
+        elif config['paths']['points_json'] in json_files:
+            points_json_path = os.path.join(data_dir, config['paths']['points_json'])
+            print(f"Punkte-Liste: {config['paths']['points_json']}")
+        # 3. Fallback: Erste gefundene
         else:
-            # Nimm erste gefundene
             points_json_path = os.path.join(data_dir, sorted(json_files)[0])
-        print(f"Punkte-Liste: {os.path.basename(points_json_path)}")
+            print(f"Punkte-Liste: {sorted(json_files)[0]}")
     else:
         print(f"WARNUNG: Keine Punkte-Liste gefunden in {data_dir}")
         points_json_path = os.path.join(data_dir, "punkte_export.json")
@@ -138,6 +143,9 @@ def main():
     target_ip = config['artnet']['target_ip']
     start_universe = config['artnet']['start_universe']
     fps_limit = config['video']['default_fps']
+    
+    # Scripts-Ordner
+    scripts_dir = os.path.join(base_path, config['paths']['scripts_dir'])
     
     # Video Player initialisieren
     player = VideoPlayer(video_path, points_json_path, target_ip, start_universe, fps_limit, config)
@@ -156,7 +164,9 @@ def main():
         listen_ip=config['artnet']['dmx_listen_ip'],
         listen_port=config['artnet']['dmx_listen_port'],
         control_universe=config['artnet']['dmx_control_universe'],
-        video_base_dir=video_dir
+        video_base_dir=video_dir,
+        scripts_dir=scripts_dir,
+        config=config
     )
     dmx_controller.start()
     

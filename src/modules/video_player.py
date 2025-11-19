@@ -3,33 +3,28 @@ Video Player - Spielt Videos ab und sendet RGB-Daten über Art-Net
 """
 import cv2
 import os
-import json
 import time
 import threading
-import hashlib
+import json
 import numpy as np
 from .logger import get_logger
-
-logger = get_logger(__name__)
-try:
-    import msgpack
-    MSGPACK_AVAILABLE = True
-except ImportError:
-    MSGPACK_AVAILABLE = False
-    print("⚠ msgpack nicht installiert - Cache-Funktion deaktiviert")
 from .artnet_manager import ArtNetManager
+from .points_loader import PointsLoader
+from .cache_manager import CacheManager
 from .constants import (
     DMX_CHANNELS_PER_UNIVERSE,
     DMX_CHANNELS_PER_POINT,
-    DMX_MAX_CHANNELS_8_UNIVERSES,
-    CACHE_CHUNK_SIZE,
-    CACHE_HASH_LENGTH,
     DEFAULT_CANVAS_WIDTH,
     DEFAULT_CANVAS_HEIGHT,
     DEFAULT_SPEED,
     UNLIMITED_LOOPS,
     DEFAULT_FPS
 )
+
+logger = get_logger(__name__)
+
+# GLOBALE LOCK: Shared mit ScriptPlayer - importiere Modul für echte Shared State
+from . import player_lock
 
 
 class VideoPlayer:
@@ -61,9 +56,11 @@ class VideoPlayer:
         self.is_recording = False
         self.recorded_data = []
         
-        # RGB Cache
-        self.use_cache = MSGPACK_AVAILABLE and self.config.get('cache', {}).get('enabled', True)
-        self.cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
+        # RGB Cache Manager
+        cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
+        cache_enabled = self.config.get('cache', {}).get('enabled', True)
+        self.cache_manager = CacheManager(cache_dir, cache_enabled)
+        self.use_cache = cache_enabled
         self.cached_rgb_data = None
         self.cache_loaded = False
         
@@ -73,109 +70,52 @@ class VideoPlayer:
         self.gif_transparency_bg = tuple(self.config.get('video', {}).get('gif_transparency_bg', [0, 0, 0]))
         self.gif_respect_timing = self.config.get('video', {}).get('gif_respect_frame_timing', True)
         
-        # JSON-Datei einlesen
-        with open(points_json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        # Lade Points-Konfiguration mit PointsLoader
+        points_data = PointsLoader.load_points(points_json_path, validate_bounds=True)
         
-        # Canvas-Größe auslesen
-        canvas = data.get('canvas', {})
-        self.canvas_width = canvas.get('width', DEFAULT_CANVAS_WIDTH)
-        self.canvas_height = canvas.get('height', DEFAULT_CANVAS_HEIGHT)
+        self.point_coords = points_data['point_coords']
+        self.canvas_width = points_data['canvas_width']
+        self.canvas_height = points_data['canvas_height']
+        self.universe_mapping = points_data['universe_mapping']
+        self.total_points = points_data['total_points']
+        self.total_channels = points_data['total_channels']
+        self.required_universes = points_data['required_universes']
+        self.channels_per_universe = points_data['channels_per_universe']
         
-        objects = data.get('objects', [])
-        
-        # Universen-Logik: Objekte die über 8 Universen hinausgehen, ab Universum 9 fortführen
-        channels_per_universe = DMX_CHANNELS_PER_UNIVERSE
-        channels_per_point = DMX_CHANNELS_PER_POINT  # RGB
-        max_channels_8_universes = DMX_MAX_CHANNELS_8_UNIVERSES  # 4080 Kanäle
-        
-        # Sammle Punkte mit Objekt-Zuordnung und berechne Universe-Mapping
-        point_list = []
-        self.universe_mapping = {}  # Mapping: Punkt-Index -> Universum-Offset
-        current_channel = 0
-        universe_offset = 0
-        
-        for obj_idx, obj in enumerate(objects):
-            obj_id = obj.get('id', f'object-{obj_idx}')
-            points = obj.get('points', [])
-            
-            # Validiere Punkte
-            valid_points = []
-            for point in points:
-                x, y = point.get('x'), point.get('y')
-                if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
-                    valid_points.append((x, y))
-            
-            if not valid_points:
-                continue
-            
-            obj_channels = len(valid_points) * channels_per_point
-            obj_start_channel = current_channel + universe_offset
-            obj_end_channel = obj_start_channel + obj_channels
-            
-            # Prüfe ob Objekt über 8-Universen-Grenze geht
-            if obj_start_channel < max_channels_8_universes and obj_end_channel > max_channels_8_universes:
-                # Objekt würde Grenze überschreiten -> verschiebe komplett zu Universum 9
-                universe_offset = max_channels_8_universes - current_channel
-                obj_start_channel = current_channel + universe_offset
-                obj_end_channel = obj_start_channel + obj_channels
-                print(f"  ⚠️  Objekt '{obj_id}' verschoben zu Universum 9+ (würde Grenze überschreiten)")
-            
-            # Füge Punkte hinzu und speichere Universe-Mapping
-            start_idx = len(point_list)
-            for point in valid_points:
-                point_list.append(point)
-                point_idx = len(point_list) - 1
-                self.universe_mapping[point_idx] = universe_offset
-            
-            current_channel += obj_channels
-        
-        # Als Numpy-Array für schnelleren Zugriff speichern
-        self.point_coords = np.array(point_list, dtype=np.int32) if point_list else np.array([])
-        total_points = len(point_list)
-        total_channels = total_points * channels_per_point + universe_offset
-        
-        # Berechne benötigte Universen
-        self.required_universes = (total_channels + channels_per_universe - 1) // channels_per_universe
-        self.channels_per_universe = channels_per_universe
-        
-        self.total_points = total_points
-        self.total_channels = total_channels
-        
-        print(f"Video Player initialisiert:")
-        print(f"  Video: {os.path.basename(video_path)}")
-        print(f"  Canvas-Größe: {self.canvas_width}x{self.canvas_height}")
-        print(f"  Anzahl Punkte: {total_points}")
-        print(f"  Benötigte Kanäle: {total_channels}")
-        print(f"  Benötigte Universen: {self.required_universes}")
-        print(f"  Art-Net Ziel-IP: {target_ip}")
-        print(f"  Start-Universum: {start_universe}")
+        logger.debug(f"Video Player initialisiert:")
+        logger.debug(f"  Video: {os.path.basename(video_path)}")
+        logger.debug(f"  Canvas-Größe: {self.canvas_width}x{self.canvas_height}")
+        logger.debug(f"  Anzahl Punkte: {self.total_points}")
+        logger.debug(f"  Benötigte Kanäle: {self.total_channels}")
+        logger.debug(f"  Benötigte Universen: {self.required_universes}")
+        logger.debug(f"  Art-Net Ziel-IP: {target_ip}")
+        logger.debug(f"  Start-Universum: {start_universe}")
         
         # Art-Net Manager erstellen und sofort starten
-        self.artnet_manager = ArtNetManager(target_ip, start_universe, total_points, channels_per_universe)
+        self.artnet_manager = ArtNetManager(target_ip, start_universe, self.total_points, self.channels_per_universe)
         artnet_config = self.config.get('artnet', {})
         self.artnet_manager.start(artnet_config)
     
     def load_video(self, video_path):
         """Lädt ein neues Video."""
         if self.is_playing:
-            print("Stoppe aktuelles Video...")
+            logger.debug("Stoppe aktuelles Video...")
             self.stop()
             shutdown_delay = self.config.get('video', {}).get('shutdown_delay', 0.5)
             time.sleep(shutdown_delay)
         
         if not os.path.exists(video_path):
-            print(f"Fehler: Video nicht gefunden: {video_path}")
+            logger.debug(f"Fehler: Video nicht gefunden: {video_path}")
             return False
         
         self.video_path = video_path
-        print(f"Video geladen: {os.path.basename(video_path)}")
+        logger.debug(f"Video geladen: {os.path.basename(video_path)}")
         return True
     
     def load_points(self, points_json_path):
         """Lädt neue Points-Konfiguration (erfordert Neuinitialisierung)."""
         if not os.path.exists(points_json_path):
-            print(f"Fehler: Points-Datei nicht gefunden: {points_json_path}")
+            logger.debug(f"Fehler: Points-Datei nicht gefunden: {points_json_path}")
             return False
         
         # Stoppe Art-Net temporär
@@ -184,79 +124,35 @@ class VideoPlayer:
         
         # Lade neue Points und re-initialisiere
         try:
-            with open(points_json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            points_data = PointsLoader.load_points(points_json_path, validate_bounds=True)
             
-            # Update Canvas-Größe
-            canvas = data.get('canvas', {})
-            self.canvas_width = canvas.get('width', DEFAULT_CANVAS_WIDTH)
-            self.canvas_height = canvas.get('height', DEFAULT_CANVAS_HEIGHT)
-            
-            # Re-calculate points (gleiche Logik wie __init__)
-            objects = data.get('objects', [])
-            channels_per_universe = DMX_CHANNELS_PER_UNIVERSE
-            channels_per_point = DMX_CHANNELS_PER_POINT
-            max_channels_8_universes = DMX_MAX_CHANNELS_8_UNIVERSES
-            
-            point_list = []
-            self.universe_mapping = {}
-            current_channel = 0
-            universe_offset = 0
-            
-            for obj_idx, obj in enumerate(objects):
-                obj_id = obj.get('id', f'object-{obj_idx}')
-                points = obj.get('points', [])
-                
-                valid_points = []
-                for point in points:
-                    x, y = point.get('x'), point.get('y')
-                    if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
-                        valid_points.append((x, y))
-                
-                if not valid_points:
-                    continue
-                
-                obj_channels = len(valid_points) * channels_per_point
-                obj_start_channel = current_channel + universe_offset
-                obj_end_channel = obj_start_channel + obj_channels
-                
-                if obj_start_channel < max_channels_8_universes and obj_end_channel > max_channels_8_universes:
-                    universe_offset = max_channels_8_universes - current_channel
-                    obj_start_channel = current_channel + universe_offset
-                    obj_end_channel = obj_start_channel + obj_channels
-                
-                for point in valid_points:
-                    point_list.append(point)
-                    point_idx = len(point_list) - 1
-                    self.universe_mapping[point_idx] = universe_offset
-                
-                current_channel += obj_channels
-            
-            self.point_coords = np.array(point_list, dtype=np.int32) if point_list else np.array([])
-            total_points = len(point_list)
-            total_channels = total_points * channels_per_point + universe_offset
-            self.required_universes = (total_channels + channels_per_universe - 1) // channels_per_universe
-            self.channels_per_universe = channels_per_universe
-            self.total_points = total_points
-            self.total_channels = total_channels
+            # Update Point-Daten
+            self.point_coords = points_data['point_coords']
+            self.canvas_width = points_data['canvas_width']
+            self.canvas_height = points_data['canvas_height']
+            self.universe_mapping = points_data['universe_mapping']
+            self.total_points = points_data['total_points']
+            self.total_channels = points_data['total_channels']
+            self.required_universes = points_data['required_universes']
+            self.channels_per_universe = points_data['channels_per_universe']
             self.points_json_path = points_json_path
             
             # Re-initialisiere Art-Net mit neuen Points
             self.artnet_manager = ArtNetManager(
                 self.target_ip, 
                 self.start_universe, 
-                total_points, 
-                channels_per_universe
+                self.total_points, 
+                self.channels_per_universe
             )
             artnet_config = self.config.get('artnet', {})
             self.artnet_manager.start(artnet_config)
             
-            print(f"Points neu geladen: {os.path.basename(points_json_path)}")
-            print(f"  Punkte: {total_points}, Universen: {self.required_universes}")
+            logger.debug(f"Points neu geladen: {os.path.basename(points_json_path)}")
+            logger.debug(f"  Punkte: {self.total_points}, Universen: {self.required_universes}")
             return True
             
         except Exception as e:
-            print(f"Fehler beim Laden der Points: {e}")
+            logger.debug(f"Fehler beim Laden der Points: {e}")
             # Re-starte altes Art-Net
             if self.artnet_manager:
                 artnet_config = self.config.get('artnet', {})
@@ -308,133 +204,62 @@ class VideoPlayer:
         
         return frame[:, :, :3]  # Stelle sicher dass nur RGB zurückgegeben wird
     
-    def _get_cache_path(self):
-        """Generiert Cache-Dateinamen basierend auf Video-Inhalt und Points Hash."""
-        if not self.use_cache:
-            return None
-        
-        # Berechne Hash vom Video-Inhalt (erste 5MB + Dateigröße)
-        # Dies verhindert Duplikate bei gleichen Videos mit unterschiedlichen Namen
-        try:
-            video_hash = self._get_video_hash()
-            points_hash = hashlib.md5(open(self.points_json_path, 'rb').read()).hexdigest()[:8]
-            canvas_hash = hashlib.md5(f"{self.canvas_width}x{self.canvas_height}".encode()).hexdigest()[:8]
-            
-            # Cache-Dateiname: <video_hash>_<points_hash>_<canvas_hash>.msgpack
-            file_hash = f"{video_hash}_{points_hash}_{canvas_hash}"
-            return os.path.join(self.cache_dir, f"{file_hash}.msgpack")
-        except Exception as e:
-            print(f"  ⚠ Fehler beim Berechnen des Cache-Hash: {e}")
-            return None
-    
-    def _get_video_hash(self):
-        """Berechnet eindeutigen Hash für Video-Datei (schnelle Methode)."""
-        # Lese erste 5MB + Dateigröße für schnellen aber eindeutigen Hash
-        chunk_size = CACHE_CHUNK_SIZE
-        file_size = os.path.getsize(self.video_path)
-        
-        hash_md5 = hashlib.md5()
-        hash_md5.update(str(file_size).encode())  # Dateigröße einbeziehen
-        
-        with open(self.video_path, 'rb') as f:
-            # Lese ersten Chunk
-            chunk = f.read(chunk_size)
-            hash_md5.update(chunk)
-            
-            # Wenn Datei größer als chunk_size, lese auch letzten Chunk
-            if file_size > chunk_size:
-                f.seek(-min(chunk_size, file_size - chunk_size), 2)
-                chunk = f.read(chunk_size)
-                hash_md5.update(chunk)
-        
-        return hash_md5.hexdigest()[:CACHE_HASH_LENGTH]  # Erste Zeichen für Hash
-    
     def _load_cache(self):
         """Lädt gecachte RGB-Daten wenn verfügbar."""
-        if not self.use_cache or not MSGPACK_AVAILABLE:
-            return False
+        cache_path = self.cache_manager.get_cache_path(
+            self.video_path, 
+            self.points_json_path, 
+            self.canvas_width, 
+            self.canvas_height
+        )
         
-        cache_path = self._get_cache_path()
-        if not cache_path or not os.path.exists(cache_path):
-            return False
-        
-        try:
-            logger.info(f"Lade RGB-Cache: {os.path.basename(cache_path)}")
-            print(f"Lade RGB-Cache: {os.path.basename(cache_path)}")
-            with open(cache_path, 'rb') as f:
-                cache_data = msgpack.unpackb(f.read(), raw=False)
-            
-            # Validiere Cache-Format
-            if not isinstance(cache_data, dict) or 'frames' not in cache_data:
-                logger.warning("Ungültiges Cache-Format")
-                print("  ⚠ Ungültiges Cache-Format")
-                return False
-            
-            self.cached_rgb_data = cache_data['frames']
-            self.total_frames = len(self.cached_rgb_data)
-            self.video_fps = cache_data.get('video_fps', DEFAULT_FPS)  # FPS aus Cache laden
-            
-            # GIF-Metadaten aus Cache laden
-            self.is_gif = cache_data.get('is_gif', False)
-            self.gif_frame_delays = cache_data.get('gif_frame_delays', None)
-            
-            file_size_mb = os.path.getsize(cache_path) / (1024*1024)
-            
-            logger.info(f"Cache geladen: {self.total_frames} Frames, {file_size_mb:.2f} MB, {self.video_fps} FPS")
-            print(f"  ✓ Cache geladen: {self.total_frames} Frames, {file_size_mb:.2f} MB, {self.video_fps} FPS")
-            if self.is_gif:
-                print(f"  ℹ GIF mit {len(self.gif_frame_delays) if self.gif_frame_delays else 0} Frame-Delays")
-            self.cache_loaded = True
-            return True
-            
-        except Exception as e:
-            logger.error(f"Fehler beim Laden des Cache: {e}", exc_info=True)
-            print(f"  ⚠ Fehler beim Laden des Cache: {e}")
-            self.cached_rgb_data = None
-            self.cache_loaded = False
-            return False
-    
-    def _save_cache(self, rgb_frames):
-        """Speichert RGB-Daten als Cache."""
-        if not self.use_cache or not MSGPACK_AVAILABLE:
-            return False
-        
-        cache_path = self._get_cache_path()
         if not cache_path:
             return False
         
-        try:
-            # Erstelle cache-Ordner falls nicht vorhanden
-            os.makedirs(self.cache_dir, exist_ok=True)
-            
-            print(f"Speichere RGB-Cache: {os.path.basename(cache_path)}")
-            
-            # Packe Daten mit msgpack
-            cache_data = {
-                'video': os.path.basename(self.video_path),
-                'points': os.path.basename(self.points_json_path),
-                'canvas_size': [self.canvas_width, self.canvas_height],
-                'total_points': self.total_points,
-                'is_gif': self.is_gif,
-                'gif_frame_delays': self.gif_frame_delays,
-                'video_fps': self.video_fps if hasattr(self, 'video_fps') else DEFAULT_FPS,
-                'frames': rgb_frames
-            }
-            
-            packed_data = msgpack.packb(cache_data, use_bin_type=True)
-            
-            with open(cache_path, 'wb') as f:
-                f.write(packed_data)
-            
-            file_size_mb = len(packed_data) / (1024*1024)
-            logger.info(f"Cache gespeichert: {self.total_frames} Frames, {file_size_mb:.2f} MB")
-            print(f"  ✓ Cache gespeichert: {self.total_frames} Frames, {file_size_mb:.2f} MB")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Fehler beim Speichern des Cache: {e}", exc_info=True)
-            print(f"  ⚠ Fehler beim Speichern des Cache: {e}")
+        cache_data = self.cache_manager.load_cache(cache_path)
+        if not cache_data:
             return False
+        
+        # Extrahiere Daten
+        self.cached_rgb_data = cache_data['frames']
+        self.total_frames = len(self.cached_rgb_data)
+        self.video_fps = cache_data.get('video_fps', DEFAULT_FPS)
+        self.is_gif = cache_data.get('is_gif', False)
+        self.gif_frame_delays = cache_data.get('gif_frame_delays', None)
+        self.cache_loaded = True
+        
+        logger.debug(f"  ✓ Cache geladen: {self.total_frames} Frames, {self.video_fps} FPS")
+        if self.is_gif and self.gif_frame_delays:
+            logger.debug(f"  ℹ GIF mit {len(self.gif_frame_delays)} Frame-Delays")
+        
+        return True
+    
+    def _save_cache(self, rgb_frames):
+        """Speichert RGB-Daten als Cache."""
+        cache_path = self.cache_manager.get_cache_path(
+            self.video_path, 
+            self.points_json_path, 
+            self.canvas_width, 
+            self.canvas_height
+        )
+        
+        if not cache_path:
+            return False
+        
+        video_fps = self.video_fps if hasattr(self, 'video_fps') else DEFAULT_FPS
+        
+        success = self.cache_manager.save_cache(
+            cache_path,
+            rgb_frames,
+            video_fps,
+            self.is_gif,
+            self.gif_frame_delays
+        )
+        
+        if success:
+            logger.debug(f"  ✓ Cache gespeichert: {len(rgb_frames)} Frames")
+        
+        return success
     
     def _play_loop(self):
         """Haupt-Wiedergabeschleife (läuft in separatem Thread)."""
@@ -457,7 +282,7 @@ class VideoPlayer:
         cap = cv2.VideoCapture(self.video_path)
         
         if not cap.isOpened():
-            print(f"Fehler: Video konnte nicht geöffnet werden.")
+            logger.debug(f"Fehler: Video konnte nicht geöffnet werden.")
             self.is_running = False
             return
         
@@ -480,13 +305,13 @@ class VideoPlayer:
             
             hw_name = hw_types.get(int(hw_accel), f"Unbekannt ({int(hw_accel)})")
             
-            if hw_accel > 0:
-                print(f"  ✓ Hardware-Beschleunigung: {hw_name}")
+            if hw_name:
+                logger.debug(f"  ✓ Hardware-Beschleunigung: {hw_name}")
             else:
-                print(f"  ⚠ Hardware-Beschleunigung nicht verfügbar - Software-Decoding aktiv")
+                logger.debug(f"  ⚠ Hardware-Beschleunigung nicht verfügbar - Software-Decoding aktiv")
         except Exception as e:
-            print(f"  ⚠ Hardware-Beschleunigung konnte nicht aktiviert werden: {e}")
-            print(f"  → Verwende Software-Decoding")
+            logger.debug(f"  ⚠ Hardware-Beschleunigung konnte nicht aktiviert werden: {e}")
+            logger.debug(f"  → Verwende Software-Decoding")
         
         # Video-Informationen
         video_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -505,19 +330,19 @@ class VideoPlayer:
         needs_scaling = (original_width != self.canvas_width or original_height != self.canvas_height)
         canvas_size = (self.canvas_width, self.canvas_height)
         
-        print(f"Starte Wiedergabe:")
-        print(f"  Original Video-Auflösung: {original_width}x{original_height}")
-        print(f"  Video-FPS: {video_fps}")
-        print(f"  Wiedergabe-FPS: {fps_limit}")
+        logger.debug(f"Starte Wiedergabe:")
+        logger.debug(f"  Original Video-Auflösung: {original_width}x{original_height}")
+        logger.debug(f"  Video-FPS: {video_fps}")
+        logger.debug(f"  Wiedergabe-FPS: {fps_limit}")
         
         if self.is_gif:
-            print(f"  ℹ GIF-Modus aktiv")
+            logger.debug(f"  ℹ GIF-Modus aktiv")
             if self.gif_frame_delays and self.gif_respect_timing:
-                print(f"    └─ Frame-Timing: Variable Delays ({len(self.gif_frame_delays)} Frames)")
-            print(f"    └─ Transparenz-BG: RGB{self.gif_transparency_bg}")
+                logger.debug(f"    └─ Frame-Timing: Variable Delays ({len(self.gif_frame_delays)} Frames)")
+            logger.debug(f"    └─ Transparenz-BG: RGB{self.gif_transparency_bg}")
         
         if needs_scaling:
-            print(f"  ➜ Video wird auf Canvas-Größe {self.canvas_width}x{self.canvas_height} skaliert")
+            logger.debug(f"  ➜ Video wird auf Canvas-Größe {self.canvas_width}x{self.canvas_height} skaliert")
         
         self.current_loop = 0
         self.current_frame = 0
@@ -527,7 +352,7 @@ class VideoPlayer:
         # Wenn Cache aktiviert ist, sammle RGB-Daten für ersten Loop
         cache_rgb_frames = [] if self.use_cache and not self.cache_loaded else None
         if cache_rgb_frames is not None:
-            print(f"  ➜ Cache wird beim ersten Durchlauf erstellt...")
+            logger.debug(f"  ➜ Cache wird beim ersten Durchlauf erstellt...")
         
         try:
             while self.is_running:
@@ -557,10 +382,8 @@ class VideoPlayer:
                     
                     # Loop-Limit prüfen
                     if self.max_loops > 0 and self.current_loop >= self.max_loops:
-                        print(f"Loop-Limit ({self.max_loops}) erreicht, stoppe...")
+                        logger.debug(f"Loop-Limit ({self.max_loops}) erreicht, stoppe...")
                         break
-                    
-                    print(f"Loop {self.current_loop} beendet, starte neu...")
                     
                     # Wenn Cache-Sammlung aktiv und erstes Loop beendet, speichere Cache
                     if cache_rgb_frames is not None and self.current_loop == 1:
@@ -626,9 +449,13 @@ class VideoPlayer:
                         dmx_buffer[base_channel + 1] = rgb_values[point_idx * 3 + 1]
                         dmx_buffer[base_channel + 2] = rgb_values[point_idx * 3 + 2]
                 
-                # Sende Frame über Art-Net Manager
-                if self.artnet_manager:
+                # Sende Frame über Art-Net Manager (prüfe ob wir noch aktiver Player sind)
+                if self.artnet_manager and self.is_running and player_lock._active_player is self:
                     self.artnet_manager.send_frame(dmx_buffer)
+                
+                # Beende Loop wenn nicht mehr aktiver Player
+                if not self.is_running or player_lock._active_player is not self:
+                    break
                 
                 # Frame-Timing
                 frame_elapsed = time.time() - frame_start
@@ -636,33 +463,33 @@ class VideoPlayer:
                     time.sleep(frame_delay - frame_elapsed)
         
         except Exception as e:
-            print(f"Fehler während Wiedergabe: {e}")
+            logger.debug(f"Fehler während Wiedergabe: {e}")
         
         finally:
             cap.release()
             self.is_running = False
             self.is_playing = False
-            print("Wiedergabe gestoppt.")
+            logger.debug("Wiedergabe gestoppt.")
     
     def _play_from_cache(self):
         """Spielt Video aus gecachten RGB-Daten ab (viel schneller als Video-Decoding)."""
         if not self.cached_rgb_data:
-            print("Keine Cache-Daten verfügbar")
+            logger.debug("Keine Cache-Daten verfügbar")
             return
         
         # Nutze video_fps aus Cache wenn kein fps_limit gesetzt
         video_fps = self.video_fps if hasattr(self, 'video_fps') else DEFAULT_FPS
         fps_limit = self.fps_limit if self.fps_limit else video_fps
         
-        print(f"Starte Wiedergabe aus Cache:")
-        print(f"  Frames: {len(self.cached_rgb_data)}")
-        print(f"  Video-FPS: {video_fps}")
-        print(f"  Wiedergabe-FPS: {fps_limit}")
+        logger.debug(f"Starte Wiedergabe aus Cache:")
+        logger.debug(f"  Frames: {len(self.cached_rgb_data)}")
+        logger.debug(f"  Video-FPS: {video_fps}")
+        logger.debug(f"  Wiedergabe-FPS: {fps_limit}")
         
         if self.is_gif:
-            print(f"  ℹ GIF-Modus aktiv (aus Cache)")
+            logger.debug(f"  ℹ GIF-Modus aktiv (aus Cache)")
             if self.gif_frame_delays and self.gif_respect_timing:
-                print(f"    └─ Frame-Timing: Variable Delays")
+                logger.debug(f"    └─ Frame-Timing: Variable Delays")
         
         self.current_loop = 0
         self.current_frame = 0
@@ -695,10 +522,9 @@ class VideoPlayer:
                     
                     # Loop-Limit prüfen
                     if self.max_loops > 0 and self.current_loop >= self.max_loops:
-                        print(f"Loop-Limit ({self.max_loops}) erreicht, stoppe...")
+                        logger.debug(f"Loop-Limit ({self.max_loops}) erreicht, stoppe...")
                         break
                     
-                    print(f"Loop {self.current_loop} beendet, starte neu...")
                     self.current_frame = 0
                     continue
                 
@@ -731,9 +557,13 @@ class VideoPlayer:
                         dmx_buffer[base_channel + 1] = rgb_values[point_idx * 3 + 1]
                         dmx_buffer[base_channel + 2] = rgb_values[point_idx * 3 + 2]
                 
-                # Sende über Art-Net
-                if self.artnet_manager:
+                # Sende über Art-Net (prüfe ob wir noch aktiver Player sind)
+                if self.artnet_manager and self.is_running and player_lock._active_player is self:
                     self.artnet_manager.send_frame(dmx_buffer)
+                
+                # Beende Loop wenn nicht mehr aktiver Player
+                if not self.is_running or player_lock._active_player is not self:
+                    break
                 
                 # Frame-Timing
                 frame_elapsed = time.time() - frame_start
@@ -741,59 +571,114 @@ class VideoPlayer:
                     time.sleep(frame_delay - frame_elapsed)
         
         except Exception as e:
-            print(f"Fehler während Cache-Wiedergabe: {e}")
+            logger.debug(f"Fehler während Cache-Wiedergabe: {e}")
         
         finally:
             self.is_running = False
             self.is_playing = False
-            print("Wiedergabe gestoppt.")
+            logger.debug("Wiedergabe gestoppt.")
     
     def start(self):
         """Startet die Video-Wiedergabe in Endlosschleife."""
+        # Prüfung ob wir schon laufen
         if self.is_playing:
-            print("Video läuft bereits!")
+            logger.debug(f"Video läuft bereits!")
             return
         
+        # KRITISCH: Registriere als aktiver Player
+        # Prüfe ob ALTER Player existiert (mit Lock) - NICHT wir selbst!
+        old_player = None
+        with player_lock._global_player_lock:
+            if player_lock._active_player and player_lock._active_player is not self:
+                old_player = player_lock._active_player
+                player_lock._active_player = None  # Deregistriere sofort
+        
+        # Stoppe alten Player OHNE Lock (könnte lange dauern)
+        if old_player:
+            player_type = type(old_player).__name__
+            logger.info(f"Stoppe alten Player vor Start des Videos: {player_type}")
+            old_player.stop()
+            time.sleep(0.5)  # Längere Wartezeit
+            del old_player  # Explizit löschen
+            logger.info(f"Alter Player gestoppt und gelöscht")
+        
+        # Registriere neuen Player (mit Lock)
+        with player_lock._global_player_lock:
+            player_lock._active_player = self
+            logger.info(f"Neuer aktiver Player: VideoPlayer")
+        
+        # Stoppe eventuelles Testmuster und aktiviere ArtNet
+        if self.artnet_manager:
+            self.artnet_manager.test_mode = False
+            self.artnet_manager._stop_test_thread()
+            self.artnet_manager.is_active = True  # WICHTIG: Reaktiviere ArtNet
+        
         self.is_playing = True
+        self.is_running = True  # WICHTIG: Auch is_running setzen!
         self.thread = threading.Thread(target=self._play_loop, daemon=True)
         self.thread.start()
-        print("Video gestartet (Endlosschleife)")
+        logger.info("Video-Thread gestartet")
     
     def stop(self):
         """Stoppt die Video-Wiedergabe."""
+        global _active_player
+        
         if not self.is_playing:
-            print("Video läuft nicht!")
+            logger.debug("Video läuft nicht!")
             return
         
-        print("Stoppe Video...")
+        logger.debug("Stoppe Video...")
+        
+        # WICHTIG: Reihenfolge ist kritisch!
+        # 1. Setze Flags SOFORT - stoppt Loop bei nächster Iteration
         self.is_running = False
         self.is_playing = False
         self.is_paused = False
         
+        # 2. Deaktiviere ArtNet temporär - verhindert weitere send_frame() Aufrufe
+        if self.artnet_manager:
+            self.artnet_manager.is_active = False
+        
+        # 3. Warte auf Thread-Ende
         if self.thread:
-            self.thread.join(timeout=2.0)
+            self.thread.join(timeout=3.0)
+            if self.thread.is_alive():
+                logger.warning("Video-Thread konnte nicht gestoppt werden!")
+        
+        # 4. Thread cleanup (ArtNet-Manager NICHT löschen - könnte wiederverwendet werden)
+        self.thread = None
+        
+        # 5. Entferne aus globaler Registrierung
+        with player_lock._global_player_lock:
+            if player_lock._active_player is self:
+                player_lock._active_player = None
     
     def pause(self):
         """Pausiert die Wiedergabe."""
         if not self.is_playing:
-            print("Video läuft nicht!")
+            logger.debug("Video läuft nicht!")
             return
         if self.is_paused:
-            print("Video ist bereits pausiert!")
+            logger.debug("Video ist bereits pausiert!")
             return
         self.is_paused = True
-        print("Video pausiert")
+        logger.debug("Video pausiert")
     
     def resume(self):
         """Setzt die Wiedergabe fort."""
         if not self.is_playing:
-            print("Video läuft nicht!")
+            logger.debug("Video läuft nicht!")
             return
         if not self.is_paused:
-            print("Video ist nicht pausiert!")
+            logger.debug("Video ist nicht pausiert!")
             return
+        
+        # Deaktiviere Testmuster KOMPLETT (stoppt auch Test-Thread)
+        if self.artnet_manager:
+            self.artnet_manager.resume_video_mode()
+        
         self.is_paused = False
-        print("Wiedergabe fortgesetzt")
+        logger.debug("Wiedergabe fortgesetzt")
     
     def restart(self):
         """Startet Video von vorne."""
@@ -805,72 +690,76 @@ class VideoPlayer:
             self.start()
             if was_paused:
                 self.pause()
-        print("Video neu gestartet")
+        logger.debug("Video neu gestartet")
     
     def set_fps(self, fps):
         """Ändert FPS-Limit während der Wiedergabe."""
         try:
             fps_val = float(fps)
             if fps_val <= 0:
-                print("FPS muss größer als 0 sein!")
+                logger.debug("FPS muss größer als 0 sein!")
                 return
             self.fps_limit = fps_val
-            print(f"FPS-Limit gesetzt: {fps_val}")
+            logger.debug(f"FPS-Limit gesetzt: {fps_val}")
         except ValueError:
-            print("Ungültiger FPS-Wert!")
+            logger.debug("Ungültiger FPS-Wert!")
     
     def set_speed(self, factor):
         """Ändert Wiedergabe-Geschwindigkeit."""
         try:
             speed = float(factor)
             if speed <= 0:
-                print("Speed-Faktor muss größer als 0 sein!")
+                logger.debug("Speed-Faktor muss größer als 0 sein!")
                 return
             self.speed_factor = speed
-            print(f"Geschwindigkeit gesetzt: {speed}x")
+            logger.debug(f"Geschwindigkeit gesetzt: {speed}x")
         except ValueError:
-            print("Ungültiger Speed-Wert!")
+            logger.debug("Ungültiger Speed-Wert!")
     
     def set_brightness(self, value):
         """Setzt globale Helligkeit (0-100)."""
         try:
             brightness = float(value)
             if brightness < 0 or brightness > 100:
-                print("Helligkeit muss zwischen 0 und 100 sein!")
+                logger.debug("Helligkeit muss zwischen 0 und 100 sein!")
                 return
             self.brightness = brightness / 100.0
-            print(f"Helligkeit gesetzt: {brightness}%")
+            logger.debug(f"Helligkeit gesetzt: {brightness}%")
         except ValueError:
-            print("Ungültiger Helligkeits-Wert!")
+            logger.debug("Ungültiger Helligkeits-Wert!")
     
     def set_loop_limit(self, loops):
         """Setzt Loop-Limit (0 = unendlich)."""
         try:
             loop_val = int(loops)
             if loop_val < 0:
-                print("Loop-Anzahl muss >= 0 sein!")
+                logger.debug("Loop-Anzahl muss >= 0 sein!")
                 return
             self.max_loops = loop_val
             if loop_val == 0:
-                print("Loop-Limit: Unendlich")
+                logger.debug("Loop-Limit: Unendlich")
             else:
-                print(f"Loop-Limit gesetzt: {loop_val}")
+                logger.debug(f"Loop-Limit gesetzt: {loop_val}")
         except ValueError:
-            print("Ungültiger Loop-Wert!")
+            logger.debug("Ungültiger Loop-Wert!")
     
     def blackout(self):
         """Setzt alle DMX-Kanäle auf 0."""
+        # Stoppe Video komplett, damit Blackout nicht überschrieben wird
+        if self.is_playing:
+            self.stop()
+        
         if self.artnet_manager:
             self.artnet_manager.blackout()
         else:
-            print("Art-Net nicht aktiv!")
+            logger.debug("Art-Net nicht aktiv!")
     
     def reload_artnet(self):
         """Lädt Art-Net mit neuer IP neu."""
         try:
             # Prüfe ob erforderliche Attribute existieren
             if not hasattr(self, 'total_points') or not hasattr(self, 'channels_per_universe'):
-                print("⚠️ Art-Net kann nicht neu geladen werden - Player nicht vollständig initialisiert")
+                logger.debug("⚠️ Art-Net kann nicht neu geladen werden - Player nicht vollständig initialisiert")
                 return False
             
             # Stoppe altes Art-Net
@@ -889,31 +778,35 @@ class VideoPlayer:
             artnet_config = self.config.get('artnet', {})
             self.artnet_manager.start(artnet_config)
             
-            print(f"✅ Art-Net neu geladen mit IP: {self.target_ip}")
+            logger.debug(f"✅ Art-Net neu geladen mit IP: {self.target_ip}")
             return True
         except Exception as e:
-            print(f"❌ Fehler beim Neuladen von Art-Net: {e}")
+            logger.debug(f"❌ Fehler beim Neuladen von Art-Net: {e}")
             import traceback
             traceback.print_exc()
             return False
     
     def test_pattern(self, color='red'):
         """Sendet Testmuster (stoppt Video-Wiedergabe)."""
+        # Stoppe Video komplett, damit Testmuster nicht überschrieben wird
+        if self.is_playing:
+            self.stop()
+        
         if self.artnet_manager:
             self.artnet_manager.test_pattern(color)
         else:
-            print("Art-Net nicht aktiv!")
+            logger.debug("Art-Net nicht aktiv!")
     
     def start_recording(self):
         """Startet RGB-Daten-Aufzeichnung."""
         self.recorded_data = []
         self.is_recording = True
-        print("Aufzeichnung gestartet")
+        logger.debug("Aufzeichnung gestartet")
     
     def stop_recording(self, filename=None):
         """Stoppt Aufzeichnung und speichert Daten."""
         if not self.is_recording:
-            print("Keine Aufzeichnung aktiv!")
+            logger.debug("Keine Aufzeichnung aktiv!")
             return
         
         self.is_recording = False
@@ -924,9 +817,9 @@ class VideoPlayer:
         try:
             with open(filename, 'w') as f:
                 json.dump(self.recorded_data, f)
-            print(f"Aufzeichnung gespeichert: {filename} ({len(self.recorded_data)} Frames)")
+            logger.debug(f"Aufzeichnung gespeichert: {filename} ({len(self.recorded_data)} Frames)")
         except Exception as e:
-            print(f"Fehler beim Speichern: {e}")
+            logger.debug(f"Fehler beim Speichern: {e}")
     
     def get_info(self):
         """Gibt detaillierte Informationen zurück."""

@@ -260,7 +260,7 @@ def register_script_routes(app, player, config):
         """Listet alle verfügbaren Scripts."""
         from .script_generator import ScriptGenerator
         
-        scripts_dir = config.get('paths', {}).get('scripts_dir', 'scripts')
+        scripts_dir = config['paths']['scripts_dir']
         script_gen = ScriptGenerator(scripts_dir)
         scripts = script_gen.list_scripts()
         
@@ -328,4 +328,111 @@ def register_script_routes(app, player, config):
                 "status": "error",
                 "message": str(e),
                 "traceback": traceback.format_exc()
+            }), 500
+
+
+def register_console_command_routes(app, player, dmx_controller, rest_api, video_dir, data_dir, config):
+    """Registriert Console Command Endpunkte."""
+    
+    @app.route('/api/console', methods=['POST'])
+    def execute_console_command():
+        """Führt CLI-Befehl über Console aus."""
+        import io
+        import sys
+        
+        old_stdout = None
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({
+                    "status": "error",
+                    "message": "Keine Daten empfangen"
+                }), 400
+                
+            command_line = data.get('command', '').strip()
+            
+            if not command_line:
+                return jsonify({
+                    "status": "error",
+                    "message": "Kein Befehl angegeben"
+                }), 400
+            
+            # Parse command und args wie in CLI
+            parts = command_line.split(maxsplit=1)
+            command = parts[0].lower()
+            args = parts[1] if len(parts) > 1 else None
+            
+            # Spezielle Behandlung für help
+            if command == "help":
+                from .utils import print_help
+                
+                # Capture print output
+                old_stdout = sys.stdout
+                sys.stdout = io.StringIO()
+                try:
+                    print_help()
+                    output = sys.stdout.getvalue()
+                finally:
+                    sys.stdout = old_stdout
+                    old_stdout = None
+                
+                return jsonify({
+                    "status": "success",
+                    "output": output
+                })
+            
+            # Führe Befehl über CLI Handler aus - in separatem Thread!
+            # Dies verhindert dass print() Statements die Flask Response stören
+            import threading
+            from .cli_handler import CLIHandler
+            
+            result_container = {'continue_loop': True, 'new_player': None, 'done': False}
+            
+            def execute_cli_command():
+                try:
+                    cli_handler = CLIHandler(player, dmx_controller, rest_api, video_dir, data_dir, config)
+                    continue_loop, new_player = cli_handler.execute_command(command, args)
+                    result_container['continue_loop'] = continue_loop
+                    result_container['new_player'] = new_player
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                finally:
+                    result_container['done'] = True
+            
+            # Starte in separatem Thread
+            cmd_thread = threading.Thread(target=execute_cli_command, daemon=True)
+            cmd_thread.start()
+            cmd_thread.join(timeout=10.0)  # Warte max 10 Sekunden
+            
+            # Update player reference wenn ersetzt (über dmx_controller)
+            if result_container['new_player']:
+                dmx_controller.player = result_container['new_player']
+            
+            return jsonify({
+                "status": "success",
+                "output": f"Befehl '{command}' ausgeführt",
+                "exit": not result_container['continue_loop']
+            })
+                
+        except Exception as e:
+            # Restore stdout wenn noch nicht gemacht
+            if old_stdout:
+                sys.stdout = old_stdout
+            
+            import traceback
+            error_trace = traceback.format_exc()
+            
+            # Log Fehler
+            try:
+                from .logger import get_logger
+                logger = get_logger(__name__)
+                logger.error(f"Console command error: {e}\n{error_trace}")
+            except:
+                pass
+            
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+                "traceback": error_trace
             }), 500

@@ -8,15 +8,17 @@ import numpy as np
 from .logger import get_logger
 from .script_generator import ScriptGenerator
 from .artnet_manager import ArtNetManager
+from .points_loader import PointsLoader
 from .constants import (
-    DMX_CHANNELS_PER_UNIVERSE,
-    DMX_CHANNELS_PER_POINT,
     DEFAULT_SPEED,
     UNLIMITED_LOOPS,
     DEFAULT_FPS
 )
 
 logger = get_logger(__name__)
+
+# GLOBALE LOCK: Shared mit VideoPlayer - importiere Modul für echte Shared State
+from . import player_lock
 
 
 class ScriptPlayer:
@@ -37,7 +39,7 @@ class ScriptPlayer:
         self.artnet_manager = None
         
         # Script Generator
-        self.script_gen = ScriptGenerator(self.config.get('paths', {}).get('scripts_dir', 'scripts'))
+        self.script_gen = ScriptGenerator(self.config['paths']['scripts_dir'])
         
         # Erweiterte Steuerung
         self.brightness = 1.0
@@ -49,112 +51,128 @@ class ScriptPlayer:
         self.start_time = 0
         self.frames_processed = 0
         
-        # Lade Points-Konfiguration
-        import json
-        with open(points_json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        # Lade Points-Konfiguration mit PointsLoader (ohne Bounds-Validierung für Scripts)
+        points_data = PointsLoader.load_points(points_json_path, validate_bounds=False)
         
-        canvas = data.get('canvas', {})
-        self.canvas_width = canvas.get('width', 1920)
-        self.canvas_height = canvas.get('height', 1080)
+        self.point_coords = points_data['point_coords']
+        self.canvas_width = points_data['canvas_width']
+        self.canvas_height = points_data['canvas_height']
+        self.universe_mapping = points_data['universe_mapping']
+        self.total_points = points_data['total_points']
+        self.total_channels = points_data['total_channels']
+        self.required_universes = points_data['required_universes']
+        self.channels_per_universe = points_data['channels_per_universe']
         
-        objects = data.get('objects', [])
-        
-        # Sammle Punkte (gleiche Logik wie VideoPlayer)
-        point_list = []
-        self.universe_mapping = {}
-        current_channel = 0
-        universe_offset = 0
-        channels_per_universe = DMX_CHANNELS_PER_UNIVERSE
-        channels_per_point = DMX_CHANNELS_PER_POINT
-        max_channels_8_universes = channels_per_universe * 8
-        
-        for obj_idx, obj in enumerate(objects):
-            obj_id = obj.get('id', f'object-{obj_idx}')
-            points = obj.get('points', [])
-            obj_channels = len(points) * channels_per_point
-            
-            if current_channel + obj_channels > max_channels_8_universes:
-                universe_offset += channels_per_universe
-                current_channel = 0
-            
-            for point in points:
-                x, y = point['x'], point['y']
-                point_list.append([x, y])
-                
-                point_idx = len(point_list) - 1
-                self.universe_mapping[point_idx] = universe_offset
-            
-            current_channel += obj_channels
-        
-        self.point_coords = np.array(point_list, dtype=np.int32) if point_list else np.array([])
-        total_points = len(point_list)
-        total_channels = total_points * channels_per_point + universe_offset
-        self.required_universes = (total_channels + channels_per_universe - 1) // channels_per_universe
-        self.channels_per_universe = channels_per_universe
-        self.total_points = total_points
-        self.total_channels = total_channels
-        
-        print(f"Script Player initialisiert:")
-        print(f"  Script: {script_name}")
-        print(f"  Canvas-Größe: {self.canvas_width}x{self.canvas_height}")
-        print(f"  Anzahl Punkte: {total_points}")
-        print(f"  Benötigte Kanäle: {total_channels}")
-        print(f"  Benötigte Universen: {self.required_universes}")
-        print(f"  Art-Net Ziel-IP: {target_ip}")
+        logger.debug(f"Script Player initialisiert:")
+        logger.debug(f"  Script: {script_name}")
+        logger.debug(f"  Canvas-Größe: {self.canvas_width}x{self.canvas_height}")
+        logger.debug(f"  Anzahl Punkte: {self.total_points}")
+        logger.debug(f"  Benötigte Kanäle: {self.total_channels}")
+        logger.debug(f"  Benötigte Universen: {self.required_universes}")
+        logger.debug(f"  Art-Net Ziel-IP: {target_ip}")
         
         # Lade Script
         if not self.script_gen.load_script(script_name):
             raise ValueError(f"Script konnte nicht geladen werden: {script_name}")
         
         # Art-Net Manager
-        self.artnet_manager = ArtNetManager(target_ip, start_universe, total_points, channels_per_universe)
+        self.artnet_manager = ArtNetManager(target_ip, start_universe, self.total_points, self.channels_per_universe)
         artnet_config = self.config.get('artnet', {})
         self.artnet_manager.start(artnet_config)
     
     def start(self):
         """Startet die Script-Wiedergabe."""
         if self.is_playing:
-            print("Script läuft bereits!")
+            logger.debug("Script läuft bereits!")
             return
         
+        # KRITISCH: Registriere als aktiver Player
+        # Prüfe ob alter Player existiert (mit Lock)
+        old_player = None
+        with player_lock._global_player_lock:
+            if player_lock._active_player and player_lock._active_player is not self:
+                old_player = player_lock._active_player
+                player_lock._active_player = None  # Deregistriere sofort
+        
+        # Stoppe alten Player OHNE Lock (könnte lange dauern)
+        if old_player:
+            player_type = type(old_player).__name__
+            player_name = getattr(old_player, 'script_name', getattr(old_player, 'video_path', 'Unknown'))
+            logger.info(f"Stoppe alten Player: {player_type} - {player_name}")
+            old_player.stop()
+            time.sleep(0.5)  # Längere Wartezeit
+            del old_player  # Explizit löschen
+            logger.info(f"Alter Player gestoppt und gelöscht")
+        
+        # Registriere neuen Player (mit Lock)
+        with player_lock._global_player_lock:
+            player_lock._active_player = self
+            logger.info(f"Neuer aktiver Player: {self.script_name}")
+        
+        # Deaktiviere Testmuster, damit Script sendet
+        if self.artnet_manager:
+            self.artnet_manager.resume_video_mode()
+        
         self.is_playing = True
+        self.is_running = True  # WICHTIG: Auch is_running setzen!
         self.script_gen.reset()
         self.thread = threading.Thread(target=self._play_loop, daemon=True)
         self.thread.start()
-        print("Script gestartet (Endlosschleife)")
+        logger.info(f"Script-Thread gestartet: {self.script_name}")
     
     def stop(self):
         """Stoppt die Wiedergabe."""
         if not self.is_playing:
-            print("Script läuft nicht!")
+            logger.debug("Script läuft nicht!")
             return
         
-        print("Stoppe Script...")
+        logger.debug("Stoppe Script...")
+        
+        # WICHTIG: Reihenfolge ist kritisch!
+        # 1. Setze Flags SOFORT - stoppt Loop bei nächster Iteration
         self.is_running = False
         self.is_playing = False
         self.is_paused = False
         
+        # 2. Deaktiviere ArtNet SOFORT - verhindert weitere send_frame() Aufrufe
+        if self.artnet_manager:
+            self.artnet_manager.is_active = False
+        
+        # 3. Warte auf Thread-Ende
         if self.thread:
-            self.thread.join(timeout=2.0)
+            self.thread.join(timeout=3.0)
+            if self.thread.is_alive():
+                logger.warning("Script-Thread konnte nicht gestoppt werden!")
+        
+        # 4. Cleanup: Stoppe und entferne ArtNet-Manager komplett
+        if self.artnet_manager:
+            self.artnet_manager.stop()
+            self.artnet_manager = None
+        
+        self.thread = None
+        
+        # 5. Entferne aus globaler Registrierung
+        with player_lock._global_player_lock:
+            if player_lock._active_player is self:
+                player_lock._active_player = None
     
     def pause(self):
         """Pausiert die Wiedergabe."""
         if not self.is_playing or self.is_paused:
-            print("Script läuft nicht oder ist bereits pausiert!")
+            logger.debug("Script läuft nicht oder ist bereits pausiert!")
             return
         
         self.is_paused = True
-        print("Script pausiert")
+        logger.debug("Script pausiert")
     
     def resume(self):
         """Setzt Wiedergabe fort."""
         if not self.is_playing or not self.is_paused:
-            print("Script läuft nicht oder ist nicht pausiert!")
+            logger.debug("Script läuft nicht oder ist nicht pausiert!")
             return
         
         self.is_paused = False
-        print("Script fortgesetzt")
+        logger.debug("Script fortgesetzt")
         
         if self.artnet_manager:
             self.artnet_manager.resume_video_mode()
@@ -168,7 +186,7 @@ class ScriptPlayer:
             self.start()
             if was_paused:
                 self.pause()
-        print("Script neu gestartet")
+        logger.debug("Script neu gestartet")
     
     def _play_loop(self):
         """Haupt-Loop für Script-Generierung."""
@@ -202,7 +220,7 @@ class ScriptPlayer:
             )
             
             if frame is None:
-                print("Fehler beim Generieren des Frames")
+                logger.debug("Fehler beim Generieren des Frames")
                 time.sleep(frame_time)
                 continue
             
@@ -231,9 +249,13 @@ class ScriptPlayer:
             dmx_buffer[valid_mask] = rgb_values
             dmx_buffer = dmx_buffer.flatten().tolist()
             
-            # Sende über Art-Net
-            if self.artnet_manager:
+            # Sende über Art-Net (prüfe ob Manager noch existiert UND wir der aktive Player sind)
+            if self.artnet_manager and self.is_running and player_lock._active_player is self:
                 self.artnet_manager.send_frame(dmx_buffer)
+            
+            # Beende Loop wenn gestoppt ODER nicht mehr aktiver Player
+            if not self.is_running or player_lock._active_player is not self:
+                break
             
             self.current_frame += 1
             self.frames_processed += 1
@@ -248,7 +270,7 @@ class ScriptPlayer:
             elif sleep_time < -0.1:  # Zu langsam, Reset
                 next_frame_time = current_time_now + frame_time
         
-        print("Script-Wiedergabe beendet")
+        logger.debug("Script-Wiedergabe beendet")
     
     def status(self):
         """Gibt Status-String zurück."""
@@ -286,11 +308,19 @@ class ScriptPlayer:
     # Delegiere andere Methoden
     def blackout(self):
         """Blackout."""
+        # Pausiere Script, damit Blackout nicht überschrieben wird
+        if self.is_playing and not self.is_paused:
+            self.pause()
+        
         if self.artnet_manager:
             self.artnet_manager.blackout()
     
     def test_pattern(self, color='red'):
         """Testmuster."""
+        # Pausiere Script, damit Testmuster nicht überschrieben wird
+        if self.is_playing and not self.is_paused:
+            self.pause()
+        
         if self.artnet_manager:
             self.artnet_manager.test_pattern(color)
     
@@ -299,30 +329,30 @@ class ScriptPlayer:
         try:
             val = float(value)
             if val < 0 or val > 100:
-                print("Helligkeit muss zwischen 0 und 100 liegen!")
+                logger.debug("Helligkeit muss zwischen 0 und 100 liegen!")
                 return
             self.brightness = val / 100.0
-            print(f"Helligkeit auf {val}% gesetzt")
+            logger.debug(f"Helligkeit auf {val}% gesetzt")
         except ValueError:
-            print("Ungültiger Helligkeits-Wert!")
+            logger.debug("Ungültiger Helligkeits-Wert!")
     
     def set_speed(self, value):
         """Setzt Geschwindigkeit."""
         try:
             val = float(value)
             if val <= 0:
-                print("Geschwindigkeit muss größer als 0 sein!")
+                logger.debug("Geschwindigkeit muss größer als 0 sein!")
                 return
             self.speed_factor = val
-            print(f"Geschwindigkeit auf {val}x gesetzt")
+            logger.debug(f"Geschwindigkeit auf {val}x gesetzt")
         except ValueError:
-            print("Ungültiger Geschwindigkeits-Wert!")
+            logger.debug("Ungültiger Geschwindigkeits-Wert!")
     
     def reload_artnet(self):
         """Lädt Art-Net neu."""
         try:
             if not hasattr(self, 'total_points') or not hasattr(self, 'channels_per_universe'):
-                print("⚠️ Art-Net kann nicht neu geladen werden - Player nicht vollständig initialisiert")
+                logger.debug("⚠️ Art-Net kann nicht neu geladen werden - Player nicht vollständig initialisiert")
                 return False
             
             if self.artnet_manager:
@@ -338,10 +368,10 @@ class ScriptPlayer:
             artnet_config = self.config.get('artnet', {})
             self.artnet_manager.start(artnet_config)
             
-            print(f"✅ Art-Net neu geladen mit IP: {self.target_ip}")
+            logger.debug(f"✅ Art-Net neu geladen mit IP: {self.target_ip}")
             return True
         except Exception as e:
-            print(f"❌ Fehler beim Neuladen von Art-Net: {e}")
+            logger.debug(f"❌ Fehler beim Neuladen von Art-Net: {e}")
             import traceback
             traceback.print_exc()
             return False

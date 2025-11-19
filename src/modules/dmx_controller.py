@@ -14,12 +14,14 @@ logger = get_logger(__name__)
 class DMXController:
     """Empfängt DMX-Befehle über Art-Net zur Steuerung der Anwendung."""
     
-    def __init__(self, player, listen_ip='0.0.0.0', listen_port=6454, control_universe=100, video_base_dir=None):
+    def __init__(self, player, listen_ip='0.0.0.0', listen_port=6454, control_universe=100, video_base_dir=None, scripts_dir=None, config=None):
         self.player = player
         self.listen_ip = listen_ip
         self.listen_port = listen_port
         self.control_universe = control_universe
         self.video_base_dir = video_base_dir
+        self.scripts_dir = scripts_dir
+        self.config = config or {}
         
         self.is_running = False
         self.thread = None
@@ -32,6 +34,11 @@ class DMXController:
         self.video_cache = {}
         if video_base_dir:
             self._build_video_cache()
+        
+        # Script-Slot Cache (Slot -> Script-Name Mapping)
+        self.script_cache = {}
+        if scripts_dir:
+            self._build_script_cache()
         
     def start(self):
         """Startet DMX-Listener."""
@@ -50,8 +57,11 @@ class DMXController:
         print("  Ch 5: Blackout (0-127=Normal, 128-255=Blackout)")
         print("  Ch 6-9: Video-Slot (4 Kanäle für bis zu 1020 Videos)")
         print("         Ch6=Kanal (1-4), Ch7-9=Slot (0-255 pro Kanal)")
+        print("  Ch 10: Script-Slot (0-255 für bis zu 255 Scripts)")
         if self.video_cache:
             print(f"  Video-Cache: {len(self.video_cache)} Videos geladen")
+        if self.script_cache:
+            print(f"  Script-Cache: {len(self.script_cache)} Scripts geladen")
     
     def stop(self):
         """Stoppt DMX-Listener."""
@@ -108,11 +118,11 @@ class DMXController:
         length = struct.unpack('>H', data[16:18])[0]
         dmx_data = list(data[18:18+length])
         
-        if len(dmx_data) < 9:
+        if len(dmx_data) < 10:
             return
         
         # Ausgabe wenn sich relevante Werte ändern
-        print(f"[DMX] Empfangen - Ch1:{dmx_data[0]} Ch2:{dmx_data[1]} Ch3:{dmx_data[2]} Ch4:{dmx_data[3]} Ch5:{dmx_data[4]} Ch6:{dmx_data[5]} Ch7:{dmx_data[6]} Ch8:{dmx_data[7]} Ch9:{dmx_data[8]}")
+        print(f"[DMX] Empfangen - Ch1:{dmx_data[0]} Ch2:{dmx_data[1]} Ch3:{dmx_data[2]} Ch4:{dmx_data[3]} Ch5:{dmx_data[4]} Ch6:{dmx_data[5]} Ch7:{dmx_data[6]} Ch8:{dmx_data[7]} Ch9:{dmx_data[8]} Ch10:{dmx_data[9]}")
         
         self._process_dmx_values(dmx_data)
     
@@ -195,6 +205,50 @@ class DMXController:
             elif video_slot > 0:
                 print(f"[DMX] Video-Slot {video_slot} nicht gefunden (Kanal {kanal})")
         
+        # Kanal 10: Script-Slot Auswahl (0-255 für bis zu 255 Scripts)
+        if dmx[9] != self.last_values[9]:
+            script_slot = dmx[9]
+            
+            # Suche Script in Cache
+            if self.script_cache and script_slot in self.script_cache:
+                script_name = self.script_cache[script_slot]
+                print(f"[DMX] Script-Slot → Slot {script_slot}, Script: {script_name}")
+                
+                # Lade Script mit ScriptPlayer
+                was_playing = self.player.is_playing
+                
+                # Speichere alte Player-Daten
+                old_player = self.player
+                points_json = old_player.points_json_path
+                target_ip = old_player.target_ip
+                start_universe = old_player.start_universe
+                fps_limit = old_player.fps_limit
+                
+                # Stoppe alten Player komplett
+                if was_playing:
+                    old_player.stop()
+                
+                # Warte und lösche Referenz
+                import time
+                time.sleep(0.5)
+                del old_player
+                
+                # Erstelle ScriptPlayer
+                try:
+                    from .script_player import ScriptPlayer
+                    new_player = ScriptPlayer(script_name, points_json, target_ip, start_universe, fps_limit, self.config)
+                    
+                    # Ersetze Player
+                    self.player = new_player
+                    print(f"[DMX] Script geladen: {script_name}")
+                    
+                    if was_playing:
+                        self.player.start()
+                except Exception as e:
+                    print(f"[DMX] Fehler beim Laden des Scripts: {e}")
+            elif script_slot > 0:
+                print(f"[DMX] Script-Slot {script_slot} nicht gefunden")
+        
         # Speichere aktuelle Werte
         self.last_values = dmx.copy()
     
@@ -236,3 +290,30 @@ class DMXController:
             slot_index += 255  # Nächster Kanal startet bei +255
         
         print(f"Video-Cache: {len(self.video_cache)} Videos in {len([d for d in os.listdir(self.video_base_dir) if d.startswith('kanal_')])} Kanälen")
+    
+    def _build_script_cache(self):
+        """Erstellt Script-Cache aus scripts/ Ordner."""
+        if not self.scripts_dir or not os.path.exists(self.scripts_dir):
+            # Erstelle scripts Ordner wenn nicht vorhanden
+            if self.scripts_dir:
+                os.makedirs(self.scripts_dir, exist_ok=True)
+                print(f"Scripts-Ordner erstellt: {self.scripts_dir} (Max 255 Scripts)")
+            return
+        
+        # Scanne Python-Scripts
+        scripts = sorted([f for f in os.listdir(self.scripts_dir) 
+                         if os.path.isfile(os.path.join(self.scripts_dir, f)) 
+                         and f.endswith('.py') and not f.startswith('_')])
+        
+        if len(scripts) > 255:
+            print(f"⚠️  WARNUNG: Scripts-Ordner hat {len(scripts)} Scripts (Max 255)! Nur erste 255 werden verwendet.")
+            scripts = scripts[:255]
+        
+        # Füge Scripts zum Cache hinzu
+        for i, script in enumerate(scripts):
+            # Verwende Script-Namen ohne .py Endung
+            script_name = script[:-3] if script.endswith('.py') else script
+            self.script_cache[i] = script_name
+        
+        if scripts:
+            print(f"Script-Cache: {len(scripts)} Scripts geladen (Slots 0-{len(scripts) - 1})")

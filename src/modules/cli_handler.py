@@ -19,6 +19,12 @@ class CLIHandler:
         self.data_dir = data_dir
         self.config = config
         self.base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        
+        # Tracking für next/back Navigation
+        self.current_video_path = None
+        self.current_script_name = None
+        self.video_list_cache = None
+        self.script_list_cache = None
     
     def execute_command(self, command, args=None):
         """
@@ -47,15 +53,18 @@ class CLIHandler:
         elif command == "resume":
             self.player.resume()
         
+        elif command == "next":
+            return self._handle_next()
+        
+        elif command == "back":
+            return self._handle_back()
+        
         # Video-Verwaltung
-        elif command == "load":
-            return self._handle_load(args)
+        elif command == "videos":
+            self._handle_videos_list()
             
-        elif command == "list":
-            self._handle_list()
-            
-        elif command == "switch":
-            return self._handle_switch(args)
+        elif command.startswith("video:"):
+            return self._handle_video_load(command)
         
         # REST API
         elif command == "api":
@@ -139,25 +148,96 @@ class CLIHandler:
     
     # === Video-Verwaltung ===
     
-    def _handle_load(self, args):
-        """Lädt ein Video."""
-        if args:
-            full_path = os.path.join(self.video_dir, args) if not os.path.isabs(args) else args
-            self.player.load_video(full_path)
-        else:
-            print("Verwendung: load <pfad>")
-        return (True, None)
-    
-    def _handle_list(self):
+    def _handle_videos_list(self):
         """Listet alle Videos auf."""
         from .utils import list_videos
         list_videos(self.video_dir)
     
-    def _handle_switch(self, args):
-        """Wechselt zu einem Video."""
-        if not args:
-            print("Verwendung: switch <name>")
+    def _handle_video_load(self, command):
+        """Lädt und startet ein Video."""
+        # Extrahiere Video-Namen
+        video_name = command.split(':', 1)[1].strip()
+        
+        if not video_name:
+            print("Verwendung: video:<name>")
             return (True, None)
+        
+        # Sammle alle Videos
+        videos = []
+        for root, dirs, files in os.walk(self.video_dir):
+            for f in files:
+                if f.lower().endswith(VIDEO_EXTENSIONS):
+                    videos.append(os.path.join(root, f))
+        
+        # Normalisiere Suchstring (erlaube beide Slash-Arten)
+        search_name = video_name.lower().replace('/', '\\')
+        
+        # Suche nach passendem Video - prüfe sowohl Dateiname als auch relativen Pfad
+        matching = []
+        for v in videos:
+            rel_path = os.path.relpath(v, self.video_dir).lower()
+            basename = os.path.basename(v).lower()
+            if search_name in rel_path or search_name in basename:
+                matching.append(v)
+        
+        if not matching:
+            print(f"Kein Video gefunden mit: {video_name}")
+            return (True, None)
+        
+        if len(matching) > 1:
+            print(f"Mehrere Videos gefunden:")
+            for v in matching:
+                # Zeige relativen Pfad zum video_dir für bessere Übersicht
+                rel_path = os.path.relpath(v, self.video_dir)
+                print(f"  - {rel_path}")
+            print("Bitte spezifischer wählen (z.B. 'video:kanal_1/test' oder kompletter Pfad).")
+            return (True, None)
+        
+        # Stoppe aktuellen Player
+        if self.player.is_playing:
+            self.player.stop()
+            time.sleep(0.5)
+        
+        # Prüfe ob aktueller Player ein VideoPlayer ist
+        from .video_player import VideoPlayer
+        from .script_player import ScriptPlayer
+        
+        if isinstance(self.player, ScriptPlayer):
+            # Erstelle neuen VideoPlayer
+            new_player = VideoPlayer(
+                matching[0],
+                self.player.points_json_path,
+                self.player.target_ip,
+                self.player.start_universe,
+                self.player.fps_limit,
+                self.config
+            )
+            
+            # Übernehme Einstellungen
+            new_player.brightness = self.player.brightness
+            new_player.speed_factor = self.player.speed_factor
+            
+            # Starte Video
+            new_player.start()
+            
+            # Tracking
+            self.current_video_path = matching[0]
+            self.current_script_name = None
+            
+            return (True, new_player)
+        else:
+            # Normales Video laden
+            if self.player.load_video(matching[0]):
+                self.current_video_path = matching[0]
+                self.current_script_name = None
+                self.player.start()
+        
+        return (True, None)
+    
+    def _get_all_videos(self):
+        """Sammelt alle Videos sortiert."""
+        if self.video_list_cache:
+            return self.video_list_cache
         
         videos = []
         for root, dirs, files in os.walk(self.video_dir):
@@ -165,11 +245,113 @@ class CLIHandler:
                 if f.lower().endswith(VIDEO_EXTENSIONS):
                     videos.append(os.path.join(root, f))
         
-        matching = [v for v in videos if args.lower() in os.path.basename(v).lower()]
-        if matching:
-            self.player.load_video(matching[0])
+        self.video_list_cache = sorted(videos)
+        return self.video_list_cache
+    
+    def _get_all_scripts(self):
+        """Sammelt alle Scripts sortiert."""
+        if self.script_list_cache:
+            return self.script_list_cache
+        
+        from .script_generator import ScriptGenerator
+        scripts_dir = self.config['paths']['scripts_dir']
+        script_gen = ScriptGenerator(scripts_dir)
+        scripts = script_gen.list_scripts()
+        
+        self.script_list_cache = [s['filename'] for s in scripts]
+        return self.script_list_cache
+    
+    def _handle_next(self):
+        """Lädt nächstes Video oder Script."""
+        # Prüfe ob Video oder Script aktiv
+        if self.current_video_path:
+            videos = self._get_all_videos()
+            if not videos:
+                print("Keine Videos verfügbar")
+                return (True, None)
+            
+            try:
+                current_idx = videos.index(self.current_video_path)
+                next_idx = (current_idx + 1) % len(videos)
+                next_video = videos[next_idx]
+                
+                # Stoppe aktuelles Video
+                if self.player.is_playing:
+                    self.player.stop()
+                    time.sleep(0.5)
+                
+                # Lade nächstes Video
+                if self.player.load_video(next_video):
+                    self.current_video_path = next_video
+                    self.player.start()
+                    print(f"Nächstes Video: {os.path.basename(next_video)}")
+            except ValueError:
+                print("Aktuelles Video nicht in Liste gefunden")
+        
+        elif self.current_script_name:
+            scripts = self._get_all_scripts()
+            if not scripts:
+                print("Keine Scripts verfügbar")
+                return (True, None)
+            
+            try:
+                current_idx = scripts.index(self.current_script_name)
+                next_idx = (current_idx + 1) % len(scripts)
+                next_script = scripts[next_idx]
+                
+                # Lade nächstes Script
+                return self._handle_load_script(f"script:{next_script.replace('.py', '')}")
+            except ValueError:
+                print("Aktuelles Script nicht in Liste gefunden")
         else:
-            print(f"Kein Video gefunden mit: {args}")
+            print("Kein Video oder Script aktiv")
+        
+        return (True, None)
+    
+    def _handle_back(self):
+        """Lädt vorheriges Video oder Script."""
+        # Prüfe ob Video oder Script aktiv
+        if self.current_video_path:
+            videos = self._get_all_videos()
+            if not videos:
+                print("Keine Videos verfügbar")
+                return (True, None)
+            
+            try:
+                current_idx = videos.index(self.current_video_path)
+                prev_idx = (current_idx - 1) % len(videos)
+                prev_video = videos[prev_idx]
+                
+                # Stoppe aktuelles Video
+                if self.player.is_playing:
+                    self.player.stop()
+                    time.sleep(0.5)
+                
+                # Lade vorheriges Video
+                if self.player.load_video(prev_video):
+                    self.current_video_path = prev_video
+                    self.player.start()
+                    print(f"Vorheriges Video: {os.path.basename(prev_video)}")
+            except ValueError:
+                print("Aktuelles Video nicht in Liste gefunden")
+        
+        elif self.current_script_name:
+            scripts = self._get_all_scripts()
+            if not scripts:
+                print("Keine Scripts verfügbar")
+                return (True, None)
+            
+            try:
+                current_idx = scripts.index(self.current_script_name)
+                prev_idx = (current_idx - 1) % len(scripts)
+                prev_script = scripts[prev_idx]
+                
+                # Lade vorheriges Script
+                return self._handle_load_script(f"script:{prev_script.replace('.py', '')}")
+            except ValueError:
+                print("Aktuelles Script nicht in Liste gefunden")
+        else:
+            print("Kein Video oder Script aktiv")
         
         return (True, None)
     
@@ -744,7 +926,7 @@ class CLIHandler:
         """Verwaltet Scripts."""
         from .script_generator import ScriptGenerator
         
-        scripts_dir = self.config.get('paths', {}).get('scripts_dir', 'scripts')
+        scripts_dir = self.config['paths']['scripts_dir']
         script_gen = ScriptGenerator(scripts_dir)
         
         if not args or args == "list":
@@ -784,17 +966,31 @@ class CLIHandler:
         
         # Stoppe aktuellen Player wenn er läuft
         was_playing = self.player.is_playing
+        
+        # Speichere alte Player-Daten
+        old_player = self.player
+        points_json_path = old_player.points_json_path
+        target_ip = old_player.target_ip
+        start_universe = old_player.start_universe
+        fps_limit = old_player.fps_limit
+        
+        # Stoppe alten Player komplett
         if was_playing:
-            self.player.stop()
+            old_player.stop()
+        
+        # Warte und lösche Referenz
+        import time
+        time.sleep(0.5)
+        del old_player
         
         try:
             # Erstelle neuen ScriptPlayer
             new_player = ScriptPlayer(
                 script_name,
-                self.player.points_json_path,
-                self.player.target_ip,
-                self.player.start_universe,
-                self.player.fps_limit,
+                points_json_path,
+                target_ip,
+                start_universe,
+                fps_limit,
                 self.config
             )
             
@@ -812,6 +1008,10 @@ class CLIHandler:
             
             # Starte automatisch
             new_player.start()
+            
+            # Tracking für next/back
+            self.current_script_name = script_name
+            self.current_video_path = None
             
             return (True, new_player)
             
