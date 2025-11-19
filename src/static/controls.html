@@ -1,155 +1,222 @@
 <!DOCTYPE html>
 <html lang="de">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flux - Control Panel</title>
-    <link rel="stylesheet" href="styles.css">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link rel="stylesheet" href="styles.css">
+        <style>
+            .control-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr 1fr;
+                grid-template-rows: auto auto auto auto auto;
+                gap: 2rem 2rem;
+                margin-top: 2rem;
+            }
+            .control-panel {
+                width: 100%;
+                box-shadow: 0 2px 12px 0 rgba(0,0,0,0.08);
+                border-radius: 12px;
+                background: var(--panel-bg, #18191a);
+                padding: 1.5rem 1.2rem;
+                border: 1px solid var(--border-color, #333);
+                min-width: 0;
+            }
+            .panel-toolbar { grid-column: 1 / 5; grid-row: 1; }
+            .panel-placeholder { grid-column: 1 / 3; grid-row: 2; }
+            .panel-media { grid-column: 3 / 5; grid-row: 2; }
+            .panel-playback { grid-column: 1 / 5; grid-row: 3; }
+            .panel-einstellungen { grid-column: 1; grid-row: 4; }
+            .panel-artnet { grid-column: 2; grid-row: 4; }
+            .panel-information { grid-column: 3; grid-row: 4; }
+            .panel-aufzeichnung { grid-column: 4; grid-row: 4; }
+            .panel-console { grid-column: 1 / 5; grid-row: 5; }
+            @media (max-width: 1100px) {
+                .control-grid { grid-template-columns: 1fr 1fr; }
+                .panel-einstellungen { grid-column: 1; }
+                .panel-artnet { grid-column: 2; }
+                .panel-information { grid-column: 1; grid-row: 5; }
+                .panel-aufzeichnung { grid-column: 2; grid-row: 5; }
+                .panel-console { grid-column: 1 / 3; grid-row: 6; }
+            }
+            @media (max-width: 700px) {
+                .control-grid { grid-template-columns: 1fr; }
+                .panel-toolbar,
+                .panel-placeholder,
+                .panel-media,
+                .panel-playback,
+                .panel-einstellungen,
+                .panel-artnet,
+                .panel-information,
+                .panel-aufzeichnung,
+                .panel-console { grid-column: 1 !important; }
+            }
+        </style>
 </head>
+
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="text-center mb-4">
-                <img src="/static/logo.svg" alt="Flux Logo" style="width: 120px; height: 120px; margin-bottom: 1rem;">
-                <h1>Flux Control Panel</h1>
-                <div style="display: flex; gap: 10px; justify-content: center; margin-top: 10px;">
-                    <a href="/" style="color: var(--text-color); text-decoration: none; padding: 5px 10px; border: 1px solid var(--border-color); border-radius: 4px;">📝 Editor</a>
-                    <a href="/config" style="color: var(--text-color); text-decoration: none; padding: 5px 10px; border: 1px solid var(--border-color); border-radius: 4px;">⚙️ Config</a>
-                </div>
-            </div>
-            <div class="theme-toggle">
-                <label for="themeToggle" id="themeLabel">Hell</label>
-                <input type="checkbox" id="themeToggle">
-            </div>
-            <div class="status-bar">
-                <div class="status-item">
-                    <span class="status-dot" id="statusDot"></span>
-                    <span id="statusText">Gestoppt</span>
-                </div>
-                <div class="status-item">
-                    <strong>Video:</strong> <span id="currentVideo">-</span>
-                </div>
-                <div class="status-item">
-                    <strong>Frame:</strong> <span id="currentFrame">0</span> / <span id="totalFrames">0</span>
-                </div>
-            </div>
+    <!-- Menu-Bar wie in config.html -->
+    <div class="menu-bar d-flex align-items-center justify-content-between flex-nowrap px-2"
+        style="gap: 1.2rem; flex-wrap: nowrap;">
+        <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem;">
+            <img src="/static/logo.svg" alt="Flux Logo"
+                style="height: 32px; width: auto; display: inline-block; vertical-align: middle;">
+            <span style="font-size: 1.4rem; font-weight: 700; letter-spacing: 1px; margin-left: 0.3rem;">Flux</span>
         </div>
-        
-        <div class="control-grid">
-            <!-- Console -->
-            <div class="control-panel" style="grid-column: 1 / -1;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h2 style="margin: 0;">Console</h2>
-                    <button class="btn btn-secondary" onclick="clearConsole()" style="padding: 5px 15px; flex: none; width: auto; min-width: auto;">Clear</button>
-                </div>
-                <pre id="consoleOutput" style="height: 200px; overflow-y: auto; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; margin-bottom: 10px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4;"></pre>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <span style="color: var(--text-color); font-weight: bold;">&gt;</span>
-                    <input type="text" id="consoleCommand" placeholder="Befehl eingeben (z.B. status, help, videos, test red)" style="flex: 1; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg); color: var(--text-color); font-family: 'Courier New', monospace;" onkeypress="if(event.key==='Enter') executeCommand()" autofocus>
-                    <button class="btn btn-primary" onclick="executeCommand()" style="flex: none; width: auto; min-width: auto;">▶️</button>
-                </div>
-            </div>
-            
-            <!-- Playback Control -->
-            <div class="control-panel">
-                <h2>Playback</h2>
-                <div class="button-group">
-                    <button class="btn btn-primary" onclick="executeCliCommand('start')" title="start">▶️ Start</button>
-                    <button class="btn btn-danger" onclick="executeCliCommand('stop')" title="stop">⏹️ Stop</button>
-                </div>
-                <div class="button-group">
-                    <button class="btn btn-warning" onclick="executeCliCommand('pause')" title="pause">⏸️ Pause</button>
-                    <button class="btn btn-info" onclick="executeCliCommand('resume')" title="resume">▶️ Resume</button>
-                </div>
-                <div class="button-group">
-                    <button class="btn btn-secondary" onclick="executeCliCommand('restart')" title="restart">🔄 Restart</button>
-                </div>
-                <div class="button-group">
-                    <button class="btn btn-secondary" onclick="executeCliCommand('back')" title="back">⏮️ Back</button>
-                    <button class="btn btn-secondary" onclick="executeCliCommand('next')" title="next">⏭️ Next</button>
-                </div>
-            </div>
-            
-            <!-- Settings -->
-            <div class="control-panel">
-                <h2>Einstellungen</h2>
-                <div class="slider-group">
-                    <label>Helligkeit: <span class="slider-value" id="brightnessValue">100%</span></label>
-                    <div class="slider-container">
-                        <input type="range" min="0" max="100" value="100" class="slider" id="brightnessSlider" oninput="updateBrightness(this.value)">
-                    </div>
-                </div>
-                <div class="slider-group">
-                    <label>Geschwindigkeit: <span class="slider-value" id="speedValue">1.0x</span></label>
-                    <div class="slider-container">
-                        <input type="range" min="0.1" max="3" step="0.1" value="1" class="slider" id="speedSlider" oninput="updateSpeed(this.value)">
-                    </div>
-                </div>
-                <div class="input-group">
-                    <label>FPS Limit:</label>
-                    <input type="number" id="fpsInput" placeholder="30" min="1" max="120">
-                    <button class="btn btn-info" style="margin-top: 10px; width: 100%;" onclick="setFPS()">FPS setzen</button>
-                </div>
-            </div>
-            
-            <!-- Art-Net -->
-            <div class="control-panel">
-                <h2>Art-Net</h2>
-                <button class="btn btn-secondary" style="width: 100%; margin-bottom: 15px;" onclick="blackout()">⚫ Blackout</button>
-                <div class="input-group">
-                    <label>Testmuster:</label>
-                    <div class="test-colors" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px;">
-                        <button class="color-btn" style="background: red; color: white;" onclick="testPattern('red')">Rot</button>
-                        <button class="color-btn" style="background: green; color: white;" onclick="testPattern('green')">Grün</button>
-                        <button class="color-btn" style="background: blue; color: white;" onclick="testPattern('blue')">Blau</button>
-                        <button class="color-btn" style="background: white; color: black;" onclick="testPattern('white')">Weiß</button>
-                        <button class="color-btn" style="background: yellow; color: black;" onclick="testPattern('yellow')">Gelb</button>
-                        <button class="color-btn" style="background: cyan; color: black;" onclick="testPattern('cyan')">Cyan</button>
-                        <button class="color-btn" style="background: magenta; color: white;" onclick="testPattern('magenta')">Magenta</button>
-                        <button class="color-btn" style="background: linear-gradient(90deg, red, yellow, green, cyan, blue, magenta); color: white; font-weight: bold;" onclick="testPattern('gradient')">Gradient</button>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Media -->
-            <div class="control-panel">
-                <h2>Media</h2>
-                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                    <button class="btn btn-info" style="flex: 1;" onclick="loadVideos()" title="videos">🎬 Videos</button>
-                    <button class="btn btn-info" style="flex: 1;" onclick="loadScripts()" title="scripts">📜 Scripts</button>
-                </div>
-                <div class="media-list" id="mediaList">
-                    <p style="text-align: center; color: #999;">Wähle Videos oder Scripts</p>
-                </div>
-            </div>
-            
-            <!-- Info -->
-            <div class="control-panel">
-                <h2>Information</h2>
-                <button class="btn btn-info" style="width: 100%; margin-bottom: 15px;" onclick="loadInfo()">🔄 Info aktualisieren</button>
-                <!-- Anwendung neu starten Button entfernt -->
-                <div class="info-display" id="infoDisplay">
-                    <div>Klicke auf "Info aktualisieren"</div>
-                </div>
-            </div>
-            
-            <!-- Recording -->
-            <div class="control-panel">
-                <h2>Aufzeichnung</h2>
-                <div class="button-group">
-                    <button class="btn btn-primary" onclick="startRecording()">⏺️ Start</button>
-                    <button class="btn btn-danger" onclick="stopRecording()">⏹️ Stop</button>
+        <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem; margin-left: auto;">
+            <a href="/" class="btn btn-primary btn-sm menu-btn" title="Editor"
+                style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎨</a>
+            <a href="/controls" class="btn btn-primary btn-sm menu-btn" title="Controls"
+                style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎛️</a>
+            <a href="/config" class="btn btn-primary btn-sm menu-btn" title="Config"
+                style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">⚙️</a>
+            <div style="display: flex; align-items: center; gap: 2rem; margin-left: 2.2rem;">
+                <div class="form-check form-switch" style="margin-bottom: 0;">
+                    <input class="form-check-input" type="checkbox" id="themeToggle">
+                    <label class="form-check-label" for="themeToggle" id="themeLabel">Dunkel</label>
                 </div>
             </div>
         </div>
     </div>
-    
-    <div class="toast" id="toast">
-        <div id="toastMessage"></div>
+
+    <!-- Status-Bar -->
+    <div class="status-bar d-flex align-items-center justify-content-start px-2" style="gap: 2rem; margin-top: 0.5rem;">
+        <div class="status-item">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Gestoppt</span>
+        </div>
+        <div class="status-item">
+            <strong>Video:</strong> <span id="currentVideo">-</span>
+        </div>
+        <div class="status-item">
+            <strong>Frame:</strong> <span id="currentFrame">0</span> / <span id="totalFrames">0</span>
+        </div>
     </div>
-    
+    <div class="control-grid" style="margin-top: 2rem;">
+        <!-- Placeholder & Media nebeneinander -->
+        <div class="control-panel panel-placeholder">
+            <p>Platzhalter</p>
+        </div>
+        <div class="control-panel panel-media">
+            <h2>Media</h2>
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <button class="btn btn-info" style="flex: 1;" onclick="loadVideos()" title="videos">🎬 Videos</button>
+                <button class="btn btn-info" style="flex: 1;" onclick="loadScripts()" title="scripts">📜 Scripts</button>
+            </div>
+            <div class="media-list" id="mediaList">
+                <p style="text-align: center; color: #999;">Wähle Videos oder Scripts</p>
+            </div>
+        </div>
+        <!-- Playback Panel (volle Breite) -->
+        <div class="control-panel panel-playback">
+            <div class="d-flex flex-wrap gap-2 justify-content-center align-items-center">
+                <button class="btn btn-primary" onclick="executeCliCommand('start')" title="start">▶️ Start</button>
+                <button class="btn btn-danger" onclick="executeCliCommand('stop')" title="stop">⏹️ Stop</button>
+                <button class="btn btn-warning" onclick="executeCliCommand('pause')" title="pause">⏸️ Pause</button>
+                <button class="btn btn-info" onclick="executeCliCommand('resume')" title="resume">▶️ Resume</button>
+                <button class="btn btn-secondary" onclick="executeCliCommand('restart')" title="restart">🔄 Restart</button>
+                <button class="btn btn-secondary" onclick="executeCliCommand('back')" title="back">⏮️ Back</button>
+                <button class="btn btn-secondary" onclick="executeCliCommand('next')" title="next">⏭️ Next</button>
+            </div>
+        </div>
+        <!-- Vier Panels nebeneinander -->
+        <div class="control-panel panel-einstellungen">
+            <h2>Einstellungen</h2>
+            <div class="slider-group">
+                <label>Helligkeit: <span class="slider-value" id="brightnessValue">100%</span></label>
+                <div class="slider-container">
+                    <input type="range" min="0" max="100" value="100" class="slider" id="brightnessSlider" oninput="updateBrightness(this.value)">
+                </div>
+            </div>
+            <div class="slider-group">
+                <label>Geschwindigkeit: <span class="slider-value" id="speedValue">1.0x</span></label>
+                <div class="slider-container">
+                    <input type="range" min="0.1" max="3" step="0.1" value="1" class="slider" id="speedSlider" oninput="updateSpeed(this.value)">
+                </div>
+            </div>
+            <div class="input-group">
+                <label>FPS Limit:</label>
+                <input type="number" id="fpsInput" placeholder="30" min="1" max="120">
+                <button class="btn btn-info" style="margin-top: 10px; width: 100%;" onclick="setFPS()">FPS setzen</button>
+            </div>
+        </div>
+        <div class="control-panel panel-artnet">
+            <h2>Art-Net</h2>
+            <button class="btn btn-secondary" style="width: 100%; margin-bottom: 15px;" onclick="blackout()">⚫ Blackout</button>
+            <div class="input-group">
+                <label>Testmuster:</label>
+                <div class="test-colors" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px;">
+                    <button class="color-btn" style="background: red; color: white;" onclick="testPattern('red')">Rot</button>
+                    <button class="color-btn" style="background: green; color: white;" onclick="testPattern('green')">Grün</button>
+                    <button class="color-btn" style="background: blue; color: white;" onclick="testPattern('blue')">Blau</button>
+                    <button class="color-btn" style="background: white; color: black;" onclick="testPattern('white')">Weiß</button>
+                    <button class="color-btn" style="background: yellow; color: black;" onclick="testPattern('yellow')">Gelb</button>
+                    <button class="color-btn" style="background: cyan; color: black;" onclick="testPattern('cyan')">Cyan</button>
+                    <button class="color-btn" style="background: magenta; color: white;" onclick="testPattern('magenta')">Magenta</button>
+                    <button class="color-btn" style="background: linear-gradient(90deg, red, yellow, green, cyan, blue, magenta); color: white; font-weight: bold;" onclick="testPattern('gradient')">Gradient</button>
+                </div>
+            </div>
+        </div>
+        <div class="control-panel panel-information">
+            <h2>Information</h2>
+            <button class="btn btn-info" style="width: 100%; margin-bottom: 15px;" onclick="loadInfo()">🔄 Info aktualisieren</button>
+            <div class="info-display" id="infoDisplay">
+                <div>Klicke auf "Info aktualisieren"</div>
+            </div>
+        </div>
+        <div class="control-panel panel-aufzeichnung">
+            <h2>Aufzeichnung</h2>
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="startRecording()">⏺️ Start</button>
+                <button class="btn btn-danger" onclick="stopRecording()">⏹️ Stop</button>
+            </div>
+        </div>
+        <!-- Console Panel (ganz unten) -->
+        <div class="control-panel panel-console">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 style="margin: 0;">Console</h2>
+                <button class="btn btn-secondary" onclick="clearConsole()" style="padding: 5px 15px; flex: none; width: auto; min-width: auto;">Clear</button>
+            </div>
+            <pre id="consoleOutput" style="height: 200px; overflow-y: auto; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; margin-bottom: 10px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4;"></pre>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <span style="color: var(--text-color); font-weight: bold;">&gt;</span>
+                <input type="text" id="consoleCommand" placeholder="Befehl eingeben (z.B. status, help, videos, test red)" style="flex: 1; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg); color: var(--text-color); font-family: 'Courier New', monospace;" onkeypress="if(event.key==='Enter') executeCommand()" autofocus>
+                <button class="btn btn-primary" onclick="executeCommand()" style="flex: none; width: auto; min-width: auto;">▶️</button>
+            </div>
+        </div>
+
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
     <!-- Socket.IO Client -->
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        // Theme Management (wie config.html)
+        const themeToggle = document.getElementById('themeToggle');
+        const themeLabel = document.getElementById('themeLabel');
+        const body = document.body;
+        function setTheme(theme) {
+            body.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            if (themeLabel) themeLabel.textContent = theme === 'dark' ? 'Dunkel' : 'Hell';
+            if (themeToggle) themeToggle.checked = theme === 'dark';
+        }
+        let savedTheme = localStorage.getItem('theme');
+        if (!savedTheme) {
+            savedTheme = 'dark';
+            localStorage.setItem('theme', 'dark');
+        }
+        setTheme(savedTheme);
+        if (themeToggle) {
+            themeToggle.checked = savedTheme === 'dark';
+            themeToggle.addEventListener('change', () => {
+                setTheme(themeToggle.checked ? 'dark' : 'light');
+            });
+        }
+    </script>
     <script src="controls.js"></script>
 </body>
+
 </html>
