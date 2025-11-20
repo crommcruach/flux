@@ -1,5 +1,9 @@
 """
 API Points - Points Management Endpoints
+
+WICHTIG: Verwende NIEMALS print() Statements in API-Funktionen!
+Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
+Nutze stattdessen immer den Logger.
 """
 from flask import jsonify, request
 import os

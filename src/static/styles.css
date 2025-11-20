@@ -283,20 +283,7 @@ body.editor-page {
 /* ========================================
    Control Panels
    ======================================== */
-.control-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
-}
-
-.control-panel {
-    background: var(--bg-secondary);
-    padding: 25px;
-    border-radius: 8px;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border-color);
-}
+/* Grid layout and panel styles defined in Controls Page Styles section */
 
 .control-panel h2 {
     color: var(--text-primary);
@@ -330,12 +317,15 @@ body.editor-page {
     letter-spacing: 0.3px;
 }
 
-.btn:hover {
+/* Gemeinsame Button-Hover-Effekte */
+.btn:hover,
+.menu-bar .menu-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
-.btn:active {
+.btn:active,
+.menu-bar .menu-btn:active {
     transform: translateY(0);
 }
 
@@ -526,39 +516,7 @@ body.editor-page {
     color: var(--text-primary);
 }
 
-/* ========================================
-   Toast Notifications
-   ======================================== */
-.toast {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: var(--bg-secondary);
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 5px 20px rgba(0,0,0,0.3);
-    display: none;
-    animation: slideIn 0.3s;
-    z-index: 1000;
-    color: var(--text-primary);
-}
-
-@keyframes slideIn {
-    from {
-        transform: translateX(400px);
-    }
-    to {
-        transform: translateX(0);
-    }
-}
-
-.toast.success {
-    border-left: 5px solid #28a745;
-}
-
-.toast.error {
-    border-left: 5px solid #dc3545;
-}
+/* Toast Notifications moved to unified section below */
 
 /* ========================================
    Info Display
@@ -578,28 +536,7 @@ body.editor-page {
     margin: 5px 0;
 }
 
-/* ========================================
-   Test Colors
-   ======================================== */
-.test-colors {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin-top: 15px;
-}
-
-.color-btn {
-    padding: 15px;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.2s;
-}
-
-.color-btn:hover {
-    transform: scale(1.05);
-}
+/* Test Colors & Color Buttons moved to Art-Net Page Styles section */
 
 /* ========================================
    Toast Notifications
@@ -782,15 +719,7 @@ body.editor-page {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.menu-bar .menu-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-}
-
-.menu-bar .menu-btn:active {
-    transform: translateY(0);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
+/* Hover & Active states defined in Buttons section above */
 
 .menu-bar .btn-success {
     background: var(--btn-primary);
@@ -856,9 +785,24 @@ body.editor-page {
 }
 
 .app-container {
-    display: flex;
+    display: grid;
+    grid-template-columns: 250px 1fr 250px;
+    grid-template-rows: auto 1fr;
     height: calc(100vh - 50px);
     gap: 0;
+}
+
+.canvas-settings-bar {
+    grid-column: 2;
+    grid-row: 1;
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    overflow-x: auto;
+    flex-wrap: nowrap;
 }
 
 .toolbar,
@@ -870,17 +814,20 @@ body.editor-page {
 }
 
 .toolbar {
-    width: 280px;
+    grid-column: 1;
+    grid-row: 1 / 3;
     border-right: 1px solid var(--border-color);
 }
 
 .sidebar {
-    width: 320px;
+    grid-column: 3;
+    grid-row: 1 / 3;
     border-left: 1px solid var(--border-color);
 }
 
 .canvas-wrapper {
-    flex: 1;
+    grid-column: 2;
+    grid-row: 2;
     position: relative;
     background: var(--bg-primary);
     overflow: auto;
@@ -1072,5 +1019,113 @@ body.editor-page {
 
     .form-label {
         font-size: 0.75rem;
+    }
+}
+
+/* ===============================================
+   Controls Page Styles
+   =============================================== */
+.control-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    grid-template-rows: auto auto auto auto auto;
+    gap: 2rem 2rem;
+    margin-top: 2rem;
+}
+
+.control-panel {
+    width: 100%;
+    box-shadow: 0 2px 12px 0 rgba(0,0,0,0.08);
+    border-radius: 12px;
+    background: var(--panel-bg, #18191a);
+    padding: 1.5rem 1.2rem;
+    border: 1px solid var(--border-color, #333);
+    min-width: 0;
+}
+
+.panel-toolbar { grid-column: 1 / 5; grid-row: 1; }
+.panel-placeholder { grid-column: 1 / 3; grid-row: 2; }
+.panel-media { grid-column: 3 / 5; grid-row: 2; }
+.panel-playback { grid-column: 1 / 5; grid-row: 3; }
+.panel-einstellungen { grid-column: 1; grid-row: 4; }
+.panel-information { grid-column: 2; grid-row: 4; }
+.panel-aufzeichnung { grid-column: 3; grid-row: 4; }
+.panel-console { grid-column: 1 / 5; grid-row: 5; }
+
+@media (max-width: 1100px) {
+    .control-grid { grid-template-columns: 1fr 1fr; }
+    .panel-einstellungen { grid-column: 1; }
+    .panel-information { grid-column: 2; }
+    .panel-aufzeichnung { grid-column: 1; grid-row: 5; }
+    .panel-console { grid-column: 1 / 3; grid-row: 6; }
+}
+
+@media (max-width: 700px) {
+    .control-grid { grid-template-columns: 1fr; }
+    .panel-toolbar,
+    .panel-placeholder,
+    .panel-media,
+    .panel-playback,
+    .panel-einstellungen,
+    .panel-information,
+    .panel-aufzeichnung,
+    .panel-console { grid-column: 1 !important; }
+}
+
+/* ===============================================
+   Art-Net Page Styles
+   =============================================== */
+.artnet-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+    margin-top: 2rem;
+    padding: 0 2rem;
+}
+
+.artnet-panel {
+    width: 100%;
+    max-width: 800px;
+    box-shadow: 0 2px 12px 0 rgba(0,0,0,0.08);
+    border-radius: 12px;
+    background: var(--panel-bg, #18191a);
+    padding: 2rem 1.5rem;
+    border: 1px solid var(--border-color, #333);
+}
+
+.test-colors {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 1rem;
+}
+
+.color-btn {
+    padding: 1rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+/* Spezifischer Hover-Effekt für Color-Buttons */
+.color-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.color-btn:active {
+    transform: translateY(0);
+}
+
+@media (max-width: 700px) {
+    .test-colors {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .artnet-container {
+        padding: 0 1rem;
     }
 }

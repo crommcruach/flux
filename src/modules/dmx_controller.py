@@ -48,20 +48,20 @@ class DMXController:
         self.is_running = True
         self.thread = threading.Thread(target=self._listen_loop, daemon=True)
         self.thread.start()
-        print(f"DMX-Steuerung aktiv auf {self.listen_ip}:{self.listen_port}, Universum {self.control_universe}")
-        print("DMX-Kanal-Mapping:")
-        print("  Ch 1: Play/Stop (0-127=Stop, 128-255=Play)")
-        print("  Ch 2: Brightness (0-255)")
-        print("  Ch 3: Speed (0-255, 128=1x)")
-        print("  Ch 4: Pause/Resume (0-127=Resume, 128-255=Pause)")
-        print("  Ch 5: Blackout (0-127=Normal, 128-255=Blackout)")
-        print("  Ch 6-9: Video-Slot (4 Kanäle für bis zu 1020 Videos)")
-        print("         Ch6=Kanal (1-4), Ch7-9=Slot (0-255 pro Kanal)")
-        print("  Ch 10: Script-Slot (0-255 für bis zu 255 Scripts)")
+        logger.info(f"DMX-Steuerung aktiv auf {self.listen_ip}:{self.listen_port}, Universum {self.control_universe}")
+        logger.info("DMX-Kanal-Mapping:")
+        logger.info("  Ch 1: Play/Stop (0-127=Stop, 128-255=Play)")
+        logger.info("  Ch 2: Brightness (0-255)")
+        logger.info("  Ch 3: Speed (0-255, 128=1x)")
+        logger.info("  Ch 4: Pause/Resume (0-127=Resume, 128-255=Pause)")
+        logger.info("  Ch 5: Blackout (0-127=Normal, 128-255=Blackout)")
+        logger.info("  Ch 6-9: Video-Slot (4 Kanäle für bis zu 1020 Videos)")
+        logger.info("         Ch6=Kanal (1-4), Ch7-9=Slot (0-255 pro Kanal)")
+        logger.info("  Ch 10: Script-Slot (0-255 für bis zu 255 Scripts)")
         if self.video_cache:
-            print(f"  Video-Cache: {len(self.video_cache)} Videos geladen")
+            logger.info(f"  Video-Cache: {len(self.video_cache)} Videos geladen")
         if self.script_cache:
-            print(f"  Script-Cache: {len(self.script_cache)} Scripts geladen")
+            logger.info(f"  Script-Cache: {len(self.script_cache)} Scripts geladen")
     
     def stop(self):
         """Stoppt DMX-Listener."""
@@ -87,10 +87,10 @@ class DMXController:
                     continue
                 except Exception as e:
                     if self.is_running:
-                        print(f"Fehler beim Empfang: {e}")
+                        logger.error(f"Fehler beim Empfang: {e}")
         
         except Exception as e:
-            print(f"DMX-Listener Fehler: {e}")
+            logger.error(f"DMX-Listener Fehler: {e}")
         finally:
             if self.sock:
                 self.sock.close()
@@ -122,7 +122,7 @@ class DMXController:
             return
         
         # Ausgabe wenn sich relevante Werte ändern
-        print(f"[DMX] Empfangen - Ch1:{dmx_data[0]} Ch2:{dmx_data[1]} Ch3:{dmx_data[2]} Ch4:{dmx_data[3]} Ch5:{dmx_data[4]} Ch6:{dmx_data[5]} Ch7:{dmx_data[6]} Ch8:{dmx_data[7]} Ch9:{dmx_data[8]} Ch10:{dmx_data[9]}")
+        logger.debug(f"[DMX] Empfangen - Ch1:{dmx_data[0]} Ch2:{dmx_data[1]} Ch3:{dmx_data[2]} Ch4:{dmx_data[3]} Ch5:{dmx_data[4]} Ch6:{dmx_data[5]} Ch7:{dmx_data[6]} Ch8:{dmx_data[7]} Ch9:{dmx_data[8]} Ch10:{dmx_data[9]}")
         
         self._process_dmx_values(dmx_data)
     
@@ -132,17 +132,17 @@ class DMXController:
         if dmx[0] != self.last_values[0]:
             if self.last_values[0] < 128 and dmx[0] >= 128:
                 if not self.player.is_playing:
-                    print("[DMX] Start triggered")
+                    logger.debug("[DMX] Start triggered")
                     self.player.start()
             elif self.last_values[0] >= 128 and dmx[0] < 128:
                 if self.player.is_playing:
-                    print("[DMX] Stop triggered")
+                    logger.debug("[DMX] Stop triggered")
                     self.player.stop()
         
         # Kanal 2: Brightness
         if abs(dmx[1] - self.last_values[1]) > 2:  # Hysterese
             brightness = (dmx[1] / 255.0) * 100
-            print(f"[DMX] Brightness → {brightness:.0f}%")
+            logger.debug(f"[DMX] Brightness → {brightness:.0f}%")
             self.player.set_brightness(brightness)
         
         # Kanal 3: Speed
@@ -152,24 +152,24 @@ class DMXController:
                 speed = 0.25 + (dmx[2] / 128.0) * 0.75  # 0.25 - 1.0
             else:
                 speed = 1.0 + ((dmx[2] - 128) / 127.0) * 3.0  # 1.0 - 4.0
-            print(f"[DMX] Speed → {speed:.2f}x")
+            logger.debug(f"[DMX] Speed → {speed:.2f}x")
             self.player.set_speed(speed)
         
         # Kanal 4: Pause/Resume
         if dmx[3] != self.last_values[3]:
             if self.last_values[3] < 128 and dmx[3] >= 128:
                 if self.player.is_playing and not self.player.is_paused:
-                    print("[DMX] Pause triggered")
+                    logger.debug("[DMX] Pause triggered")
                     self.player.pause()
             elif self.last_values[3] >= 128 and dmx[3] < 128:
                 if self.player.is_playing and self.player.is_paused:
-                    print("[DMX] Resume triggered")
+                    logger.debug("[DMX] Resume triggered")
                     self.player.resume()
         
         # Kanal 5: Blackout
         if dmx[4] != self.last_values[4]:
             if self.last_values[4] < 128 and dmx[4] >= 128:
-                print("[DMX] Blackout triggered")
+                logger.debug("[DMX] Blackout triggered")
                 self.player.blackout()
         
         # Kanal 6-9: Video-Slot Auswahl (4 Kanäle für bis zu 1020 Videos)
@@ -195,7 +195,7 @@ class DMXController:
             # Suche Video in Cache
             if self.video_cache and video_slot in self.video_cache:
                 video_path = self.video_cache[video_slot]
-                print(f"[DMX] Video-Slot → Kanal {kanal}, Slot {video_slot}, Video: {os.path.basename(video_path)}")
+                logger.info(f"[DMX] Video-Slot → Kanal {kanal}, Slot {video_slot}, Video: {os.path.basename(video_path)}")
                 was_playing = self.player.is_playing
                 if was_playing:
                     self.player.stop()
@@ -203,7 +203,7 @@ class DMXController:
                     if was_playing:
                         self.player.start()
             elif video_slot > 0:
-                print(f"[DMX] Video-Slot {video_slot} nicht gefunden (Kanal {kanal})")
+                logger.debug(f"[DMX] Video-Slot {video_slot} nicht gefunden (Kanal {kanal})")
         
         # Kanal 10: Script-Slot Auswahl (0-255 für bis zu 255 Scripts)
         if dmx[9] != self.last_values[9]:
@@ -212,7 +212,7 @@ class DMXController:
             # Suche Script in Cache
             if self.script_cache and script_slot in self.script_cache:
                 script_name = self.script_cache[script_slot]
-                print(f"[DMX] Script-Slot → Slot {script_slot}, Script: {script_name}")
+                logger.info(f"[DMX] Script-Slot → Slot {script_slot}, Script: {script_name}")
                 
                 # Lade Script mit ScriptPlayer
                 was_playing = self.player.is_playing
@@ -240,14 +240,14 @@ class DMXController:
                     
                     # Ersetze Player
                     self.player = new_player
-                    print(f"[DMX] Script geladen: {script_name}")
+                    logger.info(f"[DMX] Script geladen: {script_name}")
                     
                     if was_playing:
                         self.player.start()
                 except Exception as e:
-                    print(f"[DMX] Fehler beim Laden des Scripts: {e}")
+                    logger.error(f"[DMX] Fehler beim Laden des Scripts: {e}")
             elif script_slot > 0:
-                print(f"[DMX] Script-Slot {script_slot} nicht gefunden")
+                logger.debug(f"[DMX] Script-Slot {script_slot} nicht gefunden")
         
         # Speichere aktuelle Werte
         self.last_values = dmx.copy()
@@ -267,7 +267,7 @@ class DMXController:
             # Erstelle Ordner wenn nicht vorhanden
             if not os.path.exists(kanal_dir):
                 os.makedirs(kanal_dir)
-                print(f"Kanal-Ordner erstellt: {kanal_dir} (Max 255 Videos)")
+                logger.info(f"Kanal-Ordner erstellt: {kanal_dir} (Max 255 Videos)")
                 continue
             
             # Scanne Videos im Kanal-Ordner
@@ -276,7 +276,7 @@ class DMXController:
                            and any(f.lower().endswith(ext) for ext in video_extensions)])
             
             if len(videos) > 255:
-                print(f"⚠️  WARNUNG: Kanal {kanal} hat {len(videos)} Videos (Max 255)! Nur erste 255 werden verwendet.")
+                logger.warning(f"⚠️  WARNUNG: Kanal {kanal} hat {len(videos)} Videos (Max 255)! Nur erste 255 werden verwendet.")
                 videos = videos[:255]
             
             # Füge Videos zum Cache hinzu
@@ -285,11 +285,11 @@ class DMXController:
                 self.video_cache[slot_index + i] = video_path
             
             if videos:
-                print(f"Kanal {kanal}: {len(videos)} Videos geladen (Slots {slot_index}-{slot_index + len(videos) - 1})")
+                logger.info(f"Kanal {kanal}: {len(videos)} Videos geladen (Slots {slot_index}-{slot_index + len(videos) - 1})")
             
             slot_index += 255  # Nächster Kanal startet bei +255
         
-        print(f"Video-Cache: {len(self.video_cache)} Videos in {len([d for d in os.listdir(self.video_base_dir) if d.startswith('kanal_')])} Kanälen")
+        logger.info(f"Video-Cache: {len(self.video_cache)} Videos in {len([d for d in os.listdir(self.video_base_dir) if d.startswith('kanal_')])} Kanälen")
     
     def _build_script_cache(self):
         """Erstellt Script-Cache aus scripts/ Ordner."""
@@ -297,7 +297,7 @@ class DMXController:
             # Erstelle scripts Ordner wenn nicht vorhanden
             if self.scripts_dir:
                 os.makedirs(self.scripts_dir, exist_ok=True)
-                print(f"Scripts-Ordner erstellt: {self.scripts_dir} (Max 255 Scripts)")
+                logger.info(f"Scripts-Ordner erstellt: {self.scripts_dir} (Max 255 Scripts)")
             return
         
         # Scanne Python-Scripts
@@ -306,7 +306,7 @@ class DMXController:
                          and f.endswith('.py') and not f.startswith('_')])
         
         if len(scripts) > 255:
-            print(f"⚠️  WARNUNG: Scripts-Ordner hat {len(scripts)} Scripts (Max 255)! Nur erste 255 werden verwendet.")
+            logger.warning(f"⚠️  WARNUNG: Scripts-Ordner hat {len(scripts)} Scripts (Max 255)! Nur erste 255 werden verwendet.")
             scripts = scripts[:255]
         
         # Füge Scripts zum Cache hinzu
@@ -316,4 +316,4 @@ class DMXController:
             self.script_cache[i] = script_name
         
         if scripts:
-            print(f"Script-Cache: {len(scripts)} Scripts geladen (Slots 0-{len(scripts) - 1})")
+            logger.info(f"Script-Cache: {len(scripts)} Scripts geladen (Slots 0-{len(scripts) - 1})")

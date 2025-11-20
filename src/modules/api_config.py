@@ -1,10 +1,20 @@
 """
 API Config Routes - Configuration Management Endpoints
+
+WICHTIG: Verwende NIEMALS print() Statements in API-Funktionen!
+Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
+Nutze stattdessen immer den Logger für Debug-Ausgaben:
+    from .logger import get_logger
+    logger = get_logger(__name__)
+    logger.info("Message")
 """
 from flask import jsonify, request
 import json
 import os
 from .config_schema import ConfigValidator
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def register_config_routes(app, config_path='config.json'):
@@ -23,7 +33,7 @@ def register_config_routes(app, config_path='config.json'):
             if not os.path.exists(config_file):
                 return jsonify({
                     "status": "error",
-                    "message": "Config-Datei nicht gefunden"
+                    "message": f"Config-Datei nicht gefunden: {config_file}"
                 }), 404
             
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -176,12 +186,6 @@ def register_config_routes(app, config_path='config.json'):
                 "status": "success",
                 "config": default_config
             })
-        except Exception as e:
-            return jsonify({
-                "status": "error",
-                "message": str(e)
-            }), 500
-            
         except Exception as e:
             return jsonify({
                 "status": "error",

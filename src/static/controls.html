@@ -5,61 +5,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flux - Control Panel</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-        <link rel="stylesheet" href="styles.css">
-        <style>
-            .control-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr 1fr 1fr;
-                grid-template-rows: auto auto auto auto auto;
-                gap: 2rem 2rem;
-                margin-top: 2rem;
-            }
-            .control-panel {
-                width: 100%;
-                box-shadow: 0 2px 12px 0 rgba(0,0,0,0.08);
-                border-radius: 12px;
-                background: var(--panel-bg, #18191a);
-                padding: 1.5rem 1.2rem;
-                border: 1px solid var(--border-color, #333);
-                min-width: 0;
-            }
-            .panel-toolbar { grid-column: 1 / 5; grid-row: 1; }
-            .panel-placeholder { grid-column: 1 / 3; grid-row: 2; }
-            .panel-media { grid-column: 3 / 5; grid-row: 2; }
-            .panel-playback { grid-column: 1 / 5; grid-row: 3; }
-            .panel-einstellungen { grid-column: 1; grid-row: 4; }
-            .panel-artnet { grid-column: 2; grid-row: 4; }
-            .panel-information { grid-column: 3; grid-row: 4; }
-            .panel-aufzeichnung { grid-column: 4; grid-row: 4; }
-            .panel-console { grid-column: 1 / 5; grid-row: 5; }
-            @media (max-width: 1100px) {
-                .control-grid { grid-template-columns: 1fr 1fr; }
-                .panel-einstellungen { grid-column: 1; }
-                .panel-artnet { grid-column: 2; }
-                .panel-information { grid-column: 1; grid-row: 5; }
-                .panel-aufzeichnung { grid-column: 2; grid-row: 5; }
-                .panel-console { grid-column: 1 / 3; grid-row: 6; }
-            }
-            @media (max-width: 700px) {
-                .control-grid { grid-template-columns: 1fr; }
-                .panel-toolbar,
-                .panel-placeholder,
-                .panel-media,
-                .panel-playback,
-                .panel-einstellungen,
-                .panel-artnet,
-                .panel-information,
-                .panel-aufzeichnung,
-                .panel-console { grid-column: 1 !important; }
-            }
-        </style>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
-    <!-- Menu-Bar wie in config.html -->
-    <div class="menu-bar d-flex align-items-center justify-content-between flex-nowrap px-2"
-        style="gap: 1.2rem; flex-wrap: nowrap;">
+    <!-- Einheitliche Menu-Bar -->
+    <div class="menu-bar d-flex align-items-center justify-content-between flex-nowrap px-2" style="gap: 1.2rem; flex-wrap: nowrap;">
         <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem;">
             <img src="/static/logo.svg" alt="Flux Logo"
                 style="height: 32px; width: auto; display: inline-block; vertical-align: middle;">
@@ -70,6 +22,8 @@
                 style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎨</a>
             <a href="/controls" class="btn btn-primary btn-sm menu-btn" title="Controls"
                 style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎛️</a>
+            <a href="/artnet" class="btn btn-primary btn-sm menu-btn" title="Art-Net"
+                style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">💡</a>
             <a href="/config" class="btn btn-primary btn-sm menu-btn" title="Config"
                 style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">⚙️</a>
             <div style="display: flex; align-items: center; gap: 2rem; margin-left: 2.2rem;">
@@ -97,7 +51,24 @@
     <div class="control-grid" style="margin-top: 2rem;">
         <!-- Placeholder & Media nebeneinander -->
         <div class="control-panel panel-placeholder">
-            <p>Platzhalter</p>
+            <h2>Preview</h2>
+            <div id="previewContainer" style="text-align: center;">
+                <img id="previewStream" src="" alt="Video Preview" style="width: 100%; max-width: 400px; border: 2px solid var(--border-color); border-radius: 8px; background: #000; image-rendering: pixelated; display: block; margin: 0 auto;">
+                <div style="margin-top: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
+                    <div style="margin-bottom: 0.5rem;">
+                        <strong id="previewVideoName">-</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; gap: 1rem;">
+                        <span>Canvas: <strong id="previewCanvasSize">-</strong></span>
+                        <span>Frame: <strong id="previewFrame">0/0</strong></span>
+                    </div>
+                    <div style="margin-top: 0.5rem;">
+                        <div style="width: 100%; height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;">
+                            <div id="previewProgress" style="width: 0%; height: 100%; background: var(--accent-color); transition: width 0.1s;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="control-panel panel-media">
             <h2>Media</h2>
@@ -142,23 +113,6 @@
                 <button class="btn btn-info" style="margin-top: 10px; width: 100%;" onclick="setFPS()">FPS setzen</button>
             </div>
         </div>
-        <div class="control-panel panel-artnet">
-            <h2>Art-Net</h2>
-            <button class="btn btn-secondary" style="width: 100%; margin-bottom: 15px;" onclick="blackout()">⚫ Blackout</button>
-            <div class="input-group">
-                <label>Testmuster:</label>
-                <div class="test-colors" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px;">
-                    <button class="color-btn" style="background: red; color: white;" onclick="testPattern('red')">Rot</button>
-                    <button class="color-btn" style="background: green; color: white;" onclick="testPattern('green')">Grün</button>
-                    <button class="color-btn" style="background: blue; color: white;" onclick="testPattern('blue')">Blau</button>
-                    <button class="color-btn" style="background: white; color: black;" onclick="testPattern('white')">Weiß</button>
-                    <button class="color-btn" style="background: yellow; color: black;" onclick="testPattern('yellow')">Gelb</button>
-                    <button class="color-btn" style="background: cyan; color: black;" onclick="testPattern('cyan')">Cyan</button>
-                    <button class="color-btn" style="background: magenta; color: white;" onclick="testPattern('magenta')">Magenta</button>
-                    <button class="color-btn" style="background: linear-gradient(90deg, red, yellow, green, cyan, blue, magenta); color: white; font-weight: bold;" onclick="testPattern('gradient')">Gradient</button>
-                </div>
-            </div>
-        </div>
         <div class="control-panel panel-information">
             <h2>Information</h2>
             <button class="btn btn-info" style="width: 100%; margin-bottom: 15px;" onclick="loadInfo()">🔄 Info aktualisieren</button>
@@ -189,6 +143,11 @@
 
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+    
+    <!-- Toast Notification (Legacy Support) -->
+    <div id="toast" class="toast" style="display: none; position: fixed; bottom: 20px; right: 20px; padding: 15px 20px; border-radius: 8px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: var(--bg-secondary); border: 1px solid var(--border-color);">
+        <span id="toastMessage"></span>
+    </div>
 
     <!-- Socket.IO Client -->
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
@@ -216,7 +175,7 @@
             });
         }
     </script>
-    <script src="controls.js"></script>
+    <script src="js/controls.js"></script>
 </body>
 
 </html>

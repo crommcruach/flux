@@ -5,6 +5,7 @@ Kompatibel mit VideoPlayer Schnittstelle
 import time
 import threading
 import numpy as np
+import cv2
 from .logger import get_logger
 from .script_generator import ScriptGenerator
 from .artnet_manager import ArtNetManager
@@ -50,6 +51,8 @@ class ScriptPlayer:
         self.total_frames = 0  # Unendlich für Scripts
         self.start_time = 0
         self.frames_processed = 0
+        self.last_frame = None  # Letztes Frame (LED-Punkte) für Preview
+        self.last_video_frame = None  # Kein Video bei Scripts
         
         # Lade Points-Konfiguration mit PointsLoader (ohne Bounds-Validierung für Scripts)
         points_data = PointsLoader.load_points(points_json_path, validate_bounds=False)
@@ -224,6 +227,10 @@ class ScriptPlayer:
                 time.sleep(frame_time)
                 continue
             
+            # Speichere komplettes generiertes Frame für Preview (RGB Format)
+            # Konvertiere RGB zu BGR für OpenCV (für konsistente Darstellung)
+            self.last_video_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            
             # NumPy-optimierte Pixel-Extraktion
             # Erstelle boolean Maske für gültige Koordinaten
             valid_mask = (
@@ -248,6 +255,9 @@ class ScriptPlayer:
             dmx_buffer = np.zeros((len(self.point_coords), 3), dtype=np.uint8)
             dmx_buffer[valid_mask] = rgb_values
             dmx_buffer = dmx_buffer.flatten().tolist()
+            
+            # Speichere letztes Frame für Preview
+            self.last_frame = dmx_buffer.copy()
             
             # Sende über Art-Net (prüfe ob Manager noch existiert UND wir der aktive Player sind)
             if self.artnet_manager and self.is_running and player_lock._active_player is self:
@@ -373,5 +383,5 @@ class ScriptPlayer:
         except Exception as e:
             logger.debug(f"❌ Fehler beim Neuladen von Art-Net: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
             return False

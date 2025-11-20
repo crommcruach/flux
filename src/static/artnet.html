@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flux - Art-Net Control</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- Einheitliche Menu-Bar -->
+    <div class="menu-bar d-flex align-items-center justify-content-between flex-nowrap px-2" style="gap: 1.2rem; flex-wrap: nowrap;">
+        <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem;">
+            <img src="/static/logo.svg" alt="Flux Logo"
+                style="height: 32px; width: auto; display: inline-block; vertical-align: middle;">
+            <span style="font-size: 1.4rem; font-weight: 700; letter-spacing: 1px; margin-left: 0.3rem;">Flux</span>
+        </div>
+        <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem; margin-left: auto;">
+            <a href="/" class="btn btn-primary btn-sm menu-btn" title="Editor"
+                style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎨</a>
+            <a href="/controls" class="btn btn-primary btn-sm menu-btn" title="Controls"
+                style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎛️</a>
+            <a href="/artnet" class="btn btn-primary btn-sm menu-btn" title="Art-Net"
+                style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">💡</a>
+            <a href="/config" class="btn btn-primary btn-sm menu-btn" title="Config"
+                style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">⚙️</a>
+            <div style="display: flex; align-items: center; gap: 2rem; margin-left: 2.2rem;">
+                <div class="form-check form-switch" style="margin-bottom: 0;">
+                    <input class="form-check-input" type="checkbox" id="themeToggle">
+                    <label class="form-check-label" for="themeToggle" id="themeLabel">Dunkel</label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Art-Net Control Container -->
+    <div class="artnet-container">
+        <div class="artnet-panel">
+            <h2 style="margin-bottom: 1.5rem; font-size: 2rem; font-weight: 700;">Art-Net Steuerung</h2>
+            
+            <button class="btn btn-secondary btn-lg" style="width: 100%; margin-bottom: 2rem; padding: 1rem; font-size: 1.1rem; font-weight: 600;" onclick="blackout()">
+                ⚫ Blackout
+            </button>
+            
+            <div class="input-group">
+                <label style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; display: block;">Testmuster:</label>
+                <div class="test-colors">
+                    <button class="color-btn" style="background: red; color: white;" onclick="testPattern('red')">Rot</button>
+                    <button class="color-btn" style="background: green; color: white;" onclick="testPattern('green')">Grün</button>
+                    <button class="color-btn" style="background: blue; color: white;" onclick="testPattern('blue')">Blau</button>
+                    <button class="color-btn" style="background: white; color: black;" onclick="testPattern('white')">Weiß</button>
+                    <button class="color-btn" style="background: yellow; color: black;" onclick="testPattern('yellow')">Gelb</button>
+                    <button class="color-btn" style="background: cyan; color: black;" onclick="testPattern('cyan')">Cyan</button>
+                    <button class="color-btn" style="background: magenta; color: white;" onclick="testPattern('magenta')">Magenta</button>
+                    <button class="color-btn" style="background: linear-gradient(90deg, red, yellow, green, cyan, blue, magenta); color: white; font-weight: bold;" onclick="testPattern('gradient')">Gradient</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        // Theme Management
+        const themeToggle = document.getElementById('themeToggle');
+        const themeLabel = document.getElementById('themeLabel');
+        const body = document.body;
+        
+        function setTheme(theme) {
+            body.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            if (themeLabel) themeLabel.textContent = theme === 'dark' ? 'Dunkel' : 'Hell';
+            if (themeToggle) themeToggle.checked = theme === 'dark';
+        }
+        
+        let savedTheme = localStorage.getItem('theme');
+        if (!savedTheme) {
+            savedTheme = 'dark';
+            localStorage.setItem('theme', 'dark');
+        }
+        setTheme(savedTheme);
+        
+        if (themeToggle) {
+            themeToggle.checked = savedTheme === 'dark';
+            themeToggle.addEventListener('change', () => {
+                setTheme(themeToggle.checked ? 'dark' : 'light');
+            });
+        }
+
+        // Art-Net Control Functions
+        function blackout() {
+            fetch('http://localhost:5000/api/blackout', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Blackout:', data);
+                    showToast('Blackout aktiviert', 'success');
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showToast('Fehler beim Blackout', 'error');
+                });
+        }
+
+        function testPattern(color) {
+            fetch('http://localhost:5000/api/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ color: color })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Test pattern:', color, data);
+                    showToast(`Testmuster ${color} aktiviert`, 'success');
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showToast('Fehler beim Testmuster', 'error');
+                });
+        }
+
+        function showToast(message, type = 'info') {
+            const toastContainer = document.querySelector('.toast-container');
+            const toastId = 'toast-' + Date.now();
+            const bgClass = type === 'success' ? 'bg-success' : type === 'error' ? 'bg-danger' : 'bg-info';
+            
+            const toastHtml = `
+                <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">${message}</div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            `;
+            
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            const toastElement = document.getElementById(toastId);
+            const toast = new bootstrap.Toast(toastElement, { autohide: true, delay: 3000 });
+            toast.show();
+            
+            toastElement.addEventListener('hidden.bs.toast', () => {
+                toastElement.remove();
+            });
+        }
+    </script>
+</body>
+
+</html>

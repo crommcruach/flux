@@ -166,12 +166,12 @@ class ArtNetManager:
         self.test_thread = threading.Thread(target=self._test_pattern_loop, daemon=True)
         self.test_thread.start()
         
-        print("Blackout gesendet")
+        logger.info("Blackout gesendet")
     
     def test_pattern(self, color='red'):
         """Sendet Testmuster (hat Vorrang vor Video)."""
         if not self.is_active:
-            print("Art-Net nicht aktiv!")
+            logger.warning("Art-Net nicht aktiv!")
             return
         
         # Stoppe alten Test-Thread
@@ -195,7 +195,7 @@ class ArtNetManager:
         }
         
         if color not in colors:
-            print(f"Unbekannte Farbe! Verfügbar: {', '.join(colors.keys())}, gradient")
+            logger.warning(f"Unbekannte Farbe! Verfügbar: {', '.join(colors.keys())}, gradient")
             return
         
         r, g, b = colors[color]
@@ -206,7 +206,7 @@ class ArtNetManager:
         self.test_thread = threading.Thread(target=self._test_pattern_loop, daemon=True)
         self.test_thread.start()
         
-        print(f"Testmuster '{color}' gesendet (Video gestoppt)")
+        logger.info(f"Testmuster '{color}' gesendet (Video gestoppt)")
     
     def _gradient_pattern(self):
         """Erzeugt RGB-Farbverlauf über alle Punkte."""

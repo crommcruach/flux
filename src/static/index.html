@@ -15,73 +15,80 @@
        HTML STRUCTURE [Lines 171-245]
        ======================================== -->
 
-  <!-- Top Menu Bar -->
-  <div class="menu-bar d-flex align-items-center justify-content-between px-2" style="gap: 1rem;">
-    <!-- Logo & Title -->
-    <div class="d-flex align-items-center" style="gap: 0.5rem; min-width: 180px;">
+  <!-- Top Menu Bar (einheitlich) -->
+  <div class="menu-bar d-flex align-items-center justify-content-between flex-nowrap px-2" style="gap: 1.2rem; flex-wrap: nowrap;">
+    <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem;">
       <img src="/static/logo.svg" alt="Flux Logo"
         style="height: 32px; width: auto; display: inline-block; vertical-align: middle;">
       <span style="font-size: 1.4rem; font-weight: 700; letter-spacing: 1px; margin-left: 0.3rem;">Flux</span>
     </div>
-
-    <!-- Projektname Input -->
-    <input type="text" id="projectName" class="form-control form-control-sm" placeholder="Projektname"
-      value="Mein Projekt" style="width: 150px; margin-left: 0.5rem; margin-right: 0.5rem;">
-
-    <!-- Projekt Dropdown -->
-    <div class="dropdown">
-      <button class="btn btn-light btn-sm dropdown-toggle" type="button" id="projektDropdown" data-bs-toggle="dropdown"
-        aria-expanded="false">
-        Projekt
-      </button>
-      <ul class="dropdown-menu" aria-labelledby="projektDropdown">
-        <li><a class="dropdown-item" href="#" onclick="saveProjectToServer()">Speichern auf Server</a></li>
-        <li><a class="dropdown-item" href="#" onclick="saveProject()">Lokal herunterladen</a></li>
-        <li><a class="dropdown-item" href="#" onclick="document.getElementById('projectFileInput').click()">Lokale Datei
-            laden</a></li>
-      </ul>
-      <input type="file" id="projectFileInput" class="form-control form-control-sm" accept=".json"
-        style="display: none;">
-    </div>
-    <!-- Canvas Size -->
-    <div class="menu-section">
-      <label>Canvas:</label>
-      <select id="canvasSize" class="form-select form-select-sm" style="width: 140px;">
-        <option value="1024x768">1024 × 768</option>
-        <option value="1280x720">1280 × 720</option>
-        <option value="1920x1080">1920 × 1080</option>
-        <option value="2560x1440">2560 × 1440</option>
-        <option value="3840x2160">3840 × 2160</option>
-        <option value="custom">Benutzerdefiniert...</option>
-      </select>
-      <input type="number" id="customWidth" class="form-control form-control-sm" placeholder="Breite"
-        style="width: 80px; display: none;" min="100" max="10000">
-      <input type="number" id="customHeight" class="form-control form-control-sm" placeholder="Höhe"
-        style="width: 80px; display: none;" min="100" max="10000">
-      <button id="customApply" class="btn btn-primary btn-sm menu-btn" style="display: none;"
-        onclick="applyCustomCanvasSize()">✓</button>
-
-    </div>
-    <!-- Background Image -->
-    <div class="menu-section">
-      <label>Hintergrund:</label>
-      <input type="file" id="bgImageInput" class="form-control form-control-sm" accept="image/*" style="width: 260px;">
-      <button class="btn btn-secondary btn-sm menu-btn" onclick="clearBackgroundImage()"
-        title="Bild entfernen" style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🗑️</button>
-    </div>
-
-    <!-- Theme Toggle & Controls Link (right side) -->
-    <div class="menu-section right">
-      <a href="/controls" class="btn btn-primary btn-sm menu-btn" style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Controls">🎛️</a>
-      <a href="/config" class="btn btn-primary btn-sm menu-btn" style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Config">⚙️</a>
-      <div class="form-check form-switch">
-        <input class="form-check-input" type="checkbox" id="themeToggle">
-        <label class="form-check-label" for="themeToggle" id="themeLabel">Hell</label>
+    <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem; margin-left: auto;">
+      <a href="/" class="btn btn-primary btn-sm menu-btn" title="Editor"
+        style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎨</a>
+      <a href="/controls" class="btn btn-primary btn-sm menu-btn" title="Controls"
+        style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎛️</a>
+      <a href="/artnet" class="btn btn-primary btn-sm menu-btn" title="Art-Net"
+        style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">💡</a>
+      <a href="/config" class="btn btn-primary btn-sm menu-btn" title="Config"
+        style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">⚙️</a>
+      <div style="display: flex; align-items: center; gap: 2rem; margin-left: 2.2rem;">
+        <div class="form-check form-switch" style="margin-bottom: 0;">
+          <input class="form-check-input" type="checkbox" id="themeToggle">
+          <label class="form-check-label" for="themeToggle" id="themeLabel">Dunkel</label>
+        </div>
       </div>
     </div>
   </div>
 
   <div class="app-container">
+    <!-- Sub-Header für Canvas-Settings -->
+    <div class="canvas-settings-bar d-flex align-items-center justify-content-between px-2" style="gap: 1rem; background: var(--panel-bg); border-bottom: 1px solid var(--border-color); padding: 0.5rem 1rem; grid-column: 2;">
+      <!-- Projektname Input -->
+      <input type="text" id="projectName" class="form-control form-control-sm" placeholder="Projektname"
+        value="Mein Projekt" style="width: 150px;">
+
+      <!-- Projekt Dropdown -->
+      <div class="dropdown">
+        <button class="btn btn-light btn-sm dropdown-toggle" type="button" id="projektDropdown" data-bs-toggle="dropdown"
+          aria-expanded="false">
+          Projekt
+        </button>
+        <ul class="dropdown-menu" aria-labelledby="projektDropdown">
+          <li><a class="dropdown-item" href="#" onclick="saveProjectToServer()">Speichern auf Server</a></li>
+          <li><a class="dropdown-item" href="#" onclick="saveProject()">Lokal herunterladen</a></li>
+          <li><a class="dropdown-item" href="#" onclick="document.getElementById('projectFileInput').click()">Lokale Datei laden</a></li>
+        </ul>
+        <input type="file" id="projectFileInput" class="form-control form-control-sm" accept=".json"
+          style="display: none;">
+      </div>
+
+      <!-- Canvas Size -->
+      <div class="d-flex align-items-center" style="gap: 0.5rem;">
+        <label style="margin: 0; white-space: nowrap;">Canvas:</label>
+        <select id="canvasSize" class="form-select form-select-sm" style="width: 140px;">
+          <option value="1024x768">1024 × 768</option>
+          <option value="1280x720">1280 × 720</option>
+          <option value="1920x1080">1920 × 1080</option>
+          <option value="2560x1440">2560 × 1440</option>
+          <option value="3840x2160">3840 × 2160</option>
+          <option value="custom">Benutzerdefiniert...</option>
+        </select>
+        <input type="number" id="customWidth" class="form-control form-control-sm" placeholder="Breite"
+          style="width: 80px; display: none;" min="100" max="10000">
+        <input type="number" id="customHeight" class="form-control form-control-sm" placeholder="Höhe"
+          style="width: 80px; display: none;" min="100" max="10000">
+        <button id="customApply" class="btn btn-primary btn-sm" style="display: none;"
+          onclick="applyCustomCanvasSize()">✓</button>
+      </div>
+
+      <!-- Background Image -->
+      <div class="d-flex align-items-center" style="gap: 0.5rem;">
+        <label style="margin: 0; white-space: nowrap;">Hintergrund:</label>
+        <input type="file" id="bgImageInput" class="form-control form-control-sm" accept="image/*" style="width: 200px;">
+        <button class="btn btn-secondary btn-sm" onclick="clearBackgroundImage()"
+          title="Bild entfernen" style="width: 28px; min-width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center;">🗑️</button>
+      </div>
+    </div>
     <!-- Toolbar (links) -->
     <div class="toolbar">
       <div class="toolbar-section">
@@ -249,7 +256,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="js/stroke-font.js"></script>
-  <script src="editor.js"></script>
+  <script src="js/editor.js"></script>
 </body>
 
 </html>

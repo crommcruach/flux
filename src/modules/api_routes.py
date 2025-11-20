@@ -4,36 +4,41 @@ API Routes - Playback, Settings, Art-Net Endpoints
 from flask import jsonify, request
 
 
-def register_playback_routes(app, player):
+def register_playback_routes(app, dmx_controller):
     """Registriert Playback-Control Endpunkte."""
     
     @app.route('/api/play', methods=['POST'])
     def play():
         """Startet Video-Wiedergabe."""
+        player = dmx_controller.player
         player.start()
         return jsonify({"status": "success", "message": "Video gestartet"})
     
     @app.route('/api/stop', methods=['POST'])
     def stop():
         """Stoppt Video-Wiedergabe."""
+        player = dmx_controller.player
         player.stop()
         return jsonify({"status": "success", "message": "Video gestoppt"})
     
     @app.route('/api/pause', methods=['POST'])
     def pause():
         """Pausiert Wiedergabe."""
+        player = dmx_controller.player
         player.pause()
         return jsonify({"status": "success", "message": "Video pausiert"})
     
     @app.route('/api/resume', methods=['POST'])
     def resume():
         """Setzt Wiedergabe fort."""
+        player = dmx_controller.player
         player.resume()
         return jsonify({"status": "success", "message": "Wiedergabe fortgesetzt"})
     
     @app.route('/api/restart', methods=['POST'])
     def restart():
         """Startet Video neu."""
+        player = dmx_controller.player
         player.restart()
         return jsonify({"status": "success", "message": "Video neu gestartet"})
     
@@ -58,12 +63,13 @@ def register_playback_routes(app, player):
         return jsonify({"status": "success", "message": "Anwendung wird neu gestartet..."})
 
 
-def register_settings_routes(app, player):
+def register_settings_routes(app, dmx_controller):
     """Registriert Settings-Endpunkte."""
     
     @app.route('/api/brightness', methods=['POST'])
     def set_brightness():
         """Setzt Helligkeit."""
+        player = dmx_controller.player
         data = request.get_json()
         value = data.get('value', 100)
         player.set_brightness(value)
@@ -72,6 +78,7 @@ def register_settings_routes(app, player):
     @app.route('/api/speed', methods=['POST'])
     def set_speed():
         """Setzt Wiedergabe-Geschwindigkeit."""
+        player = dmx_controller.player
         data = request.get_json()
         value = data.get('value', 1.0)
         player.set_speed(value)
@@ -80,6 +87,7 @@ def register_settings_routes(app, player):
     @app.route('/api/fps', methods=['POST'])
     def set_fps():
         """Setzt FPS-Limit."""
+        player = dmx_controller.player
         data = request.get_json()
         value = data.get('value')
         player.set_fps(value)
@@ -88,24 +96,27 @@ def register_settings_routes(app, player):
     @app.route('/api/loop', methods=['POST'])
     def set_loop():
         """Setzt Loop-Limit."""
+        player = dmx_controller.player
         data = request.get_json()
         value = data.get('value', 0)
         player.set_loop_limit(value)
         return jsonify({"status": "success", "loop_limit": player.max_loops})
 
 
-def register_artnet_routes(app, player):
+def register_artnet_routes(app, dmx_controller):
     """Registriert Art-Net Endpunkte."""
     
     @app.route('/api/blackout', methods=['POST'])
     def blackout():
         """Aktiviert Blackout."""
+        player = dmx_controller.player
         player.blackout()
         return jsonify({"status": "success", "message": "Blackout aktiviert"})
     
     @app.route('/api/test', methods=['POST'])
     def test_pattern():
         """Sendet Testmuster."""
+        player = dmx_controller.player
         data = request.get_json() or {}
         color = data.get('color', 'red')
         player.test_pattern(color)
@@ -114,6 +125,7 @@ def register_artnet_routes(app, player):
     @app.route('/api/ip', methods=['POST'])
     def set_ip():
         """Setzt Art-Net Ziel-IP."""
+        player = dmx_controller.player
         data = request.get_json()
         ip = data.get('ip')
         if ip:
@@ -125,6 +137,7 @@ def register_artnet_routes(app, player):
     def get_ip():
         """Gibt aktuelle Art-Net Ziel-IP zurück."""
         try:
+            player = dmx_controller.player
             return jsonify({"status": "success", "ip": player.target_ip})
         except Exception as e:
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
@@ -133,6 +146,7 @@ def register_artnet_routes(app, player):
     def set_universe():
         """Setzt Art-Net Start-Universum."""
         try:
+            player = dmx_controller.player
             data = request.get_json()
             universe = data.get('universe')
             if universe is not None:
@@ -149,17 +163,19 @@ def register_artnet_routes(app, player):
     def get_universe():
         """Gibt aktuelles Art-Net Start-Universum zurück."""
         try:
+            player = dmx_controller.player
             return jsonify({"status": "success", "universe": player.start_universe})
         except Exception as e:
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
 
 
-def register_info_routes(app, player):
+def register_info_routes(app, dmx_controller):
     """Registriert Info-Endpunkte."""
     
     @app.route('/api/status', methods=['GET'])
     def status():
         """Gibt aktuellen Status zurück."""
+        player = dmx_controller.player
         return jsonify({
             "status": player.status(),
             "is_playing": player.is_playing,
@@ -174,12 +190,156 @@ def register_info_routes(app, player):
     @app.route('/api/info', methods=['GET'])
     def info():
         """Gibt Player-Informationen zurück."""
+        player = dmx_controller.player
         return jsonify(player.get_info())
     
     @app.route('/api/stats', methods=['GET'])
     def stats():
         """Gibt Live-Statistiken zurück."""
+        player = dmx_controller.player
         return jsonify(player.get_stats())
+    
+    @app.route('/api/preview/stream')
+    def preview_stream():
+        """MJPEG Video-Stream des aktuellen Frames."""
+        from flask import Response
+        import cv2
+        import numpy as np
+        import time
+        
+        # WICHTIG: Keine Logger/Print-Aufrufe vor oder im Generator!
+        # Dies würde "write() before start_response" Fehler verursachen
+        
+        def generate_frames():
+            """Generator für MJPEG-Stream."""
+            frame_count = 0
+            while True:
+                try:
+                    frame_count += 1
+                    # Hole aktuellen Player dynamisch
+                    player = dmx_controller.player
+                    # Hole aktuelles Video-Frame (komplettes Bild)
+                    if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
+                        # Verwende komplettes Video-Frame (bereits in BGR)
+                        frame = player.last_video_frame.copy()
+                    elif not hasattr(player, 'last_frame') or player.last_frame is None:
+                        # Schwarzes Bild wenn kein Frame vorhanden
+                        canvas_width = getattr(player, 'canvas_width', 320)
+                        canvas_height = getattr(player, 'canvas_height', 180)
+                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+                    else:
+                        # Fallback: Rekonstruiere Bild aus LED-Punkten
+                        frame_data = player.last_frame
+                        canvas_width = getattr(player, 'canvas_width', 320)
+                        canvas_height = getattr(player, 'canvas_height', 180)
+                        point_coords = getattr(player, 'point_coords', None)
+                        
+                        # Erstelle schwarzes Bild
+                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+                        
+                        # Zeichne die Punkte auf das Bild
+                        if point_coords is not None and len(frame_data) >= len(point_coords) * 3:
+                            for i in range(len(point_coords)):
+                                x, y = point_coords[i]
+                                if 0 <= y < canvas_height and 0 <= x < canvas_width:
+                                    r = frame_data[i * 3]
+                                    g = frame_data[i * 3 + 1]
+                                    b = frame_data[i * 3 + 2]
+                                    # BGR Format für OpenCV
+                                    frame[y, x] = [b, g, r]
+                    
+                    # Skaliere auf vernünftige Preview-Größe (optional)
+                    max_width = 640
+                    if frame.shape[1] > max_width:
+                        scale = max_width / frame.shape[1]
+                        new_width = int(frame.shape[1] * scale)
+                        new_height = int(frame.shape[0] * scale)
+                        frame = cv2.resize(frame, (new_width, new_height))
+                    
+                    # Encode als JPEG
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    if not ret:
+                        time.sleep(0.033)  # ~30 FPS
+                        continue
+                    
+                    frame_bytes = buffer.tobytes()
+                    
+                    # MJPEG Format: --frame boundary
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    
+                    # Limitiere auf ~30 FPS
+                    time.sleep(0.033)
+                
+                except Exception as e:
+                    # Bei Fehler: Schwarzes Bild
+                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    if ret:
+                        frame_bytes = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    time.sleep(0.1)
+        
+        return Response(generate_frames(), 
+                       mimetype='multipart/x-mixed-replace; boundary=frame')
+    
+    @app.route('/api/preview/debug')
+    def preview_debug():
+        """Debug-Info über Player-Zustand."""
+        info = {
+            "has_last_video_frame": hasattr(player, 'last_video_frame'),
+            "last_video_frame_is_none": hasattr(player, 'last_video_frame') and player.last_video_frame is None,
+            "has_last_frame": hasattr(player, 'last_frame'),
+            "last_frame_is_none": hasattr(player, 'last_frame') and player.last_frame is None,
+            "is_playing": getattr(player, 'is_playing', False),
+            "canvas_width": getattr(player, 'canvas_width', 'N/A'),
+            "canvas_height": getattr(player, 'canvas_height', 'N/A'),
+            "point_coords_len": len(getattr(player, 'point_coords', [])),
+        }
+        if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
+            info["video_frame_shape"] = player.last_video_frame.shape
+        if hasattr(player, 'last_frame') and player.last_frame is not None:
+            info["last_frame_len"] = len(player.last_frame)
+        return jsonify(info)
+    
+    @app.route('/api/preview/test')
+    def preview_test():
+        """Test-Endpoint: Zeigt ein farbiges Testbild."""
+        from flask import Response
+        import cv2
+        import numpy as np
+        import time
+        
+        def generate_test_frames():
+            """Generiert bunte Testbilder."""
+            colors = [
+                (255, 0, 0),    # Blau
+                (0, 255, 0),    # Grün
+                (0, 0, 255),    # Rot
+                (255, 255, 0),  # Cyan
+                (255, 0, 255),  # Magenta
+                (0, 255, 255),  # Gelb
+            ]
+            color_idx = 0
+            
+            while True:
+                # Erstelle farbiges Testbild
+                frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                frame[:, :] = colors[color_idx]
+                color_idx = (color_idx + 1) % len(colors)
+                
+                # Encode als JPEG
+                ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if ret:
+                    frame_bytes = buffer.tobytes()
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                
+                time.sleep(0.5)  # Wechsel alle 0.5 Sekunden
+        
+        return Response(generate_test_frames(), 
+                       mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 def register_recording_routes(app, player):
@@ -252,7 +412,7 @@ def register_cache_routes(app):
         })
 
 
-def register_script_routes(app, player, config):
+def register_script_routes(app, player, dmx_controller, config):
     """Registriert Script-Management Endpunkte."""
     
     @app.route('/api/scripts', methods=['GET'])
@@ -273,7 +433,12 @@ def register_script_routes(app, player, config):
     @app.route('/api/load_script', methods=['POST'])
     def load_script():
         """Lädt und startet ein Script."""
+        import sys
+        import io
         from .script_player import ScriptPlayer
+        from ..logger import get_logger
+        
+        logger = get_logger(__name__)
         
         data = request.get_json()
         script_name = data.get('script')
@@ -287,7 +452,14 @@ def register_script_routes(app, player, config):
         if not script_name.endswith('.py'):
             script_name += '.py'
         
+        # Umleite stdout/stderr um print() während Script-Start zu verhindern
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        
         try:
+            sys.stdout = io.StringIO()
+            sys.stderr = io.StringIO()
+            
             # Stoppe aktuellen Player
             was_playing = player.is_playing
             if was_playing:
@@ -310,11 +482,20 @@ def register_script_routes(app, player, config):
             # Starte Script
             new_player.start()
             
+            # Warte kurz damit Thread initialisiert (und potentielle stdout writes passieren)
+            import time
+            time.sleep(0.1)
+            
             # Info
             info = new_player.get_info()
             
-            # TODO: Player-Referenz in rest_api aktualisieren
-            # Das muss im Haupt-Code gemacht werden, hier nur Response
+            # Aktualisiere Player-Referenz in dmx_controller
+            if dmx_controller:
+                dmx_controller.player = new_player
+            
+            # WICHTIG: stdout/stderr VOR return wiederherstellen!
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
             
             return jsonify({
                 "status": "success",
@@ -324,6 +505,10 @@ def register_script_routes(app, player, config):
             
         except Exception as e:
             import traceback
+            # Stelle stdout/stderr wieder her vor dem return
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+            logger.error(traceback.format_exc())
             return jsonify({
                 "status": "error",
                 "message": str(e),
@@ -389,15 +574,25 @@ def register_console_command_routes(app, player, dmx_controller, rest_api, video
             result_container = {'continue_loop': True, 'new_player': None, 'done': False}
             
             def execute_cli_command():
+                old_stdout = sys.stdout
+                old_stderr = sys.stderr
                 try:
+                    # Umleite stdout/stderr zu StringIO um print() zu isolieren
+                    sys.stdout = io.StringIO()
+                    sys.stderr = io.StringIO()
+                    
                     cli_handler = CLIHandler(player, dmx_controller, rest_api, video_dir, data_dir, config)
                     continue_loop, new_player = cli_handler.execute_command(command, args)
                     result_container['continue_loop'] = continue_loop
                     result_container['new_player'] = new_player
                 except Exception as e:
                     import traceback
-                    traceback.print_exc()
+                    from ..logger import get_logger
+                    logger = get_logger(__name__)
+                    logger.error(traceback.format_exc())
                 finally:
+                    sys.stdout = old_stdout
+                    sys.stderr = old_stderr
                     result_container['done'] = True
             
             # Starte in separatem Thread

@@ -6,13 +6,16 @@ import sys
 import time
 import json
 from .constants import VIDEO_EXTENSIONS, AFFIRMATIVE_RESPONSES
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class CLIHandler:
     """Verarbeitet CLI-Befehle und delegiert an entsprechende Komponenten."""
     
     def __init__(self, player, dmx_controller, rest_api, video_dir, data_dir, config):
-        self.player = player
+        # Nutze dmx_controller für dynamischen Player-Zugriff
         self.dmx_controller = dmx_controller
         self.rest_api = rest_api
         self.video_dir = video_dir
@@ -25,6 +28,11 @@ class CLIHandler:
         self.current_script_name = None
         self.video_list_cache = None
         self.script_list_cache = None
+    
+    @property
+    def player(self):
+        """Gibt aktuellen Player dynamisch zurück."""
+        return self.dmx_controller.player
     
     def execute_command(self, command, args=None):
         """
@@ -141,8 +149,8 @@ class CLIHandler:
             return (False, None)
         
         else:
-            print(f"Unbekannter Befehl: {command}")
-            print("Gib 'help' ein für alle Befehle")
+            logger.warning(f"Unbekannter Befehl: {command}")
+            logger.info("Gib 'help' ein für alle Befehle")
         
         return (True, None)
     
@@ -159,7 +167,7 @@ class CLIHandler:
         video_name = command.split(':', 1)[1].strip()
         
         if not video_name:
-            print("Verwendung: video:<name>")
+            logger.info("Verwendung: video:<name>")
             return (True, None)
         
         # Sammle alle Videos
@@ -181,16 +189,16 @@ class CLIHandler:
                 matching.append(v)
         
         if not matching:
-            print(f"Kein Video gefunden mit: {video_name}")
+            logger.warning(f"Kein Video gefunden mit: {video_name}")
             return (True, None)
         
         if len(matching) > 1:
-            print(f"Mehrere Videos gefunden:")
+            logger.info(f"Mehrere Videos gefunden:")
             for v in matching:
                 # Zeige relativen Pfad zum video_dir für bessere Übersicht
                 rel_path = os.path.relpath(v, self.video_dir)
-                print(f"  - {rel_path}")
-            print("Bitte spezifischer wählen (z.B. 'video:kanal_1/test' oder kompletter Pfad).")
+                logger.info(f"  - {rel_path}")
+            logger.info("Bitte spezifischer wählen (z.B. 'video:kanal_1/test' oder kompletter Pfad).")
             return (True, None)
         
         # Stoppe aktuellen Player
@@ -198,24 +206,29 @@ class CLIHandler:
             self.player.stop()
             time.sleep(0.5)
         
-        # Prüfe ob aktueller Player ein VideoPlayer ist
+        # Prüfe ob aktueller Player ein VideoPlayer oder ScriptPlayer ist
         from .video_player import VideoPlayer
-        from .script_player import ScriptPlayer
         
-        if isinstance(self.player, ScriptPlayer):
-            # Erstelle neuen VideoPlayer
+        current_player = self.dmx_controller.player
+        
+        # Prüfe ob ScriptPlayer (hat kein load_video) oder VideoPlayer (hat load_video)
+        if not hasattr(current_player, 'load_video'):
+            # ScriptPlayer - Erstelle neuen VideoPlayer
             new_player = VideoPlayer(
                 matching[0],
-                self.player.points_json_path,
-                self.player.target_ip,
-                self.player.start_universe,
-                self.player.fps_limit,
+                current_player.points_json_path,
+                current_player.target_ip,
+                current_player.start_universe,
+                current_player.fps_limit,
                 self.config
             )
             
             # Übernehme Einstellungen
-            new_player.brightness = self.player.brightness
-            new_player.speed_factor = self.player.speed_factor
+            new_player.brightness = current_player.brightness
+            new_player.speed_factor = current_player.speed_factor
+            
+            # Aktualisiere Player-Referenz SOFORT
+            self.dmx_controller.player = new_player
             
             # Starte Video
             new_player.start()
@@ -223,14 +236,12 @@ class CLIHandler:
             # Tracking
             self.current_video_path = matching[0]
             self.current_script_name = None
-            
-            return (True, new_player)
         else:
-            # Normales Video laden
-            if self.player.load_video(matching[0]):
+            # VideoPlayer - Normales Video laden
+            if current_player.load_video(matching[0]):
                 self.current_video_path = matching[0]
                 self.current_script_name = None
-                self.player.start()
+                current_player.start()
         
         return (True, None)
     
@@ -267,7 +278,7 @@ class CLIHandler:
         if self.current_video_path:
             videos = self._get_all_videos()
             if not videos:
-                print("Keine Videos verfügbar")
+                logger.info("Keine Videos verfügbar")
                 return (True, None)
             
             try:
@@ -284,14 +295,14 @@ class CLIHandler:
                 if self.player.load_video(next_video):
                     self.current_video_path = next_video
                     self.player.start()
-                    print(f"Nächstes Video: {os.path.basename(next_video)}")
+                    logger.info(f"Nächstes Video: {os.path.basename(next_video)}")
             except ValueError:
-                print("Aktuelles Video nicht in Liste gefunden")
+                logger.info("Aktuelles Video nicht in Liste gefunden")
         
         elif self.current_script_name:
             scripts = self._get_all_scripts()
             if not scripts:
-                print("Keine Scripts verfügbar")
+                logger.info("Keine Scripts verfügbar")
                 return (True, None)
             
             try:
@@ -302,9 +313,9 @@ class CLIHandler:
                 # Lade nächstes Script
                 return self._handle_load_script(f"script:{next_script.replace('.py', '')}")
             except ValueError:
-                print("Aktuelles Script nicht in Liste gefunden")
+                logger.info("Aktuelles Script nicht in Liste gefunden")
         else:
-            print("Kein Video oder Script aktiv")
+            logger.info("Kein Video oder Script aktiv")
         
         return (True, None)
     
@@ -314,7 +325,7 @@ class CLIHandler:
         if self.current_video_path:
             videos = self._get_all_videos()
             if not videos:
-                print("Keine Videos verfügbar")
+                logger.info("Keine Videos verfügbar")
                 return (True, None)
             
             try:
@@ -331,14 +342,14 @@ class CLIHandler:
                 if self.player.load_video(prev_video):
                     self.current_video_path = prev_video
                     self.player.start()
-                    print(f"Vorheriges Video: {os.path.basename(prev_video)}")
+                    logger.info(f"Vorheriges Video: {os.path.basename(prev_video)}")
             except ValueError:
-                print("Aktuelles Video nicht in Liste gefunden")
+                logger.info("Aktuelles Video nicht in Liste gefunden")
         
         elif self.current_script_name:
             scripts = self._get_all_scripts()
             if not scripts:
-                print("Keine Scripts verfügbar")
+                logger.info("Keine Scripts verfügbar")
                 return (True, None)
             
             try:
@@ -349,9 +360,9 @@ class CLIHandler:
                 # Lade vorheriges Script
                 return self._handle_load_script(f"script:{prev_script.replace('.py', '')}")
             except ValueError:
-                print("Aktuelles Script nicht in Liste gefunden")
+                logger.info("Aktuelles Script nicht in Liste gefunden")
         else:
-            print("Kein Video oder Script aktiv")
+            logger.info("Kein Video oder Script aktiv")
         
         return (True, None)
     
@@ -360,7 +371,7 @@ class CLIHandler:
     def _handle_api(self, args):
         """Steuert REST API."""
         if not args:
-            print("Verwendung: api start [port] | api stop")
+            logger.info("Verwendung: api start [port] | api stop")
             return
         
         if args == "start":
@@ -370,7 +381,7 @@ class CLIHandler:
         elif args == "stop":
             self.rest_api.stop()
         else:
-            print("Verwendung: api start [port] | api stop")
+            logger.info("Verwendung: api start [port] | api stop")
     
     # === Punkte-Verwaltung ===
     
@@ -395,7 +406,7 @@ class CLIHandler:
             return self._handle_points_reload()
         
         else:
-            print("Verwendung: points list | points validate [name] | points switch <name> | points reload")
+            logger.info("Verwendung: points list | points validate [name] | points switch <name> | points reload")
             return None
     
     def _handle_points_validate(self, args):
@@ -409,32 +420,32 @@ class CLIHandler:
             matching = [f for f in json_files if search_name.lower() in f.lower()]
             if matching:
                 file_path = os.path.join(self.data_dir, matching[0])
-                print(f"\nValidiere: {matching[0]}")
+                logger.info(f"\nValidiere: {matching[0]}")
                 is_valid, message, errors, data = validate_points_file(file_path)
                 
                 if is_valid:
-                    print(f"✓ {message}")
+                    logger.info(f"✓ {message}")
                 else:
-                    print(f"✗ {message}")
+                    logger.warning(f"✗ {message}")
                     if errors:
-                        print("\nFehler:")
+                        logger.warning("\nFehler:")
                         for error in errors:
-                            print(f"  • {error}")
+                            logger.warning(f"  • {error}")
             else:
-                print(f"Keine Punkte-Liste gefunden mit: {search_name}")
+                logger.warning(f"Keine Punkte-Liste gefunden mit: {search_name}")
         else:
             # Validiere aktuelle Liste
-            print(f"\nValidiere: {os.path.basename(self.player.points_json_path)}")
+            logger.info(f"\nValidiere: {os.path.basename(self.player.points_json_path)}")
             is_valid, message, errors, data = validate_points_file(self.player.points_json_path)
             
             if is_valid:
-                print(f"✓ {message}")
+                logger.info(f"✓ {message}")
             else:
-                print(f"✗ {message}")
+                logger.warning(f"✗ {message}")
                 if errors:
-                    print("\nFehler:")
+                    logger.warning("\nFehler:")
                     for error in errors:
-                        print(f"  • {error}")
+                        logger.warning(f"  • {error}")
     
     def _handle_points_switch(self, args):
         """Wechselt Punkte-Liste."""
@@ -442,7 +453,7 @@ class CLIHandler:
         
         parts = args.split(maxsplit=1)
         if len(parts) < 2:
-            print("Verwendung: points switch <name>")
+            logger.info("Verwendung: points switch <name>")
             return None
         
         search_name = parts[1]
@@ -450,7 +461,7 @@ class CLIHandler:
         matching = [f for f in json_files if search_name.lower() in f.lower()]
         
         if not matching:
-            print(f"Keine Punkte-Liste gefunden mit: {search_name}")
+            logger.warning(f"Keine Punkte-Liste gefunden mit: {search_name}")
             return None
         
         new_points_path = os.path.join(self.data_dir, matching[0])
@@ -471,16 +482,16 @@ class CLIHandler:
             new_player.speed_factor = self.player.speed_factor
             new_player.max_loops = self.player.max_loops
             
-            print(f"✓ Punkte-Liste gewechselt: {matching[0]}")
-            print(f"  Anzahl Punkte: {new_player.total_points}")
-            print(f"  Benötigte Universen: {new_player.required_universes}")
+            logger.info(f"✓ Punkte-Liste gewechselt: {matching[0]}")
+            logger.info(f"  Anzahl Punkte: {new_player.total_points}")
+            logger.info(f"  Benötigte Universen: {new_player.required_universes}")
             
             if was_playing:
                 new_player.start()
             
             return new_player
         except Exception as e:
-            print(f"Fehler beim Laden der Punkte-Liste: {e}")
+            logger.error(f"Fehler beim Laden der Punkte-Liste: {e}")
             return None
     
     def _handle_points_reload(self):
@@ -505,16 +516,16 @@ class CLIHandler:
             new_player.speed_factor = self.player.speed_factor
             new_player.max_loops = self.player.max_loops
             
-            print(f"✓ Punkte-Liste neu geladen: {os.path.basename(current_points_path)}")
-            print(f"  Anzahl Punkte: {new_player.total_points}")
-            print(f"  Benötigte Universen: {new_player.required_universes}")
+            logger.info(f"✓ Punkte-Liste neu geladen: {os.path.basename(current_points_path)}")
+            logger.info(f"  Anzahl Punkte: {new_player.total_points}")
+            logger.info(f"  Benötigte Universen: {new_player.required_universes}")
             
             if was_playing:
                 new_player.start()
             
             return new_player
         except Exception as e:
-            print(f"Fehler beim Neuladen der Punkte-Liste: {e}")
+            logger.error(f"Fehler beim Neuladen der Punkte-Liste: {e}")
             return None
     
     # === Einstellungen ===
@@ -524,21 +535,21 @@ class CLIHandler:
         if args:
             self.player.set_fps(args)
         else:
-            print("Verwendung: fps <wert>")
+            logger.info("Verwendung: fps <wert>")
     
     def _handle_speed(self, args):
         """Setzt Geschwindigkeit."""
         if args:
             self.player.set_speed(args)
         else:
-            print("Verwendung: speed <faktor>")
+            logger.info("Verwendung: speed <faktor>")
     
     def _handle_brightness(self, args):
         """Setzt Helligkeit."""
         if args:
             self.player.set_brightness(args)
         else:
-            print("Verwendung: brightness <0-100>")
+            logger.info("Verwendung: brightness <0-100>")
     
     def _handle_loop(self, args):
         """Setzt Loop-Limit."""
@@ -546,11 +557,11 @@ class CLIHandler:
             try:
                 limit = int(args)
                 self.player.set_loop_limit(limit)
-                print(f"Loop-Limit gesetzt: {limit} (0 = unendlich)")
+                logger.info(f"Loop-Limit gesetzt: {limit} (0 = unendlich)")
             except ValueError:
-                print("Ungültiger Wert! Verwende eine Zahl.")
+                logger.warning("Ungültiger Wert! Verwende eine Zahl.")
         else:
-            print("Verwendung: loop <anzahl>")
+            logger.info("Verwendung: loop <anzahl>")
     
     # === Art-Net ===
     
@@ -563,39 +574,39 @@ class CLIHandler:
         """Setzt oder zeigt Ziel-IP."""
         if args:
             self.player.target_ip = args
-            print(f"Ziel-IP gesetzt: {args}")
-            print("HINWEIS: Starte Video neu für Änderung")
+            logger.info(f"Ziel-IP gesetzt: {args}")
+            logger.info("HINWEIS: Starte Video neu für Änderung")
         else:
-            print(f"Aktuelle IP: {self.player.target_ip}")
+            logger.info(f"Aktuelle IP: {self.player.target_ip}")
     
     def _handle_universe(self, args):
         """Setzt oder zeigt Start-Universum."""
         if args:
             try:
                 self.player.start_universe = int(args)
-                print(f"Start-Universum gesetzt: {args}")
-                print("HINWEIS: Starte Video neu für Änderung")
+                logger.info(f"Start-Universum gesetzt: {args}")
+                logger.info("HINWEIS: Starte Video neu für Änderung")
             except ValueError:
-                print("Ungültiger Wert!")
+                logger.warning("Ungültiger Wert!")
         else:
-            print(f"Aktuelles Start-Universum: {self.player.start_universe}")
+            logger.info(f"Aktuelles Start-Universum: {self.player.start_universe}")
     
     def _handle_artnet(self, args):
         """Verwaltet Art-Net Konfiguration (Subcommands: map, show)."""
         if not args:
-            print("❌ Verwendung: artnet <subcommand> [args]")
-            print("")
-            print("Subcommands:")
-            print("  artnet map <format> <universes>  - Setzt RGB-Kanal-Reihenfolge")
-            print("  artnet show                      - Zeigt aktuelle Kanal-Mappings")
-            print("")
-            print("Formate: RGB, GRB, BGR, RBG, GBR, BRG")
-            print("")
-            print("Beispiele:")
-            print("  artnet map rgb 0-4       - Universen 0-4 auf RGB setzen")
-            print("  artnet map grb 5         - Universum 5 auf GRB setzen")
-            print("  artnet map bgr 6-10      - Universen 6-10 auf BGR setzen")
-            print("  artnet show              - Zeigt alle Mappings")
+            logger.info("❌ Verwendung: artnet <subcommand> [args]")
+            logger.info("")
+            logger.info("Subcommands:")
+            logger.info("  artnet map <format> <universes>  - Setzt RGB-Kanal-Reihenfolge")
+            logger.info("  artnet show                      - Zeigt aktuelle Kanal-Mappings")
+            logger.info("")
+            logger.info("Formate: RGB, GRB, BGR, RBG, GBR, BRG")
+            logger.info("")
+            logger.info("Beispiele:")
+            logger.info("  artnet map rgb 0-4       - Universen 0-4 auf RGB setzen")
+            logger.info("  artnet map grb 5         - Universum 5 auf GRB setzen")
+            logger.info("  artnet map bgr 6-10      - Universen 6-10 auf BGR setzen")
+            logger.info("  artnet show              - Zeigt alle Mappings")
             return
         
         parts = args.split(maxsplit=2)
@@ -603,8 +614,8 @@ class CLIHandler:
         
         if subcommand == "map":
             if len(parts) < 3:
-                print("❌ Verwendung: artnet map <format> <universes>")
-                print("Beispiel: artnet map grb 0-5")
+                logger.info("❌ Verwendung: artnet map <format> <universes>")
+                logger.info("Beispiel: artnet map grb 0-5")
                 return
             self._handle_artnet_map(parts[1], parts[2])
         
@@ -612,8 +623,8 @@ class CLIHandler:
             self._handle_artnet_show()
         
         else:
-            print(f"❌ Unbekanntes Subcommand: {subcommand}")
-            print("Verfügbar: map, show")
+            logger.warning(f"❌ Unbekanntes Subcommand: {subcommand}")
+            logger.info("Verfügbar: map, show")
     
     def _handle_artnet_map(self, format_str, universes_str):
         """Setzt RGB-Kanal-Reihenfolge für Universen."""
@@ -621,8 +632,8 @@ class CLIHandler:
         format_str = format_str.upper()
         valid_formats = ['RGB', 'GRB', 'BGR', 'RBG', 'GBR', 'BRG']
         if format_str not in valid_formats:
-            print(f"❌ Ungültiges Format: {format_str}")
-            print(f"Verfügbar: {', '.join(valid_formats)}")
+            logger.warning(f"❌ Ungültiges Format: {format_str}")
+            logger.info(f"Verfügbar: {', '.join(valid_formats)}")
             return
         
         # Parse Universum-Bereich (z.B. "0-5" oder "3")
@@ -632,14 +643,14 @@ class CLIHandler:
                 start_uni = int(start)
                 end_uni = int(end)
                 if start_uni > end_uni:
-                    print("❌ Start-Universum muss kleiner als End-Universum sein")
+                    logger.warning("❌ Start-Universum muss kleiner als End-Universum sein")
                     return
                 universe_list = list(range(start_uni, end_uni + 1))
             else:
                 universe_list = [int(universes_str)]
         except ValueError:
-            print(f"❌ Ungültiger Universum-Bereich: {universes_str}")
-            print("Verwende Format: '0-5' oder '3'")
+            logger.warning(f"❌ Ungültiger Universum-Bereich: {universes_str}")
+            logger.info("Verwende Format: '0-5' oder '3'")
             return
         
         # Lade config.json
@@ -667,21 +678,21 @@ class CLIHandler:
             
             # Erfolgsausgabe
             if len(universe_list) == 1:
-                print(f"✅ Universum {universe_list[0]} auf {format_str} gesetzt")
+                logger.info(f"✅ Universum {universe_list[0]} auf {format_str} gesetzt")
             else:
-                print(f"✅ Universen {universe_list[0]}-{universe_list[-1]} auf {format_str} gesetzt")
-            print("💾 Konfiguration gespeichert in config.json")
-            print("⚠️  HINWEIS: Starte Video neu, damit die Änderung wirksam wird")
+                logger.info(f"✅ Universen {universe_list[0]}-{universe_list[-1]} auf {format_str} gesetzt")
+            logger.info("💾 Konfiguration gespeichert in config.json")
+            logger.info("⚠️  HINWEIS: Starte Video neu, damit die Änderung wirksam wird")
             
         except Exception as e:
-            print(f"❌ Fehler beim Speichern: {e}")
+            logger.error(f"❌ Fehler beim Speichern: {e}")
     
     def _handle_artnet_show(self):
         """Zeigt aktuelle RGB-Kanal-Mappings."""
         config_path = os.path.join(self.base_path, "config.json")
         try:
             if not os.path.exists(config_path):
-                print("⚠️  Keine config.json gefunden")
+                logger.warning("⚠️  Keine config.json gefunden")
                 return
             
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -690,55 +701,55 @@ class CLIHandler:
             universe_configs = config_data.get('artnet', {}).get('universe_configs', {})
             
             if not universe_configs:
-                print("⚠️  Keine Universe-Konfigurationen gefunden")
+                logger.warning("⚠️  Keine Universe-Konfigurationen gefunden")
                 return
             
-            print("")
-            print("🎨 Art-Net RGB-Kanal-Mappings:")
-            print("=" * 40)
+            logger.info("")
+            logger.info("🎨 Art-Net RGB-Kanal-Mappings:")
+            logger.info("=" * 40)
             
             # Default zuerst
             default = universe_configs.get('default', 'RGB')
-            print(f"Default:  {default}")
-            print("-" * 40)
+            logger.info(f"Default:  {default}")
+            logger.info("-" * 40)
             
             # Sortiere Universen numerisch
             universe_nums = [k for k in universe_configs.keys() if k.isdigit()]
             universe_nums.sort(key=int)
             
             if not universe_nums:
-                print("Keine spezifischen Universen konfiguriert")
+                logger.info("Keine spezifischen Universen konfiguriert")
             else:
                 for uni in universe_nums:
                     format_str = universe_configs[uni]
-                    print(f"Universum {uni:>3}: {format_str}")
+                    logger.info(f"Universum {uni:>3}: {format_str}")
             
-            print("=" * 40)
-            print("")
+            logger.info("=" * 40)
+            logger.info("")
             
         except Exception as e:
-            print(f"❌ Fehler beim Laden: {e}")
+            logger.error(f"❌ Fehler beim Laden: {e}")
     
     # === Info ===
     
     def _handle_status(self):
         """Zeigt Status."""
-        print(self.player.status())
+        logger.info(self.player.status())
     
     def _handle_info(self):
         """Zeigt Informationen."""
         info = self.player.get_info()
         for key, value in info.items():
-            print(f"{key}: {value}")
+            logger.info(f"{key}: {value}")
     
     def _handle_stats(self):
         """Zeigt Statistiken."""
         stats = self.player.get_stats()
         if isinstance(stats, dict):
             for key, value in stats.items():
-                print(f"{key}: {value}")
+                logger.info(f"{key}: {value}")
         else:
-            print(stats)
+            logger.info(stats)
     
     # === Recording ===
     
@@ -751,7 +762,7 @@ class CLIHandler:
             filename = parts[1] if len(parts) > 1 else None
             self.player.stop_recording(filename)
         else:
-            print("Verwendung: record start | record stop [datei]")
+            logger.info("Verwendung: record start | record stop [datei]")
     
     # === Cache ===
     
@@ -776,7 +787,7 @@ class CLIHandler:
         elif args == "fill":
             self._handle_cache_fill(cache_dir)
         else:
-            print("Verwendung: cache clear | info | delete <name> | enable | disable | size | fill")
+            logger.info("Verwendung: cache clear | info | delete <name> | enable | disable | size | fill")
     
     def _handle_cache_clear(self, cache_dir):
         """Leert Cache."""
@@ -788,29 +799,29 @@ class CLIHandler:
                     os.remove(os.path.join(cache_dir, f))
                     file_count += 1
                 except Exception as e:
-                    print(f"  ⚠ Konnte nicht löschen: {f} ({e})")
-            print(f"✓ Cache geleert ({file_count} Dateien gelöscht)")
+                    logger.warning(f"  ⚠ Konnte nicht löschen: {f} ({e})")
+            logger.info(f"✓ Cache geleert ({file_count} Dateien gelöscht)")
         else:
-            print("Cache-Ordner existiert nicht")
+            logger.info("Cache-Ordner existiert nicht")
     
     def _handle_cache_info(self, cache_dir):
         """Zeigt Cache-Info."""
         if os.path.exists(cache_dir):
             files = [f for f in os.listdir(cache_dir) if os.path.isfile(os.path.join(cache_dir, f))]
             total_size = sum(os.path.getsize(os.path.join(cache_dir, f)) for f in files)
-            print(f"Cache-Informationen:")
-            print(f"  Dateien: {len(files)}")
-            print(f"  Größe: {total_size / (1024*1024):.2f} MB")
-            print(f"  Pfad: {cache_dir}")
-            print(f"  Status: {'Aktiviert' if self.config.get('cache', {}).get('enabled', True) else 'Deaktiviert'}")
+            logger.info(f"Cache-Informationen:")
+            logger.info(f"  Dateien: {len(files)}")
+            logger.info(f"  Größe: {total_size / (1024*1024):.2f} MB")
+            logger.info(f"  Pfad: {cache_dir}")
+            logger.info(f"  Status: {'Aktiviert' if self.config.get('cache', {}).get('enabled', True) else 'Deaktiviert'}")
         else:
-            print("Cache-Ordner existiert nicht")
+            logger.info("Cache-Ordner existiert nicht")
     
     def _handle_cache_delete(self, args, cache_dir):
         """Löscht Cache für bestimmtes Video."""
         parts = args.split(maxsplit=1)
         if len(parts) < 2:
-            print("Verwendung: cache delete <videoname>")
+            logger.info("Verwendung: cache delete <videoname>")
             return
         
         video_name = parts[1]
@@ -826,13 +837,13 @@ class CLIHandler:
                         if video_name.lower() in cache_data.get('video', '').lower():
                             file_size_mb = os.path.getsize(cache_path) / (1024*1024)
                             os.remove(cache_path)
-                            print(f"✓ Cache gelöscht für: {cache_data.get('video')} ({file_size_mb:.2f} MB)")
+                            logger.info(f"✓ Cache gelöscht für: {cache_data.get('video')} ({file_size_mb:.2f} MB)")
                             found = True
                             break
                     except:
                         pass
         if not found:
-            print(f"Keine Cache-Datei gefunden für: {video_name}")
+            logger.warning(f"Keine Cache-Datei gefunden für: {video_name}")
     
     def _handle_cache_enable(self):
         """Aktiviert Cache."""
@@ -840,7 +851,7 @@ class CLIHandler:
         config_path = os.path.join(self.base_path, 'config.json')
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(self.config, f, indent=2)
-        print("✓ RGB-Caching aktiviert")
+        logger.info("✓ RGB-Caching aktiviert")
     
     def _handle_cache_disable(self):
         """Deaktiviert Cache."""
@@ -848,34 +859,34 @@ class CLIHandler:
         config_path = os.path.join(self.base_path, 'config.json')
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(self.config, f, indent=2)
-        print("✓ RGB-Caching deaktiviert")
+        logger.info("✓ RGB-Caching deaktiviert")
     
     def _handle_cache_size(self, cache_dir):
         """Zeigt Cache-Größe."""
         if os.path.exists(cache_dir):
             files = [f for f in os.listdir(cache_dir) if os.path.isfile(os.path.join(cache_dir, f))]
             total_size = sum(os.path.getsize(os.path.join(cache_dir, f)) for f in files)
-            print(f"Cache-Größe: {total_size / (1024*1024):.2f} MB ({len(files)} Dateien)")
+            logger.info(f"Cache-Größe: {total_size / (1024*1024):.2f} MB ({len(files)} Dateien)")
             if files:
-                print("\nTop 5 größte Dateien:")
+                logger.info("\nTop 5 größte Dateien:")
                 file_sizes = [(f, os.path.getsize(os.path.join(cache_dir, f))) for f in files]
                 for fname, fsize in sorted(file_sizes, key=lambda x: x[1], reverse=True)[:5]:
-                    print(f"  {fname}: {fsize / (1024*1024):.2f} MB")
+                    logger.info(f"  {fname}: {fsize / (1024*1024):.2f} MB")
         else:
-            print("Cache-Ordner existiert nicht")
+            logger.info("Cache-Ordner existiert nicht")
     
     def _handle_cache_fill(self, cache_dir):
         """Füllt Cache für alle Videos."""
         from .video_player import VideoPlayer
         
         if not self.config.get('cache', {}).get('enabled', True):
-            print("⚠ Cache ist deaktiviert! Aktiviere mit: cache enable")
+            logger.warning("⚠ Cache ist deaktiviert! Aktiviere mit: cache enable")
             return
         
-        print("⚠ WARNUNG: Dies cached alle Videos neu und kann sehr lange dauern!")
+        logger.warning("⚠ WARNUNG: Dies cached alle Videos neu und kann sehr lange dauern!")
         confirm = input("Fortfahren? (j/n): ").strip().lower()
         if confirm not in AFFIRMATIVE_RESPONSES:
-            print("Abgebrochen")
+            logger.info("Abgebrochen")
             return
         
         all_videos = []
@@ -884,10 +895,10 @@ class CLIHandler:
                 if f.lower().endswith(VIDEO_EXTENSIONS):
                     all_videos.append(os.path.join(root, f))
         
-        print(f"\nStarte Cache-Fill für {len(all_videos)} Videos...")
+        logger.info(f"\nStarte Cache-Fill für {len(all_videos)} Videos...")
         
         for idx, video_path in enumerate(all_videos, 1):
-            print(f"\n[{idx}/{len(all_videos)}] Processing: {os.path.basename(video_path)}")
+            logger.info(f"\n[{idx}/{len(all_videos)}] Processing: {os.path.basename(video_path)}")
             try:
                 temp_player = VideoPlayer(
                     video_path, 
@@ -899,19 +910,19 @@ class CLIHandler:
                 )
                 cache_path = temp_player._get_cache_path()
                 if cache_path and os.path.exists(cache_path):
-                    print(f"  ✓ Cache existiert bereits, überspringe...")
+                    logger.info(f"  ✓ Cache existiert bereits, überspringe...")
                 else:
-                    print(f"  → Erstelle Cache (dauert einige Sekunden)...")
+                    logger.info(f"  → Erstelle Cache (dauert einige Sekunden)...")
                     temp_player.start()
                     while temp_player.current_loop < 1 and temp_player.is_running:
                         time.sleep(0.5)
                     temp_player.stop()
                     time.sleep(0.5)
-                    print(f"  ✓ Cache erstellt")
+                    logger.info(f"  ✓ Cache erstellt")
             except Exception as e:
-                print(f"  ✗ Fehler: {e}")
+                logger.error(f"  ✗ Fehler: {e}")
         
-        print(f"\n✓ Cache-Fill abgeschlossen für {len(all_videos)} Videos")
+        logger.info(f"\n✓ Cache-Fill abgeschlossen für {len(all_videos)} Videos")
     
     # === System ===
     
@@ -932,28 +943,28 @@ class CLIHandler:
         if not args or args == "list":
             self._handle_scripts_list(script_gen)
         else:
-            print("Verwendung: scripts [list]")
+            logger.info("Verwendung: scripts [list]")
     
     def _handle_scripts_list(self, script_gen):
         """Listet alle Scripts auf."""
         scripts = script_gen.list_scripts()
         
         if not scripts:
-            print("\nKeine Scripts gefunden!")
+            logger.info("\nKeine Scripts gefunden!")
             return
         
-        print(f"\n{'='*60}")
-        print(f"{'Script':<30} {'Beschreibung':<30}")
-        print(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"{'Script':<30} {'Beschreibung':<30}")
+        logger.info(f"{'='*60}")
         
         for script in scripts:
             name = script['name'][:28]
             desc = script.get('description', 'Keine Beschreibung')[:28]
-            print(f"{name:<30} {desc:<30}")
+            logger.info(f"{name:<30} {desc:<30}")
         
-        print(f"{'='*60}")
-        print(f"\nInsgesamt {len(scripts)} Script(s)")
-        print("Verwendung: script:<name>  (z.B. script:rainbow_wave)")
+        logger.info(f"{'='*60}")
+        logger.info(f"\nInsgesamt {len(scripts)} Script(s)")
+        logger.info("Verwendung: script:<name>  (z.B. script:rainbow_wave)")
     
     def _handle_load_script(self, command):
         """Lädt und startet ein Script."""
@@ -964,24 +975,27 @@ class CLIHandler:
         if not script_name.endswith('.py'):
             script_name += '.py'
         
+        # Hole aktuellen Player
+        old_player = self.dmx_controller.player
+        
         # Stoppe aktuellen Player wenn er läuft
-        was_playing = self.player.is_playing
+        was_playing = old_player.is_playing
         
         # Speichere alte Player-Daten
-        old_player = self.player
         points_json_path = old_player.points_json_path
         target_ip = old_player.target_ip
         start_universe = old_player.start_universe
         fps_limit = old_player.fps_limit
+        old_brightness = old_player.brightness
+        old_speed = old_player.speed_factor
         
         # Stoppe alten Player komplett
         if was_playing:
             old_player.stop()
         
-        # Warte und lösche Referenz
+        # Warte kurz
         import time
         time.sleep(0.5)
-        del old_player
         
         try:
             # Erstelle neuen ScriptPlayer
@@ -994,17 +1008,20 @@ class CLIHandler:
                 self.config
             )
             
-            # Übernehme Einstellungen vom alten Player
-            new_player.brightness = self.player.brightness
-            new_player.speed_factor = self.player.speed_factor
+            # Übernehme Einstellungen
+            new_player.brightness = old_brightness
+            new_player.speed_factor = old_speed
+            
+            # Aktualisiere Player-Referenz SOFORT
+            self.dmx_controller.player = new_player
             
             # Zeige Info
             info = new_player.get_info()
-            print(f"\n✓ Script geladen: {info.get('name', script_name)}")
+            logger.info(f"\n✓ Script geladen: {info.get('name', script_name)}")
             if 'description' in info:
-                print(f"  {info['description']}")
+                logger.info(f"  {info['description']}")
             if 'parameters' in info:
-                print(f"  Parameter: {', '.join(info['parameters'].keys())}")
+                logger.info(f"  Parameter: {', '.join(info['parameters'].keys())}")
             
             # Starte automatisch
             new_player.start()
@@ -1013,12 +1030,12 @@ class CLIHandler:
             self.current_script_name = script_name
             self.current_video_path = None
             
-            return (True, new_player)
+            return (True, None)
             
         except Exception as e:
-            print(f"Fehler beim Laden des Scripts: {e}")
+            logger.error(f"Fehler beim Laden des Scripts: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
             return (True, None)
     
     def _handle_open(self):
@@ -1027,10 +1044,10 @@ class CLIHandler:
         port = self.config.get('api', {}).get('port', 5000)
         
         if not self.rest_api.is_running:
-            print("⚠️  REST API ist nicht aktiv")
-            print("Starte API mit: api start")
+            logger.warning("⚠️  REST API ist nicht aktiv")
+            logger.info("Starte API mit: api start")
             return
         
         url = f"http://localhost:{port}"
-        print(f"Öffne Browser: {url}")
+        logger.info(f"Öffne Browser: {url}")
         webbrowser.open(url)

@@ -52,6 +52,12 @@ function initWebSocket() {
 function showToast(message, type = 'success') {
     const toast = document.getElementById('toast');
     const toastMessage = document.getElementById('toastMessage');
+    
+    if (!toast || !toastMessage) {
+        console.warn('Toast-Elemente nicht gefunden');
+        return;
+    }
+    
     toast.className = `toast ${type}`;
     toastMessage.textContent = message;
     toast.style.display = 'block';
@@ -90,7 +96,7 @@ async function apiCall(endpoint, method = 'GET', data = null) {
 // ========================================
 
 async function executeCliCommand(command) {
-    const result = await apiCall('/console', 'POST', { command: command });
+    const result = await apiCall('/console/command', 'POST', { command: command });
     if (result && result.status === 'success') {
         showToast(`Befehl '${command}' ausgeführt`);
         updateStatus();
@@ -212,10 +218,12 @@ async function loadVideo(path, name) {
     // Verwende video:<relativePath> CLI-Befehl (mit Kanal-Ordner)
     // path enthält bereits den relativen Pfad (z.B. "kanal_1/test.mp4")
     const relativePath = path.replace(/\\/g, '/');  // Normalisiere Backslashes zu Forward Slashes
-    const result = await apiCall('/console', 'POST', { command: `video:${relativePath}` });
+    const result = await apiCall('/console/command', 'POST', { command: `video:${relativePath}` });
     if (result && result.status === 'success') {
-        showToast(`Video geladen: ${name}`);
+        showToast(`Video startet: ${name}`);
         updateStatus();
+        // Starte Video automatisch nach dem Laden
+        await executeCliCommand('start');
     } else if (result) {
         showToast(`Fehler: ${result.message}`, 'error');
     }
@@ -252,10 +260,12 @@ async function loadScripts() {
 async function loadScript(scriptName) {
     // Entferne .py Endung falls vorhanden
     const cleanName = scriptName.endsWith('.py') ? scriptName.slice(0, -3) : scriptName;
-    const result = await apiCall('/console', 'POST', { command: `script:${cleanName}` });
+    const result = await apiCall('/console/command', 'POST', { command: `script:${cleanName}` });
     if (result && result.status === 'success') {
-        showToast(`Script '${cleanName}' geladen`);
+        showToast(`Script startet: ${cleanName}`);
         updateStatus();
+        // Starte Script automatisch nach dem Laden
+        await executeCliCommand('start');
     } else if (result) {
         showToast(`Fehler: ${result.message}`, 'error');
     }
@@ -312,6 +322,97 @@ function updateStatusFromWebSocket(data) {
     } else if (data.status && data.status.current_frame !== undefined) {
         document.getElementById('currentFrame').textContent = data.status.current_frame;
         document.getElementById('totalFrames').textContent = data.status.total_frames || 0;
+    }
+    
+    // Preview Update
+    updatePreview(data);
+}
+
+// ========================================
+// PREVIEW
+// ========================================
+
+let previewStream = null;
+
+function initPreview() {
+    previewStream = document.getElementById('previewStream');
+    if (!previewStream) {
+        console.error('Preview Stream Element nicht gefunden!');
+        return;
+    }
+    
+    // Teste zuerst mit Test-Stream
+    const useTestStream = false; // Setze auf true zum Testen
+    const streamUrl = useTestStream ? 
+        `${API_BASE}/preview/test` : 
+        `${API_BASE}/preview/stream`;
+    
+    // Debug-Ausgaben BEFORE setting src
+    previewStream.onerror = function(e) {
+        console.error('Preview Stream Fehler:', e);
+        console.error('Stream URL:', previewStream.src);
+        console.error('Stream readyState:', previewStream.readyState);
+        console.error('Stream complete:', previewStream.complete);
+        
+        // Versuche neu zu laden nach Fehler
+        setTimeout(() => {
+            console.log('Versuche Stream neu zu laden...');
+            previewStream.src = streamUrl + '?t=' + Date.now();
+        }, 1000);
+    };
+    
+    previewStream.onloadstart = function() {
+        console.log('Preview Stream lädt...');
+    };
+    
+    previewStream.onload = function() {
+        console.log('Preview Stream geladen:', previewStream.src);
+        console.log('Bild-Größe:', previewStream.naturalWidth, 'x', previewStream.naturalHeight);
+    };
+    
+    console.log('Preview initialisiert mit URL:', streamUrl);
+    console.log('API_BASE:', API_BASE);
+    console.log('Setting img.src now...');
+    
+    // Setze src NACH Event-Handlern
+    previewStream.src = streamUrl;
+    
+    console.log('img.src gesetzt:', previewStream.src);
+}
+
+function updatePreview(data) {
+    // Video-Name und Canvas-Größe aktualisieren
+    const videoName = data.video || (data.status && data.status.video_path ? data.status.video_path.split('\\').pop() : '-');
+    document.getElementById('previewVideoName').textContent = videoName;
+    
+    // Canvas-Größe aus Info-Daten holen (später über separaten API-Call)
+    const canvasSize = '-'; // Wird beim nächsten info-Call aktualisiert
+    document.getElementById('previewCanvasSize').textContent = canvasSize;
+    
+    // Frame-Info
+    const currentFrame = data.current_frame || 0;
+    const totalFrames = data.total_frames || 0;
+    document.getElementById('previewFrame').textContent = `${currentFrame}/${totalFrames}`;
+    
+    // Progress Bar
+    const progress = totalFrames > 0 ? (currentFrame / totalFrames * 100) : 0;
+    document.getElementById('previewProgress').style.width = `${progress}%`;
+    
+    // Stream läuft automatisch via <img> Element
+}
+
+async function updatePreviewInfo() {
+    // Info-Daten separat holen für Canvas-Größe
+    const info = await apiCall('/info', 'GET');
+    if (info && info.canvas) {
+        document.getElementById('previewCanvasSize').textContent = info.canvas;
+        
+        // Setze img width/height Attribute für korrekte Skalierung
+        const [w, h] = info.canvas.split('x').map(Number);
+        if (previewStream && (previewStream.naturalWidth === 0 || previewStream.naturalWidth !== w)) {
+            // Optional: Setze explizite Größe (Browser skaliert automatisch)
+            console.log(`Preview Canvas-Größe: ${w}x${h}`);
+        }
     }
 }
 
@@ -478,7 +579,7 @@ async function clearConsole() {
 // Lade Frontend-Config und initialisiere
 async function loadConfig() {
     try {
-        const response = await fetch('/api/config/frontend');
+        const response = await fetch('http://localhost:5000/api/config/frontend');
         if (response.ok) {
             const config = await response.json();
             API_BASE = config.api_base || API_BASE;
@@ -496,7 +597,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     initWebSocket();
     initThemeToggle();
+    initPreview();
     updateStatus();
+    updatePreviewInfo();
     fetchConsole();
     
     // Fallback Polling (falls WebSocket nicht verbindet)
@@ -506,4 +609,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             fetchConsole();
         }
     }, POLLING_INTERVAL);
+    
+    // Preview Info regelmäßig aktualisieren
+    setInterval(updatePreviewInfo, 5000);
 });

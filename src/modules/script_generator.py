@@ -8,6 +8,9 @@ import importlib.util
 import numpy as np
 import time as time_module
 from pathlib import Path
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ScriptGenerator:
@@ -69,7 +72,7 @@ class ScriptGenerator:
         script_path = os.path.join(self.scripts_dir, script_name)
         
         if not os.path.exists(script_path):
-            print(f"Script nicht gefunden: {script_path}")
+            logger.error(f"Script nicht gefunden: {script_path}")
             return False
         
         try:
@@ -84,7 +87,7 @@ class ScriptGenerator:
             
             # Prüfe ob generate_frame Funktion existiert
             if not hasattr(module, 'generate_frame'):
-                print(f"Fehler: Script {script_name} hat keine generate_frame() Funktion")
+                logger.error(f"Fehler: Script {script_name} hat keine generate_frame() Funktion")
                 return False
             
             self.script_module = module
@@ -95,16 +98,16 @@ class ScriptGenerator:
             
             # Zeige Metadata
             metadata = getattr(module, 'METADATA', {})
-            print(f"Script geladen: {metadata.get('name', script_name)}")
+            logger.info(f"Script geladen: {metadata.get('name', script_name)}")
             if metadata.get('description'):
-                print(f"  {metadata['description']}")
+                logger.info(f"  {metadata['description']}")
             
             return True
             
         except Exception as e:
-            print(f"Fehler beim Laden des Scripts: {e}")
+            logger.error(f"Fehler beim Laden des Scripts: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
             return False
     
     def generate_frame(self, width, height, fps=30, frame_number=None, time=None):
@@ -149,11 +152,11 @@ class ScriptGenerator:
                 return None
             
             if not isinstance(frame, np.ndarray):
-                print("Warnung: generate_frame() muss numpy.ndarray zurückgeben")
+                logger.warning("Warnung: generate_frame() muss numpy.ndarray zurückgeben")
                 return None
             
             if frame.shape != (height, width, 3):
-                print(f"Warnung: Frame hat falsche Dimensionen: {frame.shape}, erwartet: ({height}, {width}, 3)")
+                logger.warning(f"Warnung: Frame hat falsche Dimensionen: {frame.shape}, erwartet: ({height}, {width}, 3)")
                 return None
             
             if frame.dtype != np.uint8:
@@ -163,9 +166,9 @@ class ScriptGenerator:
             return frame
             
         except Exception as e:
-            print(f"Fehler beim Generieren des Frames: {e}")
+            logger.error(f"Fehler beim Generieren des Frames: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
             return None
     
     def reset(self):

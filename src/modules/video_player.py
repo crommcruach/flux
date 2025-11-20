@@ -55,6 +55,8 @@ class VideoPlayer:
         self.frames_processed = 0
         self.is_recording = False
         self.recorded_data = []
+        self.last_frame = None  # Letztes Frame (LED-Punkte) für Preview
+        self.last_video_frame = None  # Letztes Video-Frame (komplettes Bild) für Preview
         
         # RGB Cache Manager
         cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
@@ -405,6 +407,9 @@ class VideoPlayer:
                 if needs_scaling:
                     frame = cv2.resize(frame, canvas_size, interpolation=cv2.INTER_LINEAR)
                 
+                # Speichere komplettes Video-Frame für Preview (BGR Format)
+                self.last_video_frame = frame.copy()
+                
                 # RGB-Werte für alle Punkte sammeln (optimiert mit Numpy)
                 if len(self.point_coords) > 0:
                     # Extrahiere alle Pixel auf einmal (viel schneller als Loop)
@@ -426,6 +431,9 @@ class VideoPlayer:
                 # Cache-Sammlung (nur im ersten Loop)
                 if cache_rgb_frames is not None:
                     cache_rgb_frames.append(rgb_values.copy())
+                
+                # Speichere letztes Frame für Preview
+                self.last_frame = rgb_values.copy()
                 
                 # Recording
                 if self.is_recording:
@@ -491,6 +499,15 @@ class VideoPlayer:
             if self.gif_frame_delays and self.gif_respect_timing:
                 logger.debug(f"    └─ Frame-Timing: Variable Delays")
         
+        # Öffne Video parallel für Preview (ohne Hardware-Beschleunigung für weniger Overhead)
+        cap_preview = None
+        try:
+            cap_preview = cv2.VideoCapture(self.video_path)
+            if cap_preview.isOpened():
+                logger.debug(f"  ℹ Video-Preview parallel geöffnet")
+        except:
+            cap_preview = None
+        
         self.current_loop = 0
         self.current_frame = 0
         self.start_time = time.time()
@@ -532,11 +549,26 @@ class VideoPlayer:
                 self.current_frame += 1
                 self.frames_processed += 1
                 
+                # Lade entsprechendes Video-Frame für Preview
+                if cap_preview and cap_preview.isOpened():
+                    ret, preview_frame = cap_preview.read()
+                    if ret:
+                        # Skaliere auf Canvas-Größe falls nötig
+                        if preview_frame.shape[1] != self.canvas_width or preview_frame.shape[0] != self.canvas_height:
+                            preview_frame = cv2.resize(preview_frame, (self.canvas_width, self.canvas_height))
+                        self.last_video_frame = preview_frame
+                    else:
+                        # Video neu starten für Preview
+                        cap_preview.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                
                 # Brightness anwenden (falls geändert)
                 if self.brightness != 1.0:
                     rgb_array = np.array(rgb_values, dtype=np.float32)
                     rgb_array = (rgb_array * self.brightness).clip(0, 255).astype(np.uint8)
                     rgb_values = rgb_array.tolist()
+                
+                # Speichere letztes Frame für Preview
+                self.last_frame = rgb_values.copy()
                 
                 # Recording
                 if self.is_recording:
@@ -574,6 +606,9 @@ class VideoPlayer:
             logger.debug(f"Fehler während Cache-Wiedergabe: {e}")
         
         finally:
+            # Schließe Preview-Video
+            if cap_preview:
+                cap_preview.release()
             self.is_running = False
             self.is_playing = False
             logger.debug("Wiedergabe gestoppt.")
@@ -783,7 +818,7 @@ class VideoPlayer:
         except Exception as e:
             logger.debug(f"❌ Fehler beim Neuladen von Art-Net: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
             return False
     
     def test_pattern(self, color='red'):
