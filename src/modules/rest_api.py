@@ -40,7 +40,16 @@ class RestAPI:
         CORS(self.app)  # CORS für alle Routen aktivieren
         
         # Socket.IO initialisieren
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
+        self.socketio = SocketIO(
+            self.app, 
+            cors_allowed_origins="*", 
+            async_mode='threading',
+            logger=False,
+            engineio_logger=False,
+            ping_timeout=60,
+            ping_interval=25,
+            manage_session=False
+        )
         
         # Routen registrieren
         self._register_routes()
@@ -123,37 +132,42 @@ class RestAPI:
         """Registriert WebSocket Events."""
         
         @self.socketio.on('connect')
-        def handle_connect():
+        def handle_connect(auth=None):
             """Client verbunden."""
-            logger.debug(f"WebSocket Client verbunden: {threading.current_thread().name}")
-            emit('status', self._get_status_data())
+            logger.debug(f"WebSocket Client verbunden")
+            # Client sollte 'request_status' Event senden nach erfolgreichem Connect
         
         @self.socketio.on('disconnect')
         def handle_disconnect():
             """Client getrennt."""
-            logger.debug(f"WebSocket Client getrennt: {threading.current_thread().name}")
+            try:
+                logger.debug(f"WebSocket Client getrennt")
+            except Exception:
+                pass  # Ignore disconnect errors (Werkzeug bug)
         
         @self.socketio.on('request_status')
         def handle_status_request():
             """Client fordert Status an."""
-            emit('status', self._get_status_data())
+            with self.app.app_context():
+                emit('status', self._get_status_data())
         
         @self.socketio.on('request_console')
         def handle_console_request(data):
             """Client fordert Console Log an."""
-            lines = data.get('lines', 100) if data else 100
-            log_lines = list(self.console_log)[-lines:]
-            emit('console_update', {
-                "log": log_lines,
-                "total": len(self.console_log)
-            })
+            with self.app.app_context():
+                lines = data.get('lines', 100) if data else 100
+                log_lines = list(self.console_log)[-lines:]
+                emit('console_update', {
+                    "log": log_lines,
+                    "total": len(self.console_log)
+                })
     
     def _get_status_data(self):
         """Erstellt Status-Daten für WebSocket."""
         # Hole Media-Namen (Video oder Script)
-        if hasattr(self.player, 'video_path'):
+        if hasattr(self.player, 'video_path') and self.player.video_path:
             media_name = os.path.basename(self.player.video_path)
-        elif hasattr(self.player, 'script_name'):
+        elif hasattr(self.player, 'script_name') and self.player.script_name:
             media_name = self.player.script_name
         else:
             media_name = "Unknown"
@@ -176,9 +190,10 @@ class RestAPI:
         interval = self.config.get('api', {}).get('status_broadcast_interval', 2)
         while self.is_running:
             try:
-                status_data = self._get_status_data()
-                self.socketio.emit('status', status_data, namespace='/')
                 time.sleep(interval)
+                with self.app.app_context():
+                    status_data = self._get_status_data()
+                    self.socketio.emit('status', status_data, namespace='/')
             except Exception as e:
                 logger.error(f"Fehler beim Status-Broadcast: {e}")
                 time.sleep(interval)
@@ -188,11 +203,15 @@ class RestAPI:
         self.console_log.append(message)
         # Broadcast an alle WebSocket Clients
         if self.is_running:
-            self.socketio.emit('console_update', {
-                "log": [message],
-                "total": len(self.console_log),
-                "append": True
-            }, namespace='/')
+            try:
+                with self.app.app_context():
+                    self.socketio.emit('console_update', {
+                        "log": [message],
+                        "total": len(self.console_log),
+                        "append": True
+                    }, namespace='/')
+            except Exception as e:
+                logger.debug(f"Konnte Log nicht broadcasten: {e}")
     
     def _execute_command(self, command):
         """Führt CLI-Befehl aus und gibt Ergebnis zurück.
@@ -211,30 +230,23 @@ class RestAPI:
                 try:
                     video_path = os.path.join(self.video_dir, target.strip())
                     if os.path.exists(video_path):
-                        # Prüfe ob aktueller Player ein ScriptPlayer ist
-                        if not hasattr(self.player, 'load_video'):
-                            # ScriptPlayer - Erstelle VideoPlayer
-                            from .video_player import VideoPlayer
-                            old_player = self.player
-                            new_player = VideoPlayer(
-                                video_path,
-                                old_player.points_json_path,
-                                old_player.target_ip,
-                                old_player.start_universe,
-                                old_player.fps_limit,
-                                self.config
-                            )
-                            new_player.brightness = old_player.brightness
-                            new_player.speed_factor = old_player.speed_factor
-                            self.player = new_player
-                            if self.dmx_controller:
-                                self.dmx_controller.player = new_player
-                            new_player.start()
+                        from .frame_source import VideoSource
+                        
+                        # Erstelle VideoSource
+                        video_source = VideoSource(
+                            video_path,
+                            self.player.canvas_width,
+                            self.player.canvas_height,
+                            self.config
+                        )
+                        
+                        # Wechsle Source (unified Player bleibt bestehen)
+                        success = self.player.switch_source(video_source)
+                        
+                        if success:
+                            return f"Video geladen: {target}"
                         else:
-                            # VideoPlayer - Nutze load_video
-                            self.player.load_video(video_path)
-                            self.player.start()
-                        return f"Video geladen: {target}"
+                            return f"Fehler beim Laden des Videos: {target}"
                     else:
                         return f"Video nicht gefunden: {target}"
                 except Exception as e:
@@ -243,36 +255,27 @@ class RestAPI:
             elif prefix == 'script':
                 # Lade Script
                 try:
-                    from .script_player import ScriptPlayer
+                    from .frame_source import ScriptSource
                     
-                    # Stoppe aktuellen Player
-                    if self.player.is_playing:
-                        self.player.stop()
+                    script_name = target.strip()
+                    if not script_name.endswith('.py'):
+                        script_name += '.py'
                     
-                    # Hole points_json_path vom aktuellen Player
-                    points_path = self.player.points_json_path if hasattr(self.player, 'points_json_path') else None
-                    if not points_path:
-                        # Fallback auf data_dir
-                        points_path = os.path.join(self.data_dir, 'punkte_export.json')
-                    
-                    script_player = ScriptPlayer(
-                        script_name=target.strip(),
-                        points_json_path=points_path,
-                        target_ip=self.player.target_ip,
-                        start_universe=self.player.start_universe if hasattr(self.player, 'start_universe') else 0,
-                        fps_limit=self.player.fps_limit if hasattr(self.player, 'fps_limit') else None,
-                        config=self.config
+                    # Erstelle ScriptSource
+                    script_source = ScriptSource(
+                        script_name,
+                        self.player.canvas_width,
+                        self.player.canvas_height,
+                        self.config
                     )
                     
-                    # Ersetze Player
-                    self.player = script_player
-                    if self.dmx_controller:
-                        self.dmx_controller.player = script_player
+                    # Wechsle Source (unified Player bleibt bestehen)
+                    success = self.player.switch_source(script_source)
                     
-                    # Starte Script automatisch
-                    script_player.start()
-                    
-                    return f"Script geladen: {target}"
+                    if success:
+                        return f"Script geladen: {target}"
+                    else:
+                        return f"Fehler beim Laden des Scripts: {target}"
                 except Exception as e:
                     import traceback
                     return f"Fehler beim Laden des Scripts: {e}\n{traceback.format_exc()}"
@@ -284,8 +287,14 @@ class RestAPI:
         
         # Playback
         if cmd == "start":
-            self.player.start()
-            return "Video gestartet"
+            try:
+                self.player.start()
+                return "Video gestartet"
+            except Exception as e:
+                self.logger.error(f"Fehler beim Start: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+                return f"Fehler beim Start: {e}"
         elif cmd == "stop":
             self.player.stop()
             return "Video gestoppt"

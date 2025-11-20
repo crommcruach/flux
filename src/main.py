@@ -5,7 +5,9 @@ import os
 import json
 import sys
 import time
-from modules import VideoPlayer, DMXController, RestAPI
+from modules import DMXController, RestAPI
+from modules.player import Player
+from modules.frame_source import VideoSource
 from modules.cli_handler import CLIHandler
 from modules.logger import FluxLogger, get_logger
 
@@ -147,9 +149,16 @@ def main():
     # Scripts-Ordner
     scripts_dir = os.path.join(base_path, config['paths']['scripts_dir'])
     
-    # Video Player initialisieren
-    player = VideoPlayer(video_path, points_json_path, target_ip, start_universe, fps_limit, config)
-    logger.info(f"VideoPlayer initialisiert: Video={os.path.basename(video_path)}, Points={os.path.basename(points_json_path)}")
+    # Lade Points-Daten um Canvas-Dimensionen zu erhalten
+    from modules.points_loader import PointsLoader
+    points_data = PointsLoader.load_points(points_json_path, validate_bounds=True)
+    canvas_width = points_data['canvas_width']
+    canvas_height = points_data['canvas_height']
+    
+    # Unified Player initialisieren mit VideoSource
+    video_source = VideoSource(video_path, canvas_width, canvas_height, config)
+    player = Player(video_source, points_json_path, target_ip, start_universe, fps_limit, config)
+    logger.info(f"Player initialisiert: Source={os.path.basename(video_path)}, Points={os.path.basename(points_json_path)}")
     
     # Speichere data_dir für spätere Verwendung
     player.data_dir = data_dir

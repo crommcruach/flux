@@ -51,6 +51,7 @@ htmlcov/
 
 # Logs
 *.log
+logs/
 
 # RGB Cache
 cache/
@@ -59,3 +60,7 @@ video_rgb_data.*
 
 # API Backups
 *_backup.py
+
+# Deprecated files (kept for backward compatibility)
+src/modules/video_player.py
+src/modules/script_player.py

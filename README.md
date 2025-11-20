@@ -29,6 +29,13 @@ Video-to-Art-Net DMX Control System mit Web-Interface und Multi-Kanal Unterstüt
 - 💾 **Server-Projektverwaltung** - Projekte speichern/laden/löschen im Backend, Download & Modal-UI
 - ⚡ **Performance** - NumPy-optimierte RGB-Extraktion, Hardware-Decoding
 
+### Architektur (v2.0 - Unified Player)
+- 🔄 **Unified Player** - Single Player-Instanz für alle Media-Typen
+- 🎯 **Frame Source Pattern** - Austauschbare Frame-Quellen (Video, Script, Stream)
+- 🔌 **Hot Source Switching** - Wechsel zwischen Videos/Scripts ohne Player-Neustart
+- 🧩 **Extensible** - Einfaches Hinzufügen neuer Source-Typen (ImageSequence, LiveStream, etc.)
+- ♻️ **Code Reduction** - 90% weniger Duplikation (alte VideoPlayer/ScriptPlayer eliminiert)
+
 ## Installation
 
 ```bash
@@ -159,11 +166,11 @@ Py_artnet/
 ├── src/
 │   ├── main.py                    # Haupteinstiegspunkt
 │   ├── modules/
-│   │   ├── video_player.py        # Video-Playback Engine
-│   │   ├── script_player.py       # Script-Playback Engine
+│   │   ├── player.py              # Unified Media Player (NEU)
+│   │   ├── frame_source.py        # Frame Source Abstraction (VideoSource, ScriptSource)
 │   │   ├── script_generator.py    # Script Loader & Manager
-│   │   ├── points_loader.py       # Points-JSON Parser (NEU)
-│   │   ├── cache_manager.py       # RGB Cache Manager (NEU)
+│   │   ├── points_loader.py       # Points-JSON Parser
+│   │   ├── cache_manager.py       # RGB Cache Manager
 │   │   ├── artnet_manager.py      # Art-Net Output Handler
 │   │   ├── dmx_controller.py      # DMX Input Handler
 │   │   ├── rest_api.py            # Flask REST API

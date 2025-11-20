@@ -9,14 +9,14 @@
   - [ ] Bitrate-Optimierung für schnelleres Decoding
   - [ ] Keyframe-Intervall anpassen (g=30 für bessere Loop-Performance)
   - [ ] Batch-Processing für alle Videos in Kanal-Ordnern
-- [ ] RGB-Daten-Vorberechnung als Alternative
-  - [ ] Video zu komprimierten RGB-Arrays konvertieren
-  - [ ] Player-Modus für vorberechnete Daten
-  - [ ] Speicherformat optimieren (z.B. mit msgpack/pickle)
+- [ ] Neues Cache-Format für Unified Player
+  - [ ] Full-Frame Caching (statt RGB-Punkt-Daten)
+  - [ ] Komprimierte Frame-Arrays (msgpack/lz4)
+  - [ ] Cache-Kompatibilität mit VideoSource
+  - [ ] Migration alter Cache-Dateien
 
 ### Weitere Verbesserungen
-- [ ] Logging in Datei implementieren
-- [ ] Unit Tests erweitern
+- [ ] Unit Tests erweitern (Player, FrameSource, API)
 - [ ] API-Authentifizierung (Basic Auth/Token)
 - [ ] PyInstaller EXE Build Setup
   - [ ] Spec-Datei erstellen mit allen Dependencies
@@ -39,6 +39,20 @@
   - [ ] requirements-lock.txt (pip freeze)
 
 ## Abgeschlossen ✓
+
+### v2.0 - Unified Player Architecture (2025-11-20)
+- ✓ Frame Source Abstraction (FrameSource base class)
+- ✓ VideoSource Implementation (OpenCV-basiert, GIF-Support)
+- ✓ ScriptSource Implementation (ScriptGenerator-Integration)
+- ✓ Unified Player mit source switching
+- ✓ Alle API-Routen aktualisiert (video/script loading)
+- ✓ CLI Handler Migration (video/script/points)
+- ✓ DMX Controller Integration
+- ✓ Backward Compatibility (alte VideoPlayer/ScriptPlayer als deprecated)
+- ✓ Stop/Start/Restart Playback-Fixes
+- ✓ 90% Code-Duplikation eliminiert (~1300 → 850 Zeilen + neue Architektur)
+
+### v1.x - Initial Implementation
 - ✓ CLI-Steuerung implementiert
 - ✓ DMX-Input über Art-Net (Universum 100)
 - ✓ DMX-Test-App erstellt
@@ -81,6 +95,7 @@
   - ✓ Status Broadcasting (alle 2s)
   - ✓ Console Live-Updates
   - ✓ Fallback auf REST Polling
+  - ✓ Werkzeug "write() before start_response" Bug gefixt (manage_session=False + disconnect error handling)
 - ✓ Points Switch/Reload via REST API
   - ✓ /api/points/switch mit Validierung
   - ✓ /api/points/reload für aktuelles File

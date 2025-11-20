@@ -435,7 +435,7 @@ def register_script_routes(app, player, dmx_controller, config):
         """Lädt und startet ein Script."""
         import sys
         import io
-        from .script_player import ScriptPlayer
+        from ..frame_source import ScriptSource
         from ..logger import get_logger
         
         logger = get_logger(__name__)
@@ -460,38 +460,33 @@ def register_script_routes(app, player, dmx_controller, config):
             sys.stdout = io.StringIO()
             sys.stderr = io.StringIO()
             
-            # Stoppe aktuellen Player
-            was_playing = player.is_playing
-            if was_playing:
-                player.stop()
+            current_player = dmx_controller.player
             
-            # Erstelle ScriptPlayer
-            new_player = ScriptPlayer(
+            # Erstelle neue ScriptSource
+            script_source = ScriptSource(
                 script_name,
-                player.points_json_path,
-                player.target_ip if hasattr(player, 'target_ip') else '127.0.0.1',
-                player.start_universe if hasattr(player, 'start_universe') else 0,
-                player.fps_limit if hasattr(player, 'fps_limit') else 30,
+                current_player.canvas_width,
+                current_player.canvas_height,
                 config
             )
             
-            # Übernehme Einstellungen
-            new_player.brightness = player.brightness if hasattr(player, 'brightness') else 1.0
-            new_player.speed_factor = player.speed_factor if hasattr(player, 'speed_factor') else 1.0
+            # Wechsle Source (unified Player bleibt bestehen)
+            success = current_player.switch_source(script_source)
             
-            # Starte Script
-            new_player.start()
+            if not success:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+                return jsonify({
+                    "status": "error",
+                    "message": "Fehler beim Laden des Scripts"
+                }), 500
             
-            # Warte kurz damit Thread initialisiert (und potentielle stdout writes passieren)
+            # Warte kurz damit Thread initialisiert
             import time
             time.sleep(0.1)
             
             # Info
-            info = new_player.get_info()
-            
-            # Aktualisiere Player-Referenz in dmx_controller
-            if dmx_controller:
-                dmx_controller.player = new_player
+            info = current_player.get_info()
             
             # WICHTIG: stdout/stderr VOR return wiederherstellen!
             sys.stdout = old_stdout

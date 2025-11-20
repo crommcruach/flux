@@ -214,36 +214,25 @@ class DMXController:
                 script_name = self.script_cache[script_slot]
                 logger.info(f"[DMX] Script-Slot → Slot {script_slot}, Script: {script_name}")
                 
-                # Lade Script mit ScriptPlayer
-                was_playing = self.player.is_playing
-                
-                # Speichere alte Player-Daten
-                old_player = self.player
-                points_json = old_player.points_json_path
-                target_ip = old_player.target_ip
-                start_universe = old_player.start_universe
-                fps_limit = old_player.fps_limit
-                
-                # Stoppe alten Player komplett
-                if was_playing:
-                    old_player.stop()
-                
-                # Warte und lösche Referenz
-                import time
-                time.sleep(0.5)
-                del old_player
-                
-                # Erstelle ScriptPlayer
+                # Lade Script mit ScriptSource
                 try:
-                    from .script_player import ScriptPlayer
-                    new_player = ScriptPlayer(script_name, points_json, target_ip, start_universe, fps_limit, self.config)
+                    from ..frame_source import ScriptSource
                     
-                    # Ersetze Player
-                    self.player = new_player
-                    logger.info(f"[DMX] Script geladen: {script_name}")
+                    # Erstelle neue ScriptSource
+                    script_source = ScriptSource(
+                        script_name,
+                        self.player.canvas_width,
+                        self.player.canvas_height,
+                        self.config
+                    )
                     
-                    if was_playing:
-                        self.player.start()
+                    # Wechsle Source (unified Player bleibt bestehen)
+                    success = self.player.switch_source(script_source)
+                    
+                    if success:
+                        logger.info(f"[DMX] Script geladen: {script_name}")
+                    else:
+                        logger.error(f"[DMX] Fehler beim Laden des Scripts: {script_name}")
                 except Exception as e:
                     logger.error(f"[DMX] Fehler beim Laden des Scripts: {e}")
             elif script_slot > 0:

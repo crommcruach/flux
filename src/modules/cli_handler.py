@@ -163,6 +163,8 @@ class CLIHandler:
     
     def _handle_video_load(self, command):
         """Lädt und startet ein Video."""
+        from .frame_source import VideoSource
+        
         # Extrahiere Video-Namen
         video_name = command.split(':', 1)[1].strip()
         
@@ -201,47 +203,26 @@ class CLIHandler:
             logger.info("Bitte spezifischer wählen (z.B. 'video:kanal_1/test' oder kompletter Pfad).")
             return (True, None)
         
-        # Stoppe aktuellen Player
-        if self.player.is_playing:
-            self.player.stop()
-            time.sleep(0.5)
+        # Erstelle neue VideoSource
+        video_source = VideoSource(
+            matching[0],
+            self.player.canvas_width,
+            self.player.canvas_height,
+            self.config
+        )
         
-        # Prüfe ob aktueller Player ein VideoPlayer oder ScriptPlayer ist
-        from .video_player import VideoPlayer
+        # Wechsle Source (unified Player bleibt bestehen)
+        success = self.player.switch_source(video_source)
         
-        current_player = self.dmx_controller.player
+        if not success:
+            logger.error(f"Fehler beim Laden des Videos: {os.path.basename(matching[0])}")
+            return (True, None)
         
-        # Prüfe ob ScriptPlayer (hat kein load_video) oder VideoPlayer (hat load_video)
-        if not hasattr(current_player, 'load_video'):
-            # ScriptPlayer - Erstelle neuen VideoPlayer
-            new_player = VideoPlayer(
-                matching[0],
-                current_player.points_json_path,
-                current_player.target_ip,
-                current_player.start_universe,
-                current_player.fps_limit,
-                self.config
-            )
-            
-            # Übernehme Einstellungen
-            new_player.brightness = current_player.brightness
-            new_player.speed_factor = current_player.speed_factor
-            
-            # Aktualisiere Player-Referenz SOFORT
-            self.dmx_controller.player = new_player
-            
-            # Starte Video
-            new_player.start()
-            
-            # Tracking
-            self.current_video_path = matching[0]
-            self.current_script_name = None
-        else:
-            # VideoPlayer - Normales Video laden
-            if current_player.load_video(matching[0]):
-                self.current_video_path = matching[0]
-                self.current_script_name = None
-                current_player.start()
+        # Tracking
+        self.current_video_path = matching[0]
+        self.current_script_name = None
+        
+        logger.info(f"✓ Video geladen: {os.path.basename(matching[0])}")
         
         return (True, None)
     
@@ -389,7 +370,6 @@ class CLIHandler:
         """Verwaltet Punkte-Listen."""
         from .utils import list_points_files
         from .validator import validate_points_file
-        from .video_player import VideoPlayer
         
         if args == "list":
             list_points_files(self.data_dir)
@@ -449,8 +429,6 @@ class CLIHandler:
     
     def _handle_points_switch(self, args):
         """Wechselt Punkte-Liste."""
-        from .video_player import VideoPlayer
-        
         parts = args.split(maxsplit=1)
         if len(parts) < 2:
             logger.info("Verwendung: points switch <name>")
@@ -470,60 +448,41 @@ class CLIHandler:
             self.player.stop()
         
         try:
-            new_player = VideoPlayer(
-                self.player.video_path, 
-                new_points_path,
-                self.player.target_ip, 
-                self.player.start_universe, 
-                self.player.fps_limit,
-                self.config
-            )
-            new_player.brightness = self.player.brightness
-            new_player.speed_factor = self.player.speed_factor
-            new_player.max_loops = self.player.max_loops
+            # Update points path in existing player
+            self.player.points_json_path = new_points_path
+            self.player.reload_points()
             
             logger.info(f"✓ Punkte-Liste gewechselt: {matching[0]}")
-            logger.info(f"  Anzahl Punkte: {new_player.total_points}")
-            logger.info(f"  Benötigte Universen: {new_player.required_universes}")
+            logger.info(f"  Anzahl Punkte: {self.player.total_points}")
+            logger.info(f"  Benötigte Universen: {self.player.required_universes}")
             
             if was_playing:
-                new_player.start()
+                self.player.start()
             
-            return new_player
+            return self.player
         except Exception as e:
             logger.error(f"Fehler beim Laden der Punkte-Liste: {e}")
             return None
     
     def _handle_points_reload(self):
         """Lädt aktuelle Punkte-Liste neu."""
-        from .video_player import VideoPlayer
-        
         was_playing = self.player.is_playing
         current_points_path = self.player.points_json_path
         if was_playing:
             self.player.stop()
         
         try:
-            new_player = VideoPlayer(
-                self.player.video_path, 
-                current_points_path,
-                self.player.target_ip, 
-                self.player.start_universe, 
-                self.player.fps_limit,
-                self.config
-            )
-            new_player.brightness = self.player.brightness
-            new_player.speed_factor = self.player.speed_factor
-            new_player.max_loops = self.player.max_loops
+            # Reload points in existing player
+            self.player.reload_points()
             
             logger.info(f"✓ Punkte-Liste neu geladen: {os.path.basename(current_points_path)}")
-            logger.info(f"  Anzahl Punkte: {new_player.total_points}")
-            logger.info(f"  Benötigte Universen: {new_player.required_universes}")
+            logger.info(f"  Anzahl Punkte: {self.player.total_points}")
+            logger.info(f"  Benötigte Universen: {self.player.required_universes}")
             
             if was_playing:
-                new_player.start()
+                self.player.start()
             
-            return new_player
+            return self.player
         except Exception as e:
             logger.error(f"Fehler beim Neuladen der Punkte-Liste: {e}")
             return None
@@ -768,8 +727,6 @@ class CLIHandler:
     
     def _handle_cache(self, args):
         """Verwaltet Cache."""
-        from .video_player import VideoPlayer
-        
         cache_dir = os.path.join(self.base_path, self.config['paths'].get('cache_dir', 'cache'))
         
         if args == "clear":
@@ -877,8 +834,6 @@ class CLIHandler:
     
     def _handle_cache_fill(self, cache_dir):
         """Füllt Cache für alle Videos."""
-        from .video_player import VideoPlayer
-        
         if not self.config.get('cache', {}).get('enabled', True):
             logger.warning("⚠ Cache ist deaktiviert! Aktiviere mit: cache enable")
             return
@@ -897,18 +852,31 @@ class CLIHandler:
         
         logger.info(f"\nStarte Cache-Fill für {len(all_videos)} Videos...")
         
+        from .frame_source import VideoSource
+        from .player import Player
+        
         for idx, video_path in enumerate(all_videos, 1):
             logger.info(f"\n[{idx}/{len(all_videos)}] Processing: {os.path.basename(video_path)}")
             try:
-                temp_player = VideoPlayer(
-                    video_path, 
-                    self.player.points_json_path,
-                    self.player.target_ip, 
-                    self.player.start_universe,
-                    self.player.fps_limit, 
+                # Create temporary VideoSource for caching
+                temp_source = VideoSource(
+                    video_path,
+                    self.player.canvas_width,
+                    self.player.canvas_height,
                     self.config
                 )
-                cache_path = temp_player._get_cache_path()
+                
+                # Create temporary player for caching
+                temp_player = Player(
+                    temp_source,
+                    self.player.points_json_path,
+                    self.player.target_ip,
+                    self.player.start_universe,
+                    self.player.fps_limit,
+                    self.config
+                )
+                
+                cache_path = temp_source._get_cache_path()
                 if cache_path and os.path.exists(cache_path):
                     logger.info(f"  ✓ Cache existiert bereits, überspringe...")
                 else:
@@ -968,63 +936,36 @@ class CLIHandler:
     
     def _handle_load_script(self, command):
         """Lädt und startet ein Script."""
-        from .script_player import ScriptPlayer
+        from .frame_source import ScriptSource
         
         # Extrahiere Script-Namen
         script_name = command.split(':', 1)[1].strip()
         if not script_name.endswith('.py'):
             script_name += '.py'
         
-        # Hole aktuellen Player
-        old_player = self.dmx_controller.player
-        
-        # Stoppe aktuellen Player wenn er läuft
-        was_playing = old_player.is_playing
-        
-        # Speichere alte Player-Daten
-        points_json_path = old_player.points_json_path
-        target_ip = old_player.target_ip
-        start_universe = old_player.start_universe
-        fps_limit = old_player.fps_limit
-        old_brightness = old_player.brightness
-        old_speed = old_player.speed_factor
-        
-        # Stoppe alten Player komplett
-        if was_playing:
-            old_player.stop()
-        
-        # Warte kurz
-        import time
-        time.sleep(0.5)
-        
         try:
-            # Erstelle neuen ScriptPlayer
-            new_player = ScriptPlayer(
+            # Erstelle neue ScriptSource
+            script_source = ScriptSource(
                 script_name,
-                points_json_path,
-                target_ip,
-                start_universe,
-                fps_limit,
+                self.player.canvas_width,
+                self.player.canvas_height,
                 self.config
             )
             
-            # Übernehme Einstellungen
-            new_player.brightness = old_brightness
-            new_player.speed_factor = old_speed
+            # Wechsle Source (unified Player bleibt bestehen)
+            success = self.player.switch_source(script_source)
             
-            # Aktualisiere Player-Referenz SOFORT
-            self.dmx_controller.player = new_player
+            if not success:
+                logger.error(f"Fehler beim Laden des Scripts: {script_name}")
+                return (True, None)
             
             # Zeige Info
-            info = new_player.get_info()
+            info = self.player.get_info()
             logger.info(f"\n✓ Script geladen: {info.get('name', script_name)}")
             if 'description' in info:
                 logger.info(f"  {info['description']}")
             if 'parameters' in info:
                 logger.info(f"  Parameter: {', '.join(info['parameters'].keys())}")
-            
-            # Starte automatisch
-            new_player.start()
             
             # Tracking für next/back
             self.current_script_name = script_name

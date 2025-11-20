@@ -58,7 +58,7 @@ def register_video_routes(app, player, dmx_controller, video_dir, config):
             # Prüfe ob aktueller Player ein VideoPlayer ist
             current_player = dmx_controller.player
             current_video = None
-            if hasattr(current_player, 'video_path'):
+            if hasattr(current_player, 'video_path') and current_player.video_path:
                 current_video = os.path.relpath(current_player.video_path, video_dir)
             
             return jsonify({
@@ -76,6 +76,7 @@ def register_video_routes(app, player, dmx_controller, video_dir, config):
         import sys
         import io
         from ..logger import get_logger
+        from ..frame_source import VideoSource
         
         logger = get_logger(__name__)
         
@@ -103,44 +104,21 @@ def register_video_routes(app, player, dmx_controller, video_dir, config):
             current_player = dmx_controller.player
             was_playing = current_player.is_playing
             
-            # Prüfe ob aktueller Player ein ScriptPlayer ist
-            if type(current_player).__name__ == 'ScriptPlayer':
-                # Erstelle neuen VideoPlayer
-                from .video_player import VideoPlayer
-                
-                # Stoppe ScriptPlayer
-                current_player.stop()
-                
-                # Erstelle VideoPlayer mit gleichen Einstellungen
-                new_player = VideoPlayer(
-                    video_path,
-                    current_player.points_json_path,
-                    current_player.target_ip,
-                    current_player.start_universe,
-                    current_player.fps_limit,
-                    config
-                )
-                
-                # Übernehme Einstellungen
-                new_player.brightness = current_player.brightness
-                new_player.speed_factor = current_player.speed_factor
-                
-                # Aktualisiere Player-Referenz
-                dmx_controller.player = new_player
-                
-                # Starte wenn vorher lief
-                if was_playing:
-                    new_player.start()
-            else:
-                # Normaler VideoPlayer - nutze load_video
-                success = current_player.load_video(video_path)
-                
-                if not success:
-                    return jsonify({"status": "error", "message": "Fehler beim Laden des Videos"}), 500
-                
-                # Auto-start wenn vorher spielte
-                if was_playing:
-                    current_player.start()
+            # Erstelle neue VideoSource
+            video_source = VideoSource(
+                video_path,
+                current_player.canvas_width,
+                current_player.canvas_height,
+                config
+            )
+            
+            # Wechsle Source (unified Player bleibt bestehen)
+            success = current_player.switch_source(video_source)
+            
+            if not success:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+                return jsonify({"status": "error", "message": "Fehler beim Laden des Videos"}), 500
             
             # Warte kurz damit Thread initialisiert
             import time
@@ -171,7 +149,7 @@ def register_video_routes(app, player, dmx_controller, video_dir, config):
         current_player = dmx_controller.player
         
         # Prüfe ob es ein VideoPlayer ist
-        if not hasattr(current_player, 'video_path'):
+        if not hasattr(current_player, 'video_path') or not current_player.video_path:
             return jsonify({
                 "status": "error",
                 "message": "Kein Video geladen (Script-Modus aktiv)"
