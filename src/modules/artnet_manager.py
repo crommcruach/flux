@@ -13,11 +13,12 @@ logger = get_logger(__name__)
 class ArtNetManager:
     """Verwaltet Art-Net Universen und Testmuster mit Priorität."""
     
-    def __init__(self, target_ip, start_universe, total_points, channels_per_universe=510):
+    def __init__(self, target_ip, start_universe, total_points, channels_per_universe=3):
         self.target_ip = target_ip
         self.start_universe = start_universe
         self.total_points = total_points
         self.channels_per_universe = channels_per_universe
+        self.last_frame = None  # Für DMX Monitor
         
         # Berechne benötigte Universen
         total_channels = total_points * 3  # RGB
@@ -26,10 +27,19 @@ class ArtNetManager:
         self.universes = []
         self.universe_channel_orders = {}  # Universe-Index -> channel_order (z.B. "GRB")
         self.is_active = False
-        self.test_mode = False  # True wenn Testmuster aktiv
+        
+        # Priorisierung: Test > Replay > Video
+        self.test_mode = False  # True wenn Testmuster aktiv (höchste Priorität)
+        self.replay_mode = False  # True wenn Replay aktiv (überschreibt Video)
         self.test_pattern_data = None  # Gespeicherte Testmuster-Daten
         self.test_thread = None  # Thread für kontinuierliches Testmuster-Senden
         self.test_thread_running = False
+        
+        # Statistik-Tracking
+        self.packets_sent = 0
+        self.bytes_sent = 0
+        self.stats_start_time = time.time()
+        self.stats_lock = threading.Lock()
         
         # RGB-Kanal-Mapping: Definiert Reihenfolge für jede Permutation
         self.channel_mappings = {
@@ -49,7 +59,8 @@ class ArtNetManager:
         # Lade Werte aus config oder verwende defaults
         config = artnet_config or {}
         # Höhere FPS für flüssigere Ausgabe (wird von show() überschrieben)
-        fps = config.get('fps', 60)
+        self.artnet_fps = config.get('fps', 60)
+        fps = self.artnet_fps
         even_packet = config.get('even_packet', True)
         broadcast = config.get('broadcast', True)
         
@@ -102,10 +113,28 @@ class ArtNetManager:
         self.is_active = False
         logger.debug("Art-Net gestoppt")
     
-    def send_frame(self, rgb_data):
-        """Sendet RGB-Frame über Art-Net (nur wenn kein Testmuster aktiv)."""
-        if not self.is_active or self.test_mode:
+    def send_frame(self, rgb_data, source='video'):
+        """Sendet RGB-Frame über Art-Net mit Priorisierung.
+        
+        Args:
+            rgb_data: DMX-Daten
+            source: 'video', 'replay', oder 'test'
+        
+        Priorität: test > replay > video
+        """
+        if not self.is_active:
             return
+        
+        # Test hat höchste Priorität - blockiert alles
+        if self.test_mode:
+            return
+        
+        # Replay blockiert Video
+        if self.replay_mode and source == 'video':
+            return
+        
+        # Speichere für DMX Monitor (was tatsächlich gesendet wird)
+        self.last_frame = rgb_data
         
         for universe_idx, universe in enumerate(self.universes):
             start_channel = universe_idx * self.channels_per_universe
@@ -121,6 +150,12 @@ class ArtNetManager:
             # Setze Daten UND sende sofort (flush=True umgeht FPS-Limiting)
             universe.set(universe_data)
             universe.show()  # Explizit senden ohne FPS-Wartezeit
+        
+        # Statistik: Zähle gesendete Pakete
+        with self.stats_lock:
+            self.packets_sent += len(self.universes)
+            # Art-Net Paket: 18B Header + 512B Data + 8B UDP + 20B IP + 14B Ethernet ≈ 572 Bytes
+            self.bytes_sent += len(self.universes) * 572
     
     def _stop_test_thread(self):
         """Stoppt den Test-Thread."""
@@ -134,6 +169,9 @@ class ArtNetManager:
         """Thread-Funktion: Sendet Testmuster kontinuierlich (~40 Hz)."""
         while self.test_thread_running and self.is_active:
             if self.test_pattern_data:
+                # Speichere für DMX Monitor
+                self.last_frame = self.test_pattern_data
+                
                 for universe_idx, universe in enumerate(self.universes):
                     start_channel = universe_idx * self.channels_per_universe
                     end_channel = min(start_channel + self.channels_per_universe, len(self.test_pattern_data))
@@ -147,6 +185,11 @@ class ArtNetManager:
                     
                     universe.set(universe_data)
                     universe.show()
+                
+                # Statistik: Zähle gesendete Pakete
+                with self.stats_lock:
+                    self.packets_sent += len(self.universes)
+                    self.bytes_sent += len(self.universes) * 572
             
             time.sleep(0.025)  # 40 Hz Refresh-Rate
     
@@ -239,11 +282,71 @@ class ArtNetManager:
         logger.debug(f"RGB-Gradient Testmuster gesendet ({self.total_points} Punkte, Video gestoppt)")
     
     def resume_video_mode(self):
-        """Deaktiviert Testmuster-Modus, erlaubt Video-Wiedergabe."""
+        """Deaktiviert Test- und Replay-Modus, erlaubt Video-Wiedergabe."""
         self._stop_test_thread()
         self.test_mode = False
+        self.replay_mode = False
         self.test_pattern_data = None
         logger.debug("Video-Modus aktiviert")
+    
+    def get_active_mode(self):
+        """Gibt den aktuellen aktiven Modus zurück."""
+        if self.test_mode:
+            return "Test"
+        elif self.replay_mode:
+            return "Replay"
+        else:
+            return "Video"
+    
+    def set_fps(self, fps):
+        """Setzt Art-Net FPS für alle Universen."""
+        if not self.is_active:
+            return
+        fps = max(1, min(60, int(fps)))  # Limit 1-60 FPS (realistisch für LED-Strips)
+        self.artnet_fps = fps
+        for universe in self.universes:
+            universe.fps = fps
+        logger.debug(f"Art-Net FPS auf {fps} gesetzt")
+    
+    def get_fps(self):
+        """Gibt aktuelle Art-Net FPS zurück."""
+        return getattr(self, 'artnet_fps', 60)
+    
+    def get_network_stats(self):
+        """Gibt Netzwerk-Statistiken zurück."""
+        with self.stats_lock:
+            elapsed = time.time() - self.stats_start_time
+            if elapsed < 0.1:  # Verhindere Division durch 0
+                return {
+                    'packets_sent': 0,
+                    'packets_per_sec': 0,
+                    'bytes_sent': 0,
+                    'bytes_per_sec': 0,
+                    'mbps': 0.0,
+                    'network_load_percent': 0.0
+                }
+            
+            packets_per_sec = self.packets_sent / elapsed
+            bytes_per_sec = self.bytes_sent / elapsed
+            mbps = (bytes_per_sec * 8) / 1_000_000  # Megabit pro Sekunde
+            # Netzwerkauslastung basierend auf 1 Gbit/s Netzwerk
+            network_load = (bytes_per_sec / 125_000_000) * 100
+            
+            return {
+                'packets_sent': self.packets_sent,
+                'packets_per_sec': round(packets_per_sec, 1),
+                'bytes_sent': self.bytes_sent,
+                'bytes_per_sec': round(bytes_per_sec, 1),
+                'mbps': round(mbps, 2),
+                'network_load_percent': round(network_load, 2)
+            }
+    
+    def reset_stats(self):
+        """Setzt Statistiken zurück."""
+        with self.stats_lock:
+            self.packets_sent = 0
+            self.bytes_sent = 0
+            self.stats_start_time = time.time()
     
     def _reorder_channels(self, data, universe_idx):
         """Ordnet RGB-Kanäle entsprechend der Universum-Konfiguration um."""

@@ -116,14 +116,21 @@ def generate_frame(frame_number, width, height, time, fps=30):
         g = max(0, min(255, g))
         b = max(0, min(255, b))
         
-        rgb_values.extend([r, g, b])
+        rgb_values.append((x, y, r, g, b))
     
-    # Konvertiere zu NumPy Array und forme zu (height, width, 3)
-    rgb_array = np.array(rgb_values, dtype=np.uint8)
-    # Erstelle leeres Canvas und fülle mit berechneten Werten
+    # Erstelle Canvas und schreibe RGB-Werte hinein
     canvas = np.zeros((height, width, 3), dtype=np.uint8)
-    # Verteile die RGB-Werte gleichmäßig über das Canvas
-    # (Vereinfachte Darstellung - in Realität würden Points gemappt)
+    
+    for px, py, r, g, b in rgb_values:
+        # Zeichne kleinen Block um jeden Point (damit sichtbar)
+        x_start = max(0, int(px) - 5)
+        x_end = min(width, int(px) + 5)
+        y_start = max(0, int(py) - 5)
+        y_end = min(height, int(py) + 5)
+        
+        if 0 <= y_start < height and 0 <= x_start < width:
+            canvas[y_start:y_end, x_start:x_end] = [r, g, b]
+    
     return canvas
 
 

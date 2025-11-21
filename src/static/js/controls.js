@@ -6,7 +6,6 @@ let WEBSOCKET_URL = 'http://localhost:5000';  // Default, wird aus Config gelade
 let POLLING_INTERVAL = 3000;  // Default, wird aus Config geladen
 let socket = null;
 let socketConnected = false;
-let lastConsoleLines = 0;
 
 // ========================================
 // WEBSOCKET FUNCTIONS
@@ -32,10 +31,6 @@ function initWebSocket() {
     
     socket.on('status', (data) => {
         updateStatusFromWebSocket(data);
-    });
-    
-    socket.on('console_update', (data) => {
-        updateConsoleFromWebSocket(data);
     });
     
     socket.on('connect_error', (error) => {
@@ -109,21 +104,65 @@ async function executeCliCommand(command) {
 // SETTINGS
 // ========================================
 
-async function updateBrightness(value) {
+// Helligkeit Slider bewegt
+function updateBrightnessSlider(value) {
     document.getElementById('brightnessValue').textContent = value + '%';
-    await apiCall('/brightness', 'POST', { value: parseInt(value) });
+    document.getElementById('brightnessInput').value = value;
 }
 
-async function updateSpeed(value) {
-    document.getElementById('speedValue').textContent = parseFloat(value).toFixed(1) + 'x';
-    await apiCall('/speed', 'POST', { value: parseFloat(value) });
+// Helligkeit Input geändert (sendet an API)
+async function updateBrightnessInput(value) {
+    const val = parseInt(value);
+    if (isNaN(val) || val < 0 || val > 100) return;
+    
+    document.getElementById('brightnessValue').textContent = val + '%';
+    document.getElementById('brightnessSlider').value = val;
+    
+    const result = await apiCall('/brightness', 'POST', { value: val });
+    if (result) {
+        showToast(`Helligkeit auf ${val}% gesetzt`, 'success');
+    }
 }
 
-async function setFPS() {
-    const fps = document.getElementById('fpsInput').value;
-    if (fps) {
-        const result = await apiCall('/fps', 'POST', { value: parseInt(fps) });
-        if (result) showToast(`FPS auf ${fps} gesetzt`);
+// Geschwindigkeit Slider bewegt
+function updateSpeedSlider(value) {
+    const speed = parseFloat(value);
+    document.getElementById('speedValue').textContent = speed.toFixed(1) + 'x';
+    document.getElementById('speedInput').value = speed.toFixed(1);
+}
+
+// Geschwindigkeit Input geändert (sendet an API)
+async function updateSpeedInput(value) {
+    const val = parseFloat(value);
+    if (isNaN(val) || val <= 0 || val > 10) return;
+    
+    document.getElementById('speedValue').textContent = val.toFixed(1) + 'x';
+    document.getElementById('speedSlider').value = val;
+    
+    const result = await apiCall('/speed', 'POST', { value: val });
+    if (result) {
+        showToast(`Geschwindigkeit auf ${val.toFixed(1)}x gesetzt`, 'success');
+    }
+}
+
+// Hue Slider bewegt
+function updateHueSlider(value) {
+    const hue = parseInt(value);
+    document.getElementById('hueValue').textContent = hue + '°';
+    document.getElementById('hueInput').value = hue;
+}
+
+// Hue Input geändert (sendet an API)
+async function updateHueInput(value) {
+    const val = parseInt(value);
+    if (isNaN(val) || val < 0 || val > 360) return;
+    
+    document.getElementById('hueValue').textContent = val + '°';
+    document.getElementById('hueSlider').value = val;
+    
+    const result = await apiCall('/hue', 'POST', { value: val });
+    if (result) {
+        showToast(`Hue Rotation auf ${val}° gesetzt`, 'success');
     }
 }
 
@@ -244,14 +283,15 @@ async function loadScripts() {
             const div = document.createElement('div');
             div.className = 'video-item';
             div.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <strong>${script.filename}</strong>
-                        ${script.description ? `<br><small style="color: #999;">${script.description}</small>` : ''}
-                    </div>
-                    <button class="btn btn-primary btn-sm" onclick="loadScript('${script.filename}')" title="script:${script.filename}">▶️</button>
+                <div>
+                    <strong>${script.filename}</strong>
+                    ${script.description ? `<br><small style="color: #999;">${script.description}</small>` : ''}
                 </div>
             `;
+            div.onclick = (e) => {
+                e.stopPropagation();
+                loadScript(script.filename);
+            };
             mediaList.appendChild(div);
         });
     }
@@ -272,60 +312,51 @@ async function loadScript(scriptName) {
 }
 
 // ========================================
-// INFO
-// ========================================
-
-async function loadInfo() {
-    const result = await apiCall('/info', 'GET');
-    if (result) {
-        const infoDisplay = document.getElementById('infoDisplay');
-        infoDisplay.innerHTML = '';
-        for (const [key, value] of Object.entries(result)) {
-            const div = document.createElement('div');
-            div.innerHTML = `<strong>${key}:</strong> ${value}`;
-            infoDisplay.appendChild(div);
-        }
-    }
-}
-
-// ========================================
 // STATUS
 // ========================================
 
 function updateStatusFromWebSocket(data) {
-    const statusDot = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    
-    if (data.is_playing) {
-        statusDot.className = 'status-dot playing';
-        statusText.textContent = 'Läuft';
-    } else if (data.is_paused) {
-        statusDot.className = 'status-dot paused';
-        statusText.textContent = 'Pausiert';
-    } else {
-        statusDot.className = 'status-dot';
-        statusText.textContent = 'Gestoppt';
-    }
-    
-    // Video-Name anzeigen (direkt aus data.video)
-    if (data.video) {
-        document.getElementById('currentVideo').textContent = data.video;
-    } else if (data.status && data.status.video_path) {
-        const videoName = data.status.video_path.split('\\').pop();
-        document.getElementById('currentVideo').textContent = videoName;
-    }
-    
-    // Frame-Info anzeigen
-    if (data.current_frame !== undefined) {
-        document.getElementById('currentFrame').textContent = data.current_frame;
-        document.getElementById('totalFrames').textContent = data.total_frames || 0;
-    } else if (data.status && data.status.current_frame !== undefined) {
-        document.getElementById('currentFrame').textContent = data.status.current_frame;
-        document.getElementById('totalFrames').textContent = data.status.total_frames || 0;
-    }
-    
     // Preview Update
     updatePreview(data);
+    
+    // Active Mode Update
+    if (data.active_mode !== undefined && window.updateActiveModeDisplay) {
+        window.updateActiveModeDisplay(data.active_mode);
+    }
+    
+    // Slider-Werte synchronisieren
+    if (data.brightness !== undefined) {
+        const brightness = Math.round(data.brightness);
+        const brightnessSlider = document.getElementById('brightnessSlider');
+        const brightnessInput = document.getElementById('brightnessInput');
+        const brightnessValue = document.getElementById('brightnessValue');
+        
+        if (brightnessSlider) brightnessSlider.value = brightness;
+        if (brightnessInput) brightnessInput.value = brightness;
+        if (brightnessValue) brightnessValue.textContent = brightness + '%';
+    }
+    
+    if (data.speed !== undefined) {
+        const speed = parseFloat(data.speed);
+        const speedSlider = document.getElementById('speedSlider');
+        const speedInput = document.getElementById('speedInput');
+        const speedValue = document.getElementById('speedValue');
+        
+        if (speedSlider) speedSlider.value = speed;
+        if (speedInput) speedInput.value = speed.toFixed(1);
+        if (speedValue) speedValue.textContent = speed.toFixed(1) + 'x';
+    }
+    
+    if (data.hue_shift !== undefined) {
+        const hue = parseInt(data.hue_shift);
+        const hueSlider = document.getElementById('hueSlider');
+        const hueInput = document.getElementById('hueInput');
+        const hueValue = document.getElementById('hueValue');
+        
+        if (hueSlider) hueSlider.value = hue;
+        if (hueInput) hueInput.value = hue;
+        if (hueValue) hueValue.textContent = hue + '°';
+    }
 }
 
 // ========================================
@@ -381,22 +412,28 @@ function initPreview() {
 }
 
 function updatePreview(data) {
-    // Video-Name und Canvas-Größe aktualisieren
+    // Video-Name aktualisieren
     const videoName = data.video || (data.status && data.status.video_path ? data.status.video_path.split('\\').pop() : '-');
     document.getElementById('previewVideoName').textContent = videoName;
     
-    // Canvas-Größe aus Info-Daten holen (später über separaten API-Call)
-    const canvasSize = '-'; // Wird beim nächsten info-Call aktualisiert
-    document.getElementById('previewCanvasSize').textContent = canvasSize;
+    // Canvas-Größe wird separat über info-Call geholt
     
-    // Frame-Info
-    const currentFrame = data.current_frame || 0;
-    const totalFrames = data.total_frames || 0;
-    document.getElementById('previewFrame').textContent = `${currentFrame}/${totalFrames}`;
+    const isScript = data.is_script || false;
     
-    // Progress Bar
-    const progress = totalFrames > 0 ? (currentFrame / totalFrames * 100) : 0;
-    document.getElementById('previewProgress').style.width = `${progress}%`;
+    if (isScript) {
+        // Bei Scripts: Keine Frame-Zählung (endlos)
+        document.getElementById('previewFrame').textContent = 'Endlos';
+        document.getElementById('previewProgress').style.width = '100%';
+    } else {
+        // Bei Videos: Frame-Info anzeigen
+        const currentFrame = data.current_frame || 0;
+        const totalFrames = data.total_frames || 0;
+        document.getElementById('previewFrame').textContent = `${currentFrame}/${totalFrames}`;
+        
+        // Progress Bar
+        const progress = totalFrames > 0 ? (currentFrame / totalFrames * 100) : 0;
+        document.getElementById('previewProgress').style.width = `${progress}%`;
+    }
     
     // Stream läuft automatisch via <img> Element
 }
@@ -404,14 +441,20 @@ function updatePreview(data) {
 async function updatePreviewInfo() {
     // Info-Daten separat holen für Canvas-Größe
     const info = await apiCall('/info', 'GET');
-    if (info && info.canvas) {
-        document.getElementById('previewCanvasSize').textContent = info.canvas;
+    if (info) {
+        // Canvas-Größe aus width/height zusammensetzen
+        const canvasSize = (info.canvas_width && info.canvas_height) 
+            ? `${info.canvas_width}x${info.canvas_height}` 
+            : '-';
+        document.getElementById('previewCanvasSize').textContent = canvasSize;
         
         // Setze img width/height Attribute für korrekte Skalierung
-        const [w, h] = info.canvas.split('x').map(Number);
-        if (previewStream && (previewStream.naturalWidth === 0 || previewStream.naturalWidth !== w)) {
-            // Optional: Setze explizite Größe (Browser skaliert automatisch)
-            console.log(`Preview Canvas-Größe: ${w}x${h}`);
+        if (info.canvas_width && info.canvas_height) {
+            const previewStream = document.getElementById('previewStream');
+            if (previewStream && (previewStream.naturalWidth === 0 || previewStream.naturalWidth !== info.canvas_width)) {
+                // Optional: Setze explizite Größe (Browser skaliert automatisch)
+                console.log(`Preview Canvas-Größe: ${info.canvas_width}x${info.canvas_height}`);
+            }
         }
     }
 }
@@ -424,20 +467,6 @@ async function updateStatus() {
 }
 
 // ========================================
-// RECORDING
-// ========================================
-
-async function startRecording() {
-    const result = await apiCall('/record/start', 'POST');
-    if (result) showToast(result.message);
-}
-
-async function stopRecording() {
-    const result = await apiCall('/record/stop', 'POST');
-    if (result) showToast(result.message);
-}
-
-// ========================================
 // THEME TOGGLE
 // ========================================
 
@@ -445,131 +474,30 @@ function initThemeToggle() {
     const themeToggle = document.getElementById('themeToggle');
     const themeLabel = document.getElementById('themeLabel');
     
+    // Exit if theme toggle not present on this page
+    if (!themeToggle) return;
+    
     // Load saved theme preference or default to light
     const savedTheme = localStorage.getItem('theme') || 'light';
     if (savedTheme === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');
         themeToggle.checked = true;
-        themeLabel.textContent = 'Dunkel';
+        if (themeLabel) themeLabel.textContent = 'Dunkel';
     } else {
-        themeLabel.textContent = 'Hell';
+        if (themeLabel) themeLabel.textContent = 'Hell';
     }
     
     themeToggle.addEventListener('change', () => {
         if (themeToggle.checked) {
             document.documentElement.setAttribute('data-theme', 'dark');
-            themeLabel.textContent = 'Dunkel';
+            if (themeLabel) themeLabel.textContent = 'Dunkel';
             localStorage.setItem('theme', 'dark');
         } else {
             document.documentElement.removeAttribute('data-theme');
-            themeLabel.textContent = 'Hell';
+            if (themeLabel) themeLabel.textContent = 'Hell';
             localStorage.setItem('theme', 'light');
         }
     });
-}
-
-// ========================================
-// CONSOLE FUNCTIONS
-// ========================================
-
-function updateConsoleFromWebSocket(data) {
-    const consoleOutput = document.getElementById('consoleOutput');
-    
-    if (data.append) {
-        // Append neue Zeilen
-        const newLog = data.log.join('\n');
-        if (consoleOutput.textContent) {
-            consoleOutput.textContent += '\n' + newLog;
-        } else {
-            consoleOutput.textContent = newLog;
-        }
-    } else {
-        // Komplettes Update
-        const log = data.log.join('\n');
-        consoleOutput.textContent = log;
-    }
-    
-    consoleOutput.scrollTop = consoleOutput.scrollHeight;
-    lastConsoleLines = data.total;
-}
-
-async function fetchConsole() {
-    if (socketConnected) {
-        // Request via WebSocket
-        socket.emit('request_console', { lines: 100 });
-        return;
-    }
-    
-    // Fallback: REST API
-    try {
-        const response = await fetch(`${API_BASE}/console/log?lines=100`);
-        if (!response.ok) return;
-        const result = await response.json();
-        if (result) {
-            updateConsoleFromWebSocket({ log: result.log, total: result.total, append: false });
-        }
-    } catch (error) {
-        // Stiller Fehler bei Console-Polling
-    }
-}
-
-async function executeCommand() {
-    const input = document.getElementById('consoleCommand');
-    const command = input.value.trim();
-    if (!command) return;
-    
-    const consoleOutput = document.getElementById('consoleOutput');
-    
-    // Zeige Befehl in Console
-    const cmdLine = document.createElement('div');
-    cmdLine.style.color = '#4CAF50';
-    cmdLine.style.fontWeight = 'bold';
-    cmdLine.textContent = `> ${command}`;
-    consoleOutput.appendChild(cmdLine);
-    consoleOutput.scrollTop = consoleOutput.scrollHeight;
-    
-    try {
-        const result = await apiCall('/console', 'POST', { command });
-        
-        if (result) {
-            // Zeige Output
-            if (result.output) {
-                const outputDiv = document.createElement('div');
-                outputDiv.style.whiteSpace = 'pre-wrap';
-                outputDiv.textContent = result.output;
-                consoleOutput.appendChild(outputDiv);
-            }
-            
-            // Zeige Status-Meldung
-            if (result.status === 'success') {
-                if (!result.output && result.message) {
-                    const msgDiv = document.createElement('div');
-                    msgDiv.style.color = '#4CAF50';
-                    msgDiv.textContent = result.message;
-                    consoleOutput.appendChild(msgDiv);
-                }
-            } else {
-                const errorDiv = document.createElement('div');
-                errorDiv.style.color = '#f44336';
-                errorDiv.textContent = `Fehler: ${result.message || 'Unbekannter Fehler'}`;
-                consoleOutput.appendChild(errorDiv);
-            }
-            
-            consoleOutput.scrollTop = consoleOutput.scrollHeight;
-            input.value = '';
-            updateStatus();
-        }
-    } catch (error) {
-        const errorDiv = document.createElement('div');
-        errorDiv.style.color = '#f44336';
-        errorDiv.textContent = `Fehler: ${error.message}`;
-        consoleOutput.appendChild(errorDiv);
-        consoleOutput.scrollTop = consoleOutput.scrollHeight;
-    }
-}
-
-async function clearConsole() {
-    document.getElementById('consoleOutput').textContent = '';
 }
 
 // ========================================
@@ -600,13 +528,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     initPreview();
     updateStatus();
     updatePreviewInfo();
-    fetchConsole();
     
     // Fallback Polling (falls WebSocket nicht verbindet)
     setInterval(() => {
         if (!socketConnected) {
             updateStatus();
-            fetchConsole();
         }
     }, POLLING_INTERVAL);
     

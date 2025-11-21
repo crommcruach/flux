@@ -1,7 +1,7 @@
 """
 Flask REST API mit WebSocket für Flux Steuerung
 """
-from flask import Flask, send_from_directory
+from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import os
@@ -20,12 +20,13 @@ from .constants import (
 class RestAPI:
     """REST API Server mit WebSocket für Video-Player Steuerung."""
     
-    def __init__(self, player, dmx_controller, data_dir, video_dir, config=None):
+    def __init__(self, player, dmx_controller, data_dir, video_dir, config=None, replay_manager=None):
         self.player = player
         self.dmx_controller = dmx_controller
         self.data_dir = data_dir
         self.video_dir = video_dir
         self.config = config or {}
+        self.replay_manager = replay_manager
         self.logger = logger  # Add logger as instance attribute
         
         # Console Log Buffer aus config oder default
@@ -55,6 +56,24 @@ class RestAPI:
         self._register_routes()
         self._register_socketio_events()
         
+        # Error Handler für 500er Fehler (verhindert write() before start_response)
+        @self.app.errorhandler(500)
+        def handle_internal_error(e):
+            """Fängt Server-Fehler ab und verhindert stdout-Probleme."""
+            from flask import jsonify
+            logger.error(f"Server-Fehler: {e}")
+            return jsonify({"error": "Internal Server Error"}), 500
+        
+        # 404 Handler (ohne lautes Logging)
+        @self.app.errorhandler(404)
+        def handle_not_found(e):
+            """Behandelt 404-Fehler still."""
+            from flask import jsonify, request
+            # Nur loggen wenn es kein favicon oder bekannte statische Datei ist
+            if not request.path.endswith(('.ico', '.map', '.svg')):
+                logger.debug(f"404: {request.path}")
+            return jsonify({"error": "Not Found"}), 404
+        
         self.server_thread = None
         self.status_broadcast_thread = None
         self.is_running = False
@@ -62,43 +81,11 @@ class RestAPI:
     def _register_routes(self):
         """Registriert alle API-Routen."""
         
-        # Web-Interface
-        @self.app.route('/')
-        def index():
-            """Serve the Bootstrap GUI."""
-            return send_from_directory(self.app.static_folder, 'index.html')
+        # Lade Web-Interface Routen
+        from .routes import register_web_routes
+        register_web_routes(self.app, self.config)
         
-        @self.app.route('/controls')
-        def controls():
-            """Serve the control panel."""
-            return send_from_directory(self.app.static_folder, 'controls.html')
-        
-        @self.app.route('/artnet')
-        def artnet():
-            """Serve the Art-Net control panel."""
-            return send_from_directory(self.app.static_folder, 'artnet.html')
-        
-        @self.app.route('/config')
-        def config():
-            """Serve the configuration panel."""
-            return send_from_directory(self.app.static_folder, 'config.html')
-        
-        @self.app.route('/static/<path:filename>')
-        def serve_static(filename):
-            """Serve static files like logos, CSS, JS."""
-            return send_from_directory(self.app.static_folder, filename)
-        
-        @self.app.route('/api/config/frontend')
-        def frontend_config():
-            """Liefert Frontend-Konfiguration."""
-            from flask import jsonify
-            return jsonify({
-                "api_base": f"http://localhost:{self.config.get('api', {}).get('port', 5000)}/api",
-                "websocket_url": f"http://localhost:{self.config.get('api', {}).get('port', 5000)}",
-                "polling_interval": self.config.get('frontend', {}).get('polling_interval', 3000)
-            })
-        
-        # Lade externe Route-Module
+        # Lade externe API Route-Module
         from .api_routes import (
             register_playback_routes, 
             register_settings_routes,
@@ -113,13 +100,14 @@ class RestAPI:
         from .api_console import register_console_routes
         from .api_projects import register_project_routes
         from .api_config import register_config_routes
+        from .api_logs import register_log_routes
         
         # Registriere alle Routen
         register_playback_routes(self.app, self.dmx_controller)
         register_settings_routes(self.app, self.dmx_controller)
         register_artnet_routes(self.app, self.dmx_controller)
         register_info_routes(self.app, self.dmx_controller)
-        register_recording_routes(self.app, self.player)
+        register_recording_routes(self.app, self.player, self)
         register_cache_routes(self.app)
         register_script_routes(self.app, self.player, self.dmx_controller, self.config)
         register_points_routes(self.app, self.player, self.data_dir)
@@ -127,6 +115,7 @@ class RestAPI:
         register_console_routes(self.app, self)
         register_project_routes(self.app, self.logger)
         register_config_routes(self.app)
+        register_log_routes(self.app)
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
@@ -164,13 +153,47 @@ class RestAPI:
     
     def _get_status_data(self):
         """Erstellt Status-Daten für WebSocket."""
-        # Hole Media-Namen (Video oder Script)
-        if hasattr(self.player, 'video_path') and self.player.video_path:
+        # Hole Media-Namen und Typ (Video oder Script)
+        is_script = False
+        media_name = "Unknown"
+        
+        if hasattr(self.player, 'current_source') and self.player.current_source:
+            from .frame_source import ScriptSource
+            is_script = isinstance(self.player.current_source, ScriptSource)
+            if hasattr(self.player.current_source, 'script_name'):
+                media_name = self.player.current_source.script_name
+            elif hasattr(self.player, 'video_path') and self.player.video_path:
+                media_name = os.path.basename(self.player.video_path)
+        elif hasattr(self.player, 'video_path') and self.player.video_path:
             media_name = os.path.basename(self.player.video_path)
         elif hasattr(self.player, 'script_name') and self.player.script_name:
             media_name = self.player.script_name
-        else:
-            media_name = "Unknown"
+            is_script = True
+        
+        # DMX Preview Daten direkt von Art-Net Manager (= tatsächliche Ausgabe)
+        dmx_preview = None
+        total_universes = 0
+        
+        # Art-Net Manager ist die zentrale Quelle - zeigt was wirklich gesendet wird
+        if hasattr(self.player, 'artnet_manager') and self.player.artnet_manager:
+            artnet_mgr = self.player.artnet_manager
+            if hasattr(artnet_mgr, 'last_frame') and artnet_mgr.last_frame:
+                dmx_preview = artnet_mgr.last_frame
+                total_universes = (len(artnet_mgr.last_frame) + 511) // 512
+            elif hasattr(artnet_mgr, 'required_universes'):
+                total_universes = artnet_mgr.required_universes
+        elif hasattr(self.player, 'required_universes'):
+            total_universes = self.player.required_universes
+        
+        # Replay Status
+        is_replaying = False
+        if self.replay_manager:
+            is_replaying = self.replay_manager.is_playing
+        
+        # Aktiver Modus (Test/Replay/Video)
+        active_mode = "Video"
+        if hasattr(self.player, 'artnet_manager') and self.player.artnet_manager:
+            active_mode = self.player.artnet_manager.get_active_mode()
         
         return {
             "status": self.player.status(),
@@ -181,7 +204,13 @@ class RestAPI:
             "current_loop": self.player.current_loop,
             "brightness": self.player.brightness * 100,
             "speed": self.player.speed_factor,
-            "video": media_name
+            "hue_shift": self.player.hue_shift,
+            "video": media_name,
+            "is_script": is_script,
+            "dmx_preview": dmx_preview,
+            "total_universes": total_universes,
+            "is_replaying": is_replaying,
+            "active_mode": active_mode
         }
     
     def _status_broadcast_loop(self):
@@ -196,6 +225,51 @@ class RestAPI:
                     self.socketio.emit('status', status_data, namespace='/')
             except Exception as e:
                 logger.error(f"Fehler beim Status-Broadcast: {e}")
+                time.sleep(interval)
+    
+    def _log_broadcast_loop(self):
+        """Sendet Log-Updates an alle Clients."""
+        import time
+        from pathlib import Path
+        
+        interval = 5  # Update every 5 seconds
+        last_log_data = None
+        
+        while self.is_running:
+            try:
+                time.sleep(interval)
+                
+                # Read current log
+                log_dir = Path('logs')
+                if log_dir.exists():
+                    log_files = sorted(log_dir.glob('flux_*.log'), key=lambda f: f.stat().st_mtime, reverse=True)
+                    
+                    if log_files:
+                        latest_log = log_files[0]
+                        
+                        try:
+                            with open(latest_log, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()
+                                lines = [line.rstrip('\n') for line in lines]
+                                lines = lines[-500:]  # Last 500 lines
+                            
+                            log_data = {
+                                'lines': lines,
+                                'file': latest_log.name,
+                                'total_lines': len(lines)
+                            }
+                            
+                            # Only emit if data has changed
+                            if log_data != last_log_data:
+                                with self.app.app_context():
+                                    self.socketio.emit('log_update', log_data, namespace='/')
+                                last_log_data = log_data
+                                
+                        except Exception as e:
+                            logger.debug(f"Fehler beim Lesen der Log-Datei: {e}")
+                
+            except Exception as e:
+                logger.error(f"Fehler beim Log-Broadcast: {e}")
                 time.sleep(interval)
     
     def add_log(self, message):
@@ -436,12 +510,19 @@ class RestAPI:
         
         self.is_running = True
         
-        # Flask/SocketIO Logging komplett deaktivieren
+        # Flask/SocketIO Logging komplett deaktivieren und von stdout entfernen
         import logging
         import sys
-        logging.getLogger('werkzeug').setLevel(logging.ERROR)
-        logging.getLogger('socketio').setLevel(logging.ERROR)
-        logging.getLogger('engineio').setLevel(logging.ERROR)
+        
+        # Entferne alle Handler von werkzeug/socketio/engineio
+        werkzeug_logger = logging.getLogger('werkzeug')
+        socketio_logger = logging.getLogger('socketio')
+        engineio_logger = logging.getLogger('engineio')
+        
+        for logger_obj in [werkzeug_logger, socketio_logger, engineio_logger]:
+            logger_obj.setLevel(logging.CRITICAL)  # Nur kritische Fehler
+            logger_obj.handlers = []  # Entferne alle Handler
+            logger_obj.propagate = False  # Verhindere Propagierung zu Root-Logger
         
         # Unterdrücke Flask Startup-Nachrichten
         cli = sys.modules.get('flask.cli')
@@ -452,6 +533,10 @@ class RestAPI:
         self.status_broadcast_thread = threading.Thread(target=self._status_broadcast_loop, daemon=True)
         self.status_broadcast_thread.start()
         
+        # Log Broadcast Thread starten
+        self.log_broadcast_thread = threading.Thread(target=self._log_broadcast_loop, daemon=True)
+        self.log_broadcast_thread.start()
+        
         # Server Thread starten
         self.server_thread = threading.Thread(
             target=lambda: self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True),
@@ -461,6 +546,7 @@ class RestAPI:
         logger.info(f"REST API + WebSocket gestartet auf http://{host}:{port}")
         logger.info(f"Web-Interface: http://localhost:{port}")
         logger.info(f"Control Panel: http://localhost:{port}/controls")
+        logger.info(f"CLI Interface: http://localhost:{port}/cli")
     
     def stop(self):
         """Stoppt REST API Server."""

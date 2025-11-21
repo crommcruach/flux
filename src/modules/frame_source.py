@@ -59,13 +59,7 @@ class FrameSource(ABC):
     def get_info(self):
         """Gibt Informationen über die Quelle zurück."""
         return {
-            'source_type': self.__class__.__name__,
-            'source_name': self.get_source_name(),
-            'canvas_width': self.canvas_width,
-            'canvas_height': self.canvas_height,
-            'current_frame': self.current_frame,
-            'total_frames': self.total_frames if not self.is_infinite else -1,
-            'fps': self.fps
+            'source_type': self.__class__.__name__
         }
 
 
@@ -75,6 +69,7 @@ class VideoSource(FrameSource):
     def __init__(self, video_path, canvas_width, canvas_height, config=None):
         super().__init__(canvas_width, canvas_height, config)
         self.video_path = video_path
+        self.source_path = video_path  # Generischer Pfad für load_points()
         self.cap = None
         
         # HINWEIS: Cache deaktiviert für unified Player
@@ -271,6 +266,7 @@ class ScriptSource(FrameSource):
     def __init__(self, script_name, canvas_width, canvas_height, config=None):
         super().__init__(canvas_width, canvas_height, config)
         self.script_name = script_name
+        self.source_path = script_name  # Generischer Pfad für load_points()
         self.script_gen = None
         self.start_time = 0
         self.is_infinite = True  # Scripts laufen unendlich

@@ -16,6 +16,10 @@
   - [ ] Migration alter Cache-Dateien
 
 ### Weitere Verbesserungen
+- [ ] Web CLI und Console Commands vereinheitlichen
+  - [ ] Gemeinsame Command-Handler Logik
+  - [ ] Einheitliche Befehlssyntax und Rückgabewerte
+  - [ ] Code-Deduplizierung zwischen CLI Handler und API Console
 - [ ] Unit Tests erweitern (Player, FrameSource, API)
 - [ ] API-Authentifizierung (Basic Auth/Token)
 - [ ] PyInstaller EXE Build Setup

@@ -19,27 +19,47 @@ class ConsoleCapture:
     def __init__(self, rest_api=None):
         self.rest_api = rest_api
         self.original_stdout = sys.stdout
+        self._in_request = False
     
     def write(self, text):
         """Schreibt Text sowohl in Terminal als auch in Console Log."""
         import threading
         
         # Schreibe immer ins Terminal
-        self.original_stdout.write(text)
+        try:
+            self.original_stdout.write(text)
+            self.original_stdout.flush()
+        except:
+            pass
         
         # Sende NUR zu REST API wenn:
         # 1. REST API existiert
         # 2. Text nicht leer ist
-        # 3. Wir sind NICHT in einem Flask/Werkzeug Thread (verhindert write() before start_response Fehler)
+        # 3. Wir sind NICHT in einem Flask/Werkzeug Thread
+        # 4. Wir sind NICHT bereits in einem Request-Kontext
         thread_name = threading.current_thread().name
-        is_flask_thread = 'werkzeug' in thread_name.lower() or 'dummy' in thread_name.lower()
+        is_flask_thread = (
+            'werkzeug' in thread_name.lower() or 
+            'dummy' in thread_name.lower() or
+            'thread' in thread_name.lower() and 'wsgi' in thread_name.lower()
+        )
         
-        if self.rest_api and text.strip() and not is_flask_thread:
+        # Prüfe ob wir in einem Flask Request Context sind
+        try:
+            from flask import has_request_context
+            in_request = has_request_context()
+        except:
+            in_request = False
+        
+        if self.rest_api and text.strip() and not is_flask_thread and not in_request and not self._in_request:
+            self._in_request = True
             try:
                 self.rest_api.add_log(text.rstrip())
             except:
                 # Stiller Fehler - verhindert Endlosschleife bei Problemen
                 pass
+            finally:
+                self._in_request = False
     
     def flush(self):
         """Flush für stdout Kompatibilität."""
@@ -155,10 +175,28 @@ def main():
     canvas_width = points_data['canvas_width']
     canvas_height = points_data['canvas_height']
     
+    # Art-Net Manager global initialisieren (unabhängig vom Player)
+    from modules.artnet_manager import ArtNetManager
+    artnet_manager = ArtNetManager(
+        target_ip, 
+        start_universe, 
+        points_data['total_points'], 
+        points_data['channels_per_universe']
+    )
+    artnet_config = config.get('artnet', {})
+    artnet_manager.start(artnet_config)
+    logger.info(f"Art-Net gestartet: {target_ip}, Universen: {points_data['required_universes']}")
+    
     # Unified Player initialisieren mit VideoSource
     video_source = VideoSource(video_path, canvas_width, canvas_height, config)
     player = Player(video_source, points_json_path, target_ip, start_universe, fps_limit, config)
+    player.set_artnet_manager(artnet_manager)  # Verbinde Player mit globalem Art-Net
     logger.info(f"Player initialisiert: Source={os.path.basename(video_path)}, Points={os.path.basename(points_json_path)}")
+    
+    # Replay Manager global initialisieren (mit Player-Referenz)
+    from modules.replay_manager import ReplayManager
+    replay_manager = ReplayManager(artnet_manager, config, player)
+    logger.info("Replay Manager initialisiert")
     
     # Speichere data_dir für spätere Verwendung
     player.data_dir = data_dir
@@ -180,12 +218,13 @@ def main():
     dmx_controller.start()
     
     # REST API initialisieren und automatisch starten
-    rest_api = RestAPI(player, dmx_controller, data_dir, video_dir, config)
+    rest_api = RestAPI(player, dmx_controller, data_dir, video_dir, config, replay_manager=replay_manager)
     rest_api.start(host=config['api']['host'], port=config['api']['port'])
     
-    # Console Capture aktivieren
-    console_capture = ConsoleCapture(rest_api)
-    sys.stdout = console_capture
+    # Console Capture NICHT aktivieren - verursacht "write() before start_response" Fehler
+    # Die REST API Console Log funktioniert über direkte add_log() Aufrufe
+    # console_capture = ConsoleCapture(rest_api)
+    # sys.stdout = console_capture
     
     # CLI Handler initialisieren
     cli_handler = CLIHandler(player, dmx_controller, rest_api, video_dir, data_dir, config)

@@ -4,12 +4,17 @@
         <img src="/static/logo.svg" alt="Flux Logo"
             style="height: 32px; width: auto; display: inline-block; vertical-align: middle;">
         <span style="font-size: 1.4rem; font-weight: 700; letter-spacing: 1px; margin-left: 0.3rem;">Flux</span>
+        <div id="menuActiveModeDisplay" style="padding: 4px 12px; margin-left: 1rem; border-radius: 4px; font-weight: 600; font-size: 0.85rem; background: var(--bg-secondary); border: 2px solid var(--border-color); white-space: nowrap;">
+            <span id="menuActiveModeText">Video</span>
+        </div>
     </div>
     <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem; margin-left: auto;">
         <a href="/" class="btn btn-primary btn-sm menu-btn" title="Editor"
             style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎨</a>
         <a href="/controls" class="btn btn-primary btn-sm menu-btn" title="Controls"
             style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎛️</a>
+        <a href="/cli" class="btn btn-primary btn-sm menu-btn" title="Web CLI"
+            style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">💻</a>
         <a href="/artnet" class="btn btn-primary btn-sm menu-btn" title="Art-Net"
             style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">💡</a>
         <a href="/config" class="btn btn-primary btn-sm menu-btn" title="Config"
@@ -22,31 +27,3 @@
         </div>
     </div>
 </div>
-
-<script>
-    // Theme Management für Menu-Bar
-    const themeToggle = document.getElementById('themeToggle');
-    const themeLabel = document.getElementById('themeLabel');
-    const body = document.body;
-    
-    function setTheme(theme) {
-        body.setAttribute('data-theme', theme);
-        localStorage.setItem('theme', theme);
-        if (themeLabel) themeLabel.textContent = theme === 'dark' ? 'Dunkel' : 'Hell';
-        if (themeToggle) themeToggle.checked = theme === 'dark';
-    }
-    
-    let savedTheme = localStorage.getItem('theme');
-    if (!savedTheme) {
-        savedTheme = 'dark';
-        localStorage.setItem('theme', 'dark');
-    }
-    setTheme(savedTheme);
-    
-    if (themeToggle) {
-        themeToggle.checked = savedTheme === 'dark';
-        themeToggle.addEventListener('change', () => {
-            setTheme(themeToggle.checked ? 'dark' : 'light');
-        });
-    }
-</script>

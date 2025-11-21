@@ -41,9 +41,12 @@ Alle Standard-Befehle funktionieren mit Scripts:
 
 ## Eigenes Script erstellen
 
-### Minimales Beispiel
+### ⚠️ WICHTIG: Canvas vs. Points
 
-Erstelle `scripts/mein_script.py`:
+Es gibt **zwei Methoden** um Pixel zu zeichnen:
+
+#### Methode 1: Canvas zeichnen (Standard)
+Das Script schreibt direkt auf das Canvas-Array:
 
 ```python
 import numpy as np
@@ -54,18 +57,54 @@ METADATA = {
     'parameters': {}
 }
 
-def generate_frame(frame_number, width, height, time, fps):
-    """Generiert einen Frame als NumPy RGB-Array."""
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
+    """Generiert Frame durch direktes Zeichnen auf Canvas."""
     
-    # Erstelle leeres Frame
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    # Erstelle Canvas falls nicht vorhanden
+    if canvas is None:
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
     
-    # ... füge hier deine Grafik-Logik ein ...
+    # Zeichne direkt auf Canvas
+    canvas[10:20, 10:20] = [255, 0, 0]  # Rotes Quadrat
     
-    return frame
+    return canvas
 ```
 
-### Vollständiges Beispiel (Farbverlauf)
+#### Methode 2: Point-Liste (für Mapping)
+Das Script gibt eine Liste von (x, y, r, g, b) Tupeln zurück:
+
+```python
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
+    """Generiert Frame als Point-Liste für LED-Mapping."""
+    
+    rgb_values = []
+    
+    # Für jeden Punkt RGB-Wert berechnen
+    for y in range(height):
+        for x in range(width):
+            # Berechne Farbe basierend auf Position/Zeit
+            r = int((x / width) * 255)
+            g = int((y / height) * 255) 
+            b = int((time * 50) % 255)
+            
+            rgb_values.append((x, y, r, g, b))
+    
+    # WICHTIG: Schreibe Points auf Canvas für Preview
+    if canvas is not None:
+        for x, y, r, g, b in rgb_values:
+            # Zeichne 10x10 Block für jeden Point
+            x_start = x * 10
+            y_start = y * 10
+            x_end = min(x_start + 10, width)
+            y_end = min(y_start + 10, height)
+            canvas[y_start:y_end, x_start:x_end] = [r, g, b]
+    
+    return rgb_values
+```
+
+**Regel:** Wenn dein Script `rgb_values` zurückgibt, **muss** es auch auf Canvas zeichnen, sonst ist die Preview schwarz!
+
+### Vollständiges Beispiel 1: Canvas-basiert (Farbverlauf)
 
 ```python
 import numpy as np
@@ -79,11 +118,12 @@ METADATA = {
     }
 }
 
-def generate_frame(frame_number, width, height, time, fps):
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
     """Horizontaler Regenbogen-Verlauf."""
     
-    # Erstelle leeres Frame
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    # Erstelle Canvas falls nicht vorhanden
+    if canvas is None:
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
     
     # Zeit-basierte Hue-Rotation
     hue_offset = (time * 0.1) % 1.0
@@ -97,9 +137,69 @@ def generate_frame(frame_number, width, height, time, fps):
         r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
         
         # Setze alle Pixel in dieser Spalte
-        frame[:, x] = [int(r*255), int(g*255), int(b*255)]
+        canvas[:, x] = [int(r*255), int(g*255), int(b*255)]
     
-    return frame
+    return canvas
+```
+
+### Vollständiges Beispiel 2: Point-basiert (Matrix Rain)
+
+```python
+import numpy as np
+import random
+
+METADATA = {
+    'name': 'Matrix Rain',
+    'description': 'Matrix-artiger Regen-Effekt',
+    'parameters': {
+        'speed': 1.0
+    }
+}
+
+# Globaler State für Spalten-Positionen
+COLUMNS = []
+
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
+    """Matrix-Regen mit fallenden grünen Pixeln."""
+    
+    global COLUMNS
+    
+    # Initialisiere Spalten beim ersten Frame
+    if not COLUMNS:
+        COLUMNS = [{'y': random.randint(-height, 0), 'speed': random.uniform(0.5, 2.0)} 
+                   for _ in range(width)]
+    
+    rgb_values = []
+    
+    # Update und zeichne jede Spalte
+    for x in range(width):
+        col = COLUMNS[x]
+        
+        # Bewege Spalte nach unten
+        col['y'] += col['speed']
+        
+        # Reset wenn unten angekommen
+        if col['y'] > height:
+            col['y'] = random.randint(-20, 0)
+            col['speed'] = random.uniform(0.5, 2.0)
+        
+        # Zeichne Pixel an aktueller Position
+        y = int(col['y'])
+        if 0 <= y < height:
+            rgb_values.append((x, y, 0, 255, 0))  # Grün
+    
+    # WICHTIG: Zeichne auf Canvas für Preview!
+    if canvas is not None:
+        canvas.fill(0)  # Lösche altes Frame
+        for x, y, r, g, b in rgb_values:
+            # Zeichne 10x10 Block pro Point
+            x_start = x * 10
+            y_start = y * 10
+            x_end = min(x_start + 10, width)
+            y_end = min(y_start + 10, height)
+            canvas[y_start:y_end, x_start:x_end] = [r, g, b]
+    
+    return rgb_values
 ```
 
 ## API-Spezifikation
@@ -107,7 +207,7 @@ def generate_frame(frame_number, width, height, time, fps):
 ### generate_frame()
 
 ```python
-def generate_frame(frame_number, width, height, time, fps):
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
     """
     Generiert einen einzelnen Frame.
     
@@ -117,10 +217,15 @@ def generate_frame(frame_number, width, height, time, fps):
         height (int): Canvas-Höhe in Pixel
         time (float): Zeit in Sekunden seit Start
         fps (int): Ziel-FPS
+        canvas (np.ndarray): Wiederverwendbares Canvas-Array (height, width, 3)
+                             Optional, aber sollte genutzt werden für Performance
     
     Returns:
         np.ndarray: RGB-Array mit shape (height, width, 3), dtype=uint8
                     Werte: 0-255 für jeden Kanal (R, G, B)
+        ODER
+        list: Liste von (x, y, r, g, b) Tupeln für Point-Mapping
+              ⚠️ WICHTIG: Wenn Point-Liste, MUSS auch auf canvas gezeichnet werden!
     """
 ```
 
@@ -219,7 +324,27 @@ response = requests.get('http://...')
 
 ## Häufige Fehler
 
-### Frame Shape falsch
+### 1. Point-Liste ohne Canvas-Zeichnung
+```python
+# ❌ Falsch: Point-Liste zurückgeben, aber nicht auf Canvas zeichnen
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
+    rgb_values = [(x, y, 255, 0, 0) for x, y in points]
+    return rgb_values  # Preview bleibt schwarz!
+
+# ✓ Richtig: Immer auch auf Canvas zeichnen
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
+    rgb_values = [(x, y, 255, 0, 0) for x, y in points]
+    
+    if canvas is not None:
+        for x, y, r, g, b in rgb_values:
+            x_start = x * 10
+            y_start = y * 10
+            canvas[y_start:y_start+10, x_start:x_start+10] = [r, g, b]
+    
+    return rgb_values  # Preview funktioniert!
+```
+
+### 2. Frame Shape falsch
 ```python
 # ❌ Falsch: (width, height, 3)
 frame = np.zeros((width, height, 3))
@@ -228,20 +353,35 @@ frame = np.zeros((width, height, 3))
 frame = np.zeros((height, width, 3))
 ```
 
-### Dtype vergessen
+### 3. Dtype vergessen
 ```python
 # ❌ Falsch: float64 (default)
-frame = np.zeros((height, width, 3))
+canvas = np.zeros((height, width, 3))
 
 # ✓ Richtig: uint8 (0-255)
-frame = np.zeros((height, width, 3), dtype=np.uint8)
+canvas = np.zeros((height, width, 3), dtype=np.uint8)
 ```
 
-### RGB statt BGR
+### 4. Canvas-Parameter ignoriert
+```python
+# ❌ Falsch: Immer neues Array erstellen
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
+    frame = np.zeros((height, width, 3), dtype=np.uint8)  # Langsam!
+    return frame
+
+# ✓ Richtig: Canvas wiederverwenden
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
+    if canvas is None:
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
+    canvas.fill(0)  # Schneller als neu erstellen
+    return canvas
+```
+
+### 5. RGB statt BGR
 ```python
 # ✓ Richtig: RGB-Reihenfolge
 # OpenCV nutzt BGR, aber wir verwenden RGB!
-frame[:, :] = [255, 0, 0]  # Rot
+canvas[:, :] = [255, 0, 0]  # Rot
 ```
 
 ## Weitere Informationen

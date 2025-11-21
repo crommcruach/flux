@@ -2,6 +2,9 @@
 API Routes - Playback, Settings, Art-Net Endpoints
 """
 from flask import jsonify, request
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def register_playback_routes(app, dmx_controller):
@@ -84,14 +87,25 @@ def register_settings_routes(app, dmx_controller):
         player.set_speed(value)
         return jsonify({"status": "success", "speed": player.speed_factor})
     
+    @app.route('/api/hue', methods=['POST'])
+    def set_hue():
+        """Setzt Hue Rotation."""
+        player = dmx_controller.player
+        data = request.get_json()
+        value = data.get('value', 0)
+        player.set_hue_shift(value)
+        return jsonify({"status": "success", "hue_shift": player.hue_shift})
+    
     @app.route('/api/fps', methods=['POST'])
     def set_fps():
-        """Setzt FPS-Limit."""
+        """Setzt Art-Net FPS."""
         player = dmx_controller.player
         data = request.get_json()
         value = data.get('value')
-        player.set_fps(value)
-        return jsonify({"status": "success", "fps": player.fps_limit})
+        if player and player.artnet_manager:
+            player.artnet_manager.set_fps(value)
+            return jsonify({"status": "success", "fps": value})
+        return jsonify({"status": "error", "message": "Kein Art-Net aktiv"}), 400
     
     @app.route('/api/loop', methods=['POST'])
     def set_loop():
@@ -110,6 +124,8 @@ def register_artnet_routes(app, dmx_controller):
     def blackout():
         """Aktiviert Blackout."""
         player = dmx_controller.player
+        if not player:
+            return jsonify({"status": "error", "message": "Kein Player geladen"}), 400
         player.blackout()
         return jsonify({"status": "success", "message": "Blackout aktiviert"})
     
@@ -117,6 +133,8 @@ def register_artnet_routes(app, dmx_controller):
     def test_pattern():
         """Sendet Testmuster."""
         player = dmx_controller.player
+        if not player:
+            return jsonify({"status": "error", "message": "Kein Player geladen"}), 400
         data = request.get_json() or {}
         color = data.get('color', 'red')
         player.test_pattern(color)
@@ -167,6 +185,32 @@ def register_artnet_routes(app, dmx_controller):
             return jsonify({"status": "success", "universe": player.start_universe})
         except Exception as e:
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
+    
+    @app.route('/api/artnet/info', methods=['GET'])
+    def artnet_info():
+        """Gibt Art-Net Informationen und Statistiken zurück."""
+        try:
+            player = dmx_controller.player
+            artnet_manager = player.artnet_manager
+            
+            network_stats = artnet_manager.get_network_stats()
+            
+            return jsonify({
+                "status": "success",
+                "artnet_brightness": int(dmx_controller.brightness * 100) if hasattr(dmx_controller, 'brightness') else 100,
+                "artnet_fps": artnet_manager.get_fps(),
+                "total_universes": artnet_manager.required_universes,
+                "packets_sent": network_stats['packets_sent'],
+                "packets_per_sec": network_stats['packets_per_sec'],
+                "mbps": network_stats['mbps'],
+                "network_load": network_stats['network_load_percent'],
+                "active_mode": artnet_manager.get_active_mode()
+            })
+        except Exception as e:
+            logger.error(f"Fehler in /api/artnet/info: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
 
 
 def register_info_routes(app, dmx_controller):
@@ -180,11 +224,7 @@ def register_info_routes(app, dmx_controller):
             "status": player.status(),
             "is_playing": player.is_playing,
             "is_paused": player.is_paused,
-            "current_frame": player.current_frame,
-            "total_frames": player.total_frames,
-            "current_loop": player.current_loop,
-            "brightness": player.brightness * 100,
-            "speed": player.speed_factor
+            "current_loop": player.current_loop
         })
     
     @app.route('/api/info', methods=['GET'])
@@ -342,22 +382,104 @@ def register_info_routes(app, dmx_controller):
                        mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-def register_recording_routes(app, player):
+def register_recording_routes(app, player, rest_api):
     """Registriert Recording-Endpunkte."""
     
     @app.route('/api/record/start', methods=['POST'])
     def record_start():
         """Startet Aufzeichnung."""
-        player.start_recording()
-        return jsonify({"status": "success", "message": "Aufzeichnung gestartet"})
+        data = request.get_json() or {}
+        name = data.get('name')
+        result = player.start_recording(name)
+        if result:
+            return jsonify({"status": "success", "message": "Aufzeichnung gestartet"})
+        else:
+            return jsonify({"status": "error", "message": "Aufzeichnung nur während Video-Wiedergabe möglich"})
     
     @app.route('/api/record/stop', methods=['POST'])
     def record_stop():
         """Stoppt Aufzeichnung."""
+        filename = player.stop_recording()
+        if filename:
+            return jsonify({"status": "success", "message": "Aufzeichnung gespeichert", "filename": filename})
+        return jsonify({"status": "error", "message": "Keine Frames aufgezeichnet - Video muss laufen"})
+    
+    @app.route('/api/recordings', methods=['GET'])
+    def list_recordings():
+        """Listet alle gespeicherten Aufzeichnungen."""
+        if not rest_api.replay_manager:
+            return jsonify({"recordings": []})
+        
+        recordings = rest_api.replay_manager.list_recordings()
+        return jsonify({"recordings": recordings})
+    
+    @app.route('/api/replay/load', methods=['POST'])
+    def replay_load():
+        """Lädt eine Aufzeichnung."""
+        if not rest_api.replay_manager:
+            return jsonify({"status": "error", "message": "Replay Manager nicht verfügbar"}), 500
+        
         data = request.get_json() or {}
         filename = data.get('filename')
-        player.stop_recording(filename)
-        return jsonify({"status": "success", "message": "Aufzeichnung gestoppt"})
+        
+        if not filename:
+            return jsonify({"status": "error", "message": "Kein Dateiname angegeben"}), 400
+        
+        if rest_api.replay_manager.load_recording(filename):
+            return jsonify({"status": "success", "message": f"Aufzeichnung {filename} geladen"})
+        return jsonify({"status": "error", "message": "Fehler beim Laden"}), 400
+    
+    @app.route('/api/replay/start', methods=['POST'])
+    def replay_start():
+        """Startet Replay."""
+        if not rest_api.replay_manager:
+            return jsonify({"status": "error", "message": "Replay Manager nicht verfügbar"}), 500
+        
+        if rest_api.replay_manager.start():
+            return jsonify({"status": "success", "message": "Replay gestartet"})
+        return jsonify({"status": "error", "message": "Replay konnte nicht gestartet werden"}), 400
+    
+    @app.route('/api/replay/stop', methods=['POST'])
+    def replay_stop():
+        """Stoppt Replay."""
+        if not rest_api.replay_manager:
+            return jsonify({"status": "error", "message": "Replay Manager nicht verfügbar"}), 500
+        
+        if rest_api.replay_manager.stop():
+            return jsonify({"status": "success", "message": "Replay gestoppt"})
+        return jsonify({"status": "error", "message": "Kein Replay aktiv"}), 400
+    
+    @app.route('/api/replay/brightness', methods=['POST'])
+    def replay_brightness():
+        """Setzt Replay-Helligkeit."""
+        if not rest_api.replay_manager:
+            return jsonify({"status": "error", "message": "Replay Manager nicht verfügbar"}), 500
+        
+        data = request.get_json() or {}
+        brightness = data.get('brightness')
+        
+        if brightness is None:
+            return jsonify({"status": "error", "message": "Helligkeit nicht angegeben"}), 400
+        
+        brightness = max(0, min(100, int(brightness)))  # 0-100
+        rest_api.replay_manager.set_brightness(brightness / 100.0)
+        return jsonify({"status": "success", "brightness": brightness})
+    
+    @app.route('/api/replay/speed', methods=['POST'])
+    def replay_speed():
+        """Setzt Replay-Geschwindigkeit."""
+        if not rest_api.replay_manager:
+            return jsonify({"status": "error", "message": "Replay Manager nicht verfügbar"}), 500
+        
+        data = request.get_json() or {}
+        speed = data.get('speed')
+        
+        if speed is None:
+            return jsonify({"status": "error", "message": "Geschwindigkeit nicht angegeben"}), 400
+        
+        speed = max(0.1, min(10.0, float(speed)))
+        rest_api.replay_manager.set_speed(speed)
+        return jsonify({"status": "success", "speed": speed})
 
 
 def register_cache_routes(app):

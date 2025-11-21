@@ -23,6 +23,7 @@ class ScriptGenerator:
         self.script_module = None
         self.start_time = None
         self.frame_count = 0
+        self.last_mtime = None  # Für Hot-Reload
         
     def list_scripts(self):
         """Listet alle verfügbaren Scripts auf."""
@@ -95,6 +96,7 @@ class ScriptGenerator:
             self.loaded_script = script_name
             self.start_time = time_module.time()
             self.frame_count = 0
+            self.last_mtime = os.path.getmtime(script_path)  # Speichere Änderungszeit
             
             # Zeige Metadata
             metadata = getattr(module, 'METADATA', {})
@@ -109,6 +111,21 @@ class ScriptGenerator:
             import traceback
             logger.error(traceback.format_exc())
             return False
+    
+    def _check_and_reload(self):
+        """Prüft ob Script geändert wurde und lädt es neu."""
+        if not self.script_path or not self.loaded_script:
+            return False
+        
+        try:
+            current_mtime = os.path.getmtime(self.script_path)
+            if current_mtime != self.last_mtime:
+                logger.info(f"Script wurde geändert, lade neu: {self.loaded_script}")
+                return self.load_script(self.loaded_script)
+        except Exception as e:
+            logger.error(f"Fehler beim Prüfen der Script-Änderung: {e}")
+        
+        return False
     
     def generate_frame(self, width, height, fps=30, frame_number=None, time=None):
         """
@@ -127,6 +144,10 @@ class ScriptGenerator:
         if not self.script_module:
             return None
         
+        # Hot-Reload: Prüfe alle 60 Frames ob Script geändert wurde
+        if self.frame_count % 60 == 0:
+            self._check_and_reload()
+        
         try:
             # Verwende externe Werte oder interne Counter
             if frame_number is None:
@@ -138,21 +159,82 @@ class ScriptGenerator:
                     self.start_time = time_module.time()
                 time = time_module.time() - self.start_time
             
-            # Rufe generate_frame Funktion auf
-            frame = self.script_module.generate_frame(
-                frame_number=frame_number,
-                width=width,
-                height=height,
-                time=time,
-                fps=fps
-            )
+            # Erstelle wiederverwendbares Canvas
+            if not hasattr(self, '_canvas') or self._canvas is None or self._canvas.shape != (height, width, 3):
+                self._canvas = np.zeros((height, width, 3), dtype=np.uint8)
+            
+            # Rufe generate_frame Funktion auf - versuche verschiedene Parameter-Kombinationen
+            frame = None
+            errors = []
+            
+            # Versuch 1: Mit allen Parametern (neueste Version)
+            try:
+                frame = self.script_module.generate_frame(
+                    frame_number=frame_number,
+                    width=width,
+                    height=height,
+                    time=time,
+                    fps=fps,
+                    canvas=self._canvas
+                )
+            except TypeError as e:
+                errors.append(str(e))
+                
+                # Versuch 2: time_sec statt time (fireworks.py)
+                try:
+                    frame = self.script_module.generate_frame(
+                        frame_number=frame_number,
+                        width=width,
+                        height=height,
+                        time_sec=time,
+                        fps=fps,
+                        canvas=self._canvas
+                    )
+                except TypeError as e2:
+                    errors.append(str(e2))
+                    
+                    # Versuch 3: Ohne canvas (alte Scripts)
+                    try:
+                        frame = self.script_module.generate_frame(
+                            frame_number=frame_number,
+                            width=width,
+                            height=height,
+                            time=time,
+                            fps=fps
+                        )
+                    except TypeError as e3:
+                        errors.append(str(e3))
+                        
+                        # Versuch 4: time_sec ohne canvas
+                        try:
+                            frame = self.script_module.generate_frame(
+                                frame_number=frame_number,
+                                width=width,
+                                height=height,
+                                time_sec=time,
+                                fps=fps
+                            )
+                        except TypeError as e4:
+                            errors.append(str(e4))
+                            # Alle Versuche fehlgeschlagen
+                            raise TypeError(f"Konnte generate_frame() nicht aufrufen. Versuche: {errors}")
             
             # Validiere Frame
             if frame is None:
                 return None
             
+            # Prüfe ob Point-Liste oder Canvas zurückgegeben wurde
+            if isinstance(frame, list):
+                # Point-Liste zurückgegeben - Canvas sollte bereits gezeichnet sein
+                # Nutze das Canvas für die Ausgabe
+                if self._canvas is not None:
+                    return self._canvas.copy()
+                else:
+                    logger.warning("Warnung: Point-Liste zurückgegeben, aber Canvas ist None")
+                    return None
+            
             if not isinstance(frame, np.ndarray):
-                logger.warning("Warnung: generate_frame() muss numpy.ndarray zurückgeben")
+                logger.warning(f"Warnung: generate_frame() muss numpy.ndarray oder list zurückgeben, bekam: {type(frame)}")
                 return None
             
             if frame.shape != (height, width, 3):
@@ -162,6 +244,9 @@ class ScriptGenerator:
             if frame.dtype != np.uint8:
                 # Konvertiere zu uint8 wenn nötig
                 frame = frame.astype(np.uint8)
+            
+            # Speichere Canvas für nächsten Frame
+            self._canvas = frame
             
             return frame
             

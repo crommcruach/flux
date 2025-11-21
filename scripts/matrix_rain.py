@@ -150,18 +150,29 @@ def generate_frame(frame_number, width, height, time, fps=30):
                 g = int(g * 0.5)
                 b = int(b * 0.5)
             
-            rgb_values.extend([r, g, b])
+            rgb_values.append((x, y, r, g, b))
         else:
             # Schwarzer Hintergrund mit gelegentlichem schwachem Glühen
             if random.random() > 0.98:
                 # Sehr seltenes schwaches grünes Glühen
                 glow = random.randint(0, 30)
-                rgb_values.extend([0, glow, 0])
+                rgb_values.append((x, y, 0, glow, 0))
             else:
-                rgb_values.extend([0, 0, 0])
+                rgb_values.append((x, y, 0, 0, 0))
     
-    # Konvertiere zu Canvas
+    # Erstelle Canvas und schreibe RGB-Werte hinein
     canvas = np.zeros((height, width, 3), dtype=np.uint8)
+    
+    for px, py, r, g, b in rgb_values:
+        # Zeichne kleinen Block um jeden Point
+        x_start = max(0, int(px) - 5)
+        x_end = min(width, int(px) + 5)
+        y_start = max(0, int(py) - 5)
+        y_end = min(height, int(py) + 5)
+        
+        if 0 <= y_start < height and 0 <= x_start < width:
+            canvas[y_start:y_end, x_start:x_end] = [r, g, b]
+    
     return canvas
 
 

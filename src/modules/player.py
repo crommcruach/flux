@@ -6,6 +6,7 @@ import time
 import threading
 import numpy as np
 import cv2
+import os
 from .logger import get_logger
 from .artnet_manager import ArtNetManager
 from .points_loader import PointsLoader
@@ -57,6 +58,7 @@ class Player:
         # Erweiterte Steuerung
         self.brightness = 1.0  # 0.0 - 1.0
         self.speed_factor = DEFAULT_SPEED
+        self.hue_shift = 0  # 0-360 Grad Hue Rotation
         self.max_loops = UNLIMITED_LOOPS  # 0 = unendlich
         self.current_loop = 0
         self.start_time = 0
@@ -65,6 +67,7 @@ class Player:
         # Recording
         self.is_recording = False
         self.recorded_data = []
+        self.recording_name = None
         
         # Preview Frames
         self.last_frame = None  # Letztes Frame (LED-Punkte RGB) für Preview
@@ -95,10 +98,8 @@ class Player:
         logger.debug(f"  Universen: {self.required_universes}")
         logger.debug(f"  Art-Net: {target_ip}, Start-Universe: {start_universe}")
         
-        # Art-Net Manager erstellen und starten
-        self.artnet_manager = ArtNetManager(target_ip, start_universe, self.total_points, self.channels_per_universe)
-        artnet_config = self.config.get('artnet', {})
-        self.artnet_manager.start(artnet_config)
+        # Art-Net Manager wird extern gesetzt
+        self.artnet_manager = None
     
     # Properties that delegate to source for backward compatibility
     @property
@@ -311,8 +312,19 @@ class Player:
                 self.source.reset()
                 continue
             
+            # Helligkeit und Hue Shift auf komplettes Frame anwenden für Preview
+            frame_with_brightness = frame.astype(np.float32)
+            frame_with_brightness *= self.brightness
+            frame_with_brightness = np.clip(frame_with_brightness, 0, 255).astype(np.uint8)
+            
+            # Hue Shift anwenden wenn aktiviert
+            if self.hue_shift != 0:
+                frame_hsv = cv2.cvtColor(frame_with_brightness, cv2.COLOR_RGB2HSV)
+                frame_hsv[:, :, 0] = (frame_hsv[:, :, 0].astype(np.int16) + self.hue_shift // 2) % 180
+                frame_with_brightness = cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2RGB)
+            
             # Speichere komplettes Frame für Preview (konvertiere zu BGR für OpenCV)
-            self.last_video_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            self.last_video_frame = cv2.cvtColor(frame_with_brightness, cv2.COLOR_RGB2BGR)
             
             # NumPy-optimierte Pixel-Extraktion
             valid_mask = (
@@ -322,14 +334,10 @@ class Player:
                 (self.point_coords[:, 0] < self.canvas_width)
             )
             
-            # Extrahiere RGB-Werte für alle Punkte
+            # Extrahiere RGB-Werte für alle Punkte (mit Helligkeit bereits angewendet)
             y_coords = self.point_coords[valid_mask, 1]
             x_coords = self.point_coords[valid_mask, 0]
-            rgb_values = frame[y_coords, x_coords].astype(np.float32)
-            
-            # Helligkeit anwenden
-            rgb_values *= self.brightness
-            rgb_values = np.clip(rgb_values, 0, 255).astype(np.uint8)
+            rgb_values = frame_with_brightness[y_coords, x_coords]
             
             # DMX-Buffer erstellen
             dmx_buffer = np.zeros((len(self.point_coords), 3), dtype=np.uint8)
@@ -349,7 +357,7 @@ class Player:
             
             # Sende über Art-Net (prüfe ob wir aktiver Player sind)
             if self.artnet_manager and self.is_running and player_lock._active_player is self:
-                self.artnet_manager.send_frame(dmx_buffer)
+                self.artnet_manager.send_frame(dmx_buffer, source='video')
             
             # Beende wenn gestoppt oder nicht mehr aktiv
             if not self.is_running or player_lock._active_player is not self:
@@ -383,15 +391,13 @@ class Player:
     
     def get_info(self):
         """Gibt Informationen zurück."""
+        import os
+        
         info = {
             'source_type': type(self.source).__name__,
-            'source_name': self.source.get_source_name(),
-            'canvas_width': self.canvas_width,
-            'canvas_height': self.canvas_height,
             'total_points': self.total_points,
             'total_universes': self.required_universes,
-            'brightness': int(self.brightness * 100),
-            'speed': self.speed_factor,
+            'points_list': os.path.basename(self.points_json_path) if self.points_json_path else 'N/A',
             'fps_limit': self.fps_limit or self.source.fps
         }
         
@@ -431,22 +437,20 @@ class Player:
         if self.artnet_manager:
             self.artnet_manager.test_pattern(color)
     
+    def set_artnet_manager(self, artnet_manager):
+        """Setzt den Art-Net Manager von außen."""
+        self.artnet_manager = artnet_manager
+    
     def reload_artnet(self):
-        """Lädt Art-Net Manager neu."""
+        """Lädt Art-Net Manager neu (falls bereits gesetzt)."""
+        if not self.artnet_manager:
+            logger.warning("Kein Art-Net Manager gesetzt")
+            return False
+        
         try:
-            if self.artnet_manager:
-                self.artnet_manager.stop()
-            
-            self.artnet_manager = ArtNetManager(
-                self.target_ip, 
-                self.start_universe, 
-                self.total_points, 
-                self.channels_per_universe
-            )
-            
+            self.artnet_manager.stop()
             artnet_config = self.config.get('artnet', {})
             self.artnet_manager.start(artnet_config)
-            
             logger.debug(f"✅ Art-Net neu geladen mit IP: {self.target_ip}")
             return True
         except Exception as e:
@@ -478,24 +482,157 @@ class Player:
         except ValueError:
             logger.debug("Ungültiger Geschwindigkeits-Wert!")
     
+    def set_hue_shift(self, value):
+        """Setzt Hue Rotation (0-360 Grad)."""
+        try:
+            val = int(value)
+            if val < 0 or val > 360:
+                logger.debug("Hue Shift muss zwischen 0 und 360 liegen!")
+                return
+            self.hue_shift = val
+            logger.debug(f"Hue Shift auf {val}° gesetzt")
+        except ValueError:
+            logger.debug("Ungültiger Hue Shift-Wert!")
+    
     # Recording
-    def start_recording(self):
+    def start_recording(self, name=None):
         """Startet Aufzeichnung."""
         if not self.is_playing:
             logger.debug("Aufzeichnung nur während Wiedergabe möglich!")
-            return
+            return False
         
         self.is_recording = True
         self.recorded_data = []
-        logger.debug("Aufzeichnung gestartet")
+        self.recording_name = name or "Unnamed"
+        logger.debug(f"Aufzeichnung gestartet: {self.recording_name}")
+        return True
     
     def stop_recording(self):
-        """Stoppt Aufzeichnung."""
+        """Stoppt Aufzeichnung und speichert sie."""
         if not self.is_recording:
             logger.debug("Keine Aufzeichnung aktiv!")
-            return
+            return None
         
         self.is_recording = False
         frame_count = len(self.recorded_data)
-        logger.debug(f"Aufzeichnung gestoppt: {frame_count} Frames aufgezeichnet")
-        return self.recorded_data
+        
+        if frame_count == 0:
+            logger.debug("Keine Frames aufgezeichnet")
+            return None
+        
+        # Speichere Aufzeichnung
+        import json
+        from datetime import datetime
+        
+        # Erstelle records Ordner falls nicht vorhanden (Root-Level)
+        base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        records_dir = os.path.join(base_path, 'records')
+        os.makedirs(records_dir, exist_ok=True)
+        
+        # Dateiname mit Timestamp und Name
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = "".join(c for c in (self.recording_name or "recording") if c.isalnum() or c in (' ', '_', '-')).strip()
+        filename = f"{safe_name}_{timestamp}.json"
+        filepath = os.path.join(records_dir, filename)
+        
+        # Speichere als JSON
+        recording_data = {
+            'name': self.recording_name or "Unnamed Recording",
+            'timestamp': timestamp,
+            'frame_count': frame_count,
+            'total_duration': self.recorded_data[-1]['timestamp'] if self.recorded_data else 0,
+            'canvas_width': self.canvas_width,
+            'canvas_height': self.canvas_height,
+            'total_points': self.total_points,
+            'frames': self.recorded_data
+        }
+        
+        try:
+            with open(filepath, 'w') as f:
+                json.dump(recording_data, f)
+            logger.info(f"✅ Aufzeichnung gespeichert: {filename} ({frame_count} Frames)")
+            return filename
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern der Aufzeichnung: {e}")
+            return None
+    
+    def load_points(self, points_json_path):
+        """
+        Lädt neue Points-Konfiguration und passt Player entsprechend an.
+        
+        WICHTIG: Stoppt/Startet Source neu, da Canvas-Größe sich ändern kann!
+        
+        Args:
+            points_json_path: Pfad zur neuen Points-JSON-Datei
+        """
+        logger.info(f"Lade neue Points-Konfiguration: {os.path.basename(points_json_path)}")
+        
+        # Lade neue Points-Daten
+        validate_bounds = isinstance(self.source, VideoSource)
+        points_data = PointsLoader.load_points(points_json_path, validate_bounds=validate_bounds)
+        
+        # Prüfe ob Canvas-Größe sich ändert
+        canvas_changed = (
+            points_data['canvas_width'] != self.canvas_width or 
+            points_data['canvas_height'] != self.canvas_height
+        )
+        
+        # Update Points-Daten
+        old_points = self.total_points
+        old_universes = self.required_universes
+        
+        self.points_json_path = points_json_path
+        self.point_coords = points_data['point_coords']
+        self.canvas_width = points_data['canvas_width']
+        self.canvas_height = points_data['canvas_height']
+        self.universe_mapping = points_data['universe_mapping']
+        self.total_points = points_data['total_points']
+        self.total_channels = points_data['total_channels']
+        self.required_universes = points_data['required_universes']
+        self.channels_per_universe = points_data['channels_per_universe']
+        
+        # Wenn Canvas-Größe sich ändert, muss Source neu initialisiert werden
+        if canvas_changed:
+            logger.info(f"Canvas-Größe geändert: {self.canvas_width}x{self.canvas_height}")
+            
+            # Stoppe Source
+            self.source.cleanup()
+            
+            # Erstelle neue Source-Instanz mit neuer Canvas-Größe
+            source_path = self.source.source_path if hasattr(self.source, 'source_path') else None
+            is_video_source = isinstance(self.source, VideoSource)
+            
+            if is_video_source:
+                self.source = VideoSource(source_path, self.canvas_width, self.canvas_height, self.config)
+            else:
+                # ScriptSource oder andere - passe Canvas-Größe an
+                self.source.canvas_width = self.canvas_width
+                self.source.canvas_height = self.canvas_height
+            
+            # Neu initialisieren
+            if not self.source.initialize():
+                raise ValueError(f"Source konnte nicht neu initialisiert werden")
+        
+        # Art-Net Manager aktualisieren
+        if self.artnet_manager:
+            # Stoppe alten Manager
+            self.artnet_manager.stop()
+            
+            # Erstelle neuen Manager mit neuen Dimensionen
+            from .artnet_manager import ArtNetManager
+            artnet_config = self.config.get('artnet', {})
+            self.artnet_manager = ArtNetManager(
+                self.target_ip,
+                self.start_universe,
+                self.total_points,
+                self.channels_per_universe
+            )
+            self.artnet_manager.start(artnet_config)
+            
+            logger.info(f"Art-Net Manager aktualisiert: {self.required_universes} Universen")
+        
+        logger.info(f"✅ Points gewechselt:")
+        logger.info(f"   Punkte: {old_points} → {self.total_points}")
+        logger.info(f"   Universen: {old_universes} → {self.required_universes}")
+        logger.info(f"   Canvas: {self.canvas_width}x{self.canvas_height}")
+    

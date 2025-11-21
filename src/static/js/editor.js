@@ -260,32 +260,7 @@ function applyCustomCanvasSize() {
 // EVENT LISTENERS - UI Controls [Lines 311-415]
 // ========================================
 
-// Theme Toggle
-const themeToggle = document.getElementById('themeToggle');
-const themeLabel = document.getElementById('themeLabel');
-
-
-// Load saved theme preference or default to dark
-const savedTheme = localStorage.getItem('theme') || 'dark';
-if (savedTheme === 'dark') {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    themeToggle.checked = true;
-    themeLabel.textContent = 'Dunkel';
-} else {
-    themeLabel.textContent = 'Hell';
-}
-
-themeToggle.addEventListener('change', () => {
-    if (themeToggle.checked) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-        themeLabel.textContent = 'Dunkel';
-        localStorage.setItem('theme', 'dark');
-    } else {
-        document.documentElement.removeAttribute('data-theme');
-        themeLabel.textContent = 'Hell';
-        localStorage.setItem('theme', 'light');
-    }
-});
+// Theme Toggle wird jetzt über menu-loader.js gehandhabt
 
 // Connection lines toggle
 document.getElementById('showConnectionLines').addEventListener('change', e => {

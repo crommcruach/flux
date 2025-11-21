@@ -9,7 +9,7 @@ Jedes Script muss eine `generate_frame()` Funktion implementieren:
 ```python
 import numpy as np
 
-def generate_frame(frame_number, width, height, time, fps=30):
+def generate_frame(frame_number, width, height, time, fps, canvas=None):
     """
     Generiert ein einzelnes Frame.
     
@@ -19,17 +19,48 @@ def generate_frame(frame_number, width, height, time, fps=30):
         height (int): Canvas-Höhe in Pixeln
         time (float): Verstrichene Zeit in Sekunden seit Start
         fps (int): Frames pro Sekunde
+        canvas (numpy.ndarray): Wiederverwendbares Canvas (optional, für Performance)
     
     Returns:
         numpy.ndarray: Frame als (height, width, 3) RGB Array (dtype=uint8)
+        ODER
+        list: Liste von (x, y, r, g, b) Tupeln für Point-Mapping
+              ⚠️ Bei Point-Listen MUSS auch auf canvas gezeichnet werden!
     """
-    # Erstelle Frame
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    # Nutze Canvas wenn vorhanden (schneller als neu erstellen)
+    if canvas is None:
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
     
-    # Deine Logik hier...
+    # Option 1: Direkt auf Canvas zeichnen
+    canvas[10:20, 10:20] = [255, 0, 0]  # Rotes Quadrat
+    return canvas
     
-    return frame
+    # Option 2: Point-Liste (für LED-Mapping)
+    rgb_values = []
+    for x in range(width):
+        for y in range(height):
+            rgb_values.append((x, y, 255, 0, 0))
+    
+    # WICHTIG: Auch auf Canvas zeichnen für Preview!
+    if canvas is not None:
+        for x, y, r, g, b in rgb_values:
+            # Zeichne 10x10 Block pro Point
+            canvas[y*10:(y+1)*10, x*10:(x+1)*10] = [r, g, b]
+    
+    return rgb_values
 ```
+
+## ⚠️ Wichtig: Canvas vs. Point-Liste
+
+**Canvas-basiert (Standard):**
+- Zeichne direkt auf das Canvas-Array
+- Schneller für Full-Frame-Effekte
+- Return: `numpy.ndarray`
+
+**Point-basiert (für Mapping):**
+- Return: Liste von `(x, y, r, g, b)` Tupeln
+- **MUSS auch auf Canvas zeichnen**, sonst schwarze Preview!
+- Siehe `fire.py`, `heartbeat.py`, `matrix_rain.py` für Beispiele
 
 ## Optionale Metadata
 
@@ -70,14 +101,33 @@ start
 ## Tipps
 
 ### Performance
+- **Nutze canvas-Parameter**: Nicht jedes Frame neu erstellen!
 - Verwende NumPy für schnelle Array-Operationen
-- Vermeide Python-Schleifen wo möglich
-- Nutze vectorization für Pixel-Operationen
+- Vermeide Python-Schleifen wo möglich (nutze Broadcasting)
+- `canvas.fill(0)` ist schneller als `np.zeros()`
+
+### Canvas-Zeichnung (Point-Listen)
+Wenn dein Script Point-Listen zurückgibt:
+```python
+# Zeichne 10x10 Blöcke für jeden Point
+for x, y, r, g, b in rgb_values:
+    x_start = x * 10
+    y_start = y * 10
+    x_end = min(x_start + 10, width)
+    y_end = min(y_start + 10, height)
+    canvas[y_start:y_end, x_start:x_end] = [r, g, b]
+```
+
+### Animation
+- Nutze `time` für zeitbasierte Animation (FPS-unabhängig)
+- Nutze `frame_number` für frame-genaue Sequenzen
+- `np.sin(time)` für periodische Bewegungen
 
 ### Kreative Ideen
 - Mathematische Muster (Sinus, Perlin Noise)
 - Zelluläre Automaten (Game of Life)
 - Fraktale (Mandelbrot, Julia)
+- Partikel-Systeme mit globalem State
 - Audio-Reaktive Effekte
 - Partikel-Systeme
 - L-Systems
