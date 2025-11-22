@@ -109,15 +109,23 @@ CONFIG_SCHEMA = {
                     "maximum": 10.0,
                     "description": "Standard Geschwindigkeitsfaktor"
                 },
-                "default_video": {
-                    "type": ["string", "null"],
-                    "description": "Standard-Video das beim Start geladen wird (relativ zu video_dir)"
-                },
                 "shutdown_delay": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 10,
                     "description": "Verzögerung beim Shutdown in Sekunden"
+                },
+                "frame_wait_delay": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Wartezeit zwischen Frames in Sekunden"
+                },
+                "recording_stop_delay": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 5,
+                    "description": "Verzögerung beim Stoppen der Aufzeichnung in Sekunden"
                 },
                 "gif_transparency_bg": {
                     "type": "array",
@@ -155,6 +163,10 @@ CONFIG_SCHEMA = {
                 "scripts_dir": {
                     "type": "string",
                     "description": "Verzeichnis für Script-Dateien"
+                },
+                "cache_dir": {
+                    "type": "string",
+                    "description": "Verzeichnis für Video-Cache-Dateien"
                 },
                 "projects_dir": {
                     "type": "string",
@@ -425,6 +437,8 @@ class ConfigValidator:
                 "default_brightness": 100,
                 "default_speed": 1.0,
                 "shutdown_delay": 0.5,
+                "frame_wait_delay": 0.1,
+                "recording_stop_delay": 0.3,
                 "gif_transparency_bg": [0, 0, 0],
                 "gif_respect_frame_timing": True
             },
@@ -433,6 +447,7 @@ class ConfigValidator:
                 "data_dir": "data",
                 "points_json": "punkte_export.json",
                 "scripts_dir": "scripts",
+                "cache_dir": "cache",
                 "projects_dir": "PROJECTS"
             },
             "channels": {

@@ -7,6 +7,7 @@ import time
 import json
 from .constants import VIDEO_EXTENSIONS, AFFIRMATIVE_RESPONSES
 from .logger import get_logger
+from .command_executor import CommandExecutor
 
 logger = get_logger(__name__)
 
@@ -22,6 +23,15 @@ class CLIHandler:
         self.data_dir = data_dir
         self.config = config
         self.base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        
+        # Initialize unified command executor
+        self.command_executor = CommandExecutor(
+            player_provider=lambda: self.dmx_controller.player,
+            dmx_controller=dmx_controller,
+            video_dir=video_dir,
+            data_dir=data_dir,
+            config=config
+        )
         
         # Tracking für next/back Navigation
         self.current_video_path = None
@@ -45,113 +55,45 @@ class CLIHandler:
         Returns:
             tuple: (continue_loop, new_player) - continue_loop=False bei Exit, new_player wenn Player ersetzt wurde
         """
-        # Playback-Befehle
-        if command == "start":
-            self.player.start()
+        # Build full command string for CommandExecutor
+        full_command = f"{command} {args}" if args else command
         
-        elif command == "restart":
-            self.player.restart()
-            
-        elif command == "stop":
-            self.player.stop()
-            
-        elif command == "pause":
-            self.player.pause()
-            
-        elif command == "resume":
-            self.player.resume()
-        
-        elif command == "next":
+        # Handle CLI-specific commands first (navigation, exit, etc.)
+        if command == "next":
             return self._handle_next()
-        
         elif command == "back":
             return self._handle_back()
-        
-        # Video-Verwaltung
-        elif command == "videos":
-            self._handle_videos_list()
-            
-        elif command.startswith("video:"):
-            return self._handle_video_load(command)
-        
-        # REST API
         elif command == "api":
             self._handle_api(args)
-        
-        # Punkte-Verwaltung
+            return (True, None)
         elif command == "points":
             new_player = self._handle_points(args)
             if new_player:
                 return (True, new_player)
-        
-        # Einstellungen
-        elif command == "fps":
-            self._handle_fps(args)
-            
-        elif command == "speed":
-            self._handle_speed(args)
-            
-        elif command == "brightness":
-            self._handle_brightness(args)
-            
-        elif command == "loop":
-            self._handle_loop(args)
-        
-        # Art-Net
-        elif command == "blackout":
-            self.player.blackout()
-            
-        elif command == "test":
-            self._handle_test(args)
-            
-        elif command == "ip":
-            self._handle_ip(args)
-            
-        elif command == "universe":
-            self._handle_universe(args)
-        
-        elif command == "artnet":
-            self._handle_artnet(args)
-        
-        # Info
-        elif command == "status":
-            self._handle_status()
-            
-        elif command == "info":
-            self._handle_info()
-            
-        elif command == "stats":
-            self._handle_stats()
-        
-        # Recording
-        elif command == "record":
-            self._handle_record(args)
-        
-        # Cache
+            return (True, None)
         elif command == "cache":
             self._handle_cache(args)
-        
-        # Scripts
-        elif command == "scripts":
-            self._handle_scripts(args)
-            
-        elif command.startswith("script:"):
-            return self._handle_load_script(command)
-        
-        # System
-        elif command == "help":
-            self._handle_help()
-        
+            return (True, None)
+        elif command == "record":
+            self._handle_record(args)
+            return (True, None)
+        elif command == "artnet":
+            self._handle_artnet(args)
+            return (True, None)
         elif command == "browser":
             self._handle_open()
-            
+            return (True, None)
         elif command in ["exit", "quit"]:
+            print("\nBeende Anwendung...")
             return (False, None)
         
-        else:
-            logger.warning(f"Unbekannter Befehl: {command}")
-            logger.info("Gib 'help' ein für alle Befehle")
+        # Use CommandExecutor for standard commands
+        result = self.command_executor.execute(full_command)
         
+        # Print result to console
+        print(str(result))
+        
+        # Return continue flag
         return (True, None)
     
     # === Video-Verwaltung ===

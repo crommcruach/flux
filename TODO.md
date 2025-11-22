@@ -2,31 +2,126 @@
 
 ## Geplante Features
 
+### Architektur-Refactoring
+- [ ] **HOCH: PlayerManager Refactoring (Analyse 2025-11-22)**
+  - **Problem:** DMXController wird als Player-Container missbraucht
+    - Verletzt Single Responsibility Principle
+    - Namens-Verwirrung: Module nutzen `dmx_controller` nur für `player`-Zugriff
+    - Zirkuläre Abhängigkeiten und Code-Duplikation
+  - **Lösung:** PlayerManager-Klasse einführen
+    - Zentraler Player-Container (Single Source of Truth)
+    - DMXController bleibt rein für DMX-Input zuständig
+    - Betrifft: main.py, cli_handler.py, rest_api.py, api_videos.py, command_executor.py
+  - **Vorteile:**
+    - Klare Verantwortlichkeit und Modulgrenzen
+    - Einfacherer Player-Wechsel (nur `player_manager.set_player()`)
+    - Reduziert Coupling zwischen Modulen
+    - Bessere Testbarkeit
+
+### Art-Net Optimierung
+- [ ] **HOCH: Delta-Encoding für Art-Net Output (Konzept 2025-11-22)**
+  - **Grundidee:** Sende nur Pixel die sich signifikant geändert haben
+  - **Phase 0: LED Bit-Tiefe Unterstützung**
+    - Parametrierbare Dimming-Modi: 8-bit (Standard) vs. 16-bit (High-End)
+    - Config: `artnet.bit_depth` (8 oder 16)
+    - **8-bit Modus:** 3 Bytes/LED (R, G, B je 0-255)
+      - Standard für Consumer-LEDs (WS2812B, SK6812)
+      - Ausreichend für 99% der Anwendungen
+      - Threshold-Empfehlung: 5-10 (≈ 2-4%)
+    - **16-bit Modus:** 6 Bytes/LED (R, G, B je 0-65535, High+Low Byte)
+      - Professionelle LED-Systeme (DMX High-Resolution)
+      - Smoother Dimming bei sehr niedrigen Helligkeiten
+      - Threshold-Empfehlung: 1280-2560 (≈ 2-4% von 65535)
+      - 2× so viel Traffic → Delta-Encoding NOCH wichtiger
+    - **Implementierung:**
+      - `_convert_to_artnet_data()` erweitern mit bit_depth Parameter
+      - 16-bit: High-Byte = value >> 8, Low-Byte = value & 0xFF
+      - Universe-Berechnung anpassen (6 statt 3 channels per LED)
+  - **Phase 1: Basic Delta-Encoding**
+    - Threshold-basierte Differenz-Erkennung (konfigurierbar 0-20 für 8-bit)
+    - NumPy-optimierte Differenz-Berechnung (funktioniert für beide Modi)
+    - Sende nur geänderte Pixel pro Universum
+    - Config: `artnet.delta_encoding.enabled`, `threshold`, `threshold_16bit`
+    - Automatische Threshold-Skalierung je nach bit_depth
+  - **Phase 2: Full-Frame Sync**
+    - Alle N Frames komplettes Update (Fehlerkorrektur bei Packet-Loss)
+    - Config: `artnet.delta_encoding.full_frame_interval` (default: 30)
+  - **Phase 3: Adaptive Threshold** (Optional)
+    - Automatische Anpassung an Szenen-Komplexität
+    - Schnelle Bewegung → höherer Threshold
+    - Statische Szene → präziserer Threshold
+  - **Phase 4: Spatial Grouping** (Optional)
+    - Gruppiere benachbarte LEDs für effizientere Updates
+  - **Geschätzter Gewinn:**
+    - 50-90% weniger Netzwerk-Traffic (beide Modi)
+    - 40-60% weniger CPU-Last beim Senden
+    - 60+ FPS möglich (statt 30-40 FPS)
+    - Cache wird überflüssig für Art-Net-Output
+    - Bei 16-bit: Traffic-Reduktion kompensiert doppelte Datenmenge
+  - **Trade-offs:**
+    - +2-5ms CPU für Delta-Berechnung
+    - +2-6KB Memory für last_sent_frame Buffer (bit_depth abhängig)
+    - Funktioniert schlechter bei High-Motion-Szenen (100% Updates)
+
 ### Performance-Optimierung
+- [ ] **Backend Performance-Optimierungen (Analyse 2025-11-22)**
+  - [ ] **KRITISCH:** NumPy-Vektorisierung Stream-Loops (api_routes.py:334, 420)
+    - Ersetze Python for-Loop durch NumPy fancy indexing
+    - Geschätzter Gewinn: 40-60% CPU-Reduktion, -15ms Latenz
+    - Impact: 10-50x Speedup bei 300+ LED-Punkten
+  - [ ] **HOCH:** Entferne redundante Frame-Copies (api_routes.py:316, 402)
+    - Direkter Zugriff statt `.copy()` mit Read-Lock
+    - Geschätzter Gewinn: 15-20% CPU-Reduktion, spart 20 MB/s Memory-Bandwidth
+  - [ ] **HOCH:** Async JPEG-Encoding (api_routes.py Stream-Generator)
+    - Thread-Pool für cv2.imencode() oder Frame-Skip (30→15 FPS)
+    - Geschätzter Gewinn: 25-35% CPU-Reduktion, -8ms Latenz
+  - [ ] **MITTEL:** NumPy Channel-Reordering (artnet_manager.py:360-378)
+    - Ersetze RGB→GRB Loop durch NumPy fancy indexing
+    - Geschätzter Gewinn: 5-10% CPU-Reduktion, -2ms Latenz
+  - [ ] **MITTEL:** Cache Gradient-Pattern (dmx_controller.py:257-276)
+    - Vektorisierte HSV→RGB + Caching statt Neuberechnung
+    - Geschätzter Gewinn: 1-3ms pro Pattern-Generation
+  - [ ] **NIEDRIG:** Memory Leak Prevention (player.py:359)
+    - Recording mit deque(maxlen=...) statt unbegrenzter Liste
+    - Verhindert 195 MB nach 1h Recording
+  - [ ] **NIEDRIG:** Event-basierte Synchronisation statt time.sleep()
+    - threading.Event() für Pause-Handling
+    - Reduziert Latenz-Spikes
+  - [ ] **NIEDRIG:** Lock-free Stats (artnet_manager.py)
+    - threading.local() statt Lock bei jedem Frame
+    - Geschätzter Gewinn: 2-5% CPU-Reduktion
+  - **Gesamtpotenzial: ~70% CPU-Reduktion, ~30ms weniger Latenz, bis zu 60 FPS**
 - [ ] Video-Optimierungs-Script erstellen
   - [ ] Automatische Skalierung auf Canvas-Größe
   - [ ] Hardware-Codec Encoding (H.264 mit NVENC/QSV)
   - [ ] Bitrate-Optimierung für schnelleres Decoding
   - [ ] Keyframe-Intervall anpassen (g=30 für bessere Loop-Performance)
   - [ ] Batch-Processing für alle Videos in Kanal-Ordnern
-- [ ] Neues Cache-Format für Unified Player
-  - [ ] Full-Frame Caching (statt RGB-Punkt-Daten)
-  - [ ] Komprimierte Frame-Arrays (msgpack/lz4)
-  - [ ] Cache-Kompatibilität mit VideoSource
-  - [ ] Migration alter Cache-Dateien
+
+### Neue Frame Sources
+- [ ] ShaderToy Source (Echtzeit-3D-Shader)
+  - [ ] ModernGL/PyOpenGL Integration
+  - [ ] GLSL Shader Support (Shadertoy-kompatibel)
+  - [ ] Uniform Variables (iTime, iResolution, iMouse)
+  - [ ] Shader-Dateien aus shaders/ Ordner laden
+  - [ ] Shadertoy-URL Import (API oder Scraping)
+  - [ ] Performance-Profiling und GPU-Monitoring
+- [ ] ImageSequence Source
+  - [ ] PNG/JPG Sequenz-Support
+  - [ ] Automatische Frame-Nummerierung
+  - [ ] Variable Frame-Delays
+- [ ] LiveStream Source
+  - [ ] RTSP/HTTP Stream Support
+  - [ ] FFmpeg/GStreamer Integration
+  - [ ] Stream-Buffering und Reconnect
 
 ### Weitere Verbesserungen
-- [ ] Web CLI und Console Commands vereinheitlichen
-  - [ ] Gemeinsame Command-Handler Logik
-  - [ ] Einheitliche Befehlssyntax und Rückgabewerte
-  - [ ] Code-Deduplizierung zwischen CLI Handler und API Console
 - [ ] Unit Tests erweitern (Player, FrameSource, API)
 - [ ] API-Authentifizierung (Basic Auth/Token)
 - [ ] PyInstaller EXE Build Setup
   - [ ] Spec-Datei erstellen mit allen Dependencies
-  - [ ] Static files, config.json, data/video Ordner inkludieren
   - [ ] Single-File oder Folder-basierte Distribution testen
-  - ✓ Web-Interface Verbesserungen
+- ✓ Web-Interface Verbesserungen
     - ✓ Console Component in separates JS-Modul ausgelagert
     - ✓ Responsive Design für Mobile optimiert
     - ✓ LocalStorage für Settings Persistence (Brightness, Speed)
@@ -38,9 +133,7 @@
   - [ ] JSON Schema Validation für config.json
   - [ ] Hot-Reload (config.json watcher)
 - [ ] Projekt-Struktur
-  - [ ] CDN für Bootstrap Icons
   - [ ] Dockerfile erstellen
-  - [ ] requirements-lock.txt (pip freeze)
 
 ## Abgeschlossen ✓
 
@@ -147,7 +240,7 @@
   - ✓ ScriptGenerator Klasse (list/load/generate)
   - ✓ ScriptPlayer Klasse (kompatibel mit VideoPlayer API)
   - ✓ Python Script API: generate_frame(frame_number, width, height, time, fps)
-  - ✓ 3 Beispiel-Shaders (rainbow_wave, plasma, pulse)
+  - ✓ 10 Beispiel-Shaders (rainbow_wave, plasma, pulse, matrix_rain, fire, heartbeat, falling_blocks, line_*)
   - ✓ METADATA-System für Script-Infos
   - ✓ CLI-Befehle: scripts list, script:<name>
   - ✓ REST API Endpoints: GET /api/scripts, POST /api/load_script
@@ -155,3 +248,11 @@
   - ✓ Error Handling mit Traceback
   - ✓ Lazy Module Loading (__init__.py __getattr__)
   - ✓ Dokumentation in README und API.md
+- ✓ Command Execution Unified (2025-11-22)
+  - ✓ CommandExecutor Klasse für gemeinsame Command-Handler Logik
+  - ✓ CLIHandler nutzt CommandExecutor.execute()
+  - ✓ API Console nutzt gemeinsamen Command-Handler
+  - ✓ Code-Deduplizierung zwischen CLI und Web Console
+  - ✓ Einheitliche CommandResult-Struktur
+- ✓ Projekt-Struktur (2025-11-22)
+  - ✓ requirements-lock.txt erstellt (27 Packages mit exakten Versionen)

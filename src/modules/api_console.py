@@ -90,3 +90,63 @@ def register_console_routes(app, rest_api_instance):
         """Löscht Console Log."""
         rest_api_instance.console_log.clear()
         return jsonify({"status": "success", "message": "Console gelöscht"})
+    
+    @app.route('/api/console/help', methods=['GET'])
+    def console_help():
+        """Gibt CLI-Hilfe zurück (dynamisch aus utils.print_help)."""
+        import io
+        import sys
+        from .utils import print_help
+        
+        # Capture print_help() output
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        
+        try:
+            print_help()
+            help_text = sys.stdout.getvalue()
+        finally:
+            sys.stdout = old_stdout
+        
+        # Parse help text in strukturierte Daten
+        sections = []
+        current_section = None
+        current_commands = []
+        
+        for line in help_text.split('\n'):
+            line_stripped = line.strip()
+            
+            # Skip separators
+            if line_stripped.startswith('==='):
+                continue
+            
+            # Section headers (emoji + text)
+            if line_stripped and any(emoji in line_stripped for emoji in ['📹', '🎬', '📍', '⚙️', '🌐', '🔌', 'ℹ️', '⏺️', '💾', '🎨', '🔧']):
+                if current_section:
+                    sections.append({
+                        'title': current_section,
+                        'commands': current_commands
+                    })
+                current_section = line_stripped
+                current_commands = []
+            
+            # Command lines (indented)
+            elif line.startswith('  ') and line_stripped and not line_stripped.startswith('💡'):
+                # Parse command and description
+                parts = line_stripped.split('-', 1)
+                if len(parts) == 2:
+                    cmd = parts[0].strip()
+                    desc = parts[1].strip()
+                    current_commands.append({'command': cmd, 'description': desc})
+        
+        # Add last section
+        if current_section and current_commands:
+            sections.append({
+                'title': current_section,
+                'commands': current_commands
+            })
+        
+        return jsonify({
+            "help_text": help_text,
+            "sections": sections
+        })

@@ -457,6 +457,17 @@ async function updatePreviewInfo() {
             }
         }
     }
+    
+    // Traffic-Statistiken holen
+    const traffic = await apiCall('/stream/traffic', 'GET');
+    if (traffic && traffic.preview && traffic.fullscreen && traffic.total) {
+        document.getElementById('trafficPreview').textContent = traffic.preview.formatted;
+        document.getElementById('trafficPreviewMbps').textContent = traffic.preview.mbps;
+        document.getElementById('trafficFullscreen').textContent = traffic.fullscreen.formatted;
+        document.getElementById('trafficFullscreenMbps').textContent = traffic.fullscreen.mbps;
+        document.getElementById('trafficTotal').textContent = traffic.total.formatted;
+        document.getElementById('trafficTotalMbps').textContent = traffic.total.mbps;
+    }
 }
 
 async function updateStatus() {
@@ -464,6 +475,26 @@ async function updateStatus() {
     if (result) {
         updateStatusFromWebSocket(result);
     }
+}
+
+// ========================================
+// PREVIEW WINDOW
+// ========================================
+
+function openPreviewWindow() {
+    // Öffne den Preview-Stream in einem neuen Fenster (nicht Tab)
+    // Zeigt Stream in Original Canvas-Auflösung (pixelated)
+    const fullscreenUrl = '/fullscreen.html';
+    const width = 900;
+    const height = 700;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    window.open(
+        fullscreenUrl, 
+        'FullscreenWindow',
+        `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no,status=no,toolbar=no,menubar=no,location=no`
+    );
 }
 
 // ========================================

@@ -10,7 +10,6 @@ import numpy as np
 from .logger import get_logger
 from .artnet_manager import ArtNetManager
 from .points_loader import PointsLoader
-from .cache_manager import CacheManager
 from .constants import (
     DMX_CHANNELS_PER_UNIVERSE,
     DMX_CHANNELS_PER_POINT,
@@ -57,14 +56,6 @@ class VideoPlayer:
         self.recorded_data = []
         self.last_frame = None  # Letztes Frame (LED-Punkte) für Preview
         self.last_video_frame = None  # Letztes Video-Frame (komplettes Bild) für Preview
-        
-        # RGB Cache Manager
-        cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
-        cache_enabled = self.config.get('cache', {}).get('enabled', True)
-        self.cache_manager = CacheManager(cache_dir, cache_enabled)
-        self.use_cache = cache_enabled
-        self.cached_rgb_data = None
-        self.cache_loaded = False
         
         # GIF Support
         self.is_gif = self._is_gif_file(video_path)
@@ -207,18 +198,11 @@ class VideoPlayer:
         return frame[:, :, :3]  # Stelle sicher dass nur RGB zurückgegeben wird
     
     def _load_cache(self):
-        """Lädt gecachte RGB-Daten wenn verfügbar."""
-        cache_path = self.cache_manager.get_cache_path(
-            self.video_path, 
-            self.points_json_path, 
-            self.canvas_width, 
-            self.canvas_height
-        )
-        
-        if not cache_path:
-            return False
-        
-        cache_data = self.cache_manager.load_cache(cache_path)
+        """Cache deaktiviert - verwende Delta-Encoding stattdessen."""
+        return False
+    
+    def _save_cache_dummy(self):
+        """Cache deaktiviert."""
         if not cache_data:
             return False
         
@@ -248,20 +232,8 @@ class VideoPlayer:
         if not cache_path:
             return False
         
-        video_fps = self.video_fps if hasattr(self, 'video_fps') else DEFAULT_FPS
-        
-        success = self.cache_manager.save_cache(
-            cache_path,
-            rgb_frames,
-            video_fps,
-            self.is_gif,
-            self.gif_frame_delays
-        )
-        
-        if success:
-            logger.debug(f"  ✓ Cache gespeichert: {len(rgb_frames)} Frames")
-        
-        return success
+        # Cache deaktiviert - verwende Delta-Encoding stattdessen
+        return False
     
     def _play_loop(self):
         """Haupt-Wiedergabeschleife (läuft in separatem Thread)."""

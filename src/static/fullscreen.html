@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flux - Fullscreen</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="fullscreen-body">
+    <div id="streamContainer" class="fullscreen-container">
+        <img id="previewStream" class="fullscreen-stream" src="/api/fullscreen/stream" alt="Fullscreen Stream">
+        <div id="fpsOverlay" class="fullscreen-fps-overlay" style="display: none;">
+            <div class="fullscreen-fps-content">
+                <div class="fullscreen-fps-label">FPS</div>
+                <div id="fpsValue" class="fullscreen-fps-value">0</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        let holdTimer = null;
+        let fpsVisible = false;
+        let lastFrameTime = Date.now();
+        let frameCount = 0;
+        let fps = 0;
+        
+        const streamImg = document.getElementById('previewStream');
+        const fpsOverlay = document.getElementById('fpsOverlay');
+        const fpsValue = document.getElementById('fpsValue');
+        
+        // FPS Berechnung durch Überwachung des Stream-Updates
+        function updateFPS() {
+            frameCount++;
+            const now = Date.now();
+            const elapsed = now - lastFrameTime;
+            
+            if (elapsed >= 1000) {
+                fps = Math.round((frameCount * 1000) / elapsed);
+                fpsValue.textContent = fps;
+                frameCount = 0;
+                lastFrameTime = now;
+            }
+        }
+        
+        // Überwache Stream-Updates
+        let lastSrc = streamImg.src;
+        setInterval(() => {
+            if (streamImg.complete && streamImg.naturalHeight !== 0) {
+                updateFPS();
+            }
+        }, 33); // Check ~30 times per second
+        
+        // Mouse Events
+        streamImg.addEventListener('mousedown', (e) => {
+            holdTimer = setTimeout(() => {
+                fpsVisible = !fpsVisible;
+                fpsOverlay.style.display = fpsVisible ? 'flex' : 'none';
+            }, 500); // 500ms hold
+        });
+        
+        streamImg.addEventListener('mouseup', () => {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+        });
+        
+        streamImg.addEventListener('mouseleave', () => {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+        });
+        
+        // Touch Events
+        streamImg.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            holdTimer = setTimeout(() => {
+                fpsVisible = !fpsVisible;
+                fpsOverlay.style.display = fpsVisible ? 'flex' : 'none';
+            }, 500); // 500ms hold
+        });
+        
+        streamImg.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+        });
+        
+        streamImg.addEventListener('touchcancel', () => {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -155,7 +155,7 @@ async function executeCommand() {
     consoleOutput.scrollTop = consoleOutput.scrollHeight;
     
     try {
-        const result = await apiCall('/console', 'POST', { command });
+        const result = await apiCall('/console/command', 'POST', { command });
         
         if (result) {
             // Zeige Output
@@ -291,6 +291,83 @@ function toggleLogAutoScroll() {
 }
 
 // ========================================
+// HELP FUNCTIONS
+// ========================================
+
+// Fetch and display dynamic help from CLI
+async function fetchHelp() {
+    try {
+        const response = await fetch(`${API_BASE}/console/help`);
+        if (response.ok) {
+            const data = await response.json();
+            displayHelp(data);
+        }
+    } catch (error) {
+        console.error('Fehler beim Laden der Hilfe:', error);
+        const helpContent = document.getElementById('helpContent');
+        if (helpContent) {
+            helpContent.innerHTML = '<p style="color: var(--danger);">Fehler beim Laden der Hilfe. Verwende <code>help</code> Befehl in der Console.</p>';
+        }
+    }
+}
+
+// Toggle help section
+function toggleHelp() {
+    const helpContent = document.getElementById('helpContent');
+    const toggleIcon = document.getElementById('helpToggleIcon');
+    
+    if (helpContent && toggleIcon) {
+        helpContent.classList.toggle('collapsed');
+        toggleIcon.classList.toggle('collapsed');
+    }
+}
+
+// Display help in structured format
+function displayHelp(data) {
+    const helpSection = document.getElementById('helpSection');
+    const helpContent = document.getElementById('helpContent');
+    
+    if (!helpContent) return;
+    
+    // Update title
+    const title = helpSection.querySelector('h3');
+    if (title) {
+        title.innerHTML = '<span class="help-toggle-icon collapsed" id="helpToggleIcon">▼</span> 📖 Verfügbare Befehle <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); fetchHelp()" style="margin-left: 10px;">🔄 Aktualisieren</button>';
+        title.onclick = toggleHelp;
+    }
+    
+    // Build HTML from sections
+    let html = '';
+    
+    if (data.sections && data.sections.length > 0) {
+        data.sections.forEach(section => {
+            html += `<div style="margin-bottom: 1rem;">`;
+            html += `<h4 style="margin-bottom: 0.5rem; font-size: 0.95rem; color: var(--text-color);">${section.title}</h4>`;
+            html += `<ul style="margin: 0; padding-left: 1.5rem;">`;
+            
+            section.commands.forEach(cmd => {
+                html += `<li style="margin-bottom: 0.3rem;">`;
+                html += `<code style="background: var(--input-bg); padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 12px;">${cmd.command}</code>`;
+                html += ` - ${cmd.description}`;
+                html += `</li>`;
+            });
+            
+            html += `</ul>`;
+            html += `</div>`;
+        });
+        
+        // Add note at the end
+        html += `<div style="margin-top: 1rem; padding: 0.75rem; background: rgba(79, 70, 229, 0.1); border-left: 3px solid var(--accent-color); border-radius: 4px; font-size: 0.9rem;">`;
+        html += `💡 <strong>Hinweis:</strong> REST API startet automatisch beim Programmstart. Alle Befehle sind auch via Web-Interface verfügbar!`;
+        html += `</div>`;
+    } else {
+        html = '<p style="color: var(--text-secondary);">Keine Befehle verfügbar.</p>';
+    }
+    
+    helpContent.innerHTML = html;
+}
+
+// ========================================
 // INITIALIZATION
 // ========================================
 
@@ -316,6 +393,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initWebSocket();
     fetchConsole();
     fetchLog();  // Initial log load
+    fetchHelp();  // Load dynamic help
     
     // Fallback Polling (falls WebSocket nicht verbindet)
     setInterval(() => {

@@ -8,7 +8,6 @@ import numpy as np
 from abc import ABC, abstractmethod
 from .logger import get_logger
 from .script_generator import ScriptGenerator
-from .cache_manager import CacheManager
 from .constants import DEFAULT_FPS
 
 logger = get_logger(__name__)
@@ -71,14 +70,6 @@ class VideoSource(FrameSource):
         self.video_path = video_path
         self.source_path = video_path  # Generischer Pfad für load_points()
         self.cap = None
-        
-        # HINWEIS: Cache deaktiviert für unified Player
-        # Der alte Cache speichert vorverarbeitete RGB-Punkt-Daten, nicht komplette Frames
-        # TODO: Neues Cache-Format für komplette Frames implementieren
-        self.cache_manager = None
-        self.cached_rgb_data = None
-        self.cache_loaded = False
-        self.use_cache = False
         
         # GIF Support
         self.is_gif = self._is_gif_file(video_path)

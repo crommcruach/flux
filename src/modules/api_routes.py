@@ -213,7 +213,7 @@ def register_artnet_routes(app, dmx_controller):
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
 
 
-def register_info_routes(app, dmx_controller):
+def register_info_routes(app, dmx_controller, api=None):
     """Registriert Info-Endpunkte."""
     
     @app.route('/api/status', methods=['GET'])
@@ -238,6 +238,58 @@ def register_info_routes(app, dmx_controller):
         """Gibt Live-Statistiken zurück."""
         player = dmx_controller.player
         return jsonify(player.get_stats())
+    
+    @app.route('/api/stream/traffic', methods=['GET'])
+    def stream_traffic():
+        """Gibt Traffic-Statistiken für Stream-APIs zurück."""
+        import time
+        
+        def format_bytes(bytes_val):
+            """Formatiert Bytes in lesbare Einheit."""
+            for unit in ['B', 'KB', 'MB', 'GB']:
+                if bytes_val < 1024.0:
+                    return f"{bytes_val:.2f} {unit}"
+                bytes_val /= 1024.0
+            return f"{bytes_val:.2f} TB"
+        
+        def calculate_mbps(bytes_val, start_time):
+            """Berechnet Mbps basierend auf Bytes und Zeitspanne."""
+            elapsed = time.time() - start_time
+            if elapsed <= 0:
+                return 0.0
+            bits = bytes_val * 8
+            mbps = (bits / elapsed) / 1_000_000
+            return round(mbps, 2)
+        
+        if api is None:
+            return jsonify({'error': 'API instance not available'}), 500
+            
+        preview_stats = api.stream_traffic['preview']
+        fullscreen_stats = api.stream_traffic['fullscreen']
+        
+        preview_mbps = calculate_mbps(preview_stats['bytes'], preview_stats['start_time'])
+        fullscreen_mbps = calculate_mbps(fullscreen_stats['bytes'], fullscreen_stats['start_time'])
+        
+        return jsonify({
+            'preview': {
+                'bytes': preview_stats['bytes'],
+                'frames': preview_stats['frames'],
+                'formatted': format_bytes(preview_stats['bytes']),
+                'mbps': preview_mbps
+            },
+            'fullscreen': {
+                'bytes': fullscreen_stats['bytes'],
+                'frames': fullscreen_stats['frames'],
+                'formatted': format_bytes(fullscreen_stats['bytes']),
+                'mbps': fullscreen_mbps
+            },
+            'total': {
+                'bytes': preview_stats['bytes'] + fullscreen_stats['bytes'],
+                'frames': preview_stats['frames'] + fullscreen_stats['frames'],
+                'formatted': format_bytes(preview_stats['bytes'] + fullscreen_stats['bytes']),
+                'mbps': round(preview_mbps + fullscreen_mbps, 2)
+            }
+        })
     
     @app.route('/api/preview/stream')
     def preview_stream():
@@ -303,6 +355,90 @@ def register_info_routes(app, dmx_controller):
                         continue
                     
                     frame_bytes = buffer.tobytes()
+                    
+                    # Traffic-Tracking
+                    api.stream_traffic['preview']['bytes'] += len(frame_bytes)
+                    api.stream_traffic['preview']['frames'] += 1
+                    
+                    # MJPEG Format: --frame boundary
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    
+                    # Limitiere auf ~30 FPS
+                    time.sleep(0.033)
+                
+                except Exception as e:
+                    # Bei Fehler: Schwarzes Bild
+                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    if ret:
+                        frame_bytes = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    time.sleep(0.1)
+        
+        return Response(generate_frames(), 
+                       mimetype='multipart/x-mixed-replace; boundary=frame')
+    
+    @app.route('/api/fullscreen/stream')
+    def fullscreen_stream():
+        """MJPEG Video-Stream in voller Player-Auflösung (ohne Skalierung)."""
+        from flask import Response
+        import cv2
+        import numpy as np
+        import time
+        
+        def generate_frames():
+            """Generator für MJPEG-Stream ohne Preview-Skalierung."""
+            frame_count = 0
+            while True:
+                try:
+                    frame_count += 1
+                    player = dmx_controller.player
+                    
+                    # Hole aktuelles Video-Frame (komplettes Bild)
+                    if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
+                        # Verwende komplettes Video-Frame in voller Auflösung (bereits in BGR)
+                        frame = player.last_video_frame.copy()
+                    elif not hasattr(player, 'last_frame') or player.last_frame is None:
+                        # Schwarzes Bild wenn kein Frame vorhanden
+                        canvas_width = getattr(player, 'canvas_width', 320)
+                        canvas_height = getattr(player, 'canvas_height', 180)
+                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+                    else:
+                        # Fallback: Rekonstruiere Bild aus LED-Punkten
+                        frame_data = player.last_frame
+                        canvas_width = getattr(player, 'canvas_width', 320)
+                        canvas_height = getattr(player, 'canvas_height', 180)
+                        point_coords = getattr(player, 'point_coords', None)
+                        
+                        # Erstelle schwarzes Bild
+                        frame = np.zeros((canvas_height, canvas_height, 3), dtype=np.uint8)
+                        
+                        # Zeichne die Punkte auf das Bild
+                        if point_coords is not None and len(frame_data) >= len(point_coords) * 3:
+                            for i in range(len(point_coords)):
+                                x, y = point_coords[i]
+                                if 0 <= y < canvas_height and 0 <= x < canvas_width:
+                                    r = frame_data[i * 3]
+                                    g = frame_data[i * 3 + 1]
+                                    b = frame_data[i * 3 + 2]
+                                    # BGR Format für OpenCV
+                                    frame[y, x] = [b, g, r]
+                    
+                    # KEINE SKALIERUNG - volle Player-Auflösung
+                    
+                    # Encode als JPEG mit hoher Qualität
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    if not ret:
+                        time.sleep(0.033)  # ~30 FPS
+                        continue
+                    
+                    frame_bytes = buffer.tobytes()
+                    
+                    # Traffic-Tracking
+                    api.stream_traffic['fullscreen']['bytes'] += len(frame_bytes)
+                    api.stream_traffic['fullscreen']['frames'] += 1
                     
                     # MJPEG Format: --frame boundary
                     yield (b'--frame\r\n'

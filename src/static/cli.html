@@ -7,160 +7,6 @@
     <title>Flux - Web CLI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
-    <style>
-        .cli-container {
-            max-width: 1200px;
-            margin: 2rem auto;
-            padding: 0 1rem;
-        }
-
-        .cli-panel {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 1.5rem;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        .cli-panel h2 {
-            margin-top: 0;
-            margin-bottom: 1rem;
-            color: var(--text-color);
-            font-size: 1.5rem;
-        }
-
-        .console-output {
-            height: 500px;
-            overflow-y: auto;
-            background: var(--input-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 15px;
-            margin-bottom: 15px;
-            font-family: 'Courier New', monospace;
-            font-size: 13px;
-            line-height: 1.5;
-            color: var(--text-color);
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-
-        /* Log output specific styling - distinct from console */
-        #logOutput {
-            background: linear-gradient(to bottom, var(--input-bg), rgba(0, 0, 0, 0.05));
-            border-left: 3px solid var(--accent-color);
-            font-size: 11px;
-            line-height: 1.3;
-        }
-
-        #logOutput::-webkit-scrollbar {
-            width: 10px;
-        }
-
-        #logOutput::-webkit-scrollbar-track {
-            background: var(--bg-secondary);
-        }
-
-        #logOutput::-webkit-scrollbar-thumb {
-            background: var(--accent-color);
-            border-radius: 5px;
-        }
-
-        #logOutput::-webkit-scrollbar-thumb:hover {
-            background: #5b50f0;
-        }
-
-        .btn-sm {
-            padding: 0.25rem 0.75rem;
-            font-size: 0.875rem;
-        }
-
-        .console-input-container {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        .console-prompt {
-            color: var(--accent-color);
-            font-weight: bold;
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
-        }
-
-        .console-input {
-            flex: 1;
-            padding: 10px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            background: var(--input-bg);
-            color: var(--text-color);
-            font-family: 'Courier New', monospace;
-            font-size: 13px;
-        }
-
-        .console-input:focus {
-            outline: none;
-            border-color: var(--accent-color);
-            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
-        }
-
-        .console-line-command {
-            color: #4CAF50;
-            font-weight: bold;
-        }
-
-        .console-line-error {
-            color: #f44336;
-        }
-
-        .console-line-success {
-            color: #4CAF50;
-        }
-
-        .header-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-
-        .header-controls h2 {
-            margin: 0;
-        }
-
-        .help-section {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 1rem;
-            margin-top: 1.5rem;
-        }
-
-        .help-section h3 {
-            margin-top: 0;
-            margin-bottom: 0.5rem;
-            font-size: 1.1rem;
-            color: var(--text-color);
-        }
-
-        .help-section code {
-            background: var(--input-bg);
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-        }
-
-        .help-section ul {
-            margin: 0.5rem 0;
-            padding-left: 1.5rem;
-        }
-
-        .help-section li {
-            margin-bottom: 0.3rem;
-        }
-    </style>
 </head>
 
 <body>
@@ -169,10 +15,10 @@
     <!-- CLI Container -->
     <div class="cli-container">
         <!-- Application Log Panel -->
-        <div class="cli-panel" style="margin-bottom: 1.5rem;">
+        <div class="cli-panel log-panel-spacing">
             <div class="header-controls">
                 <h2>📋 Application Log</h2>
-                <div style="display: flex; gap: 10px;">
+                <div class="button-group">
                     <button class="btn btn-secondary btn-sm" onclick="toggleLogAutoScroll()" id="autoScrollBtn">
                         <span id="autoScrollIcon">🔒</span> Auto-Scroll
                     </button>
@@ -180,8 +26,8 @@
                 </div>
             </div>
             
-            <pre id="logOutput" class="console-output" style="height: 250px; font-size: 11px; line-height: 1.3;"></pre>
-            <div style="margin-top: 10px; font-size: 0.85rem; color: var(--text-secondary);">
+            <pre id="logOutput" class="console-output log-output-custom"></pre>
+            <div class="log-info-container">
                 <span id="logInfo">Warte auf Log-Daten...</span>
             </div>
         </div>
@@ -206,24 +52,21 @@
                 <button class="btn btn-primary" onclick="executeCommand()">▶️ Run</button>
             </div>
 
-            <div class="help-section">
-                <h3>📖 Verfügbare Befehle</h3>
-                <ul>
-                    <li><code>help</code> - Zeigt alle verfügbaren Befehle</li>
-                    <li><code>status</code> - Zeigt den aktuellen Status</li>
-                    <li><code>videos</code> - Listet alle verfügbaren Videos auf</li>
-                    <li><code>scripts</code> - Listet alle verfügbaren Scripts auf</li>
-                    <li><code>start</code> / <code>stop</code> / <code>pause</code> / <code>resume</code> - Playback Steuerung</li>
-                    <li><code>video:&lt;pfad&gt;</code> - Lädt ein Video (z.B. <code>video:kanal_1/test.mp4</code>)</li>
-                    <li><code>script:&lt;name&gt;</code> - Lädt ein Script (z.B. <code>script:rainbow_wave</code>)</li>
-                    <li><code>test &lt;farbe&gt;</code> - Testmuster (z.B. <code>test red</code>, <code>test #FF00FF</code>)</li>
-                </ul>
+            <div class="help-section" id="helpSection">
+                <h3 onclick="toggleHelp()">
+                    <span class="help-toggle-icon collapsed" id="helpToggleIcon">▼</span>
+                    📖 Verfügbare Befehle 
+                    <span class="help-loading-text">(lädt...)</span>
+                </h3>
+                <div id="helpContent" class="collapsed">
+                    <p class="help-content-message">Lade Befehle...</p>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Toast Notification -->
-    <div id="toast" class="toast" style="display: none; position: fixed; bottom: 20px; right: 20px; padding: 15px 20px; border-radius: 8px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: var(--bg-secondary); border: 1px solid var(--border-color);">
+    <div id="toast" class="toast">
         <span id="toastMessage"></span>
     </div>
 

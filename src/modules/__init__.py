@@ -39,9 +39,6 @@ def __getattr__(name):
     elif name == 'PointsLoader':
         from .points_loader import PointsLoader
         return PointsLoader
-    elif name == 'CacheManager':
-        from .cache_manager import CacheManager
-        return CacheManager
     elif name == 'ConfigValidator':
         from .config_schema import ConfigValidator
         return ConfigValidator

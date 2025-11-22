@@ -8,6 +8,7 @@ import os
 import threading
 from collections import deque
 from .logger import get_logger
+from .command_executor import CommandExecutor
 
 logger = get_logger(__name__)
 from .constants import (
@@ -28,6 +29,22 @@ class RestAPI:
         self.config = config or {}
         self.replay_manager = replay_manager
         self.logger = logger  # Add logger as instance attribute
+        
+        # Traffic Counter für Stream-APIs
+        import time
+        self.stream_traffic = {
+            'preview': {'bytes': 0, 'frames': 0, 'start_time': time.time()},
+            'fullscreen': {'bytes': 0, 'frames': 0, 'start_time': time.time()}
+        }
+        
+        # Initialize unified command executor
+        self.command_executor = CommandExecutor(
+            player_provider=lambda: self.dmx_controller.player,
+            dmx_controller=dmx_controller,
+            video_dir=video_dir,
+            data_dir=data_dir,
+            config=config or {}
+        )
         
         # Console Log Buffer aus config oder default
         console_maxlen = self.config.get('api', {}).get('console_log_maxlen', CONSOLE_LOG_MAX_LENGTH)
@@ -106,7 +123,7 @@ class RestAPI:
         register_playback_routes(self.app, self.dmx_controller)
         register_settings_routes(self.app, self.dmx_controller)
         register_artnet_routes(self.app, self.dmx_controller)
-        register_info_routes(self.app, self.dmx_controller)
+        register_info_routes(self.app, self.dmx_controller, self)
         register_recording_routes(self.app, self.player, self)
         register_cache_routes(self.app)
         register_script_routes(self.app, self.player, self.dmx_controller, self.config)
@@ -288,7 +305,20 @@ class RestAPI:
                 logger.debug(f"Konnte Log nicht broadcasten: {e}")
     
     def _execute_command(self, command):
-        """Führt CLI-Befehl aus und gibt Ergebnis zurück.
+        """Führt CLI-Befehl aus und gibt Ergebnis zurück (via CommandExecutor).
+        
+        WICHTIG: Verwende NIEMALS print() in API-Funktionen!
+        Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
+        """
+        try:
+            result = self.command_executor.execute(command)
+            return result.message
+        except Exception as e:
+            logger.error(f"Command execution error: {e}", exc_info=True)
+            return f"Fehler: {str(e)}"
+    
+    def _execute_command_old(self, command):
+        """Legacy command execution (deprecated, kept for reference).
         
         WICHTIG: Verwende NIEMALS print() in API-Funktionen!
         Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
