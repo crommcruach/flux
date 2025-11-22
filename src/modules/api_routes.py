@@ -7,41 +7,41 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 
-def register_playback_routes(app, dmx_controller):
+def register_playback_routes(app, player_manager):
     """Registriert Playback-Control Endpunkte."""
     
     @app.route('/api/play', methods=['POST'])
     def play():
         """Startet Video-Wiedergabe."""
-        player = dmx_controller.player
+        player = player_manager.player
         player.start()
         return jsonify({"status": "success", "message": "Video gestartet"})
     
     @app.route('/api/stop', methods=['POST'])
     def stop():
         """Stoppt Video-Wiedergabe."""
-        player = dmx_controller.player
+        player = player_manager.player
         player.stop()
         return jsonify({"status": "success", "message": "Video gestoppt"})
     
     @app.route('/api/pause', methods=['POST'])
     def pause():
         """Pausiert Wiedergabe."""
-        player = dmx_controller.player
+        player = player_manager.player
         player.pause()
         return jsonify({"status": "success", "message": "Video pausiert"})
     
     @app.route('/api/resume', methods=['POST'])
     def resume():
         """Setzt Wiedergabe fort."""
-        player = dmx_controller.player
+        player = player_manager.player
         player.resume()
         return jsonify({"status": "success", "message": "Wiedergabe fortgesetzt"})
     
     @app.route('/api/restart', methods=['POST'])
     def restart():
         """Startet Video neu."""
-        player = dmx_controller.player
+        player = player_manager.player
         player.restart()
         return jsonify({"status": "success", "message": "Video neu gestartet"})
     
@@ -51,28 +51,58 @@ def register_playback_routes(app, dmx_controller):
         import os
         import sys
         import threading
+        import subprocess
+        from modules.logger import get_logger
+        
+        logger = get_logger(__name__)
         
         def restart_app():
             import time
-            time.sleep(0.5)
-            python = sys.executable
-            os.execl(python, python, *sys.argv)
+            time.sleep(1.0)  # Warte länger, damit Response gesendet wird
+            
+            try:
+                python = sys.executable
+                script = sys.argv[0]
+                
+                logger.info(f"Starte Anwendung neu: {python} {script}")
+                
+                # Windows: Nutze subprocess.Popen für sauberen Neustart
+                if sys.platform == 'win32':
+                    # Starte neuen Prozess ohne neue Console
+                    # DETACHED_PROCESS = 0x00000008 (als Konstante, da nicht in subprocess)
+                    DETACHED_PROCESS = 0x00000008
+                    subprocess.Popen(
+                        [python, script] + sys.argv[1:],
+                        creationflags=DETACHED_PROCESS,
+                        close_fds=True
+                    )
+                else:
+                    # Unix: os.execl funktioniert hier besser
+                    os.execl(python, python, *sys.argv)
+                
+                # Beende aktuellen Prozess
+                logger.info("Beende aktuellen Prozess...")
+                os._exit(0)
+                
+            except Exception as e:
+                logger.error(f"Fehler beim Neustart: {e}")
+                os._exit(1)
         
         # Starte Neustart in separatem Thread, damit Response noch gesendet wird
         thread = threading.Thread(target=restart_app)
-        thread.daemon = True
+        thread.daemon = False  # Nicht-daemon, damit Thread zu Ende läuft
         thread.start()
         
         return jsonify({"status": "success", "message": "Anwendung wird neu gestartet..."})
 
 
-def register_settings_routes(app, dmx_controller):
+def register_settings_routes(app, player_manager):
     """Registriert Settings-Endpunkte."""
     
     @app.route('/api/brightness', methods=['POST'])
     def set_brightness():
         """Setzt Helligkeit."""
-        player = dmx_controller.player
+        player = player_manager.player
         data = request.get_json()
         value = data.get('value', 100)
         player.set_brightness(value)
@@ -81,7 +111,7 @@ def register_settings_routes(app, dmx_controller):
     @app.route('/api/speed', methods=['POST'])
     def set_speed():
         """Setzt Wiedergabe-Geschwindigkeit."""
-        player = dmx_controller.player
+        player = player_manager.player
         data = request.get_json()
         value = data.get('value', 1.0)
         player.set_speed(value)
@@ -90,7 +120,7 @@ def register_settings_routes(app, dmx_controller):
     @app.route('/api/hue', methods=['POST'])
     def set_hue():
         """Setzt Hue Rotation."""
-        player = dmx_controller.player
+        player = player_manager.player
         data = request.get_json()
         value = data.get('value', 0)
         player.set_hue_shift(value)
@@ -99,7 +129,7 @@ def register_settings_routes(app, dmx_controller):
     @app.route('/api/fps', methods=['POST'])
     def set_fps():
         """Setzt Art-Net FPS."""
-        player = dmx_controller.player
+        player = player_manager.player
         data = request.get_json()
         value = data.get('value')
         if player and player.artnet_manager:
@@ -110,20 +140,20 @@ def register_settings_routes(app, dmx_controller):
     @app.route('/api/loop', methods=['POST'])
     def set_loop():
         """Setzt Loop-Limit."""
-        player = dmx_controller.player
+        player = player_manager.player
         data = request.get_json()
         value = data.get('value', 0)
         player.set_loop_limit(value)
         return jsonify({"status": "success", "loop_limit": player.max_loops})
 
 
-def register_artnet_routes(app, dmx_controller):
+def register_artnet_routes(app, player_manager):
     """Registriert Art-Net Endpunkte."""
     
     @app.route('/api/blackout', methods=['POST'])
     def blackout():
         """Aktiviert Blackout."""
-        player = dmx_controller.player
+        player = player_manager.player
         if not player:
             return jsonify({"status": "error", "message": "Kein Player geladen"}), 400
         player.blackout()
@@ -132,7 +162,7 @@ def register_artnet_routes(app, dmx_controller):
     @app.route('/api/test', methods=['POST'])
     def test_pattern():
         """Sendet Testmuster."""
-        player = dmx_controller.player
+        player = player_manager.player
         if not player:
             return jsonify({"status": "error", "message": "Kein Player geladen"}), 400
         data = request.get_json() or {}
@@ -143,7 +173,7 @@ def register_artnet_routes(app, dmx_controller):
     @app.route('/api/ip', methods=['POST'])
     def set_ip():
         """Setzt Art-Net Ziel-IP."""
-        player = dmx_controller.player
+        player = player_manager.player
         data = request.get_json()
         ip = data.get('ip')
         if ip:
@@ -155,7 +185,7 @@ def register_artnet_routes(app, dmx_controller):
     def get_ip():
         """Gibt aktuelle Art-Net Ziel-IP zurück."""
         try:
-            player = dmx_controller.player
+            player = player_manager.player
             return jsonify({"status": "success", "ip": player.target_ip})
         except Exception as e:
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
@@ -164,7 +194,7 @@ def register_artnet_routes(app, dmx_controller):
     def set_universe():
         """Setzt Art-Net Start-Universum."""
         try:
-            player = dmx_controller.player
+            player = player_manager.player
             data = request.get_json()
             universe = data.get('universe')
             if universe is not None:
@@ -181,7 +211,7 @@ def register_artnet_routes(app, dmx_controller):
     def get_universe():
         """Gibt aktuelles Art-Net Start-Universum zurück."""
         try:
-            player = dmx_controller.player
+            player = player_manager.player
             return jsonify({"status": "success", "universe": player.start_universe})
         except Exception as e:
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
@@ -190,14 +220,17 @@ def register_artnet_routes(app, dmx_controller):
     def artnet_info():
         """Gibt Art-Net Informationen und Statistiken zurück."""
         try:
-            player = dmx_controller.player
+            player = player_manager.player
             artnet_manager = player.artnet_manager
             
             network_stats = artnet_manager.get_network_stats()
             
+            # Get brightness from player
+            brightness = int(player.brightness * 100) if hasattr(player, 'brightness') else 100
+            
             return jsonify({
                 "status": "success",
-                "artnet_brightness": int(dmx_controller.brightness * 100) if hasattr(dmx_controller, 'brightness') else 100,
+                "artnet_brightness": brightness,
                 "artnet_fps": artnet_manager.get_fps(),
                 "total_universes": artnet_manager.required_universes,
                 "packets_sent": network_stats['packets_sent'],
@@ -213,13 +246,13 @@ def register_artnet_routes(app, dmx_controller):
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
 
 
-def register_info_routes(app, dmx_controller, api=None):
+def register_info_routes(app, player_manager, api=None):
     """Registriert Info-Endpunkte."""
     
     @app.route('/api/status', methods=['GET'])
     def status():
         """Gibt aktuellen Status zurück."""
-        player = dmx_controller.player
+        player = player_manager.player
         return jsonify({
             "status": player.status(),
             "is_playing": player.is_playing,
@@ -230,13 +263,13 @@ def register_info_routes(app, dmx_controller, api=None):
     @app.route('/api/info', methods=['GET'])
     def info():
         """Gibt Player-Informationen zurück."""
-        player = dmx_controller.player
+        player = player_manager.player
         return jsonify(player.get_info())
     
     @app.route('/api/stats', methods=['GET'])
     def stats():
         """Gibt Live-Statistiken zurück."""
-        player = dmx_controller.player
+        player = player_manager.player
         return jsonify(player.get_stats())
     
     @app.route('/api/stream/traffic', methods=['GET'])
@@ -309,7 +342,7 @@ def register_info_routes(app, dmx_controller, api=None):
                 try:
                     frame_count += 1
                     # Hole aktuellen Player dynamisch
-                    player = dmx_controller.player
+                    player = player_manager.player
                     # Hole aktuelles Video-Frame (komplettes Bild)
                     if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
                         # Verwende komplettes Video-Frame (bereits in BGR)
@@ -394,7 +427,7 @@ def register_info_routes(app, dmx_controller, api=None):
             while True:
                 try:
                     frame_count += 1
-                    player = dmx_controller.player
+                    player = player_manager.player
                     
                     # Hole aktuelles Video-Frame (komplettes Bild)
                     if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
@@ -518,7 +551,7 @@ def register_info_routes(app, dmx_controller, api=None):
                        mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-def register_recording_routes(app, player, rest_api):
+def register_recording_routes(app, player_manager, rest_api):
     """Registriert Recording-Endpunkte."""
     
     @app.route('/api/record/start', methods=['POST'])
@@ -526,7 +559,7 @@ def register_recording_routes(app, player, rest_api):
         """Startet Aufzeichnung."""
         data = request.get_json() or {}
         name = data.get('name')
-        result = player.start_recording(name)
+        result = player_manager.player.start_recording(name)
         if result:
             return jsonify({"status": "success", "message": "Aufzeichnung gestartet"})
         else:
@@ -535,7 +568,7 @@ def register_recording_routes(app, player, rest_api):
     @app.route('/api/record/stop', methods=['POST'])
     def record_stop():
         """Stoppt Aufzeichnung."""
-        filename = player.stop_recording()
+        filename = player_manager.player.stop_recording()
         if filename:
             return jsonify({"status": "success", "message": "Aufzeichnung gespeichert", "filename": filename})
         return jsonify({"status": "error", "message": "Keine Frames aufgezeichnet - Video muss laufen"})
@@ -670,7 +703,7 @@ def register_cache_routes(app):
         })
 
 
-def register_script_routes(app, player, dmx_controller, config):
+def register_script_routes(app, player_manager, config):
     """Registriert Script-Management Endpunkte."""
     
     @app.route('/api/scripts', methods=['GET'])
@@ -718,7 +751,7 @@ def register_script_routes(app, player, dmx_controller, config):
             sys.stdout = io.StringIO()
             sys.stderr = io.StringIO()
             
-            current_player = dmx_controller.player
+            current_player = player_manager.player
             
             # Erstelle neue ScriptSource
             script_source = ScriptSource(

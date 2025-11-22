@@ -27,7 +27,7 @@
   "cache": {
     "compression": "msgpack",
     "enabled": true,
-    "max_size_mb": 1024
+    "max_size_mb": 1000
   },
   "channels": {
     "channels_per_point": 3,

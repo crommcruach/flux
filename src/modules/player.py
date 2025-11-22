@@ -247,24 +247,22 @@ class Player:
             self.artnet_manager.resume_video_mode()
     
     def restart(self):
-        """Startet Wiedergabe neu."""
-        was_paused = self.is_paused
-        was_playing = self.is_playing
-        
-        if was_playing:
+        """Startet Wiedergabe neu vom ersten Frame (egal in welchem Status)."""
+        # Stoppe falls läuft oder pausiert
+        if self.is_playing or self.is_paused:
             self.stop()
             time.sleep(0.3)
         
-        # Reset Source
+        # Reset auf ersten Frame (direkt in Source)
         self.source.reset()
+        self.source.current_frame = 0
+        self.current_loop = 0
+        self.is_paused = False  # Stelle sicher dass Pause-Flag aus ist
         
-        # Starte neu
+        # Starte immer neu (egal ob vorher pause oder stop)
         self.start()
         
-        if was_paused:
-            self.pause()
-        
-        logger.debug("Wiedergabe neu gestartet")
+        logger.debug("Wiedergabe neu gestartet (vom ersten Frame)")
     
     def _play_loop(self):
         """Haupt-Wiedergabeschleife (läuft in separatem Thread)."""

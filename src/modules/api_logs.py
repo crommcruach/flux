@@ -2,8 +2,9 @@
 API Endpoints für Log-Zugriff
 """
 import os
+import logging
 from pathlib import Path
-from flask import jsonify
+from flask import jsonify, request
 
 
 def register_log_routes(app):
@@ -142,4 +143,68 @@ def register_log_routes(app):
                 'success': False,
                 'error': str(e),
                 'deleted': 0
+            }), 500
+    
+    @app.route('/api/logs/js-error', methods=['POST'])
+    def log_js_error():
+        """
+        Loggt JavaScript-Fehler aus dem Frontend.
+        
+        Expected JSON:
+            {
+                "message": "Error message",
+                "source": "file.js",
+                "line": 123,
+                "column": 45,
+                "stack": "Stack trace",
+                "url": "http://localhost:5000/page.html",
+                "userAgent": "Mozilla/5.0..."
+            }
+        
+        Returns:
+            JSON mit Bestätigung
+        """
+        try:
+            data = request.get_json()
+            
+            message = data.get('message', 'Unknown error')
+            source = data.get('source', 'unknown')
+            line = data.get('line', 0)
+            column = data.get('column', 0)
+            stack = data.get('stack', '')
+            url = data.get('url', '')
+            user_agent = data.get('userAgent', '')
+            
+            # Logging über den Python Logger
+            logger = logging.getLogger('flux')
+            
+            error_msg = f"[JS ERROR] {message}"
+            if source and line:
+                error_msg += f" at {source}:{line}:{column}"
+            if url:
+                error_msg += f" (URL: {url})"
+            
+            logger.error(error_msg)
+            
+            # Stack trace in separaten Zeilen loggen
+            if stack:
+                for stack_line in stack.split('\n'):
+                    if stack_line.strip():
+                        logger.error(f"[JS STACK] {stack_line.strip()}")
+            
+            # User Agent für Debugging
+            if user_agent:
+                logger.debug(f"[JS ERROR] User-Agent: {user_agent}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Error logged'
+            })
+            
+        except Exception as e:
+            logger = logging.getLogger('flux')
+            logger.error(f"Fehler beim Loggen von JS-Error: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
             }), 500

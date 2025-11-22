@@ -15,8 +15,9 @@ logger = get_logger(__name__)
 class CLIHandler:
     """Verarbeitet CLI-Befehle und delegiert an entsprechende Komponenten."""
     
-    def __init__(self, player, dmx_controller, rest_api, video_dir, data_dir, config):
-        # Nutze dmx_controller für dynamischen Player-Zugriff
+    def __init__(self, player_manager, dmx_controller, rest_api, video_dir, data_dir, config):
+        # Nutze player_manager für zentralen Player-Zugriff
+        self.player_manager = player_manager
         self.dmx_controller = dmx_controller
         self.rest_api = rest_api
         self.video_dir = video_dir
@@ -26,7 +27,7 @@ class CLIHandler:
         
         # Initialize unified command executor
         self.command_executor = CommandExecutor(
-            player_provider=lambda: self.dmx_controller.player,
+            player_provider=lambda: self.player_manager.player,
             dmx_controller=dmx_controller,
             video_dir=video_dir,
             data_dir=data_dir,
@@ -42,7 +43,7 @@ class CLIHandler:
     @property
     def player(self):
         """Gibt aktuellen Player dynamisch zurück."""
-        return self.dmx_controller.player
+        return self.player_manager.player
     
     def execute_command(self, command, args=None):
         """
@@ -82,6 +83,9 @@ class CLIHandler:
             return (True, None)
         elif command == "browser":
             self._handle_open()
+            return (True, None)
+        elif command == "clear":
+            self._handle_clear()
             return (True, None)
         elif command in ["exit", "quit"]:
             print("\nBeende Anwendung...")
@@ -934,3 +938,12 @@ class CLIHandler:
         url = f"http://localhost:{port}"
         logger.info(f"Öffne Browser: {url}")
         webbrowser.open(url)
+    
+    def _handle_clear(self):
+        """Löscht die Console-Anzeige."""
+        # Clear REST API console log
+        if self.rest_api:
+            self.rest_api.clear_console()
+            logger.info("✓ Console geleert")
+        else:
+            logger.warning("⚠️  REST API nicht verfügbar")

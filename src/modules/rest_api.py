@@ -21,8 +21,8 @@ from .constants import (
 class RestAPI:
     """REST API Server mit WebSocket für Video-Player Steuerung."""
     
-    def __init__(self, player, dmx_controller, data_dir, video_dir, config=None, replay_manager=None):
-        self.player = player
+    def __init__(self, player_manager, dmx_controller, data_dir, video_dir, config=None, replay_manager=None):
+        self.player_manager = player_manager
         self.dmx_controller = dmx_controller
         self.data_dir = data_dir
         self.video_dir = video_dir
@@ -39,7 +39,7 @@ class RestAPI:
         
         # Initialize unified command executor
         self.command_executor = CommandExecutor(
-            player_provider=lambda: self.dmx_controller.player,
+            player_provider=lambda: self.player_manager.player,
             dmx_controller=dmx_controller,
             video_dir=video_dir,
             data_dir=data_dir,
@@ -95,6 +95,16 @@ class RestAPI:
         self.status_broadcast_thread = None
         self.is_running = False
     
+    @property
+    def player(self):
+        """Get current player from PlayerManager."""
+        return self.player_manager.player
+    
+    @player.setter
+    def player(self, new_player):
+        """Set player via PlayerManager (for backward compatibility)."""
+        self.player_manager.player = new_player
+    
     def _register_routes(self):
         """Registriert alle API-Routen."""
         
@@ -120,15 +130,15 @@ class RestAPI:
         from .api_logs import register_log_routes
         
         # Registriere alle Routen
-        register_playback_routes(self.app, self.dmx_controller)
-        register_settings_routes(self.app, self.dmx_controller)
-        register_artnet_routes(self.app, self.dmx_controller)
-        register_info_routes(self.app, self.dmx_controller, self)
-        register_recording_routes(self.app, self.player, self)
+        register_playback_routes(self.app, self.player_manager)
+        register_settings_routes(self.app, self.player_manager)
+        register_artnet_routes(self.app, self.player_manager)
+        register_info_routes(self.app, self.player_manager, self)
+        register_recording_routes(self.app, self.player_manager, self)
         register_cache_routes(self.app)
-        register_script_routes(self.app, self.player, self.dmx_controller, self.config)
-        register_points_routes(self.app, self.player, self.data_dir)
-        register_video_routes(self.app, self.player, self.dmx_controller, self.video_dir, self.config)
+        register_script_routes(self.app, self.player_manager, self.config)
+        register_points_routes(self.app, self.player_manager, self.data_dir)
+        register_video_routes(self.app, self.player_manager, self.video_dir, self.config)
         register_console_routes(self.app, self)
         register_project_routes(self.app, self.logger)
         register_config_routes(self.app)
@@ -303,6 +313,21 @@ class RestAPI:
                     }, namespace='/')
             except Exception as e:
                 logger.debug(f"Konnte Log nicht broadcasten: {e}")
+    
+    def clear_console(self):
+        """Löscht die Console-Log-Anzeige."""
+        self.console_log.clear()
+        # Broadcast clear event an alle WebSocket Clients
+        if self.is_running:
+            try:
+                with self.app.app_context():
+                    self.socketio.emit('console_update', {
+                        "log": [],
+                        "total": 0,
+                        "clear": True
+                    }, namespace='/')
+            except Exception as e:
+                logger.debug(f"Konnte Console-Clear nicht broadcasten: {e}")
     
     def _execute_command(self, command):
         """Führt CLI-Befehl aus und gibt Ergebnis zurück (via CommandExecutor).

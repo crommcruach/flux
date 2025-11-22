@@ -852,6 +852,9 @@ body.editor-page {
 .canvas-container {
     display: inline-block;
     margin: 1rem;
+    min-width: calc(100% + 400px);
+    min-height: calc(100% + 400px);
+    position: relative;
 }
 
 #canvas {
@@ -1478,4 +1481,82 @@ body.editor-page {
     font-weight: bold;
     font-family: 'Courier New', monospace;
     line-height: 1;
+}
+
+/* ========================================
+   Modal Styles (Light/Dark Mode)
+   ======================================== */
+.modal-content {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+.modal-header {
+    background-color: var(--bg-secondary);
+    border-bottom-color: var(--border-color);
+}
+
+.modal-title {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    background-color: var(--bg-primary);
+}
+
+.modal-body h6 {
+    color: var(--text-primary);
+}
+
+.modal-footer {
+    background-color: var(--bg-secondary);
+    border-top-color: var(--border-color);
+}
+
+.modal-backdrop {
+    background-color: #000;
+}
+
+/* Project List Items */
+.list-group-item {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.list-group-item h6 {
+    color: var(--text-primary);
+}
+
+.list-group-item .text-muted {
+    color: var(--text-secondary) !important;
+}
+
+.list-group-item:hover {
+    background-color: var(--bg-tertiary);
+}
+
+/* Close Button (Dark Mode) */
+[data-theme="dark"] .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* Spinner (Dark Mode) */
+[data-theme="dark"] .spinner-border {
+    border-color: var(--accent-color);
+    border-right-color: transparent;
+}
+
+/* Alert (Dark Mode) */
+.alert-info {
+    background-color: var(--info-bg);
+    border-color: var(--info-border);
+    color: var(--info-text);
+}
+
+[data-theme="dark"] .alert-danger {
+    background-color: #3a0000;
+    border-color: var(--btn-danger);
+    color: #ff6b6b;
 }

@@ -3,20 +3,27 @@
 ## Geplante Features
 
 ### Architektur-Refactoring
-- [ ] **HOCH: PlayerManager Refactoring (Analyse 2025-11-22)**
-  - **Problem:** DMXController wird als Player-Container missbraucht
+- ✓ **HOCH: PlayerManager Refactoring (Analyse 2025-11-22, Implementiert 2025-11-22)**
+  - **Problem:** DMXController wurde als Player-Container missbraucht
     - Verletzt Single Responsibility Principle
-    - Namens-Verwirrung: Module nutzen `dmx_controller` nur für `player`-Zugriff
+    - Namens-Verwirrung: Module nutzten `dmx_controller` nur für `player`-Zugriff
     - Zirkuläre Abhängigkeiten und Code-Duplikation
-  - **Lösung:** PlayerManager-Klasse einführen
+  - **Lösung:** PlayerManager-Klasse eingeführt
     - Zentraler Player-Container (Single Source of Truth)
     - DMXController bleibt rein für DMX-Input zuständig
-    - Betrifft: main.py, cli_handler.py, rest_api.py, api_videos.py, command_executor.py
+    - Betrifft: main.py, cli_handler.py, rest_api.py, api_videos.py, api_points.py, api_routes.py, command_executor.py
   - **Vorteile:**
     - Klare Verantwortlichkeit und Modulgrenzen
     - Einfacherer Player-Wechsel (nur `player_manager.set_player()`)
     - Reduziert Coupling zwischen Modulen
     - Bessere Testbarkeit
+  - **Implementierung:**
+    - `PlayerManager` Klasse mit `player` Property und `set_player()` Methode
+    - DMXController nutzt PlayerManager statt direktem Player
+    - Backward Compatibility: DMXController.player Property delegiert zu PlayerManager
+    - Alle API-Routen aktualisiert (playback, settings, artnet, info, recording, scripts, videos, points)
+    - RestAPI und CLIHandler nutzen PlayerManager
+    - CommandExecutor nutzt player_provider Lambda für PlayerManager-Zugriff
 
 ### Art-Net Optimierung
 - [ ] **HOCH: Delta-Encoding für Art-Net Output (Konzept 2025-11-22)**
@@ -256,3 +263,14 @@
   - ✓ Einheitliche CommandResult-Struktur
 - ✓ Projekt-Struktur (2025-11-22)
   - ✓ requirements-lock.txt erstellt (27 Packages mit exakten Versionen)
+- ✓ PlayerManager Refactoring (2025-11-22)
+  - ✓ PlayerManager-Klasse als Single Source of Truth implementiert
+  - ✓ DMXController nur noch für DMX-Input zuständig
+  - ✓ Alle Module (RestAPI, CLIHandler, API-Routes) nutzen PlayerManager
+  - ✓ Backward Compatibility über Properties gewährleistet
+  - ✓ Cache-System-Reste entfernt (cache_loaded AttributeError behoben)
+  - ✓ 11 Dateien aktualisiert (main.py, dmx_controller.py, rest_api.py, cli_handler.py, api_routes.py, api_videos.py, api_points.py, etc.)
+- ✓ Bugfixes (2025-11-22)
+  - ✓ Restart-Funktion repariert: Startet Video jetzt immer neu vom ersten Frame (egal ob pausiert/gestoppt)
+  - ✓ Preview & Fullscreen Stream funktionieren wieder
+  - ✓ Traffic-Messung funktioniert

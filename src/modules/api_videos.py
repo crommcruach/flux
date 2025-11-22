@@ -15,7 +15,7 @@ import os
 from .constants import VIDEO_EXTENSIONS
 
 
-def register_video_routes(app, player, dmx_controller, video_dir, config):
+def register_video_routes(app, player_manager, video_dir, config):
     """Registriert Video-Management Endpunkte."""
     
     @app.route('/api/videos', methods=['GET'])
@@ -56,7 +56,7 @@ def register_video_routes(app, player, dmx_controller, video_dir, config):
                         })
             
             # Prüfe ob aktueller Player ein VideoPlayer ist
-            current_player = dmx_controller.player
+            current_player = player_manager.player
             current_video = None
             if hasattr(current_player, 'video_path') and current_player.video_path:
                 current_video = os.path.relpath(current_player.video_path, video_dir)
@@ -101,7 +101,7 @@ def register_video_routes(app, player, dmx_controller, video_dir, config):
             sys.stdout = io.StringIO()
             sys.stderr = io.StringIO()
             
-            current_player = dmx_controller.player
+            current_player = player_manager.player
             was_playing = current_player.is_playing
             
             # Erstelle neue VideoSource
@@ -146,7 +146,7 @@ def register_video_routes(app, player, dmx_controller, video_dir, config):
     @app.route('/api/video/current', methods=['GET'])
     def current_video():
         """Gibt aktuell geladenes Video zurück."""
-        current_player = dmx_controller.player
+        current_player = player_manager.player
         
         # Prüfe ob es ein VideoPlayer ist
         if not hasattr(current_player, 'video_path') or not current_player.video_path:

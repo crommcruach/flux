@@ -1,9 +1,17 @@
 // ========================================
+// IMPORTS
+// ========================================
+import { showToast, initErrorLogging } from './common.js';
+
+// ========================================
 // TASTATUR-SHORTCUTS
 // ========================================
 // Entf/Backspace: Ausgewählte Form(en) löschen
 // Strg+D: Ausgewählte Form(en) duplizieren
 // Strg+S: Projekt speichern (lokal)
+
+// Initialize error logging
+initErrorLogging();
 
 document.addEventListener('keydown', function(e) {
     // Fokus auf Input-Felder ignorieren
@@ -32,6 +40,11 @@ document.addEventListener('keydown', function(e) {
 // ========================================
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+
+// Canvas overflow buffer (extra space around canvas for out-of-bounds objects)
+const CANVAS_OVERFLOW = 500; // pixels of extra space on each side
+let actualCanvasWidth = 1024; // The actual work area width
+let actualCanvasHeight = 768; // The actual work area height
 
 // Scale limits
 const MIN_SCALE = 0.3;
@@ -78,34 +91,6 @@ const TOOLTIP = {
     MIN_MARGIN: 5
 };
 
-// Toast notification system
-function showToast(message, type = 'info', duration = 3000) {
-    const container = document.getElementById('toastContainer');
-    const toast = document.createElement('div');
-    toast.className = `toast-message ${type}`;
-    
-    const icons = {
-        success: '✓',
-        error: '✗',
-        info: 'ℹ',
-        warning: '⚠'
-    };
-    
-    toast.innerHTML = `
-        <span class="toast-icon">${icons[type] || icons.info}</span>
-        <span class="toast-content">${message}</span>
-        <button class="toast-close" onclick="this.parentElement.remove()">×</button>
-    `;
-    
-    container.appendChild(toast);
-    
-    // Auto remove after duration
-    setTimeout(() => {
-        toast.classList.add('removing');
-        setTimeout(() => toast.remove(), 300);
-    }, duration);
-}
-
 // Point rendering
 const POINT = {
     RADIUS: 3,
@@ -149,6 +134,15 @@ let panStartY = 0;
 let isFreehandMode = false;
 let freehandPoints = [];
 let isDrawing = false;
+
+// Snapping features
+let snapToGrid = true;
+let snapToObjects = true;
+let allowOutOfBounds = true;
+let gridSize = 10;
+let showGrid = true;
+const SNAP_DISTANCE = 5; // Pixels threshold for object snapping
+let snapLines = []; // Temporary snap guide lines: [{x1, y1, x2, y2, type}]
 
 // Load flip icon
 const flipIcon = new Image();
@@ -232,8 +226,7 @@ document.getElementById('canvasSize').addEventListener('change', e => {
         customHeight.style.display = 'none';
         customApply.style.display = 'none';
         const [w, h] = value.split('x').map(Number);
-        canvas.width = w; 
-        canvas.height = h;
+        setCanvasSize(w, h);
         markForRedraw(); 
         updateObjectList();
     }
@@ -248,12 +241,32 @@ function applyCustomCanvasSize() {
         return;
     }
     
-    canvas.width = width;
-    canvas.height = height;
+    setCanvasSize(width, height);
     markForRedraw();
     updateObjectList();
     
     showToast(`Canvas-Größe: ${width} × ${height}`, 'success');
+}
+
+function setCanvasSize(width, height) {
+    actualCanvasWidth = width;
+    actualCanvasHeight = height;
+    
+    if (allowOutOfBounds) {
+        // Expand canvas to include overflow area
+        canvas.width = width + (CANVAS_OVERFLOW * 2);
+        canvas.height = height + (CANVAS_OVERFLOW * 2);
+    } else {
+        // Use exact size
+        canvas.width = width;
+        canvas.height = height;
+    }
+}
+
+function updateCanvasOverflow() {
+    // Reapply canvas size with current overflow setting
+    setCanvasSize(actualCanvasWidth, actualCanvasHeight);
+    markForRedraw();
 }
 
 // ========================================
@@ -266,6 +279,31 @@ function applyCustomCanvasSize() {
 document.getElementById('showConnectionLines').addEventListener('change', e => {
     showConnectionLines = e.target.checked;
     markForRedraw();
+});
+
+// Snapping controls
+document.getElementById('snapToGrid').addEventListener('change', e => {
+    snapToGrid = e.target.checked;
+    markForRedraw();
+});
+
+document.getElementById('showGrid').addEventListener('change', e => {
+    showGrid = e.target.checked;
+    markForRedraw();
+});
+
+document.getElementById('gridSize').addEventListener('change', e => {
+    gridSize = parseInt(e.target.value, 10);
+    markForRedraw();
+});
+
+document.getElementById('snapToObjects').addEventListener('change', e => {
+    snapToObjects = e.target.checked;
+});
+
+document.getElementById('allowOutOfBounds').addEventListener('change', e => {
+    allowOutOfBounds = e.target.checked;
+    updateCanvasOverflow();
 });
 
 // Project file input handler
@@ -689,13 +727,21 @@ function saveProject() {
 
     const projectData = {
         projectName: projectName,
-        version: '1.0',
+        version: '1.1',
         savedAt: timestamp,
         canvas: {
             width: canvas.width,
             height: canvas.height
         },
         backgroundImage: bgImageData,
+        settings: {
+            snapToGrid: snapToGrid,
+            snapToObjects: snapToObjects,
+            allowOutOfBounds: allowOutOfBounds,
+            gridSize: gridSize,
+            showGrid: showGrid,
+            showConnectionLines: showConnectionLines
+        },
         shapes: shapes.map(s => ({
             type: s.type,
             name: s.name,
@@ -813,10 +859,17 @@ async function saveProjectToServer() {
 }
 
 // Show project manager modal
-async function showProjectManager() {
-    const modal = new bootstrap.Modal(document.getElementById('projectManagerModal'));
+function showProjectManager() {
+    const modalElement = document.getElementById('projectManagerModal');
+    const modal = new bootstrap.Modal(modalElement);
+    
+    // Load project list after modal is fully shown
+    modalElement.addEventListener('shown.bs.modal', function onShown() {
+        refreshProjectList();
+        modalElement.removeEventListener('shown.bs.modal', onShown);
+    });
+    
     modal.show();
-    await refreshProjectList();
 }
 
 // Refresh project list
@@ -942,8 +995,7 @@ function loadProject(projectData) {
 
         // Set canvas size
         if (projectData.canvas) {
-            canvas.width = projectData.canvas.width;
-            canvas.height = projectData.canvas.height;
+            setCanvasSize(projectData.canvas.width, projectData.canvas.height);
 
             // Update canvas size dropdown
             const sizeSelect = document.getElementById('canvasSize');
@@ -1009,6 +1061,24 @@ function loadProject(projectData) {
             document.getElementById('projectName').value = projectData.projectName;
         }
 
+        // Load settings if available
+        if (projectData.settings) {
+            snapToGrid = projectData.settings.snapToGrid || false;
+            snapToObjects = projectData.settings.snapToObjects || false;
+            allowOutOfBounds = projectData.settings.allowOutOfBounds || false;
+            gridSize = projectData.settings.gridSize || 10;
+            showGrid = projectData.settings.showGrid || false;
+            showConnectionLines = projectData.settings.showConnectionLines !== undefined ? projectData.settings.showConnectionLines : true;
+            
+            // Update UI
+            document.getElementById('snapToGrid').checked = snapToGrid;
+            document.getElementById('snapToObjects').checked = snapToObjects;
+            document.getElementById('allowOutOfBounds').checked = allowOutOfBounds;
+            document.getElementById('gridSize').value = gridSize;
+            document.getElementById('showGrid').checked = showGrid;
+            document.getElementById('showConnectionLines').checked = showConnectionLines;
+        }
+
         markForRedraw();
         updateObjectList();
         updateToolbarSections();
@@ -1028,11 +1098,14 @@ function exportPoints() {
 
     const exportData = {
         canvas: {
-            width: canvas.width,
-            height: canvas.height
+            width: actualCanvasWidth,
+            height: actualCanvasHeight
         },
         objects: []
     };
+
+    let totalPoints = 0;
+    let filteredPoints = 0;
 
     for (let i = 0; i < shapes.length; i++) {
         const s = shapes[i];
@@ -1041,19 +1114,35 @@ function exportPoints() {
                     (s.type === 'freehand') ? getFreehandPoints(s) : 
                     getShapePoints(s);
 
-        const points = pts.map((pt, j) => {
+        const points = [];
+        
+        pts.forEach((pt, j) => {
             const [gx, gy] = localToWorld(s, pt[0], pt[1]);
-            return {
-                id: j + 1,
-                x: Math.round(gx),
-                y: Math.round(gy)
-            };
+            totalPoints++;
+            
+            // Only export points within work area bounds
+            if (gx >= 0 && gx < actualCanvasWidth && gy >= 0 && gy < actualCanvasHeight) {
+                points.push({
+                    id: j + 1,
+                    x: Math.round(gx),
+                    y: Math.round(gy)
+                });
+            } else {
+                filteredPoints++;
+            }
         });
 
-        exportData.objects.push({
-            id: s.id,
-            points: points
-        });
+        if (points.length > 0) {
+            exportData.objects.push({
+                id: s.id,
+                points: points
+            });
+        }
+    }
+
+    // Show warning if points were filtered
+    if (filteredPoints > 0) {
+        showToast(`⚠️ ${filteredPoints} von ${totalPoints} Punkten außerhalb des Canvas wurden nicht exportiert`, 'warning');
     }
 
     // Create download
@@ -1075,19 +1164,89 @@ function draw() {
     needsRedraw = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw background image if present
-    if (backgroundImage) {
+    // Calculate offset for centered work area
+    const offsetX = allowOutOfBounds ? CANVAS_OVERFLOW : 0;
+    const offsetY = allowOutOfBounds ? CANVAS_OVERFLOW : 0;
+
+    // Draw overflow area (dimmed background)
+    if (allowOutOfBounds) {
         ctx.save();
-        ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        
+        // Draw work area background
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.fillRect(offsetX, offsetY, actualCanvasWidth, actualCanvasHeight);
         ctx.restore();
     }
 
-    for (const s of shapes) {
+    // Draw background image if present
+    if (backgroundImage) {
         ctx.save();
+        ctx.drawImage(backgroundImage, offsetX, offsetY, actualCanvasWidth, actualCanvasHeight);
+        ctx.restore();
+    }
+    
+    // Draw grid if enabled (only in work area)
+    if (showGrid && gridSize > 0) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(100, 100, 100, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        
+        // Vertical lines
+        for (let x = 0; x <= actualCanvasWidth; x += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(x + offsetX, offsetY);
+            ctx.lineTo(x + offsetX, offsetY + actualCanvasHeight);
+            ctx.stroke();
+        }
+        
+        // Horizontal lines
+        for (let y = 0; y <= actualCanvasHeight; y += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(offsetX, y + offsetY);
+            ctx.lineTo(offsetX + actualCanvasWidth, y + offsetY);
+            ctx.stroke();
+        }
+        
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+    
+    // Draw canvas boundary (work area)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(offsetX, offsetY, actualCanvasWidth, actualCanvasHeight);
+    ctx.restore();
+
+    // Apply transform for overflow mode
+    ctx.save();
+    if (allowOutOfBounds) {
+        ctx.translate(offsetX, offsetY);
+    }
+
+    for (const s of shapes) {
+        // Check if shape is out of bounds (relative to work area)
+        const halfW = (s.size * Math.abs(s.scaleX)) / 2;
+        const halfH = (s.size * Math.abs(s.scaleY)) / 2;
+        const isOutOfBounds = s.x - halfW < 0 || s.x + halfW > actualCanvasWidth || 
+                              s.y - halfH < 0 || s.y + halfH > actualCanvasHeight;
+        
+        ctx.save();
+        
+        // Tint out-of-bounds shapes differently
+        if (isOutOfBounds && allowOutOfBounds) {
+            ctx.globalAlpha = 0.5;
+        }
+        
         ctx.translate(s.x, s.y);
         ctx.rotate(s.rotation);
         ctx.scale(s.scaleX, s.scaleY);
-        ctx.strokeStyle = s.color;
+        ctx.strokeStyle = isOutOfBounds ? '#ff6b6b' : s.color; // Red tint for out-of-bounds
         ctx.lineWidth = 2 / Math.max(s.scaleX, s.scaleY);
 
         if (s.type === 'rect') ctx.strokeRect(-s.size / 2, -s.size / 2, s.size, s.size);
@@ -1253,6 +1412,9 @@ function draw() {
         }
         ctx.restore();
     }
+    
+    // Restore transform (end of shapes drawing)
+    ctx.restore();
 
     // Draw tooltip for hovered point (in world coordinates, not transformed)
     if (hoveredPoint) {
@@ -1266,9 +1428,13 @@ function draw() {
         const boxWidth = textWidth + TOOLTIP.PADDING * 2;
         const boxHeight = TOOLTIP.FONT_SIZE + TOOLTIP.PADDING * 2;
 
-        // Position tooltip above the point
-        let tooltipX = hoveredPoint.x - boxWidth / 2;
-        let tooltipY = hoveredPoint.y - boxHeight - TOOLTIP.OFFSET_Y;
+        // Apply offset if in overflow mode
+        const offsetX = allowOutOfBounds ? CANVAS_OVERFLOW : 0;
+        const offsetY = allowOutOfBounds ? CANVAS_OVERFLOW : 0;
+
+        // Position tooltip above the point (with offset)
+        let tooltipX = hoveredPoint.x + offsetX - boxWidth / 2;
+        let tooltipY = hoveredPoint.y + offsetY - boxHeight - TOOLTIP.OFFSET_Y;
 
         // Keep tooltip within canvas bounds
         tooltipX = Math.max(TOOLTIP.MIN_MARGIN, Math.min(canvas.width - boxWidth - TOOLTIP.MIN_MARGIN, tooltipX));
@@ -1321,9 +1487,31 @@ function draw() {
         ctx.stroke();
         ctx.restore();
     }
+    
+    // Draw snap guide lines
+    if (snapLines.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 0, 255, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        
+        for (const line of snapLines) {
+            ctx.beginPath();
+            ctx.moveTo(line.x1, line.y1);
+            ctx.lineTo(line.x2, line.y2);
+            ctx.stroke();
+        }
+        
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
 }
 
 function loop() { requestAnimationFrame(loop); draw(); }
+
+// Initialize canvas with overflow on startup
+setCanvasSize(actualCanvasWidth, actualCanvasHeight);
+
 loop();
 
 // ========================================
@@ -1431,6 +1619,75 @@ function distributeAlongEdges(s, edges, count) {
         dist += step;
     }
     return points;
+}
+
+// ========================================
+// SNAPPING FUNCTIONS
+// ========================================
+function snapPosition(x, y, excludeShape = null) {
+    snapLines = []; // Clear previous snap lines
+    let snappedX = x;
+    let snappedY = y;
+    
+    // Grid snapping
+    if (snapToGrid) {
+        snappedX = Math.round(x / gridSize) * gridSize;
+        snappedY = Math.round(y / gridSize) * gridSize;
+    }
+    
+    // Object snapping
+    if (snapToObjects && excludeShape) {
+        const shapesToCheck = shapes.filter(s => s !== excludeShape && !selectedShapes.includes(s));
+        
+        for (const shape of shapesToCheck) {
+            const halfW = (shape.size * Math.abs(shape.scaleX)) / 2;
+            const halfH = (shape.size * Math.abs(shape.scaleY)) / 2;
+            
+            // Calculate shape boundaries
+            const left = shape.x - halfW;
+            const right = shape.x + halfW;
+            const top = shape.y - halfH;
+            const bottom = shape.y + halfH;
+            const centerX = shape.x;
+            const centerY = shape.y;
+            
+            // Horizontal snapping (X-axis)
+            if (Math.abs(snappedX - left) < SNAP_DISTANCE) {
+                snappedX = left;
+                snapLines.push({ x1: left, y1: 0, x2: left, y2: actualCanvasHeight, type: 'vertical' });
+            } else if (Math.abs(snappedX - right) < SNAP_DISTANCE) {
+                snappedX = right;
+                snapLines.push({ x1: right, y1: 0, x2: right, y2: actualCanvasHeight, type: 'vertical' });
+            } else if (Math.abs(snappedX - centerX) < SNAP_DISTANCE) {
+                snappedX = centerX;
+                snapLines.push({ x1: centerX, y1: 0, x2: centerX, y2: actualCanvasHeight, type: 'vertical' });
+            }
+            
+            // Vertical snapping (Y-axis)
+            if (Math.abs(snappedY - top) < SNAP_DISTANCE) {
+                snappedY = top;
+                snapLines.push({ x1: 0, y1: top, x2: actualCanvasWidth, y2: top, type: 'horizontal' });
+            } else if (Math.abs(snappedY - bottom) < SNAP_DISTANCE) {
+                snappedY = bottom;
+                snapLines.push({ x1: 0, y1: bottom, x2: actualCanvasWidth, y2: bottom, type: 'horizontal' });
+            } else if (Math.abs(snappedY - centerY) < SNAP_DISTANCE) {
+                snappedY = centerY;
+                snapLines.push({ x1: 0, y1: centerY, x2: actualCanvasWidth, y2: centerY, type: 'horizontal' });
+            }
+        }
+    }
+    
+    return { x: snappedX, y: snappedY };
+}
+
+function constrainToBounds(shape) {
+    if (allowOutOfBounds) return; // Skip bounds checking
+    
+    const halfW = (shape.size * Math.abs(shape.scaleX)) / 2;
+    const halfH = (shape.size * Math.abs(shape.scaleY)) / 2;
+    
+    shape.x = Math.max(halfW, Math.min(actualCanvasWidth - halfW, shape.x));
+    shape.y = Math.max(halfH, Math.min(actualCanvasHeight - halfH, shape.y));
 }
 
 // ========================================
@@ -2277,8 +2534,16 @@ canvas.addEventListener('mousemove', e => {
     if (!selectedShape) return;
 
     if (dragMode === 'move') {
-        const nx = mx - offsetX;
-        const ny = my - offsetY;
+        let nx = mx - offsetX;
+        let ny = my - offsetY;
+        
+        // Apply snapping to the primary shape
+        if (snapToGrid || snapToObjects) {
+            const snapped = snapPosition(nx, ny, selectedShape);
+            nx = snapped.x;
+            ny = snapped.y;
+        }
+        
         const dx = nx - selectedShape.x;
         const dy = ny - selectedShape.y;
         
@@ -2286,12 +2551,11 @@ canvas.addEventListener('mousemove', e => {
         const shapesToMove = selectedShapes.length > 0 ? selectedShapes : [selectedShape];
         
         shapesToMove.forEach(shape => {
-            const newX = shape.x + dx;
-            const newY = shape.y + dy;
-            const halfW = (shape.size * Math.abs(shape.scaleX)) / 2;
-            const halfH = (shape.size * Math.abs(shape.scaleY)) / 2;
-            shape.x = Math.max(halfW, Math.min(canvas.width - halfW, newX));
-            shape.y = Math.max(halfH, Math.min(canvas.height - halfH, newY));
+            shape.x += dx;
+            shape.y += dy;
+            
+            // Apply bounds constraints
+            constrainToBounds(shape);
         });
         
         markForRedraw();
@@ -2997,6 +3261,10 @@ function addTextToCanvas() {
 
 // Convert screen coordinates to canvas coordinates considering zoom (CSS transform handles this automatically)
 function screenToCanvas(x, y) {
+    // Subtract offset when in overflow mode
+    if (allowOutOfBounds) {
+        return [x - CANVAS_OVERFLOW, y - CANVAS_OVERFLOW];
+    }
     return [x, y];
 }
 
@@ -3077,3 +3345,25 @@ canvas.addEventListener('wheel', (e) => {
 
 // Initialize canvas size on load
 updateCanvasSize();
+
+// ========================================
+// EXPORT FUNCTIONS TO GLOBAL SCOPE (for inline onclick handlers)
+// ========================================
+window.addShape = addShape;
+window.deleteSelectedShape = deleteSelectedShape;
+window.duplicateSelectedShape = duplicateSelectedShape;
+window.resetSelectedShape = resetSelectedShape;
+window.selectAllShapes = selectAllShapes;
+window.groupSelectedShapes = groupSelectedShapes;
+window.ungroupSelectedShapes = ungroupSelectedShapes;
+window.saveProject = saveProject;
+window.saveProjectToServer = saveProjectToServer;
+window.showProjectManager = showProjectManager;
+window.loadProjectFromServer = loadProjectFromServer;
+window.refreshProjectList = refreshProjectList;
+window.applyCustomCanvasSize = applyCustomCanvasSize;
+window.clearBackgroundImage = clearBackgroundImage;
+window.toggleTextTool = toggleTextTool;
+window.addTextToCanvas = addTextToCanvas;
+window.toggleFreehandDrawing = toggleFreehandDrawing;
+window.fitToCanvas = fitToCanvas;

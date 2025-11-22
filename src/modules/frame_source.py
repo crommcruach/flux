@@ -140,7 +140,6 @@ class VideoSource(FrameSource):
         self.fps = cache_data.get('video_fps', DEFAULT_FPS)
         self.is_gif = cache_data.get('is_gif', False)
         self.gif_frame_delays = cache_data.get('gif_frame_delays', None)
-        self.cache_loaded = True
         
         logger.debug(f"  ✓ Cache geladen: {self.total_frames} Frames, {self.fps} FPS")
         return True
@@ -192,19 +191,7 @@ class VideoSource(FrameSource):
     
     def get_next_frame(self):
         """Gibt nächstes Video-Frame zurück."""
-        # Cache-Modus
-        if self.cache_loaded and self.cached_rgb_data:
-            if self.current_frame >= len(self.cached_rgb_data):
-                return None, 0  # End of cache
-            
-            # TODO: Frame aus Cache ist bereits RGB-Punkt-Daten, nicht komplettes Bild
-            # Für unified Player müssen wir das anpassen
-            frame_data = self.cached_rgb_data[self.current_frame]
-            delay = self.gif_frame_delays[self.current_frame] if (self.is_gif and self.gif_frame_delays and self.current_frame < len(self.gif_frame_delays)) else (1.0 / self.fps)
-            self.current_frame += 1
-            return frame_data, delay
-        
-        # Live-Modus
+        # Cache-System wurde entfernt - nur noch Live-Modus
         if not self.cap or not self.cap.isOpened():
             return None, 0
         
@@ -233,9 +220,6 @@ class VideoSource(FrameSource):
     def reset(self):
         """Setzt Video auf Anfang zurück."""
         self.current_frame = 0
-        
-        if self.cache_loaded:
-            return  # Cache benötigt kein Reset
         
         if self.cap and self.cap.isOpened():
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)

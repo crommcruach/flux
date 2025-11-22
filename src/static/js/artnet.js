@@ -1,26 +1,18 @@
 // ========================================
-// CONFIGURATION & CONSTANTS
+// IMPORTS
 // ========================================
-const API_BASE = 'http://localhost:5000/api';
+import { 
+    loadConfig, 
+    initWebSocket, 
+    showToast, 
+    apiCall,
+    initErrorLogging,
+    API_BASE 
+} from './common.js';
 
 // ========================================
-// API HELPER
+// CONFIGURATION & CONSTANTS
 // ========================================
-async function apiCall(endpoint, method = 'GET', data = null) {
-    try {
-        const options = {
-            method: method,
-            headers: { 'Content-Type': 'application/json' }
-        };
-        if (data) options.body = JSON.stringify(data);
-        
-        const response = await fetch(`${API_BASE}${endpoint}`, options);
-        return await response.json();
-    } catch (error) {
-        console.error('API Error:', error);
-        return null;
-    }
-}
 
 // ========================================
 // ART-NET FUNCTIONS
@@ -459,34 +451,32 @@ function switchUniverse(universe) {
     updateDMXDisplay();
 }
 
-// Init beim Laden
-document.addEventListener('DOMContentLoaded', () => {
+// ========================================
+// INITIALIZATION
+// ========================================
+document.addEventListener('DOMContentLoaded', async () => {
+    initErrorLogging();
+    await loadConfig();
     initDMXMonitor();
+    
+    // Register global functions for inline onclick handlers
+    // (ES6 modules don't export to global scope by default)
+    window.blackout = blackout;
+    window.resumeVideo = resumeVideo;
+    window.testPattern = testPattern;
+    window.setFPS = setFPS;
+    window.startRecording = startRecording;
+    window.stopRecording = stopRecording;
+    window.loadRecordings = loadRecordings;
+    window.startReplay = startReplay;
+    window.stopReplay = stopReplay;
+    window.loadPointsList = loadPointsList;
+    window.switchPoints = switchPoints;
+    window.startInfoUpdates = startInfoUpdates;
+    window.stopInfoUpdates = stopInfoUpdates;
+    window.updateArtnetBrightnessSlider = updateArtnetBrightnessSlider;
+    window.updateArtnetBrightness = updateArtnetBrightness;
 });
 
 // ========================================
-// TOAST NOTIFICATION
-// ========================================
-function showToast(message, type = 'info') {
-    const toastContainer = document.querySelector('.toast-container');
-    const toastId = 'toast-' + Date.now();
-    const bgClass = type === 'success' ? 'bg-success' : type === 'error' ? 'bg-danger' : 'bg-info';
-    
-    const toastHtml = `
-        <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="d-flex">
-                <div class="toast-body">${message}</div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-            </div>
-        </div>
-    `;
-    
-    toastContainer.insertAdjacentHTML('beforeend', toastHtml);
-    const toastElement = document.getElementById(toastId);
-    const toast = new bootstrap.Toast(toastElement, { autohide: true, delay: 3000 });
-    toast.show();
-    
-    toastElement.addEventListener('hidden.bs.toast', () => {
-        toastElement.remove();
-    });
-}
+// Toast notification now imported from common.js

@@ -5,7 +5,7 @@ import os
 import json
 import sys
 import time
-from modules import DMXController, RestAPI
+from modules import DMXController, RestAPI, PlayerManager
 from modules.player import Player
 from modules.frame_source import VideoSource
 from modules.cli_handler import CLIHandler
@@ -205,9 +205,13 @@ def main():
     player.set_brightness(config['video']['default_brightness'])
     player.set_speed(config['video']['default_speed'])
     
-    # DMX-Controller initialisieren
+    # PlayerManager initialisieren (Single Source of Truth)
+    player_manager = PlayerManager(player)
+    logger.info("PlayerManager initialisiert")
+    
+    # DMX-Controller initialisieren (nur für DMX-Input zuständig)
     dmx_controller = DMXController(
-        player, 
+        player_manager, 
         listen_ip=config['artnet']['dmx_listen_ip'],
         listen_port=config['artnet']['dmx_listen_port'],
         control_universe=config['artnet']['dmx_control_universe'],
@@ -218,7 +222,7 @@ def main():
     dmx_controller.start()
     
     # REST API initialisieren und automatisch starten
-    rest_api = RestAPI(player, dmx_controller, data_dir, video_dir, config, replay_manager=replay_manager)
+    rest_api = RestAPI(player_manager, dmx_controller, data_dir, video_dir, config, replay_manager=replay_manager)
     rest_api.start(host=config['api']['host'], port=config['api']['port'])
     
     # Console Capture NICHT aktivieren - verursacht "write() before start_response" Fehler
@@ -227,7 +231,7 @@ def main():
     # sys.stdout = console_capture
     
     # CLI Handler initialisieren
-    cli_handler = CLIHandler(player, dmx_controller, rest_api, video_dir, data_dir, config)
+    cli_handler = CLIHandler(player_manager, dmx_controller, rest_api, video_dir, data_dir, config)
     
     print("\n" + "=" * 80)
     print("Flux - Video Art-Net Controller")
@@ -252,9 +256,7 @@ def main():
             
             # Update Player wenn ersetzt
             if new_player:
-                player = new_player
-                dmx_controller.player = player
-                cli_handler.player = player
+                player_manager.set_player(new_player)
             
             # Exit wenn gewünscht
             if not continue_loop:

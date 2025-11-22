@@ -14,8 +14,8 @@ logger = get_logger(__name__)
 class DMXController:
     """Empfängt DMX-Befehle über Art-Net zur Steuerung der Anwendung."""
     
-    def __init__(self, player, listen_ip='0.0.0.0', listen_port=6454, control_universe=100, video_base_dir=None, scripts_dir=None, config=None):
-        self.player = player
+    def __init__(self, player_manager, listen_ip='0.0.0.0', listen_port=6454, control_universe=100, video_base_dir=None, scripts_dir=None, config=None):
+        self.player_manager = player_manager
         self.listen_ip = listen_ip
         self.listen_port = listen_port
         self.control_universe = control_universe
@@ -39,6 +39,16 @@ class DMXController:
         self.script_cache = {}
         if scripts_dir:
             self._build_script_cache()
+    
+    @property
+    def player(self):
+        """Get current player from PlayerManager."""
+        return self.player_manager.player
+    
+    @player.setter
+    def player(self, new_player):
+        """Set player via PlayerManager (for backward compatibility)."""
+        self.player_manager.player = new_player
         
     def start(self):
         """Startet DMX-Listener."""

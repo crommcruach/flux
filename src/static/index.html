@@ -15,7 +15,7 @@
 
   <div class="app-container">
     <!-- Sub-Header für Canvas-Settings -->
-    <div class="canvas-settings-bar d-flex align-items-center justify-content-between px-2" style="gap: 1rem; background: var(--panel-bg); border-bottom: 1px solid var(--border-color); padding: 0.5rem 1rem; grid-column: 2;">
+    <div class="canvas-settings-bar d-flex align-items-center justify-content-between px-2" style="gap: 1rem; background: var(--panel-bg); border-bottom: 1px solid var(--border-color); padding: 0.5rem 1rem; grid-column: 2; overflow: visible; position: relative;">
       <!-- Projektname Input -->
       <input type="text" id="projectName" class="form-control form-control-sm" placeholder="Projektname"
         value="Mein Projekt" style="width: 150px;">
@@ -27,9 +27,11 @@
           Projekt
         </button>
         <ul class="dropdown-menu" aria-labelledby="projektDropdown">
-          <li><a class="dropdown-item" href="#" onclick="saveProjectToServer()">Speichern auf Server</a></li>
-          <li><a class="dropdown-item" href="#" onclick="saveProject()">Lokal herunterladen</a></li>
-          <li><a class="dropdown-item" href="#" onclick="document.getElementById('projectFileInput').click()">Lokale Datei laden</a></li>
+          <li><a class="dropdown-item" href="#" onclick="saveProjectToServer()">💾 Speichern auf Server</a></li>
+          <li><a class="dropdown-item" href="#" onclick="showProjectManager()">📂 Laden vom Server</a></li>
+          <li><hr class="dropdown-divider"></li>
+          <li><a class="dropdown-item" href="#" onclick="saveProject()">⬇️ Lokal herunterladen</a></li>
+          <li><a class="dropdown-item" href="#" onclick="document.getElementById('projectFileInput').click()">📁 Lokale Datei laden</a></li>
         </ul>
         <input type="file" id="projectFileInput" class="form-control form-control-sm" accept=".json"
           style="display: none;">
@@ -145,6 +147,36 @@
       </div>
 
       <div class="toolbar-section">
+        <label class="form-label">Snapping</label>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="snapToGrid" checked>
+          <label class="form-check-label" for="snapToGrid">Grid Snapping</label>
+        </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="showGrid" checked>
+          <label class="form-check-label" for="showGrid">Grid anzeigen</label>
+        </div>
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <label for="gridSize" class="form-label mb-0" style="white-space: nowrap;">Grid:</label>
+          <select id="gridSize" class="form-select form-select-sm">
+            <option value="5">5px</option>
+            <option value="10" selected>10px</option>
+            <option value="20">20px</option>
+            <option value="50">50px</option>
+            <option value="100">100px</option>
+          </select>
+        </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="snapToObjects" checked>
+          <label class="form-check-label" for="snapToObjects">Objekt Snapping</label>
+        </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="allowOutOfBounds" checked>
+          <label class="form-check-label" for="allowOutOfBounds">Über Canvas hinaus</label>
+        </div>
+      </div>
+
+      <div class="toolbar-section">
         <button class="btn btn-info btn-sm toolbar-shape-btn" onclick="selectAllShapes()" title="Alle auswählen"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-check-all" viewBox="0 0 16 16">
   <path d="M8.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L2.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093L8.95 4.992zm-.92 5.14.92.92a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 1 0-1.091-1.028L9.477 9.417l-.485-.486z"/>
 </svg></button>
@@ -229,7 +261,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="js/stroke-font.js"></script>
-  <script src="js/editor.js"></script>
+  <script type="module" src="js/editor.js"></script>
 </body>
 
 </html>

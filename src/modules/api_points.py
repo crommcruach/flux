@@ -9,7 +9,7 @@ from flask import jsonify, request
 import os
 
 
-def register_points_routes(app, player, data_dir):
+def register_points_routes(app, player_manager, data_dir):
     """Registriert Points-Management Endpunkte."""
     
     @app.route('/api/points/list', methods=['GET'])
@@ -20,7 +20,7 @@ def register_points_routes(app, player, data_dir):
                 return jsonify({"status": "error", "message": "Data-Verzeichnis nicht gefunden"}), 404
             
             json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')]
-            current_file = os.path.basename(player.points_json_path)
+            current_file = os.path.basename(player_manager.player.points_json_path)
             
             files_info = []
             for filename in sorted(json_files):
@@ -71,6 +71,7 @@ def register_points_routes(app, player, data_dir):
                 }), 400
             
             # Lade neue Points
+            player = player_manager.player
             was_playing = player.is_playing
             if was_playing:
                 player.stop()
@@ -93,6 +94,7 @@ def register_points_routes(app, player, data_dir):
     def reload_points():
         """Lädt aktuelle Points-Datei neu."""
         try:
+            player = player_manager.player
             current_path = player.points_json_path
             
             # Validiere vor Reload
@@ -166,6 +168,7 @@ def register_points_routes(app, player, data_dir):
     @app.route('/api/points/current', methods=['GET'])
     def current_points():
         """Gibt aktuell geladene Points-Datei zurück."""
+        player = player_manager.player
         return jsonify({
             "status": "success",
             "filename": os.path.basename(player.points_json_path),
