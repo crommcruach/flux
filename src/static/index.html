@@ -103,8 +103,8 @@
       <div class="toolbar-section">
         <label for="pointCount" class="form-label">Punkte</label>
         <div style="display: flex; gap: 0.5rem; align-items: center;">
-          <input id="pointCount" type="range" class="form-range" min="2" max="512" value="20" style="flex: 1;">
-          <input id="pointCountNumber" type="number" class="form-control form-control-sm" min="2" max="512" value="20"
+          <input id="pointCount" type="range" class="form-range" min="2" max="512" value="30" style="flex: 1;">
+          <input id="pointCountNumber" type="number" class="form-control form-control-sm" min="2" max="512" value="30"
             style="width: 70px;">
         </div>
       </div>
@@ -210,20 +210,36 @@
       <div class="canvas-container" id="canvasContainer">
         <canvas id="canvas" width="1024" height="768"></canvas>
       </div>
-      <!-- Zoom Controls -->
-      <div id="zoomControls">
-        <button class="btn btn-sm btn-outline-secondary zoom-btn" onclick="zoomIn()" title="Vergrößern">+</button>
-        <div id="zoomLevel">100%</div>
-        <button class="btn btn-sm btn-outline-secondary zoom-btn" onclick="zoomOut()" title="Verkleinern">−</button>
-        <button class="btn btn-sm btn-outline-secondary zoom-btn zoom-reset" onclick="resetZoom()"
-          title="Zurücksetzen">1:1</button>
-      </div>
+    </div>
+    <!-- Zoom Controls (positioned over canvas-wrapper) -->
+    <div id="zoomControls">
+      <button class="btn btn-sm btn-outline-secondary zoom-btn" onclick="zoomIn()" title="Vergrößern">+</button>
+      <div id="zoomLevel">100%</div>
+      <button class="btn btn-sm btn-outline-secondary zoom-btn" onclick="zoomOut()" title="Verkleinern">−</button>
+      <button class="btn btn-sm btn-outline-secondary zoom-btn zoom-reset" onclick="resetZoom()"
+        title="Zurücksetzen">1:1</button>
     </div>
 
     <!-- Sidebar (rechts) -->
     <div class="sidebar">
       <h3>Objektliste</h3>
       <div id="objectList"></div>
+      <div id="projectStats" class="project-stats">
+        <div class="stats-title">📊 Projekt-Statistiken</div>
+        <div class="stats-row">
+          <span class="stats-label">Pixel gesamt:</span>
+          <span class="stats-value" id="statsPixels">0</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Kanäle (RGB):</span>
+          <span class="stats-value" id="statsChannels">0</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Universen:</span>
+          <span class="stats-value" id="statsUniverses">0</span>
+        </div>
+        <div class="stats-note" id="statsNote"></div>
+      </div>
     </div>
   </div>
 
@@ -253,6 +269,39 @@
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Context Menu -->
+  <div id="contextMenu" class="context-menu" style="display: none;">
+    <div class="context-menu-item" data-action="duplicate">
+      <span class="context-menu-icon">📑</span>
+      <span>Duplizieren</span>
+      <span class="context-menu-shortcut">Strg+D</span>
+    </div>
+    <div class="context-menu-item" data-action="delete">
+      <span class="context-menu-icon">🗑️</span>
+      <span>Löschen</span>
+      <span class="context-menu-shortcut">Entf</span>
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" data-action="group">
+      <span class="context-menu-icon">📦</span>
+      <span>Gruppieren</span>
+    </div>
+    <div class="context-menu-item" data-action="ungroup">
+      <span class="context-menu-icon">📤</span>
+      <span>Gruppierung aufheben</span>
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" data-action="selectAll">
+      <span class="context-menu-icon">☑️</span>
+      <span>Alle auswählen</span>
+      <span class="context-menu-shortcut">Strg+A</span>
+    </div>
+    <div class="context-menu-item" data-action="reset">
+      <span class="context-menu-icon">🔄</span>
+      <span>Zurücksetzen</span>
     </div>
   </div>
 

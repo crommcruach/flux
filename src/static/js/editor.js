@@ -577,9 +577,9 @@ function duplicateSelectedShape() {
         // Give it a new ID
         duplicate.id = `shape-${shapeCounter++}`;
 
-        // Offset the position slightly so it's visible
-        duplicate.x += 30;
-        duplicate.y += 30;
+        // Offset the position: 20px right and 20px down
+        duplicate.x += 20;
+        duplicate.y += 20;
 
         // Add to shapes array
         shapes.push(duplicate);
@@ -1029,7 +1029,7 @@ function loadProject(projectData) {
                     scaleX: shapeData.scaleX || 1,
                     scaleY: shapeData.scaleY || 1,
                     color: shapeData.color || '#000',
-                    pointCount: shapeData.pointCount || 20
+                    pointCount: shapeData.pointCount || 30
                 };
 
                 // Type-specific properties
@@ -1401,15 +1401,53 @@ function draw() {
                 const firstPoint = nextPoints[0];
                 const [firstX, firstY] = localToWorld(nextShape, firstPoint[0], firstPoint[1]);
 
-                // Draw connection line
-                ctx.beginPath();
-                ctx.moveTo(lastX, lastY);
-                ctx.lineTo(firstX, firstY);
-                ctx.strokeStyle = COLORS.CONNECTION_LINE;
-                ctx.lineWidth = 1;
-                ctx.stroke();
+                // Draw connection line (skip if this shape starts a new 8-universe connection)
+                if (!shapeUniverseBreaks.has(i + 1)) {
+                    ctx.beginPath();
+                    ctx.moveTo(lastX, lastY);
+                    ctx.lineTo(firstX, firstY);
+                    ctx.strokeStyle = COLORS.CONNECTION_LINE;
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
             }
         }
+        ctx.restore();
+    }
+    
+    // Draw snap guide lines - before restoring transform
+    if (snapLines.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 0, 255, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        
+        for (const line of snapLines) {
+            ctx.beginPath();
+            ctx.moveTo(line.x1, line.y1);
+            ctx.lineTo(line.x2, line.y2);
+            ctx.stroke();
+        }
+        
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+    
+    // Draw selection box (marquee) - before restoring transform
+    if (selectionBox) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 123, 255, 0.8)';
+        ctx.fillStyle = 'rgba(0, 123, 255, 0.1)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        
+        const x = Math.min(selectionBox.startX, selectionBox.endX);
+        const y = Math.min(selectionBox.startY, selectionBox.endY);
+        const w = Math.abs(selectionBox.endX - selectionBox.startX);
+        const h = Math.abs(selectionBox.endY - selectionBox.startY);
+        
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeRect(x, y, w, h);
         ctx.restore();
     }
     
@@ -1456,24 +1494,6 @@ function draw() {
         ctx.restore();
     }
 
-    // Draw selection box (marquee)
-    if (selectionBox) {
-        ctx.save();
-        ctx.strokeStyle = 'rgba(0, 123, 255, 0.8)';
-        ctx.fillStyle = 'rgba(0, 123, 255, 0.1)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
-        
-        const x = Math.min(selectionBox.startX, selectionBox.endX);
-        const y = Math.min(selectionBox.startY, selectionBox.endY);
-        const w = Math.abs(selectionBox.endX - selectionBox.startX);
-        const h = Math.abs(selectionBox.endY - selectionBox.startY);
-        
-        ctx.fillRect(x, y, w, h);
-        ctx.strokeRect(x, y, w, h);
-        ctx.restore();
-    }
-
     // Draw freehand drawing in progress
     if (isFreehandMode && isDrawing && freehandPoints.length > 1) {
         ctx.save();
@@ -1485,24 +1505,6 @@ function draw() {
             ctx.lineTo(freehandPoints[i].x, freehandPoints[i].y);
         }
         ctx.stroke();
-        ctx.restore();
-    }
-    
-    // Draw snap guide lines
-    if (snapLines.length > 0) {
-        ctx.save();
-        ctx.strokeStyle = 'rgba(255, 0, 255, 0.6)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 4]);
-        
-        for (const line of snapLines) {
-            ctx.beginPath();
-            ctx.moveTo(line.x1, line.y1);
-            ctx.lineTo(line.x2, line.y2);
-            ctx.stroke();
-        }
-        
-        ctx.setLineDash([]);
         ctx.restore();
     }
 }
@@ -2866,9 +2868,27 @@ function updateObjectList() {
         titleBar.style.alignItems = 'center';
         titleBar.style.pointerEvents = 'none'; // Allow drag on entire div
 
+        // Calculate universe and channel range for this shape
+        let channelStart = 1;
+        for (let j = 0; j < i; j++) {
+            const prevShape = shapes[j];
+            const prevPts = (prevShape.type === 'line') ? getLinePoints(prevShape) : 
+                           (prevShape.type === 'polygon') ? getPolygonPoints(prevShape) : 
+                           (prevShape.type === 'freehand') ? getFreehandPoints(prevShape) : 
+                           getShapePoints(prevShape);
+            channelStart += prevPts.length * 3;
+        }
+        
+        const currentPts = (s.type === 'line') ? getLinePoints(s) : 
+                          (s.type === 'polygon') ? getPolygonPoints(s) : 
+                          (s.type === 'freehand') ? getFreehandPoints(s) : 
+                          getShapePoints(s);
+        const channelEnd = channelStart + currentPts.length * 3 - 1;
+        const universeNum = Math.floor((channelStart - 1) / 510) + 1;
+        
         const title = document.createElement('div');
         title.className = 'shape-item-title';
-        title.textContent = `${s.id} — ${s.type}`;
+        title.textContent = `${s.id} - U${universeNum}, C${channelStart}-${channelEnd}`;
 
         const toggleBtn = document.createElement('button');
         toggleBtn.textContent = s.collapsed ? '▼' : '▲';
@@ -3038,6 +3058,81 @@ function updateObjectList() {
 
         div.appendChild(contentContainer);
         container.appendChild(div);
+    }
+    
+    // Update project statistics
+    updateProjectStats();
+}
+
+// Track which shapes start a new 8-universe connection
+let shapeUniverseBreaks = new Set();
+
+// Update project statistics
+function updateProjectStats() {
+    // Count total points across all shapes and track universe boundaries
+    let totalPoints = 0;
+    let runningChannels = 0;
+    const channelsPerUniverse = 510;
+    const universesPerConnection = 8; // 8 universes per Art-Net connection
+    const newBreaks = new Set();
+    
+    for (let i = 0; i < shapes.length; i++) {
+        const s = shapes[i];
+        const pts = (s.type === 'line') ? getLinePoints(s) : 
+                    (s.type === 'polygon') ? getPolygonPoints(s) : 
+                    (s.type === 'freehand') ? getFreehandPoints(s) : 
+                    getShapePoints(s);
+        
+        const shapeChannels = pts.length * 3;
+        const previousUniverse = Math.floor(runningChannels / channelsPerUniverse);
+        const previousConnectionGroup = Math.floor(previousUniverse / universesPerConnection);
+        
+        runningChannels += shapeChannels;
+        
+        const currentUniverse = Math.floor((runningChannels - 1) / channelsPerUniverse);
+        const currentConnectionGroup = Math.floor(currentUniverse / universesPerConnection);
+        
+        // Check if this shape crosses into a new 8-universe connection group
+        if (i > 0 && previousConnectionGroup < currentConnectionGroup) {
+            newBreaks.add(i);
+            
+            // Show toast only if this is a new break (not previously detected)
+            if (!shapeUniverseBreaks.has(i)) {
+                const shapeLabel = s.label || `Shape ${i + 1}`;
+                showToast(
+                    `🔌 Neue Art-Net Verbindung benötigt ab "${shapeLabel}" (Universe ${currentUniverse + 1})`,
+                    'warning',
+                    5000
+                );
+            }
+        }
+        
+        totalPoints += pts.length;
+    }
+    
+    // Update global universe breaks
+    shapeUniverseBreaks = newBreaks;
+    
+    // Calculate channels (RGB = 3 channels per pixel)
+    const totalChannels = totalPoints * 3;
+    
+    // Calculate universes needed (510 channels per universe for RGB)
+    const universesNeeded = Math.ceil(totalChannels / channelsPerUniverse);
+    
+    // Update display
+    document.getElementById('statsPixels').textContent = totalPoints.toLocaleString();
+    document.getElementById('statsChannels').textContent = totalChannels.toLocaleString();
+    document.getElementById('statsUniverses').textContent = universesNeeded.toLocaleString();
+    
+    // Update note - just show channels per universe
+    const noteEl = document.getElementById('statsNote');
+    if (universesNeeded === 0) {
+        noteEl.textContent = '';
+        noteEl.className = 'stats-note';
+    } else {
+        const avgChannelsPerUniverse = Math.round(totalChannels / universesNeeded);
+        noteEl.textContent = `⌀ ${avgChannelsPerUniverse} Kanäle/Universum`;
+        noteEl.className = 'stats-note success';
     }
 }
 
@@ -3328,17 +3423,46 @@ function updateZoomDisplay() {
     document.getElementById('zoomLevel').textContent = Math.round(canvasZoom * 100) + '%';
 }
 
-// Mouse wheel zoom
+// Mouse wheel zoom with center on cursor
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     
+    const wrapper = document.getElementById('canvasWrapper');
+    
+    // Get mouse position relative to the wrapper (viewport)
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const mouseX = e.clientX - wrapperRect.left;
+    const mouseY = e.clientY - wrapperRect.top;
+    
+    // Get current scroll position
+    const scrollX = wrapper.scrollLeft;
+    const scrollY = wrapper.scrollTop;
+    
+    // Calculate the point in the canvas that's under the mouse (before zoom)
+    const canvasX = (mouseX + scrollX) / canvasZoom;
+    const canvasY = (mouseY + scrollY) / canvasZoom;
+    
+    // Store old zoom
+    const oldZoom = canvasZoom;
+    
+    // Update zoom level
     if (e.deltaY < 0) {
         canvasZoom = Math.min(canvasZoom * 1.1, 5.0);
     } else {
         canvasZoom = Math.max(canvasZoom / 1.1, 0.1);
     }
     
+    // Update canvas size first
     updateCanvasSize();
+    
+    // Calculate new scroll position to keep the same point under the mouse
+    const newScrollX = canvasX * canvasZoom - mouseX;
+    const newScrollY = canvasY * canvasZoom - mouseY;
+    
+    // Apply new scroll position
+    wrapper.scrollLeft = newScrollX;
+    wrapper.scrollTop = newScrollY;
+    
     updateZoomDisplay();
     markForRedraw();
 }, { passive: false });
@@ -3367,3 +3491,125 @@ window.toggleTextTool = toggleTextTool;
 window.addTextToCanvas = addTextToCanvas;
 window.toggleFreehandDrawing = toggleFreehandDrawing;
 window.fitToCanvas = fitToCanvas;
+
+// ========================================
+// CONTEXT MENU
+// ========================================
+const contextMenu = document.getElementById('contextMenu');
+let contextMenuVisible = false;
+
+// Show context menu
+function showContextMenu(x, y) {
+    // Update menu items based on selection
+    updateContextMenuItems();
+    
+    // Position menu
+    contextMenu.style.left = x + 'px';
+    contextMenu.style.top = y + 'px';
+    contextMenu.style.display = 'block';
+    contextMenuVisible = true;
+    
+    // Ensure menu stays within viewport
+    setTimeout(() => {
+        const rect = contextMenu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            contextMenu.style.left = (x - rect.width) + 'px';
+        }
+        if (rect.bottom > window.innerHeight) {
+            contextMenu.style.top = (y - rect.height) + 'px';
+        }
+    }, 0);
+}
+
+// Hide context menu
+function hideContextMenu() {
+    contextMenu.style.display = 'none';
+    contextMenuVisible = false;
+}
+
+// Update context menu items based on current selection
+function updateContextMenuItems() {
+    const hasSelection = selectedShape !== null || selectedShapes.length > 0;
+    const hasMultipleSelection = selectedShapes.length > 1;
+    const isGrouped = selectedShape && groups.some(g => g.shapes.includes(selectedShape));
+    
+    // Get all menu items
+    const items = contextMenu.querySelectorAll('.context-menu-item');
+    
+    items.forEach(item => {
+        const action = item.dataset.action;
+        
+        // Enable/disable based on context
+        switch(action) {
+            case 'duplicate':
+            case 'delete':
+            case 'reset':
+                item.classList.toggle('disabled', !hasSelection);
+                break;
+            case 'group':
+                item.classList.toggle('disabled', !hasMultipleSelection);
+                break;
+            case 'ungroup':
+                item.classList.toggle('disabled', !isGrouped);
+                break;
+            case 'selectAll':
+                item.classList.toggle('disabled', shapes.length === 0);
+                break;
+        }
+    });
+}
+
+// Handle context menu actions
+function handleContextMenuAction(action) {
+    hideContextMenu();
+    
+    switch(action) {
+        case 'duplicate':
+            duplicateSelectedShape();
+            break;
+        case 'delete':
+            deleteSelectedShape();
+            break;
+        case 'group':
+            groupSelectedShapes();
+            break;
+        case 'ungroup':
+            ungroupSelectedShapes();
+            break;
+        case 'selectAll':
+            selectAllShapes();
+            break;
+        case 'reset':
+            resetSelectedShape();
+            break;
+    }
+}
+
+// Canvas right-click handler
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showContextMenu(e.clientX, e.clientY);
+});
+
+// Click outside to close
+document.addEventListener('click', (e) => {
+    if (contextMenuVisible && !contextMenu.contains(e.target)) {
+        hideContextMenu();
+    }
+});
+
+// Context menu item clicks
+contextMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.context-menu-item');
+    if (item && !item.classList.contains('disabled')) {
+        const action = item.dataset.action;
+        handleContextMenuAction(action);
+    }
+});
+
+// Hide on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && contextMenuVisible) {
+        hideContextMenu();
+    }
+});

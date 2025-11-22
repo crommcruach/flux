@@ -653,11 +653,11 @@ body.editor-page {
 }
 
 /* Zoom Controls */
-/* Place zoom controls inside canvas-wrapper, bottom-right, above scrollbars */
+/* Fixed position overlay on bottom-right of canvas area */
 #zoomControls {
-    position: absolute;
-    bottom: 15px;
-    right: 15px;
+    position: fixed;
+    bottom: 20px;
+    right: calc(15% + 20px);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -666,8 +666,9 @@ body.editor-page {
     border-radius: 4px;
     padding: 3px;
     box-shadow: 0 2px 8px var(--shadow-color);
-    z-index: 100;
+    z-index: 1000;
     width: 50px;
+    pointer-events: auto;
 }
 
 #zoomControls .zoom-btn {
@@ -839,6 +840,7 @@ body.editor-page {
     grid-column: 3;
     grid-row: 1 / 3;
     border-left: 1px solid var(--border-color);
+    position: relative;
 }
 
 .canvas-wrapper {
@@ -993,6 +995,78 @@ body.editor-page {
     font-weight: 600;
     margin-bottom: 1rem;
     color: var(--text-primary);
+}
+
+/* Object List Container */
+#objectList {
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: calc(100% - 200px); /* Leave space for h3 and project-stats */
+    padding-bottom: 1rem;
+}
+
+/* Project Statistics Panel */
+.project-stats {
+    position: absolute;
+    bottom: 1rem;
+    left: 1rem;
+    right: 1rem;
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-color);
+    padding: 12px;
+    font-size: 0.85rem;
+    box-sizing: border-box;
+}
+
+.stats-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.stats-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    color: var(--text-primary);
+}
+
+.stats-label {
+    color: var(--text-secondary);
+}
+
+.stats-value {
+    font-weight: 600;
+    font-family: 'Courier New', monospace;
+    color: var(--accent-color);
+}
+
+.stats-note {
+    margin-top: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    text-align: center;
+}
+
+.stats-note.warning {
+    background: rgba(255, 193, 7, 0.1);
+    color: #ffc107;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.stats-note.error {
+    background: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+    border: 1px solid rgba(220, 53, 69, 0.3);
+}
+
+.stats-note.success {
+    background: rgba(40, 167, 69, 0.1);
+    color: #28a745;
+    border: 1px solid rgba(40, 167, 69, 0.3);
 }
 
 /* Responsive Styles */
@@ -1559,4 +1633,59 @@ body.editor-page {
     background-color: #3a0000;
     border-color: var(--btn-danger);
     color: #ff6b6b;
+}
+
+/* ========================================
+   Context Menu
+   ======================================== */
+.context-menu {
+    position: fixed;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    min-width: 220px;
+    padding: 4px 0;
+    z-index: 10000;
+    font-size: 0.9rem;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+    color: var(--text-primary);
+    user-select: none;
+}
+
+.context-menu-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.context-menu-item.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.context-menu-icon {
+    font-size: 1rem;
+    width: 20px;
+    text-align: center;
+}
+
+.context-menu-shortcut {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
 }
