@@ -618,16 +618,23 @@ class Player:
             
             effect = self.effect_chain[index]
             plugin_id = effect['id']
+            plugin_instance = effect['instance']
             
-            # Validiere und setze Parameter über PluginManager
-            success, message = self.plugin_manager.set_parameter(plugin_id, param_name, value)
+            # Validiere Parameter über PluginManager
+            is_valid = self.plugin_manager.validate_parameter_value(plugin_id, param_name, value)
+            if not is_valid:
+                return False, f"Invalid value for parameter '{param_name}'"
+            
+            # Setze Parameter direkt auf Plugin-Instanz
+            success = plugin_instance.update_parameter(param_name, value)
             
             if success:
                 # Update config
                 effect['config'][param_name] = value
                 logger.debug(f"Effect '{plugin_id}' Parameter '{param_name}' = {value}")
-            
-            return success, message
+                return True, f"Parameter '{param_name}' updated"
+            else:
+                return False, f"Plugin does not support parameter '{param_name}'"
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Update von Effect {index} Parameter: {e}")
