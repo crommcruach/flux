@@ -1,0 +1,185 @@
+"""
+REST API Endpoints für Effect Chain Management
+"""
+from flask import request, jsonify
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def register_effects_api(app):
+    """Registriert Effect Chain API Endpoints."""
+    
+    @app.route('/api/player/effects', methods=['GET'])
+    def get_effects():
+        """
+        Gibt die aktuelle Effect Chain zurück.
+        
+        Returns:
+            200: {effects: [...], count: int}
+            404: {error: "No active player"}
+        """
+        from .player_manager import PlayerManager
+        player_manager = PlayerManager.get_instance()
+        player = player_manager.get_active_player()
+        
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+        
+        effects = player.get_effect_chain()
+        return jsonify({
+            'effects': effects,
+            'count': len(effects)
+        })
+    
+    @app.route('/api/player/effects/add', methods=['POST'])
+    def add_effect():
+        """
+        Fügt einen Effect zur Chain hinzu.
+        
+        Body:
+            {
+                "plugin_id": "blur",
+                "config": {"strength": 5.0}  # Optional
+            }
+        
+        Returns:
+            200: {success: true, message: "...", index: int}
+            400: {success: false, message: "..."}
+            404: {error: "No active player"}
+        """
+        from .player_manager import PlayerManager
+        player_manager = PlayerManager.get_instance()
+        player = player_manager.get_active_player()
+        
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+        
+        data = request.get_json()
+        if not data or 'plugin_id' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'Missing plugin_id'
+            }), 400
+        
+        plugin_id = data['plugin_id']
+        config = data.get('config', None)
+        
+        success, message = player.add_effect(plugin_id, config)
+        
+        if success:
+            # Get new chain length for index
+            effects = player.get_effect_chain()
+            return jsonify({
+                'success': True,
+                'message': message,
+                'index': len(effects) - 1
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': message
+            }), 400
+    
+    @app.route('/api/player/effects/<int:index>', methods=['DELETE'])
+    def remove_effect(index):
+        """
+        Entfernt einen Effect aus der Chain.
+        
+        Args:
+            index: Index des Effects (0-basiert)
+        
+        Returns:
+            200: {success: true, message: "..."}
+            400: {success: false, message: "..."}
+            404: {error: "No active player"}
+        """
+        from .player_manager import PlayerManager
+        player_manager = PlayerManager.get_instance()
+        player = player_manager.get_active_player()
+        
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+        
+        success, message = player.remove_effect(index)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': message
+            }), 400
+    
+    @app.route('/api/player/effects/clear', methods=['POST'])
+    def clear_effects():
+        """
+        Entfernt alle Effects aus der Chain.
+        
+        Returns:
+            200: {success: true, message: "..."}
+            404: {error: "No active player"}
+        """
+        from .player_manager import PlayerManager
+        player_manager = PlayerManager.get_instance()
+        player = player_manager.get_active_player()
+        
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+        
+        success, message = player.clear_effects()
+        
+        return jsonify({
+            'success': True,
+            'message': message
+        })
+    
+    @app.route('/api/player/effects/<int:index>/parameters/<param_name>', methods=['POST'])
+    def update_effect_parameter(index, param_name):
+        """
+        Aktualisiert einen Parameter eines Effects.
+        
+        Args:
+            index: Index des Effects
+            param_name: Name des Parameters
+        
+        Body:
+            {"value": <new_value>}
+        
+        Returns:
+            200: {success: true, message: "..."}
+            400: {success: false, message: "..."}
+            404: {error: "No active player"}
+        """
+        from .player_manager import PlayerManager
+        player_manager = PlayerManager.get_instance()
+        player = player_manager.get_active_player()
+        
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+        
+        data = request.get_json()
+        if not data or 'value' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'Missing value'
+            }), 400
+        
+        value = data['value']
+        success, message = player.update_effect_parameter(index, param_name, value)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': message
+            }), 400
+    
+    logger.info("Effect Chain API endpoints registered")

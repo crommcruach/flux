@@ -98,7 +98,122 @@ pm = get_plugin_manager()
 
 ## REST API
 
-### Alle Plugins auflisten
+### Effect Pipeline (Player)
+
+Die Effect Chain erlaubt es, Effects auf den Video/Script-Stream anzuwenden. Effects werden in der Reihenfolge ihrer Hinzufügung angewendet.
+
+#### GET /api/player/effects
+
+Gibt die aktuelle Effect Chain zurück.
+
+**Response:**
+```json
+{
+  "effects": [
+    {
+      "index": 0,
+      "id": "blur",
+      "name": "Gaussian Blur",
+      "version": "1.0.0",
+      "config": {
+        "strength": 5.0
+      }
+    }
+  ],
+  "count": 1
+}
+```
+
+#### POST /api/player/effects/add
+
+Fügt einen Effect zur Chain hinzu.
+
+**Request Body:**
+```json
+{
+  "plugin_id": "blur",
+  "config": {
+    "strength": 5.0
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Effect 'blur' added to chain",
+  "index": 0
+}
+```
+
+#### DELETE /api/player/effects/{index}
+
+Entfernt einen Effect aus der Chain.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Effect 'blur' removed from chain"
+}
+```
+
+#### POST /api/player/effects/clear
+
+Entfernt alle Effects aus der Chain.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "2 effects cleared"
+}
+```
+
+#### POST /api/player/effects/{index}/parameters/{param_name}
+
+Aktualisiert einen Parameter eines Effects zur Laufzeit.
+
+**Request Body:**
+```json
+{
+  "value": 15.0
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Parameter 'strength' updated"
+}
+```
+
+**Beispiel:**
+```bash
+# Blur Effect hinzufügen
+curl -X POST http://localhost:5000/api/player/effects/add \
+  -H "Content-Type: application/json" \
+  -d '{"plugin_id":"blur","config":{"strength":5.0}}'
+
+# Blur Stärke erhöhen
+curl -X POST http://localhost:5000/api/player/effects/0/parameters/strength \
+  -H "Content-Type: application/json" \
+  -d '{"value":15.0}'
+
+# Effect entfernen
+curl -X DELETE http://localhost:5000/api/player/effects/0
+
+# Alle Effects löschen
+curl -X POST http://localhost:5000/api/player/effects/clear
+```
+
+---
+
+### Plugin-Verwaltung
+
+#### Alle Plugins auflisten
 
 ```bash
 GET /api/plugins/list

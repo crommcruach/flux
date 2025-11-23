@@ -12,6 +12,7 @@ from .logger import get_logger
 from .artnet_manager import ArtNetManager
 from .points_loader import PointsLoader
 from .frame_source import VideoSource, ScriptSource
+from .plugin_manager import get_plugin_manager
 from .constants import (
     DEFAULT_SPEED,
     UNLIMITED_LOOPS,
@@ -66,6 +67,10 @@ class Player:
         self.current_loop = 0
         self.start_time = 0
         self.frames_processed = 0
+        
+        # Effect Chain für Plugins
+        self.effect_chain = []  # Liste von (plugin_instance, config) Tupeln
+        self.plugin_manager = get_plugin_manager()
         
         # Recording (deque mit maxlen verhindert Memory-Leak)
         self.is_recording = False
@@ -329,6 +334,9 @@ class Player:
                 frame_hsv[:, :, 0] = (frame_hsv[:, :, 0].astype(np.int16) + self.hue_shift // 2) % 180
                 frame_with_brightness = cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2RGB)
             
+            # Wende Effect Chain an (Plugins)
+            frame_with_brightness = self.apply_effects(frame_with_brightness)
+            
             # Speichere komplettes Frame für Preview (konvertiere zu BGR für OpenCV)
             self.last_video_frame = cv2.cvtColor(frame_with_brightness, cv2.COLOR_RGB2BGR)
             
@@ -499,6 +507,158 @@ class Player:
             logger.debug(f"Hue Shift auf {val}° gesetzt")
         except ValueError:
             logger.debug("Ungültiger Hue Shift-Wert!")
+    
+    # ========== Effect Chain Management ==========
+    
+    def add_effect(self, plugin_id, config=None):
+        """
+        Fügt einen Effect-Plugin zur Effect Chain hinzu.
+        
+        Args:
+            plugin_id: ID des Plugins (z.B. 'blur')
+            config: Optional - Konfigurations-Dict mit Parametern
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            # Lade Plugin-Instanz
+            plugin_instance = self.plugin_manager.load_plugin(plugin_id, config)
+            if not plugin_instance:
+                return False, f"Plugin '{plugin_id}' konnte nicht geladen werden"
+            
+            # Prüfe ob es ein EFFECT-Plugin ist
+            plugin_type = plugin_instance.METADATA.get('type')
+            if plugin_type != 'effect':
+                return False, f"Plugin '{plugin_id}' ist kein EFFECT-Plugin (type={plugin_type})"
+            
+            # Füge zur Effect Chain hinzu
+            self.effect_chain.append({
+                'id': plugin_id,
+                'instance': plugin_instance,
+                'config': config or {}
+            })
+            
+            logger.info(f"✅ Effect '{plugin_id}' zur Chain hinzugefügt (Position {len(self.effect_chain)})")
+            return True, f"Effect '{plugin_id}' added to chain"
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Hinzufügen von Effect '{plugin_id}': {e}")
+            return False, str(e)
+    
+    def remove_effect(self, index):
+        """
+        Entfernt einen Effect aus der Chain.
+        
+        Args:
+            index: Index des Effects in der Chain (0-basiert)
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            if index < 0 or index >= len(self.effect_chain):
+                return False, f"Invalid index {index} (chain length: {len(self.effect_chain)})"
+            
+            effect = self.effect_chain.pop(index)
+            logger.info(f"✅ Effect '{effect['id']}' von Position {index} entfernt")
+            return True, f"Effect '{effect['id']}' removed from chain"
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Entfernen von Effect {index}: {e}")
+            return False, str(e)
+    
+    def clear_effects(self):
+        """Entfernt alle Effects aus der Chain."""
+        count = len(self.effect_chain)
+        self.effect_chain.clear()
+        logger.info(f"✅ {count} Effects aus Chain entfernt")
+        return True, f"{count} effects cleared"
+    
+    def get_effect_chain(self):
+        """
+        Gibt die aktuelle Effect Chain zurück.
+        
+        Returns:
+            list: Liste von Effect-Infos [{id, parameters, metadata}, ...]
+        """
+        chain_info = []
+        for i, effect in enumerate(self.effect_chain):
+            plugin_instance = effect['instance']
+            chain_info.append({
+                'index': i,
+                'id': effect['id'],
+                'name': plugin_instance.METADATA.get('name', effect['id']),
+                'version': plugin_instance.METADATA.get('version', '1.0.0'),
+                'config': effect['config']
+            })
+        return chain_info
+    
+    def update_effect_parameter(self, index, param_name, value):
+        """
+        Aktualisiert einen Parameter eines Effects in der Chain.
+        
+        Args:
+            index: Index des Effects
+            param_name: Name des Parameters
+            value: Neuer Wert
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            if index < 0 or index >= len(self.effect_chain):
+                return False, f"Invalid index {index}"
+            
+            effect = self.effect_chain[index]
+            plugin_id = effect['id']
+            
+            # Validiere und setze Parameter über PluginManager
+            success, message = self.plugin_manager.set_parameter(plugin_id, param_name, value)
+            
+            if success:
+                # Update config
+                effect['config'][param_name] = value
+                logger.debug(f"Effect '{plugin_id}' Parameter '{param_name}' = {value}")
+            
+            return success, message
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Update von Effect {index} Parameter: {e}")
+            return False, str(e)
+    
+    def apply_effects(self, frame):
+        """
+        Wendet alle Effects in der Chain auf das Frame an.
+        
+        Args:
+            frame: Input-Frame (numpy array, RGB, uint8)
+        
+        Returns:
+            numpy array: Prozessiertes Frame
+        """
+        if not self.effect_chain:
+            return frame
+        
+        processed_frame = frame
+        
+        for effect in self.effect_chain:
+            try:
+                plugin_instance = effect['instance']
+                processed_frame = plugin_instance.process_frame(processed_frame)
+                
+                # Ensure frame is valid
+                if processed_frame is None:
+                    logger.error(f"Effect '{effect['id']}' returned None, skipping")
+                    processed_frame = frame
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"❌ Fehler in Effect '{effect['id']}': {e}")
+                # Continue with unprocessed frame on error
+                continue
+        
+        return processed_frame
     
     # Recording
     def start_recording(self, name=None):
