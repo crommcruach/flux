@@ -48,6 +48,7 @@ def list_plugins():
         plugins = pm.list_plugins()
     
     return jsonify({
+        "success": True,
         "plugins": plugins,
         "count": len(plugins)
     })

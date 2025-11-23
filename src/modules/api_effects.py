@@ -26,6 +26,7 @@ def register_effects_api(app, player_manager):
         
         effects = player.get_effect_chain()
         return jsonify({
+            'success': True,
             'effects': effects,
             'count': len(effects)
         })

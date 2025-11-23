@@ -586,17 +586,39 @@ class Player:
         Gibt die aktuelle Effect Chain zurück.
         
         Returns:
-            list: Liste von Effect-Infos [{id, parameters, metadata}, ...]
+            list: Liste von Effect-Infos [{plugin_id, parameters, metadata}, ...]
         """
         chain_info = []
         for i, effect in enumerate(self.effect_chain):
             plugin_instance = effect['instance']
+            
+            # Hole aktuelle Parameter-Werte von Plugin-Instanz via get_parameters()
+            current_parameters = plugin_instance.get_parameters()
+            
+            # Konvertiere METADATA für JSON (Enums zu Strings)
+            from plugins import PluginType, ParameterType
+            metadata = plugin_instance.METADATA.copy()
+            if 'type' in metadata and isinstance(metadata['type'], PluginType):
+                metadata['type'] = metadata['type'].value
+            
+            # Konvertiere PARAMETERS für JSON
+            parameters_schema = []
+            for param in plugin_instance.PARAMETERS:
+                param_copy = param.copy()
+                if 'type' in param_copy and isinstance(param_copy['type'], ParameterType):
+                    param_copy['type'] = param_copy['type'].value
+                parameters_schema.append(param_copy)
+            
             chain_info.append({
                 'index': i,
-                'id': effect['id'],
+                'plugin_id': effect['id'],  # Frontend erwartet 'plugin_id'
                 'name': plugin_instance.METADATA.get('name', effect['id']),
                 'version': plugin_instance.METADATA.get('version', '1.0.0'),
-                'config': effect['config']
+                'parameters': current_parameters,  # Aktuelle Werte
+                'metadata': {
+                    **metadata,
+                    'parameters': parameters_schema  # Parameter-Schema mit konvertierten Types
+                }
             })
         return chain_info
     

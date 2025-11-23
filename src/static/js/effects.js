@@ -40,8 +40,8 @@ async function loadAvailableEffects() {
         const data = await response.json();
         
         if (data.success) {
-            // Filter only EFFECT type plugins
-            availablePlugins = data.plugins.filter(p => p.type === 'EFFECT');
+            // Filter only EFFECT type plugins (case-insensitive)
+            availablePlugins = data.plugins.filter(p => p.type && p.type.toLowerCase() === 'effect');
             renderAvailableEffects();
         } else {
             console.error('❌ Failed to load plugins:', data.message);
@@ -150,7 +150,8 @@ function renderEffectChain() {
  * Render a single effect item with parameters
  */
 function renderEffectItem(effect, index, plugin) {
-    const metadata = plugin?.metadata || {};
+    // Use metadata from effect (includes parameters schema), fallback to plugin
+    const metadata = effect.metadata || plugin?.metadata || {};
     const parameters = metadata.parameters || [];
     
     return `
@@ -184,10 +185,13 @@ function renderParameterControl(param, currentValue, effectIndex) {
     
     let control = '';
     
-    switch (param.type) {
+    // Normalize type to uppercase for comparison
+    const paramType = (param.type || '').toUpperCase();
+    
+    switch (paramType) {
         case 'FLOAT':
         case 'INT':
-            const step = param.type === 'INT' ? 1 : 0.1;
+            const step = paramType === 'INT' ? 1 : 0.1;
             control = `
                 <div class="parameter-control">
                     <div class="parameter-label">
