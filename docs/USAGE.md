@@ -179,6 +179,71 @@ curl -X POST http://localhost:5000/api/cache/clear
 }
 ```
 
+## Art-Net Optimierung
+
+### Delta-Encoding
+
+Delta-Encoding reduziert Netzwerktraffic um 50-90% bei statischen oder langsamen Szenen, indem nur geänderte Pixel übertragen werden.
+
+**Via CLI:**
+```bash
+> delta status                # Aktuellen Status anzeigen
+> delta on                    # Delta-Encoding aktivieren
+> delta off                   # Delta-Encoding deaktivieren
+> delta threshold 10          # Schwellwert setzen (höher = weniger Updates)
+> delta interval 30           # Full-Frame alle 30 Frames senden
+```
+
+**Via REST API:**
+```bash
+# Status abrufen
+curl http://localhost:5000/api/artnet/info
+
+# Delta-Encoding aktivieren
+curl -X POST http://localhost:5000/api/artnet/delta-encoding \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+
+# Schwellwert ändern
+curl -X POST http://localhost:5000/api/artnet/delta-encoding \
+  -H "Content-Type: application/json" \
+  -d '{"threshold": 15, "full_frame_interval": 60}'
+```
+
+**Via config.json:**
+```json
+{
+  "artnet_config": {
+    "bit_depth": 8,
+    "delta_encoding": {
+      "enabled": true,
+      "threshold": 8,
+      "threshold_16bit": 2048,
+      "full_frame_interval": 30
+    }
+  }
+}
+```
+
+**Konfiguration:**
+- `enabled`: Delta-Encoding ein/aus
+- `threshold`: Minimale Farbänderung für Update (0-255 bei 8-bit)
+- `threshold_16bit`: Schwellwert für 16-bit LEDs (0-65535)
+- `full_frame_interval`: Anzahl Frames zwischen Full-Frame-Sync (verhindert Packet Loss Artefakte)
+
+**Empfohlene Einstellungen:**
+- Statische Szenen (Testbilder): `threshold: 5-10`, `interval: 60`
+- Langsame Videos: `threshold: 8-15`, `interval: 30`
+- Schnelle Videos: `threshold: 20-30`, `interval: 15`
+
+**A/B Testing:**
+```bash
+> delta off                   # Baseline messen
+> stats                       # Netzwerktraffic notieren
+> delta on                    # Delta-Encoding aktivieren
+> stats                       # Traffic Reduktion vergleichen
+```
+
 ## DMX Control
 
 ### DMX-Kanal Mapping
@@ -202,6 +267,38 @@ video/kanal_2/video001.mp4    # Slot 255
 ```
 
 DMX-Kanäle 6-9 wählen Video automatisch aus.
+
+## CLI Debug-Modus
+
+### Console-Logging steuern
+
+Das Console-Logging kann zwischen verschiedenen Detailstufen umgeschaltet werden:
+
+**Via CLI:**
+```bash
+> debug                       # Status anzeigen
+> debug off                   # Nur Warnings & Errors (Standard)
+> debug on                    # INFO, WARNING, ERROR anzeigen
+> debug verbose               # Alle Meldungen (DEBUG, INFO, WARNING, ERROR)
+```
+
+**Via config.json (persistent):**
+```json
+{
+  "app": {
+    "console_log_level": "WARNING"
+  }
+}
+```
+
+Verfügbare Levels:
+- `"DEBUG"` - Alle Meldungen (sehr detailliert)
+- `"INFO"` - Informationen + Warnungen + Fehler
+- `"WARNING"` - Nur Warnungen und Fehler (Standard)
+- `"ERROR"` - Nur Fehler
+- `"CRITICAL"` - Nur kritische Fehler
+
+**Hinweis:** Die Log-Datei (`logs/flux_*.log`) enthält immer alle Meldungen unabhängig vom Console-Level.
 
 ## Projekte verwalten
 

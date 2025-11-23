@@ -21,16 +21,17 @@ class FluxLogger:
     
     def __init__(self):
         if not FluxLogger._initialized:
-            self.setup_logging()
+            self.setup_logging()  # Wird mit Defaults initialisiert
             FluxLogger._initialized = True
     
-    def setup_logging(self, log_dir='logs', log_level=logging.INFO):
+    def setup_logging(self, log_dir='logs', log_level=logging.INFO, console_level=logging.WARNING):
         """
         Richtet das Logging-System ein.
         
         Args:
             log_dir: Verzeichnis für Log-Dateien
-            log_level: Logging-Level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+            log_level: Logging-Level für Datei (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+            console_level: Logging-Level für Konsole (Standard: WARNING)
         """
         # Log-Verzeichnis erstellen
         log_path = Path(log_dir)
@@ -68,11 +69,14 @@ class FluxLogger:
         file_handler.setFormatter(detailed_formatter)
         root_logger.addHandler(file_handler)
         
-        # Konsolen-Handler (nur INFO und höher)
+        # Konsolen-Handler mit konfigurierbarem Level
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(console_level)  # Aus config.json
         console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
+        
+        # Speichere Console-Handler für spätere Level-Änderungen
+        self.console_handler = console_handler
         
         # Spezielle Logger für externe Bibliotheken dämpfen
         logging.getLogger('werkzeug').setLevel(logging.WARNING)
@@ -88,6 +92,31 @@ class FluxLogger:
         root_logger.info("=" * 80)
         # Console-Handler wieder hinzufügen
         root_logger.addHandler(console_handler)
+    
+    def set_console_log_level(self, level):
+        """
+        Ändert das Log-Level für die Konsolen-Ausgabe.
+        
+        Args:
+            level: logging.DEBUG, logging.INFO, logging.WARNING, etc.
+        """
+        if hasattr(self, 'console_handler'):
+            self.console_handler.setLevel(level)
+            level_name = logging.getLevelName(level)
+            # Nur in Datei loggen, nicht auf Konsole ausgeben
+            file_logger = logging.getLogger('flux.logger')
+            file_logger.debug(f"Console-Log-Level auf {level_name} gesetzt")
+    
+    def get_console_log_level(self):
+        """
+        Gibt das aktuelle Console-Log-Level zurück.
+        
+        Returns:
+            int: Aktuelles Log-Level (z.B. logging.WARNING)
+        """
+        if hasattr(self, 'console_handler'):
+            return self.console_handler.level
+        return logging.WARNING
     
     @staticmethod
     def get_logger(name):
@@ -116,6 +145,28 @@ def get_logger(name):
     # Stelle sicher, dass FluxLogger initialisiert ist
     FluxLogger()
     return logging.getLogger(name)
+
+
+def set_console_log_level(level):
+    """
+    Ändert das Console-Log-Level.
+    
+    Args:
+        level: logging.DEBUG, logging.INFO, logging.WARNING, etc.
+    """
+    flux_logger = FluxLogger()
+    flux_logger.set_console_log_level(level)
+
+
+def get_console_log_level():
+    """
+    Gibt das aktuelle Console-Log-Level zurück.
+    
+    Returns:
+        int: Aktuelles Log-Level
+    """
+    flux_logger = FluxLogger()
+    return flux_logger.get_console_log_level()
 
 
 # Hilfsfunktionen für strukturiertes Logging

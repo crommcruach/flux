@@ -41,6 +41,26 @@ default = validator.get_default_config()
 
 ## Validierungs-Regeln
 
+### App Konfiguration (NEU v2.2)
+
+```json
+"app": {
+  "default_player": "video",          // "video" oder "script"
+  "console_log_level": "WARNING"      // DEBUG, INFO, WARNING, ERROR, CRITICAL
+}
+```
+
+**Validierte Eigenschaften:**
+- Log-Level aus erlaubten Werten
+- Default-Player aus erlaubten Werten
+
+**Verfügbare Log-Levels:**
+- `DEBUG` - Alle Meldungen (sehr detailliert)
+- `INFO` - Informationen + Warnungen + Fehler
+- `WARNING` - Nur Warnungen und Fehler (Standard)
+- `ERROR` - Nur Fehler
+- `CRITICAL` - Nur kritische Fehler
+
 ### Art-Net Konfiguration
 
 ```json
@@ -50,6 +70,13 @@ default = validator.get_default_config()
   "dmx_control_universe": 100,        // 0-32767
   "dmx_listen_port": 6454,            // 1-65535
   "fps": 60,                          // 1-120
+  "bit_depth": 8,                     // 8 oder 16 (NEU v2.2)
+  "delta_encoding": {                 // NEU v2.2
+    "enabled": true,                  // Delta-Encoding aktivieren
+    "threshold": 8,                   // Schwellwert für 8-bit (0-255)
+    "threshold_16bit": 2048,          // Schwellwert für 16-bit (0-65535)
+    "full_frame_interval": 30         // Full-Frame alle N Frames
+  },
   "universe_configs": {
     "default": "RGB",                 // RGB, GRB, BGR, RBG, GBR, BRG
     "0": "GRB"                        // Pro Universum konfigurierbar
@@ -61,7 +88,16 @@ default = validator.get_default_config()
 - IP-Adresse Format (xxx.xxx.xxx.xxx)
 - Universe im gültigen Bereich
 - Port im erlaubten Bereich
+- Bit-Tiefe: 8 oder 16
+- Delta-Encoding Threshold: 0-255 (8-bit) oder 0-65535 (16-bit)
+- Full-Frame Intervall: >= 1
 - RGB-Reihenfolge aus erlaubten Werten
+
+**Delta-Encoding Details:**
+- `enabled`: Aktiviert/deaktiviert Delta-Encoding (50-90% Netzwerk-Reduktion)
+- `threshold`: Minimale Farbänderung für Update (höher = mehr gespart)
+- `threshold_16bit`: Schwellwert für 16-bit LEDs
+- `full_frame_interval`: Anzahl Frames zwischen Full-Frame Sync (verhindert Packet-Loss Artefakte)
 
 ### Video Konfiguration
 

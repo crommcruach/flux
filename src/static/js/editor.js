@@ -138,7 +138,7 @@ let isDrawing = false;
 // Snapping features
 let snapToGrid = true;
 let snapToObjects = true;
-let allowOutOfBounds = true;
+let allowOutOfBounds = false;
 let gridSize = 10;
 let showGrid = true;
 const SNAP_DISTANCE = 5; // Pixels threshold for object snapping
@@ -351,17 +351,27 @@ function clearBackgroundImage() {
 const pointCountInput = document.getElementById('pointCount');
 const pointCountNumber = document.getElementById('pointCountNumber');
 
-pointCountInput.addEventListener('input', e => {
-    const value = parseInt(e.target.value, 10);
-    pointCountNumber.value = value;
+// Snap slider to 15-step increments on change (after release)
+pointCountInput.addEventListener('change', e => {
+    const rawValue = parseInt(e.target.value, 10);
+    const snappedValue = Math.round(rawValue / 15) * 15;
+    const finalValue = Math.max(2, Math.min(512, snappedValue));
+    e.target.value = finalValue;
+    pointCountNumber.value = finalValue;
     if (selectedShape && selectedShape.type !== 'matrix') {
-        selectedShape.pointCount = value;
+        selectedShape.pointCount = finalValue;
         // Für Freihand-Formen: Punkte neu samplen
         if (selectedShape.type === 'freehand' && selectedShape.freehandPoints) {
-            selectedShape.freehandPoints = resampleFreehandPoints(selectedShape.freehandPoints, value);
+            selectedShape.freehandPoints = resampleFreehandPoints(selectedShape.freehandPoints, finalValue);
         }
         markForRedraw(); updateObjectList();
     }
+});
+
+// Live update number display while dragging
+pointCountInput.addEventListener('input', e => {
+    const value = parseInt(e.target.value, 10);
+    pointCountNumber.value = value;
 });
 
 pointCountNumber.addEventListener('input', e => {
@@ -2566,7 +2576,12 @@ canvas.addEventListener('mousemove', e => {
         const currentAngle = Math.atan2(dy, dx);
         const initialAngle = Math.atan2(dragStartY - selectedShape.y, dragStartX - selectedShape.x);
         const angleDelta = currentAngle - initialAngle;
-        selectedShape.rotation = dragStartRotation + angleDelta;
+        const newRotation = dragStartRotation + angleDelta;
+        
+        // Snap to 15° increments
+        const snapAngle = 15 * Math.PI / 180; // 15 degrees in radians
+        selectedShape.rotation = Math.round(newRotation / snapAngle) * snapAngle;
+        
         markForRedraw();
     } else if (dragMode === 'scale') {
         const half = selectedShape.size / 2;

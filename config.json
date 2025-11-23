@@ -7,7 +7,9 @@
     "status_broadcast_interval": 2
   },
   "app": {
-    "default_player": "video"
+    "default_player": "video",
+    "console_log_level": "WARNING",
+    "_console_log_level_comment": "Console Log-Level: DEBUG, INFO, WARNING, ERROR, CRITICAL"
   },
   "artnet": {
     "broadcast": true,
@@ -18,6 +20,15 @@
     "fps": 30,
     "start_universe": 0,
     "target_ip": "127.0.0.1",
+    "bit_depth": 8,
+    "_bit_depth_comment": "LED Bit-Tiefe: 8 (Standard, 3 Bytes/LED) oder 16 (High-End, 6 Bytes/LED)",
+    "delta_encoding": {
+      "enabled": true,
+      "threshold": 8,
+      "threshold_16bit": 2048,
+      "full_frame_interval": 30,
+      "_comment": "Delta-Encoding: Sende nur geänderte Pixel. Threshold 8-bit: 0-20 (~3%), 16-bit: 1280-2560 (~2-4%)"
+    },
     "universe_configs": {
       "0": "GRB",
       "_comment": "Pro Universum Kanal-Reihenfolge festlegen. Mögliche Werte: RGB, GRB, BGR, RBG, GBR, BRG",
@@ -35,7 +46,8 @@
   },
   "frontend": {
     "polling_interval": 3000,
-    "theme": "dark"
+    "theme": "dark",
+    "default_page": "editor"
   },
   "paths": {
     "cache_dir": "caches",

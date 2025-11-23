@@ -115,11 +115,13 @@ class CommandExecutor:
             'test': self._handle_test,
             'ip': self._handle_ip,
             'universe': self._handle_universe,
+            'delta': self._handle_delta,
             
             # Info
             'status': self._handle_status,
             'info': self._handle_info,
             'stats': self._handle_stats,
+            'debug': self._handle_debug,
             
             # Video/Script
             'list': self._handle_list,
@@ -288,6 +290,134 @@ class CommandExecutor:
             return CommandResult(True, f"Start-Universum auf {value} gesetzt", {"universe": value})
         except ValueError:
             return CommandResult(False, "Ungültiger Universum-Wert", error=f"'{args}' ist keine Zahl")
+    
+    def _handle_delta(self, args):
+        """Control Art-Net delta-encoding optimization."""
+        if not hasattr(self.player, 'artnet_manager') or not self.player.artnet_manager:
+            return CommandResult(False, "Art-Net Manager nicht verfügbar")
+        
+        artnet = self.player.artnet_manager
+        
+        if not args:
+            # Show current status
+            lines = ["Delta-Encoding Status:"]
+            lines.append(f"  Enabled: {artnet.delta_encoding_enabled}")
+            lines.append(f"  Threshold: {artnet.delta_encoding_threshold}")
+            lines.append(f"  Bit Depth: {artnet.bit_depth}-bit")
+            lines.append(f"  Full-Frame Interval: {artnet.full_frame_interval}")
+            lines.append(f"  Frame Counter: {artnet.frame_counter}")
+            
+            return CommandResult(True, "\n".join(lines), {
+                "enabled": artnet.delta_encoding_enabled,
+                "threshold": artnet.delta_encoding_threshold,
+                "bit_depth": artnet.bit_depth,
+                "full_frame_interval": artnet.full_frame_interval,
+                "frame_counter": artnet.frame_counter
+            })
+        
+        # Parse subcommand
+        parts = args.split(maxsplit=1)
+        subcommand = parts[0].lower()
+        subargs = parts[1] if len(parts) > 1 else None
+        
+        if subcommand in ['on', 'enable', 'true', '1']:
+            artnet.delta_encoding_enabled = True
+            artnet.frame_counter = 0
+            artnet.last_sent_frame = None
+            logger.info("Delta-Encoding via CLI aktiviert")
+            return CommandResult(True, "Delta-Encoding aktiviert", {"enabled": True})
+        
+        elif subcommand in ['off', 'disable', 'false', '0']:
+            artnet.delta_encoding_enabled = False
+            artnet.frame_counter = 0
+            artnet.last_sent_frame = None
+            logger.info("Delta-Encoding via CLI deaktiviert")
+            return CommandResult(True, "Delta-Encoding deaktiviert", {"enabled": False})
+        
+        elif subcommand == 'threshold':
+            if not subargs:
+                return CommandResult(False, "Threshold-Wert fehlt", error="Verwendung: delta threshold <wert>")
+            
+            try:
+                value = int(subargs)
+                if value < 0:
+                    return CommandResult(False, "Threshold muss >= 0 sein")
+                
+                artnet.delta_encoding_threshold = value
+                artnet.frame_counter = 0
+                artnet.last_sent_frame = None
+                logger.info(f"Delta-Encoding Threshold via CLI auf {value} gesetzt")
+                return CommandResult(True, f"Delta-Encoding Threshold auf {value} gesetzt", {"threshold": value})
+            except ValueError:
+                return CommandResult(False, "Ungültiger Threshold-Wert", error=f"'{subargs}' ist keine Zahl")
+        
+        elif subcommand == 'interval':
+            if not subargs:
+                return CommandResult(False, "Interval-Wert fehlt", error="Verwendung: delta interval <frames>")
+            
+            try:
+                value = int(subargs)
+                if value < 1:
+                    return CommandResult(False, "Interval muss >= 1 sein")
+                
+                artnet.full_frame_interval = value
+                logger.info(f"Delta-Encoding Full-Frame Interval via CLI auf {value} gesetzt")
+                return CommandResult(True, f"Full-Frame Interval auf {value} Frames gesetzt", {"interval": value})
+            except ValueError:
+                return CommandResult(False, "Ungültiger Interval-Wert", error=f"'{subargs}' ist keine Zahl")
+        
+        elif subcommand in ['status', 'info']:
+            # Same as no args
+            return self._handle_delta(None)
+        
+        else:
+            return CommandResult(False, f"Unbekannter Delta-Subbefehl: {subcommand}", 
+                              error="Verwendung: delta [on|off|threshold <wert>|interval <frames>|status]")
+    
+    def _handle_debug(self, args):
+        """Toggle CLI debug mode (console log level)."""
+        import logging
+        from .logger import set_console_log_level, get_console_log_level
+        
+        if not args:
+            # Show current status
+            current_level = get_console_log_level()
+            level_name = logging.getLevelName(current_level)
+            is_debug = current_level <= logging.INFO
+            
+            lines = ["CLI Debug-Modus:"]
+            lines.append(f"  Status: {'AN' if is_debug else 'AUS'}")
+            lines.append(f"  Console-Level: {level_name}")
+            lines.append(f"  Ausgabe: {'Alle Meldungen' if is_debug else 'Nur Warnungen & Fehler'}")
+            
+            return CommandResult(True, "\n".join(lines), {
+                "debug": is_debug,
+                "level": level_name,
+                "level_value": current_level
+            })
+        
+        # Parse subcommand
+        subcommand = args.lower().strip()
+        
+        if subcommand in ['on', 'enable', 'true', '1']:
+            set_console_log_level(logging.INFO)
+            return CommandResult(True, "Debug-Modus aktiviert (Console zeigt INFO, DEBUG, WARNING, ERROR)", {"debug": True})
+        
+        elif subcommand in ['off', 'disable', 'false', '0']:
+            set_console_log_level(logging.WARNING)
+            return CommandResult(True, "Debug-Modus deaktiviert (Console zeigt nur WARNING, ERROR)", {"debug": False})
+        
+        elif subcommand == 'verbose':
+            set_console_log_level(logging.DEBUG)
+            return CommandResult(True, "Verbose-Modus aktiviert (Console zeigt alle Meldungen inkl. DEBUG)", {"debug": True, "verbose": True})
+        
+        elif subcommand in ['status', 'info']:
+            # Same as no args
+            return self._handle_debug(None)
+        
+        else:
+            return CommandResult(False, f"Unbekannter Debug-Subbefehl: {subcommand}", 
+                              error="Verwendung: debug [on|off|verbose|status]")
     
     # === Info Commands ===
     
@@ -474,6 +604,10 @@ Art-Net:
   test <farbe>       - Testmuster (red/green/blue/white/gradient)
   ip <adresse>       - Ziel-IP setzen
   universe <nummer>  - Start-Universum setzen
+  delta [on|off]     - Delta-Encoding aktivieren/deaktivieren
+  delta status       - Delta-Encoding Status anzeigen
+  delta threshold <n> - Schwellwert setzen
+  delta interval <n> - Full-Frame Intervall setzen
 
 Video/Script:
   video:<name>       - Video laden (z.B. video:test.mp4)
@@ -485,6 +619,8 @@ Info:
   status             - Aktueller Status
   info               - Detaillierte Informationen
   stats              - Live-Statistiken
+  debug [on|off]     - Debug-Modus umschalten (Console-Logging)
+  debug verbose      - Verbose-Modus (inkl. DEBUG-Meldungen)
   help               - Diese Hilfe anzeigen
 """
         return CommandResult(True, help_text.strip())

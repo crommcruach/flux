@@ -7,6 +7,7 @@ import threading
 import numpy as np
 import cv2
 import os
+from collections import deque
 from .logger import get_logger
 from .artnet_manager import ArtNetManager
 from .points_loader import PointsLoader
@@ -52,6 +53,8 @@ class Player:
         self.is_running = False
         self.is_playing = False
         self.is_paused = False
+        self.pause_event = threading.Event()  # Event-basierte Pause (low-latency)
+        self.pause_event.set()  # Nicht pausiert = Event ist gesetzt
         self.thread = None
         self.artnet_manager = None
         
@@ -64,9 +67,10 @@ class Player:
         self.start_time = 0
         self.frames_processed = 0
         
-        # Recording
+        # Recording (deque mit maxlen verhindert Memory-Leak)
         self.is_recording = False
-        self.recorded_data = []
+        # Max 1h bei 30 FPS = 108000 Frames (~650 MB), begrenze auf 36000 (~195 MB max)
+        self.recorded_data = deque(maxlen=36000)
         self.recording_name = None
         
         # Preview Frames
@@ -178,8 +182,9 @@ class Player:
             logger.error(f"Fehler beim Re-Initialisieren der Source: {self.source.get_source_name()}")
             return
         
-        # Deaktiviere Testmuster
+        # Reaktiviere ArtNet (wurde bei stop() deaktiviert)
         if self.artnet_manager:
+            self.artnet_manager.is_active = True
             self.artnet_manager.resume_video_mode()
         
         self.is_playing = True
@@ -232,6 +237,7 @@ class Player:
             return
         
         self.is_paused = True
+        self.pause_event.clear()  # Event cleared = pausiert
         logger.debug("Wiedergabe pausiert")
     
     def resume(self):
@@ -241,6 +247,7 @@ class Player:
             return
         
         self.is_paused = False
+        self.pause_event.set()  # Event set = fortsetzen (immediate response)
         logger.debug("Wiedergabe fortgesetzt")
         
         if self.artnet_manager:
@@ -286,9 +293,10 @@ class Player:
         logger.debug(f"Play-Loop gestartet: FPS={fps}, Source={self.source.get_source_name()}")
         
         while self.is_running and self.is_playing:
-            # Pause-Handling
+            # Pause-Handling (Event-basiert für low-latency)
             if self.is_paused:
-                time.sleep(frame_wait_delay)
+                # Warte auf resume (pause_event.set()) - keine CPU-Last, immediate wake
+                self.pause_event.wait(timeout=frame_wait_delay)
                 next_frame_time = time.time()  # Reset timing
                 continue
             

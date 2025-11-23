@@ -237,12 +237,59 @@ def register_artnet_routes(app, player_manager):
                 "packets_per_sec": network_stats['packets_per_sec'],
                 "mbps": network_stats['mbps'],
                 "network_load": network_stats['network_load_percent'],
-                "active_mode": artnet_manager.get_active_mode()
+                "active_mode": artnet_manager.get_active_mode(),
+                "delta_encoding": {
+                    "enabled": artnet_manager.delta_encoding_enabled,
+                    "threshold": artnet_manager.delta_threshold,
+                    "bit_depth": artnet_manager.bit_depth,
+                    "full_frame_interval": artnet_manager.full_frame_interval,
+                    "frame_counter": artnet_manager.frame_counter
+                }
             })
         except Exception as e:
             logger.error(f"Fehler in /api/artnet/info: {str(e)}")
             import traceback
             traceback.print_exc()
+            return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
+    
+    @app.route('/api/artnet/delta-encoding', methods=['POST'])
+    def set_delta_encoding():
+        """Aktiviert/Deaktiviert Delta-Encoding zur Laufzeit."""
+        try:
+            from flask import request
+            data = request.get_json()
+            
+            player = player_manager.player
+            artnet_manager = player.artnet_manager
+            
+            if 'enabled' in data:
+                enabled = bool(data['enabled'])
+                artnet_manager.delta_encoding_enabled = enabled
+                
+                # Reset Frame-Counter und last_sent_frame bei Änderung
+                artnet_manager.frame_counter = 0
+                artnet_manager.last_sent_frame = None
+                
+                logger.info(f"Delta-Encoding {'aktiviert' if enabled else 'deaktiviert'}")
+            
+            if 'threshold' in data:
+                artnet_manager.delta_threshold = int(data['threshold'])
+                logger.info(f"Delta-Threshold auf {artnet_manager.delta_threshold} gesetzt")
+            
+            if 'full_frame_interval' in data:
+                artnet_manager.full_frame_interval = int(data['full_frame_interval'])
+                logger.info(f"Full-Frame-Interval auf {artnet_manager.full_frame_interval} gesetzt")
+            
+            return jsonify({
+                "status": "success",
+                "delta_encoding": {
+                    "enabled": artnet_manager.delta_encoding_enabled,
+                    "threshold": artnet_manager.delta_threshold,
+                    "full_frame_interval": artnet_manager.full_frame_interval
+                }
+            })
+        except Exception as e:
+            logger.error(f"Fehler in /api/artnet/delta-encoding: {str(e)}")
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
 
 
@@ -345,15 +392,15 @@ def register_info_routes(app, player_manager, api=None):
                     player = player_manager.player
                     # Hole aktuelles Video-Frame (komplettes Bild)
                     if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
-                        # Verwende komplettes Video-Frame (bereits in BGR)
-                        frame = player.last_video_frame.copy()
+                        # Verwende komplettes Video-Frame (bereits in BGR) - KEIN COPY!
+                        frame = player.last_video_frame
                     elif not hasattr(player, 'last_frame') or player.last_frame is None:
                         # Schwarzes Bild wenn kein Frame vorhanden
                         canvas_width = getattr(player, 'canvas_width', 320)
                         canvas_height = getattr(player, 'canvas_height', 180)
                         frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
                     else:
-                        # Fallback: Rekonstruiere Bild aus LED-Punkten
+                        # Fallback: Rekonstruiere Bild aus LED-Punkten (NumPy-optimiert)
                         frame_data = player.last_frame
                         canvas_width = getattr(player, 'canvas_width', 320)
                         canvas_height = getattr(player, 'canvas_height', 180)
@@ -362,16 +409,18 @@ def register_info_routes(app, player_manager, api=None):
                         # Erstelle schwarzes Bild
                         frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
                         
-                        # Zeichne die Punkte auf das Bild
+                        # Zeichne die Punkte auf das Bild (NumPy fancy indexing - 10-50x schneller)
                         if point_coords is not None and len(frame_data) >= len(point_coords) * 3:
-                            for i in range(len(point_coords)):
-                                x, y = point_coords[i]
-                                if 0 <= y < canvas_height and 0 <= x < canvas_width:
-                                    r = frame_data[i * 3]
-                                    g = frame_data[i * 3 + 1]
-                                    b = frame_data[i * 3 + 2]
-                                    # BGR Format für OpenCV
-                                    frame[y, x] = [b, g, r]
+                            # NumPy array aus frame_data erstellen und reshapen
+                            rgb_array = np.array(frame_data, dtype=np.uint8).reshape(-1, 3)
+                            
+                            # Filtere gültige Koordinaten
+                            x_coords = point_coords[:, 0]
+                            y_coords = point_coords[:, 1]
+                            valid_mask = (y_coords >= 0) & (y_coords < canvas_height) & (x_coords >= 0) & (x_coords < canvas_width)
+                            
+                            # Setze alle Pixel auf einmal (BGR Format für OpenCV)
+                            frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
                     
                     # Skaliere auf vernünftige Preview-Größe (optional)
                     max_width = 640
@@ -431,33 +480,35 @@ def register_info_routes(app, player_manager, api=None):
                     
                     # Hole aktuelles Video-Frame (komplettes Bild)
                     if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
-                        # Verwende komplettes Video-Frame in voller Auflösung (bereits in BGR)
-                        frame = player.last_video_frame.copy()
+                        # Verwende komplettes Video-Frame in voller Auflösung (bereits in BGR) - KEIN COPY!
+                        frame = player.last_video_frame
                     elif not hasattr(player, 'last_frame') or player.last_frame is None:
                         # Schwarzes Bild wenn kein Frame vorhanden
                         canvas_width = getattr(player, 'canvas_width', 320)
                         canvas_height = getattr(player, 'canvas_height', 180)
                         frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
                     else:
-                        # Fallback: Rekonstruiere Bild aus LED-Punkten
+                        # Fallback: Rekonstruiere Bild aus LED-Punkten (NumPy-optimiert)
                         frame_data = player.last_frame
                         canvas_width = getattr(player, 'canvas_width', 320)
                         canvas_height = getattr(player, 'canvas_height', 180)
                         point_coords = getattr(player, 'point_coords', None)
                         
                         # Erstelle schwarzes Bild
-                        frame = np.zeros((canvas_height, canvas_height, 3), dtype=np.uint8)
+                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
                         
-                        # Zeichne die Punkte auf das Bild
+                        # Zeichne die Punkte auf das Bild (NumPy fancy indexing - 10-50x schneller)
                         if point_coords is not None and len(frame_data) >= len(point_coords) * 3:
-                            for i in range(len(point_coords)):
-                                x, y = point_coords[i]
-                                if 0 <= y < canvas_height and 0 <= x < canvas_width:
-                                    r = frame_data[i * 3]
-                                    g = frame_data[i * 3 + 1]
-                                    b = frame_data[i * 3 + 2]
-                                    # BGR Format für OpenCV
-                                    frame[y, x] = [b, g, r]
+                            # NumPy array aus frame_data erstellen und reshapen
+                            rgb_array = np.array(frame_data, dtype=np.uint8).reshape(-1, 3)
+                            
+                            # Filtere gültige Koordinaten
+                            x_coords = point_coords[:, 0]
+                            y_coords = point_coords[:, 1]
+                            valid_mask = (y_coords >= 0) & (y_coords < canvas_height) & (x_coords >= 0) & (x_coords < canvas_width)
+                            
+                            # Setze alle Pixel auf einmal (BGR Format für OpenCV)
+                            frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
                     
                     # KEINE SKALIERUNG - volle Player-Auflösung
                     

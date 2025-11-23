@@ -5,6 +5,7 @@ import os
 import json
 import sys
 import time
+import logging
 from modules import DMXController, RestAPI, PlayerManager
 from modules.player import Player
 from modules.frame_source import VideoSource
@@ -96,12 +97,24 @@ def load_config():
 
 def main():
     """Hauptfunktion der Anwendung mit erweiteter CLI."""
-    # Logging initialisieren
-    FluxLogger()
-    logger.debug("Flux startet...")
-    
-    # Konfiguration laden
+    # Konfiguration laden (vor Logger, um console_log_level zu erhalten)
     config = load_config()
+    
+    # Console Log-Level aus Config lesen
+    console_level_str = config.get('app', {}).get('console_log_level', 'WARNING')
+    console_level_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+    console_level = console_level_map.get(console_level_str.upper(), logging.WARNING)
+    
+    # Logging initialisieren mit Console-Level aus Config
+    flux_logger = FluxLogger()
+    flux_logger.setup_logging(console_level=console_level)
+    logger.debug("Flux startet...")
     logger.debug("Konfiguration geladen")
     
     # Pfade

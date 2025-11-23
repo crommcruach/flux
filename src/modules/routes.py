@@ -20,8 +20,26 @@ def register_web_routes(app, config=None):
     
     @app.route('/')
     def index():
+        """Redirect to default page based on config."""
+        from flask import redirect, url_for
+        default_page = config.get('frontend', {}).get('default_page', 'editor')
+        
+        # Map page names to route functions
+        page_routes = {
+            'editor': 'editor',
+            'controls': 'controls',
+            'cli': 'cli',
+            'artnet': 'artnet',
+            'config': 'config_page'
+        }
+        
+        route_name = page_routes.get(default_page, 'editor')
+        return redirect(url_for(route_name))
+    
+    @app.route('/editor')
+    def editor():
         """Serve the main editor page."""
-        return send_from_directory(app.static_folder, 'index.html')
+        return send_from_directory(app.static_folder, 'editor.html')
     
     @app.route('/controls')
     def controls():

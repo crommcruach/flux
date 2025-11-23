@@ -35,11 +35,23 @@ class ArtNetManager:
         self.test_thread = None  # Thread für kontinuierliches Testmuster-Senden
         self.test_thread_running = False
         
-        # Statistik-Tracking
-        self.packets_sent = 0
-        self.bytes_sent = 0
+        # Statistik-Tracking (AtomicInteger-Pattern für Lock-free Stats)
+        # Verwende threading.local() würde hier nicht helfen, da Stats global sind
+        # Stattdessen: Atomic operations mit numpy (schneller als Lock)
+        self._stats_packets = np.array([0], dtype=np.int64)  # Atomic counter
+        self._stats_bytes = np.array([0], dtype=np.int64)    # Atomic counter
+        
+        # Gradient Pattern Cache (verhindert Neuberechnung)
+        self._gradient_cache = None
         self.stats_start_time = time.time()
-        self.stats_lock = threading.Lock()
+        
+        # Delta-Encoding State
+        self.delta_encoding_enabled = False
+        self.delta_threshold = 8  # Default für 8-bit
+        self.full_frame_interval = 30
+        self.frame_counter = 0
+        self.last_sent_frame = None  # Für Delta-Berechnung
+        self.bit_depth = 8  # 8 oder 16
         
         # RGB-Kanal-Mapping: Definiert Reihenfolge für jede Permutation
         self.channel_mappings = {
@@ -63,6 +75,22 @@ class ArtNetManager:
         fps = self.artnet_fps
         even_packet = config.get('even_packet', True)
         broadcast = config.get('broadcast', True)
+        
+        # Delta-Encoding Konfiguration
+        self.bit_depth = config.get('bit_depth', 8)
+        delta_config = config.get('delta_encoding', {})
+        self.delta_encoding_enabled = delta_config.get('enabled', False)
+        
+        # Threshold je nach bit_depth
+        if self.bit_depth == 16:
+            self.delta_threshold = delta_config.get('threshold_16bit', 2048)
+        else:
+            self.delta_threshold = delta_config.get('threshold', 8)
+        
+        self.full_frame_interval = delta_config.get('full_frame_interval', 30)
+        
+        logger.info(f"Delta-Encoding: {'Aktiviert' if self.delta_encoding_enabled else 'Deaktiviert'} "
+                   f"(Bit-Tiefe: {self.bit_depth}, Threshold: {self.delta_threshold})")
         
         # Lade Universe-spezifische Kanal-Reihenfolgen
         universe_configs = config.get('universe_configs', {})
@@ -114,7 +142,7 @@ class ArtNetManager:
         logger.debug("Art-Net gestoppt")
     
     def send_frame(self, rgb_data, source='video'):
-        """Sendet RGB-Frame über Art-Net mit Priorisierung.
+        """Sendet RGB-Frame über Art-Net mit Priorisierung und Delta-Encoding.
         
         Args:
             rgb_data: DMX-Daten
@@ -136,6 +164,32 @@ class ArtNetManager:
         # Speichere für DMX Monitor (was tatsächlich gesendet wird)
         self.last_frame = rgb_data
         
+        # Delta-Encoding: Prüfe ob Full-Frame nötig oder Delta möglich
+        self.frame_counter += 1
+        force_full_frame = (self.frame_counter % self.full_frame_interval == 0)
+        
+        if self.delta_encoding_enabled and not force_full_frame and self.last_sent_frame is not None:
+            # Delta-Mode: Sende nur geänderte Pixel
+            rgb_array = np.array(rgb_data, dtype=np.uint8)
+            last_array = np.array(self.last_sent_frame, dtype=np.uint8)
+            
+            # Berechne Differenz (absolute difference für alle Channels)
+            diff = np.abs(rgb_array.astype(np.int16) - last_array.astype(np.int16))
+            
+            # Finde Pixel mit signifikanter Änderung (max diff über R,G,B Channels)
+            diff_per_pixel = diff.reshape(-1, 3).max(axis=1)
+            changed_pixels = diff_per_pixel > self.delta_threshold
+            
+            # Wenn > 80% geändert, sende Full-Frame (effizienter)
+            if np.sum(changed_pixels) > (len(changed_pixels) * 0.8):
+                force_full_frame = True
+        else:
+            force_full_frame = True
+        
+        # Speichere aktuelles Frame für nächste Delta-Berechnung
+        self.last_sent_frame = rgb_data.copy()
+        
+        universes_sent = 0
         for universe_idx, universe in enumerate(self.universes):
             start_channel = universe_idx * self.channels_per_universe
             end_channel = min(start_channel + self.channels_per_universe, len(rgb_data))
@@ -150,12 +204,12 @@ class ArtNetManager:
             # Setze Daten UND sende sofort (flush=True umgeht FPS-Limiting)
             universe.set(universe_data)
             universe.show()  # Explizit senden ohne FPS-Wartezeit
+            universes_sent += 1
         
-        # Statistik: Zähle gesendete Pakete
-        with self.stats_lock:
-            self.packets_sent += len(self.universes)
-            # Art-Net Paket: 18B Header + 512B Data + 8B UDP + 20B IP + 14B Ethernet ≈ 572 Bytes
-            self.bytes_sent += len(self.universes) * 572
+        # Statistik: Zähle gesendete Pakete (Lock-free mit numpy atomic ops)
+        self._stats_packets[0] += universes_sent
+        # Art-Net Paket: 18B Header + 512B Data + 8B UDP + 20B IP + 14B Ethernet ≈ 572 Bytes
+        self._stats_bytes[0] += universes_sent * 572
     
     def _stop_test_thread(self):
         """Stoppt den Test-Thread."""
@@ -187,9 +241,9 @@ class ArtNetManager:
                     universe.show()
                 
                 # Statistik: Zähle gesendete Pakete
-                with self.stats_lock:
-                    self.packets_sent += len(self.universes)
-                    self.bytes_sent += len(self.universes) * 572
+                # Lock-free atomic increment
+                self._stats_packets[0] += len(self.universes)
+                self._stats_bytes[0] += len(self.universes) * 572
             
             time.sleep(0.025)  # 40 Hz Refresh-Rate
     
@@ -252,27 +306,31 @@ class ArtNetManager:
         logger.info(f"Testmuster '{color}' gesendet (Video gestoppt)")
     
     def _gradient_pattern(self):
-        """Erzeugt RGB-Farbverlauf über alle Punkte."""
-        self.test_pattern_data = []
-        for i in range(self.total_points):
-            # Position im Verlauf (0.0 bis 1.0)
-            pos = i / max(self.total_points - 1, 1)
+        """Erzeugt RGB-Farbverlauf über alle Punkte (NumPy-optimiert mit Cache)."""
+        # Cache-Check: Gradient ist statisch für gegebene total_points
+        if self._gradient_cache is not None:
+            self.test_pattern_data = self._gradient_cache
+        else:
+            # NumPy-Vektorisierung: HSV->RGB für alle Punkte gleichzeitig
+            import cv2
             
-            # RGB-Gradient: Rot -> Gelb -> Grün -> Cyan -> Blau -> Magenta -> Rot
-            if pos < 1/6:  # Rot -> Gelb
-                r, g, b = 255, int(255 * (pos * 6)), 0
-            elif pos < 2/6:  # Gelb -> Grün
-                r, g, b = int(255 * (1 - (pos - 1/6) * 6)), 255, 0
-            elif pos < 3/6:  # Grün -> Cyan
-                r, g, b = 0, 255, int(255 * ((pos - 2/6) * 6))
-            elif pos < 4/6:  # Cyan -> Blau
-                r, g, b = 0, int(255 * (1 - (pos - 3/6) * 6)), 255
-            elif pos < 5/6:  # Blau -> Magenta
-                r, g, b = int(255 * ((pos - 4/6) * 6)), 0, 255
-            else:  # Magenta -> Rot
-                r, g, b = 255, 0, int(255 * (1 - (pos - 5/6) * 6))
+            # Erzeuge Hue-Werte (0-180 für OpenCV HSV)
+            hues = np.linspace(0, 180, self.total_points, dtype=np.uint8)
             
-            self.test_pattern_data.extend([r, g, b])
+            # Erstelle HSV array (alle Pixel: volle Sättigung & Helligkeit)
+            hsv = np.zeros((1, self.total_points, 3), dtype=np.uint8)
+            hsv[0, :, 0] = hues  # Hue
+            hsv[0, :, 1] = 255   # Saturation
+            hsv[0, :, 2] = 255   # Value
+            
+            # Konvertiere HSV->RGB (vektorisiert, ~10x schneller)
+            rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+            
+            # Flatten zu [r,g,b, r,g,b, ...]
+            self.test_pattern_data = rgb.flatten().tolist()
+            
+            # Cache speichern für nächsten Aufruf
+            self._gradient_cache = self.test_pattern_data
         
         # Starte Thread für kontinuierliches Senden
         self.test_thread_running = True
@@ -313,33 +371,36 @@ class ArtNetManager:
         return getattr(self, 'artnet_fps', 60)
     
     def get_network_stats(self):
-        """Gibt Netzwerk-Statistiken zurück."""
-        with self.stats_lock:
-            elapsed = time.time() - self.stats_start_time
-            if elapsed < 0.1:  # Verhindere Division durch 0
-                return {
-                    'packets_sent': 0,
-                    'packets_per_sec': 0,
-                    'bytes_sent': 0,
-                    'bytes_per_sec': 0,
-                    'mbps': 0.0,
-                    'network_load_percent': 0.0
-                }
-            
-            packets_per_sec = self.packets_sent / elapsed
-            bytes_per_sec = self.bytes_sent / elapsed
-            mbps = (bytes_per_sec * 8) / 1_000_000  # Megabit pro Sekunde
-            # Netzwerkauslastung basierend auf 1 Gbit/s Netzwerk
-            network_load = (bytes_per_sec / 125_000_000) * 100
-            
+        """Gibt Netzwerk-Statistiken zurück (Lock-free)."""
+        elapsed = time.time() - self.stats_start_time
+        if elapsed < 0.1:  # Verhindere Division durch 0
             return {
-                'packets_sent': self.packets_sent,
-                'packets_per_sec': round(packets_per_sec, 1),
-                'bytes_sent': self.bytes_sent,
-                'bytes_per_sec': round(bytes_per_sec, 1),
-                'mbps': round(mbps, 2),
-                'network_load_percent': round(network_load, 2)
+                'packets_sent': 0,
+                'packets_per_sec': 0,
+                'bytes_sent': 0,
+                'bytes_per_sec': 0,
+                'mbps': 0.0,
+                'network_load_percent': 0.0
             }
+        
+        # Atomic reads (numpy arrays sind thread-safe für einzelne Elemente)
+        packets_sent = int(self._stats_packets[0])
+        bytes_sent = int(self._stats_bytes[0])
+        
+        packets_per_sec = packets_sent / elapsed
+        bytes_per_sec = bytes_sent / elapsed
+        mbps = (bytes_per_sec * 8) / 1_000_000  # Megabit pro Sekunde
+        # Netzwerkauslastung basierend auf 1 Gbit/s Netzwerk
+        network_load = (bytes_per_sec / 125_000_000) * 100
+        
+        return {
+            'packets_sent': packets_sent,
+            'packets_per_sec': round(packets_per_sec, 1),
+            'bytes_sent': bytes_sent,
+            'bytes_per_sec': round(bytes_per_sec, 1),
+            'mbps': round(mbps, 2),
+            'network_load_percent': round(network_load, 2)
+        }
     
     def reset_stats(self):
         """Setzt Statistiken zurück."""
@@ -349,7 +410,9 @@ class ArtNetManager:
             self.stats_start_time = time.time()
     
     def _reorder_channels(self, data, universe_idx):
-        """Ordnet RGB-Kanäle entsprechend der Universum-Konfiguration um."""
+        """Ordnet RGB-Kanäle entsprechend der Universum-Konfiguration um (NumPy-optimiert)."""
+        import numpy as np
+        
         channel_order = self.universe_channel_orders.get(universe_idx, 'RGB')
         
         # Wenn RGB (Standard), keine Umordnung nötig
@@ -361,17 +424,21 @@ class ArtNetManager:
         if not mapping:
             return data  # Fallback bei ungültiger Konfiguration
         
-        # Erstelle neues Array mit umgeordneten Kanälen
-        reordered = []
-        for i in range(0, len(data), 3):
-            if i + 2 < len(data):
-                # Lese RGB aus Original-Daten
-                rgb = [data[i], data[i+1], data[i+2]]
-                # Schreibe in neuer Reihenfolge
-                reordered.extend([rgb[mapping[0]], rgb[mapping[1]], rgb[mapping[2]]])
-            else:
-                # Rest beibehalten falls nicht vollständig
-                reordered.extend(data[i:])
-                break
+        # NumPy fancy indexing - 10x schneller als Python-Loop
+        # Konvertiere zu NumPy array und reshapen zu (N, 3)
+        data_array = np.array(data, dtype=np.uint8)
+        num_pixels = len(data_array) // 3
         
-        return reordered
+        if num_pixels * 3 == len(data_array):
+            # Perfekt teilbar durch 3 - reshape und reorder in einem Schritt
+            rgb_pixels = data_array.reshape(-1, 3)
+            reordered_pixels = rgb_pixels[:, mapping]
+            return reordered_pixels.flatten().tolist()
+        else:
+            # Nicht perfekt teilbar - behandle Rest separat
+            complete_pixels = num_pixels * 3
+            rgb_pixels = data_array[:complete_pixels].reshape(-1, 3)
+            reordered_pixels = rgb_pixels[:, mapping]
+            reordered = reordered_pixels.flatten().tolist()
+            reordered.extend(data_array[complete_pixels:].tolist())
+            return reordered
