@@ -76,6 +76,7 @@
     --bg-primary: #ffffff;
     --bg-secondary: #f8f9fa;
     --bg-tertiary: #ffffff;
+    --panel-bg: #f8f9fa;
     --text-primary: #212529;
     --text-secondary: #495057;
     --border-color: #dee2e6;
@@ -112,6 +113,7 @@
     --bg-primary: #212529;
     --bg-secondary: #343a40;
     --bg-tertiary: #495057;
+    --panel-bg: #2a2a2a;
     --text-primary: #f8f9fa;
     --text-secondary: #b0b3b8;
     --border-color: #495057;

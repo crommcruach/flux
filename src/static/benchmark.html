@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flux - Latency Benchmark</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-family: 'Consolas', monospace;
+        }
+        .benchmark-card {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .metric {
+            background: #333;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        .metric-label {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        .metric-value.warning {
+            color: #FFC107;
+        }
+        .metric-value.danger {
+            color: #F44336;
+        }
+        .test-log {
+            background: #1a1a1a;
+            padding: 15px;
+            border-radius: 6px;
+            height: 300px;
+            overflow-y: auto;
+            font-size: 0.85em;
+            font-family: 'Courier New', monospace;
+        }
+        .test-log .entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+        }
+        .test-log .entry.success {
+            color: #4CAF50;
+        }
+        .test-log .entry.warning {
+            color: #FFC107;
+        }
+        .test-log .entry.error {
+            color: #F44336;
+        }
+        .chart-container {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-4">
+        <h1 class="mb-4">🔬 Flux Latency Benchmark</h1>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="benchmark-card">
+                    <h3>📊 Average Latency</h3>
+                    <div class="metric">
+                        <div class="metric-label">Round-Trip Time</div>
+                        <div class="metric-value" id="avgLatency">-- ms</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Backend Processing</div>
+                        <div class="metric-value" id="avgBackend">-- ms</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Network Overhead</div>
+                        <div class="metric-value" id="avgNetwork">-- ms</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="benchmark-card">
+                    <h3>⚡ Min/Max</h3>
+                    <div class="metric">
+                        <div class="metric-label">Fastest Response</div>
+                        <div class="metric-value" id="minLatency">-- ms</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Slowest Response</div>
+                        <div class="metric-value" id="maxLatency">-- ms</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Total Tests</div>
+                        <div class="metric-value" id="testCount">0</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="benchmark-card">
+                    <h3>🎯 Test Controls</h3>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" onclick="runPingTest()">
+                            📡 Ping Test (Simple)
+                        </button>
+                        <button class="btn btn-info" onclick="runStatusTest()">
+                            📊 Status Query Test
+                        </button>
+                        <button class="btn btn-warning" onclick="runCommandTest()">
+                            ⚡ Command Test (Play/Pause)
+                        </button>
+                        <button class="btn btn-success" onclick="runFullTest()">
+                            🚀 Full Benchmark (100x)
+                        </button>
+                        <button class="btn btn-danger" onclick="clearResults()">
+                            🗑️ Clear Results
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <h3>📈 Latency Distribution</h3>
+            <canvas id="latencyChart" height="80"></canvas>
+        </div>
+        
+        <div class="benchmark-card">
+            <h3>📋 Test Log</h3>
+            <div class="test-log" id="testLog">
+                <div class="entry">Ready to run tests...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        const API_BASE = 'http://localhost:5000';
+        let testResults = [];
+        let latencyChart = null;
+
+        // Initialize Chart
+        function initChart() {
+            const ctx = document.getElementById('latencyChart').getContext('2d');
+            latencyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Round-Trip Time (ms)',
+                        data: [],
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'Backend Processing (ms)',
+                        data: [],
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#444' },
+                            ticks: { color: '#888' }
+                        },
+                        x: {
+                            grid: { color: '#444' },
+                            ticks: { color: '#888' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#e0e0e0' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function log(message, type = 'success') {
+            const logDiv = document.getElementById('testLog');
+            const entry = document.createElement('div');
+            entry.className = `entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString('de-DE', { hour12: false, fractionalSecondDigits: 3 });
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateMetrics() {
+            if (testResults.length === 0) return;
+
+            const latencies = testResults.map(r => r.roundTrip);
+            const backends = testResults.filter(r => r.backend).map(r => r.backend);
+            const networks = testResults.map(r => r.network);
+
+            const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+            const min = arr => Math.min(...arr);
+            const max = arr => Math.max(...arr);
+
+            const avgLat = avg(latencies);
+            const avgBack = backends.length > 0 ? avg(backends) : 0;
+            const avgNet = avg(networks);
+
+            document.getElementById('avgLatency').textContent = avgLat.toFixed(2) + ' ms';
+            document.getElementById('avgBackend').textContent = avgBack.toFixed(2) + ' ms';
+            document.getElementById('avgNetwork').textContent = avgNet.toFixed(2) + ' ms';
+            document.getElementById('minLatency').textContent = min(latencies).toFixed(2) + ' ms';
+            document.getElementById('maxLatency').textContent = max(latencies).toFixed(2) + ' ms';
+            document.getElementById('testCount').textContent = testResults.length;
+
+            // Color coding
+            const avgLatEl = document.getElementById('avgLatency');
+            avgLatEl.className = 'metric-value';
+            if (avgLat > 50) avgLatEl.classList.add('danger');
+            else if (avgLat > 20) avgLatEl.classList.add('warning');
+
+            // Update chart
+            updateChart();
+        }
+
+        function updateChart() {
+            if (!latencyChart) return;
+
+            const last50 = testResults.slice(-50);
+            latencyChart.data.labels = last50.map((_, i) => i + 1);
+            latencyChart.data.datasets[0].data = last50.map(r => r.roundTrip);
+            latencyChart.data.datasets[1].data = last50.map(r => r.backend || 0);
+            latencyChart.update();
+        }
+
+        async function runPingTest() {
+            log('Running ping test...', 'success');
+            const start = performance.now();
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/benchmark/ping`);
+                const data = await response.json();
+                const end = performance.now();
+                
+                const roundTrip = end - start;
+                testResults.push({
+                    type: 'ping',
+                    roundTrip: roundTrip,
+                    network: roundTrip, // No backend processing for ping
+                    backend: 0
+                });
+                
+                log(`✅ Ping: ${roundTrip.toFixed(2)} ms`, 'success');
+                updateMetrics();
+            } catch (error) {
+                log(`❌ Ping failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function runStatusTest() {
+            log('Running status query test...', 'success');
+            const start = performance.now();
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/benchmark/player-status`);
+                const data = await response.json();
+                const end = performance.now();
+                
+                const roundTrip = end - start;
+                const backend = data.server_processing_ms || 0;
+                const network = roundTrip - backend;
+                
+                testResults.push({
+                    type: 'status',
+                    roundTrip: roundTrip,
+                    backend: backend,
+                    network: network
+                });
+                
+                log(`✅ Status: ${roundTrip.toFixed(2)} ms (backend: ${backend.toFixed(2)} ms, network: ${network.toFixed(2)} ms)`, 'success');
+                updateMetrics();
+            } catch (error) {
+                log(`❌ Status query failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function runCommandTest() {
+            log('Running command test (toggle play/pause)...', 'success');
+            const start = performance.now();
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/benchmark/player-command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: 'toggle' })
+                });
+                const data = await response.json();
+                const end = performance.now();
+                
+                const roundTrip = end - start;
+                const backend = data.total_processing_ms || 0;
+                const commandExec = data.command_execution_ms || 0;
+                const network = roundTrip - backend;
+                
+                testResults.push({
+                    type: 'command',
+                    roundTrip: roundTrip,
+                    backend: backend,
+                    network: network
+                });
+                
+                log(`✅ Command (${data.action}): ${roundTrip.toFixed(2)} ms (exec: ${commandExec.toFixed(3)} ms, backend: ${backend.toFixed(2)} ms, network: ${network.toFixed(2)} ms)`, 'success');
+                updateMetrics();
+            } catch (error) {
+                log(`❌ Command failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function runFullTest() {
+            log('🚀 Starting full benchmark (100 iterations)...', 'warning');
+            
+            for (let i = 0; i < 100; i++) {
+                // Mix of different test types
+                if (i % 3 === 0) {
+                    await runPingTest();
+                } else if (i % 3 === 1) {
+                    await runStatusTest();
+                } else {
+                    await runCommandTest();
+                }
+                
+                // Small delay between tests
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            
+            log('✅ Full benchmark completed!', 'success');
+        }
+
+        function clearResults() {
+            testResults = [];
+            document.getElementById('testLog').innerHTML = '<div class="entry">Results cleared. Ready for new tests...</div>';
+            updateMetrics();
+            if (latencyChart) {
+                latencyChart.data.labels = [];
+                latencyChart.data.datasets[0].data = [];
+                latencyChart.data.datasets[1].data = [];
+                latencyChart.update();
+            }
+        }
+
+        // Initialize on load
+        window.addEventListener('load', () => {
+            initChart();
+            log('Benchmark tool ready. Click a button to start testing.', 'success');
+        });
+    </script>
+</body>
+</html>

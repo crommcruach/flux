@@ -110,7 +110,7 @@ class RestAPI:
         
         # Lade Web-Interface Routen
         from .routes import register_web_routes
-        register_web_routes(self.app, self.config)
+        register_web_routes(self.app, self.config, self.player_manager)
         
         # Lade externe API Route-Module
         from .api_routes import (
@@ -124,12 +124,14 @@ class RestAPI:
         )
         from .api_points import register_points_routes
         from .api_videos import register_video_routes
+        from .api_artnet_videos import register_artnet_video_routes
         from .api_console import register_console_routes
         from .api_projects import register_project_routes
         from .api_config import register_config_routes
         from .api_logs import register_log_routes
         from .api_plugins import register_plugins_api
         from .api_effects import register_effects_api
+        from .api_benchmark import register_benchmark_routes
         
         # Registriere alle Routen
         register_playback_routes(self.app, self.player_manager)
@@ -141,12 +143,26 @@ class RestAPI:
         register_script_routes(self.app, self.player_manager, self.config)
         register_points_routes(self.app, self.player_manager, self.data_dir)
         register_video_routes(self.app, self.player_manager, self.video_dir, self.config)
+        register_artnet_video_routes(self.app, self.player_manager, self.video_dir, self.config)
         register_console_routes(self.app, self)
         register_project_routes(self.app, self.logger)
         register_config_routes(self.app)
         register_log_routes(self.app)
         register_plugins_api(self.app)
         register_effects_api(self.app, self.player_manager)
+        register_benchmark_routes(self.app, self.player_manager)
+        
+        # Register Art-Net Effects API
+        from .api_artnet_effects import register_artnet_effects_api
+        register_artnet_effects_api(self.app, self.player_manager)
+        
+        # Register Art-Net Playback API
+        from .api_artnet_playback import register_artnet_playback_api
+        register_artnet_playback_api(self.app, self.player_manager, self.video_dir, self.config)
+        
+        # Register Files API
+        from .api_files import register_files_api
+        register_files_api(self.app, self.video_dir)
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
@@ -205,16 +221,23 @@ class RestAPI:
         dmx_preview = None
         total_universes = 0
         
+        # Prüfe zuerst den artnet_player (falls vorhanden) - der sendet die Daten
+        artnet_source = None
+        if hasattr(self.player_manager, 'artnet_player') and self.player_manager.artnet_player:
+            artnet_source = self.player_manager.artnet_player
+        else:
+            artnet_source = self.player
+        
         # Art-Net Manager ist die zentrale Quelle - zeigt was wirklich gesendet wird
-        if hasattr(self.player, 'artnet_manager') and self.player.artnet_manager:
-            artnet_mgr = self.player.artnet_manager
+        if hasattr(artnet_source, 'artnet_manager') and artnet_source.artnet_manager:
+            artnet_mgr = artnet_source.artnet_manager
             if hasattr(artnet_mgr, 'last_frame') and artnet_mgr.last_frame:
                 dmx_preview = artnet_mgr.last_frame
                 total_universes = (len(artnet_mgr.last_frame) + 511) // 512
             elif hasattr(artnet_mgr, 'required_universes'):
                 total_universes = artnet_mgr.required_universes
-        elif hasattr(self.player, 'required_universes'):
-            total_universes = self.player.required_universes
+        elif hasattr(artnet_source, 'required_universes'):
+            total_universes = artnet_source.required_universes
         
         # Replay Status
         is_replaying = False

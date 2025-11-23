@@ -31,7 +31,7 @@ class Player:
     Unterstützt Videos, Scripts und zukünftige Medien-Typen.
     """
     
-    def __init__(self, frame_source, points_json_path, target_ip='127.0.0.1', start_universe=0, fps_limit=None, config=None):
+    def __init__(self, frame_source, points_json_path, target_ip='127.0.0.1', start_universe=0, fps_limit=None, config=None, enable_artnet=True, player_name="Player"):
         """
         Initialisiert Player mit Frame-Quelle.
         
@@ -42,7 +42,11 @@ class Player:
             start_universe: Start-Universum für Art-Net
             fps_limit: FPS-Limit (None = Source-FPS)
             config: Konfigurations-Dict
+            enable_artnet: Aktiviert Art-Net Ausgabe (False für Preview-Only Player)
+            player_name: Name des Players für Logging
         """
+        self.player_name = player_name
+        self.enable_artnet = enable_artnet
         self.source = frame_source
         self.points_json_path = points_json_path
         self.target_ip = target_ip
@@ -68,8 +72,16 @@ class Player:
         self.start_time = 0
         self.frames_processed = 0
         
-        # Effect Chain für Plugins
-        self.effect_chain = []  # Liste von (plugin_instance, config) Tupeln
+        # Playlist Management
+        self.playlist = []  # Liste von Video-Pfaden
+        self.playlist_index = -1  # Aktueller Index in der Playlist
+        self.autoplay = False  # Automatisch nächstes Video abspielen
+        self.loop_playlist = False  # Playlist wiederholen
+        
+        # Effect Chains für Plugins (getrennt für Video-Preview und Art-Net)
+        self.video_effect_chain = []  # Video-Preview FX (nicht zu Art-Net)
+        self.artnet_effect_chain = []  # Art-Net Output FX (nicht zu Video-Preview)
+        self.effect_chain = []  # DEPRECATED: Legacy compatibility (maps to video_effect_chain)
         self.plugin_manager = get_plugin_manager()
         
         # Recording (deque mit maxlen verhindert Memory-Leak)
@@ -100,12 +112,12 @@ class Player:
         if not self.source.initialize():
             raise ValueError(f"Frame-Source konnte nicht initialisiert werden: {self.source.get_source_name()}")
         
-        logger.debug(f"Player initialisiert:")
+        logger.debug(f"{self.player_name} initialisiert:")
         logger.debug(f"  Source: {self.source.get_source_name()} ({type(self.source).__name__})")
         logger.debug(f"  Canvas: {self.canvas_width}x{self.canvas_height}")
         logger.debug(f"  Punkte: {self.total_points}, Kanäle: {self.total_channels}")
         logger.debug(f"  Universen: {self.required_universes}")
-        logger.debug(f"  Art-Net: {target_ip}, Start-Universe: {start_universe}")
+        logger.debug(f"  Art-Net: {'Enabled' if enable_artnet else 'Disabled'} ({target_ip}, Start-Universe: {start_universe})")
         
         # Art-Net Manager wird extern gesetzt
         self.artnet_manager = None
@@ -165,22 +177,51 @@ class Player:
         
         # Starte Wiedergabe wieder falls vorher aktiv
         if was_playing:
-            self.start()
+            # Verwende resume() statt start() um Thread nicht zu blockieren
+            self.is_playing = True
+            self.is_running = True
+            self.source.reset()
+            self.thread = threading.Thread(target=self._play_loop, daemon=True)
+            self.thread.start()
+            
             if was_paused:
                 self.pause()
         
         return True
     
-    def start(self):
-        """Startet die Wiedergabe."""
-        if self.is_playing:
-            logger.debug("Wiedergabe läuft bereits!")
+    def play(self):
+        """Intelligente Play-Funktion: startet oder setzt fort je nach Status."""
+        if self.is_playing and not self.is_paused:
+            logger.debug(f"{self.player_name}: Wiedergabe läuft bereits!")
             return
         
-        # Registriere als aktiver Player (unified Player ersetzt player_lock Mechanismus)
-        with player_lock._global_player_lock:
-            player_lock._active_player = self
-            logger.info(f"Aktiver Player: {self.source.get_source_name()}")
+        if self.is_paused:
+            # Pausiert → nur fortsetzen
+            self.resume()
+        else:
+            # Gestoppt → neu starten
+            self.start()
+    
+    def start(self):
+        """Startet die Wiedergabe (interner Start mit Thread-Erstellung)."""
+        if self.is_playing:
+            logger.debug(f"{self.player_name}: Wiedergabe läuft bereits!")
+            return
+        
+        # Registriere als aktiver Player NUR wenn Art-Net enabled ist
+        # Dies erlaubt mehrere Preview-Only Player gleichzeitig
+        if self.enable_artnet:
+            with player_lock._global_player_lock:
+                # Stoppe alten Art-Net Player falls vorhanden
+                if player_lock._active_player and player_lock._active_player is not self:
+                    old_player = player_lock._active_player
+                    logger.info(f"Stoppe alten Art-Net Player: {old_player.player_name}")
+                    old_player.stop()
+                
+                player_lock._active_player = self
+                logger.info(f"Aktiver Art-Net Player: {self.player_name} ({self.source.get_source_name()})")
+        else:
+            logger.info(f"{self.player_name}: Starte Preview-Only (kein Art-Net)")
         
         # Re-initialisiere Source falls nötig (nach stop)
         if not self.source.initialize():
@@ -228,12 +269,13 @@ class Player:
         # Sie werden beim nächsten start() wiederverwendet
         # Nur bei switch_source() oder Shutdown cleanup nötig
         
-        # Deregistriere Player
-        with player_lock._global_player_lock:
-            if player_lock._active_player is self:
-                player_lock._active_player = None
+        # Deregistriere Player (nur wenn Art-Net enabled)
+        if self.enable_artnet:
+            with player_lock._global_player_lock:
+                if player_lock._active_player is self:
+                    player_lock._active_player = None
         
-        logger.info("Wiedergabe gestoppt")
+        logger.info(f"{self.player_name}: Wiedergabe gestoppt")
     
     def pause(self):
         """Pausiert die Wiedergabe."""
@@ -314,6 +356,49 @@ class Player:
                 # Ende der Source (Video-Loop oder Fehler)
                 self.current_loop += 1
                 
+                logger.debug(f"🎬 [{self.player_name}] Frame=None: autoplay={self.autoplay}, playlist_len={len(self.playlist)}, current_index={self.playlist_index}")
+                
+                # Prüfe Playlist-Autoplay
+                if self.autoplay and len(self.playlist) > 0:
+                    # Nächstes Video in Playlist laden
+                    next_index = self.playlist_index + 1
+                    
+                    # Loop zurück zum Anfang wenn am Ende
+                    if next_index >= len(self.playlist):
+                        if self.loop_playlist:
+                            next_index = 0
+                            logger.debug("🔁 Playlist loop - zurück zum ersten Video")
+                        else:
+                            logger.debug("📋 Ende der Playlist erreicht, stoppe...")
+                            break
+                    
+                    # Lade nächstes Video
+                    next_video_path = self.playlist[next_index]
+                    logger.debug(f"⏭️ [{self.player_name}] Autoplay: Lade nächstes Video ({next_index + 1}/{len(self.playlist)}): {next_video_path}")
+                    
+                    try:
+                        from .frame_source import VideoSource
+                        new_source = VideoSource(next_video_path, self.canvas_width, self.canvas_height, self.config)
+                        
+                        # Initialisiere neue Source
+                        if not new_source.initialize():
+                            logger.error(f"❌ [{self.player_name}] Fehler beim Initialisieren des nächsten Videos: {next_video_path}")
+                            break
+                        
+                        # Cleanup alte Source
+                        if self.source:
+                            self.source.cleanup()
+                        
+                        self.source = new_source
+                        self.playlist_index = next_index
+                        self.current_loop = 0
+                        logger.info(f"✅ [{self.player_name}] Nächstes Video geladen: {os.path.basename(next_video_path)}")
+                        continue
+                    except Exception as e:
+                        logger.error(f"❌ [{self.player_name}] Fehler beim Laden des nächsten Videos: {e}")
+                        break
+                
+                # Kein Autoplay - normales Loop-Verhalten
                 # Loop-Limit prüfen (nur für nicht-infinite Sources)
                 if not self.source.is_infinite and self.max_loops > 0 and self.current_loop >= self.max_loops:
                     logger.debug(f"Loop-Limit ({self.max_loops}) erreicht, stoppe...")
@@ -334,13 +419,16 @@ class Player:
                 frame_hsv[:, :, 0] = (frame_hsv[:, :, 0].astype(np.int16) + self.hue_shift // 2) % 180
                 frame_with_brightness = cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2RGB)
             
-            # Wende Effect Chain an (Plugins)
-            frame_with_brightness = self.apply_effects(frame_with_brightness)
+            # Wende Video Effect Chain an (nur für Preview)
+            frame_for_video_preview = self.apply_effects(frame_with_brightness, chain_type='video')
             
-            # Speichere komplettes Frame für Preview (konvertiere zu BGR für OpenCV)
-            self.last_video_frame = cv2.cvtColor(frame_with_brightness, cv2.COLOR_RGB2BGR)
+            # Wende Art-Net Effect Chain an (für Art-Net Ausgabe)
+            frame_for_artnet = self.apply_effects(frame_with_brightness, chain_type='artnet')
             
-            # NumPy-optimierte Pixel-Extraktion
+            # Speichere komplettes Frame für Video-Preview (konvertiere zu BGR für OpenCV)
+            self.last_video_frame = cv2.cvtColor(frame_for_video_preview, cv2.COLOR_RGB2BGR)
+            
+            # NumPy-optimierte Pixel-Extraktion (verwende Art-Net Frame!)
             valid_mask = (
                 (self.point_coords[:, 1] >= 0) & 
                 (self.point_coords[:, 1] < self.canvas_height) &
@@ -348,10 +436,10 @@ class Player:
                 (self.point_coords[:, 0] < self.canvas_width)
             )
             
-            # Extrahiere RGB-Werte für alle Punkte (mit Helligkeit bereits angewendet)
+            # Extrahiere RGB-Werte für alle Punkte aus Art-Net Frame
             y_coords = self.point_coords[valid_mask, 1]
             x_coords = self.point_coords[valid_mask, 0]
-            rgb_values = frame_with_brightness[y_coords, x_coords]
+            rgb_values = frame_for_artnet[y_coords, x_coords]
             
             # DMX-Buffer erstellen
             dmx_buffer = np.zeros((len(self.point_coords), 3), dtype=np.uint8)
@@ -369,12 +457,23 @@ class Player:
                     'dmx_data': dmx_buffer.copy()
                 })
             
-            # Sende über Art-Net (prüfe ob wir aktiver Player sind)
-            if self.artnet_manager and self.is_running and player_lock._active_player is self:
-                self.artnet_manager.send_frame(dmx_buffer, source='video')
+            # Sende über Art-Net (nur wenn aktiviert und wir aktiver Art-Net Player sind)
+            if self.enable_artnet and self.artnet_manager and self.is_running:
+                # Prüfe ob wir noch der aktive Art-Net Player sind
+                if player_lock._active_player is self:
+                    self.artnet_manager.send_frame(dmx_buffer, source='video')
+                else:
+                    # Ein anderer Player hat Art-Net übernommen - stoppen
+                    logger.info(f"{self.player_name}: Art-Net von anderem Player übernommen, stoppe")
+                    break
             
-            # Beende wenn gestoppt oder nicht mehr aktiv
-            if not self.is_running or player_lock._active_player is not self:
+            # Beende wenn gestoppt
+            if not self.is_running:
+                break
+            
+            # Für Preview-Only Player: Kein Lock-Check nötig
+            if self.enable_artnet and player_lock._active_player is not self:
+                # Art-Net Player wurde deaktiviert
                 break
             
             self.frames_processed += 1
@@ -581,15 +680,102 @@ class Player:
         logger.info(f"✅ {count} Effects aus Chain entfernt")
         return True, f"{count} effects cleared"
     
-    def get_effect_chain(self):
+    # NEW: Separate chain management for Video and Art-Net
+    def add_effect_to_chain(self, plugin_id, config=None, chain_type='video'):
+        """
+        Fügt einen Effect zur gewählten Chain hinzu.
+        
+        Args:
+            plugin_id: Plugin-ID (z.B. 'blur')
+            config: Plugin-Konfiguration (Dict)
+            chain_type: 'video' für Video-Preview, 'artnet' für Art-Net
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            # Lade Plugin-Instanz
+            logger.debug(f"Loading plugin '{plugin_id}' for {chain_type} chain with config: {config}")
+            plugin_instance = self.plugin_manager.load_plugin(plugin_id, config)
+            if not plugin_instance:
+                return False, f"Plugin '{plugin_id}' konnte nicht geladen werden"
+            
+            # Prüfe ob es ein EFFECT-Plugin ist
+            from plugins import PluginType
+            plugin_type = plugin_instance.METADATA.get('type')
+            
+            if plugin_type != PluginType.EFFECT:
+                return False, f"Plugin '{plugin_id}' ist kein EFFECT-Plugin"
+            
+            effect_data = {
+                'id': plugin_id,
+                'instance': plugin_instance,
+                'config': config or {}
+            }
+            
+            # Füge zur richtigen Chain hinzu
+            if chain_type == 'artnet':
+                self.artnet_effect_chain.append(effect_data)
+                chain_length = len(self.artnet_effect_chain)
+            else:
+                self.video_effect_chain.append(effect_data)
+                chain_length = len(self.video_effect_chain)
+            
+            logger.info(f"✅ Effect '{plugin_id}' zur {chain_type} Chain hinzugefügt (Position {chain_length})")
+            return True, f"Effect '{plugin_id}' added to {chain_type} chain"
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"❌ Fehler beim Hinzufügen von Effect '{plugin_id}': {e}")
+            logger.error(traceback.format_exc())
+            return False, str(e)
+    
+    def remove_effect_from_chain(self, index, chain_type='video'):
+        """Entfernt einen Effect aus der gewählten Chain."""
+        try:
+            chain = self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain
+            
+            if index < 0 or index >= len(chain):
+                return False, f"Invalid index {index} (chain length: {len(chain)})"
+            
+            effect = chain.pop(index)
+            logger.info(f"✅ Effect '{effect['id']}' von {chain_type} Chain Position {index} entfernt")
+            return True, f"Effect removed from {chain_type} chain"
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Entfernen von Effect: {e}")
+            return False, str(e)
+    
+    def clear_effects_chain(self, chain_type='video'):
+        """Entfernt alle Effects aus der gewählten Chain."""
+        if chain_type == 'artnet':
+            count = len(self.artnet_effect_chain)
+            self.artnet_effect_chain.clear()
+        else:
+            count = len(self.video_effect_chain)
+            self.video_effect_chain.clear()
+        
+        logger.info(f"✅ {count} Effects aus {chain_type} Chain entfernt")
+        return True, f"{count} effects cleared from {chain_type} chain"
+    
+    def get_effect_chain(self, chain_type='video'):
         """
         Gibt die aktuelle Effect Chain zurück.
+        
+        Args:
+            chain_type: 'video' für Video-Preview, 'artnet' für Art-Net
         
         Returns:
             list: Liste von Effect-Infos [{plugin_id, parameters, metadata}, ...]
         """
+        # Select correct chain
+        if chain_type == 'artnet':
+            chain = self.artnet_effect_chain
+        else:
+            chain = self.video_effect_chain or self.effect_chain  # Fallback to legacy
+        
         chain_info = []
-        for i, effect in enumerate(self.effect_chain):
+        for i, effect in enumerate(chain):
             plugin_instance = effect['instance']
             
             # Hole aktuelle Parameter-Werte von Plugin-Instanz via get_parameters()
@@ -622,7 +808,7 @@ class Player:
             })
         return chain_info
     
-    def update_effect_parameter(self, index, param_name, value):
+    def update_effect_parameter(self, index, param_name, value, chain_type='video'):
         """
         Aktualisiert einen Parameter eines Effects in der Chain.
         
@@ -630,15 +816,22 @@ class Player:
             index: Index des Effects
             param_name: Name des Parameters
             value: Neuer Wert
+            chain_type: 'video' oder 'artnet'
         
         Returns:
             tuple: (success: bool, message: str)
         """
         try:
-            if index < 0 or index >= len(self.effect_chain):
+            # Select correct chain
+            if chain_type == 'artnet':
+                chain = self.artnet_effect_chain
+            else:
+                chain = self.video_effect_chain or self.effect_chain  # Fallback
+            
+            if index < 0 or index >= len(chain):
                 return False, f"Invalid index {index}"
             
-            effect = self.effect_chain[index]
+            effect = chain[index]
             plugin_id = effect['id']
             plugin_instance = effect['instance']
             
@@ -662,22 +855,29 @@ class Player:
             logger.error(f"❌ Fehler beim Update von Effect {index} Parameter: {e}")
             return False, str(e)
     
-    def apply_effects(self, frame):
+    def apply_effects(self, frame, chain_type='video'):
         """
-        Wendet alle Effects in der Chain auf das Frame an.
+        Wendet alle Effects in der gewählten Chain auf das Frame an.
         
         Args:
             frame: Input-Frame (numpy array, RGB, uint8)
+            chain_type: 'video' für Video-Preview, 'artnet' für Art-Net Ausgabe
         
         Returns:
             numpy array: Prozessiertes Frame
         """
-        if not self.effect_chain:
+        # Select chain based on type
+        if chain_type == 'artnet':
+            effect_chain = self.artnet_effect_chain
+        else:
+            effect_chain = self.video_effect_chain or self.effect_chain  # Fallback to legacy
+        
+        if not effect_chain:
             return frame
         
         processed_frame = frame
         
-        for effect in self.effect_chain:
+        for effect in effect_chain:
             try:
                 plugin_instance = effect['instance']
                 processed_frame = plugin_instance.process_frame(processed_frame)

@@ -12,7 +12,13 @@ import os
 """Video-Management API Routen"""
 from flask import jsonify
 import os
+import sys
+import io
 from .constants import VIDEO_EXTENSIONS
+from .logger import get_logger
+from .frame_source import VideoSource
+
+logger = get_logger(__name__)
 
 
 def register_video_routes(app, player_manager, video_dir, config):
@@ -72,14 +78,7 @@ def register_video_routes(app, player_manager, video_dir, config):
     
     @app.route('/api/video/load', methods=['POST'])
     def load_video():
-        """Lädt ein Video."""
-        import sys
-        import io
-        from ..logger import get_logger
-        from ..frame_source import VideoSource
-        
-        logger = get_logger(__name__)
-        
+        """Lädt ein Video in den Video Player."""
         data = request.get_json()
         video_path = data.get('path')
         
@@ -93,76 +92,417 @@ def register_video_routes(app, player_manager, video_dir, config):
         if not os.path.exists(video_path):
             return jsonify({"status": "error", "message": f"Video nicht gefunden: {video_path}"}), 404
         
-        # Umleite stdout/stderr um print() während Video-Load zu verhindern
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        
         try:
-            sys.stdout = io.StringIO()
-            sys.stderr = io.StringIO()
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"status": "error", "message": "No video player available"}), 404
             
-            current_player = player_manager.player
-            was_playing = current_player.is_playing
+            was_playing = player.is_playing
             
             # Erstelle neue VideoSource
             video_source = VideoSource(
                 video_path,
-                current_player.canvas_width,
-                current_player.canvas_height,
+                player.canvas_width,
+                player.canvas_height,
                 config
             )
             
-            # Wechsle Source (unified Player bleibt bestehen)
-            success = current_player.switch_source(video_source)
+            # Wechsle Source
+            success = player.switch_source(video_source)
             
             if not success:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
                 return jsonify({"status": "error", "message": "Fehler beim Laden des Videos"}), 500
             
-            # Warte kurz damit Thread initialisiert
-            import time
-            time.sleep(0.1)
+            # Try to find index in playlist
+            if hasattr(player, 'playlist') and player.playlist:
+                try:
+                    player.playlist_index = player.playlist.index(video_path)
+                    logger.debug(f"📋 Video in Playlist gefunden: Index {player.playlist_index}/{len(player.playlist)}")
+                except ValueError:
+                    player.playlist_index = -1
+                    logger.warning(f"⚠️ Video nicht in Playlist: {video_path}")
             
-            # WICHTIG: stdout/stderr VOR return wiederherstellen!
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+            # Play if was playing before
+            if was_playing:
+                player.play()
+            
+            rel_path = os.path.relpath(video_path, video_dir)
             
             return jsonify({
                 "status": "success",
                 "message": f"Video geladen: {os.path.basename(video_path)}",
-                "video": os.path.basename(video_path),
+                "video": rel_path,
                 "was_playing": was_playing
             })
             
         except Exception as e:
+            logger.error(f"Error loading video: {e}")
             import traceback
-            # Stelle stdout/stderr wieder her vor dem return
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
             logger.error(traceback.format_exc())
             return jsonify({"status": "error", "message": str(e)}), 500
+    
+    # NOTE: Art-Net video endpoints are in api_artnet_videos.py
     
     @app.route('/api/video/current', methods=['GET'])
     def current_video():
         """Gibt aktuell geladenes Video zurück."""
-        current_player = player_manager.player
+        current_player = player_manager.get_video_player()
         
         # Prüfe ob es ein VideoPlayer ist
-        if not hasattr(current_player, 'video_path') or not current_player.video_path:
+        if not current_player or not hasattr(current_player, 'source'):
             return jsonify({
                 "status": "error",
-                "message": "Kein Video geladen (Script-Modus aktiv)"
+                "message": "Kein Video geladen"
             }), 404
         
-        rel_path = os.path.relpath(current_player.video_path, video_dir)
+        # Get video path from source
+        video_path = None
+        if hasattr(current_player.source, 'video_path'):
+            video_path = current_player.source.video_path
+        
+        if not video_path:
+            return jsonify({
+                "status": "error",
+                "message": "Kein Video geladen"
+            }), 404
+        
+        rel_path = os.path.relpath(video_path, video_dir)
         return jsonify({
             "status": "success",
-            "filename": os.path.basename(current_player.video_path),
+            "filename": os.path.basename(video_path),
             "path": rel_path,
-            "full_path": current_player.video_path,
+            "full_path": video_path,
             "is_playing": current_player.is_playing,
             "is_paused": current_player.is_paused,
             "current_frame": current_player.current_frame,
-            "total_frames": current_player.total_frames
+            "total_frames": getattr(current_player.source, 'total_frames', 0) if current_player.source else 0
         })
+    
+    def _get_video_list():
+        """Helper: Holt sortierte Video-Liste."""
+        videos = []
+        if os.path.exists(video_dir):
+            for root, dirs, files in os.walk(video_dir):
+                for filename in files:
+                    if filename.lower().endswith(VIDEO_EXTENSIONS):
+                        filepath = os.path.join(root, filename)
+                        rel_path = os.path.relpath(filepath, video_dir)
+                        videos.append(rel_path)
+        return sorted(videos)
+
+    @app.route('/api/video/next', methods=['POST'])
+    def next_video():
+        """Lädt das nächste Video aus der Playlist."""
+        try:
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"status": "error", "message": "No video player available"}), 404
+        
+            # Check if player has playlist
+            if not hasattr(player, 'playlist') or not player.playlist:
+                return jsonify({"status": "error", "message": "No playlist configured"}), 404
+        
+            # Calculate next index
+            next_index = player.playlist_index + 1
+            if next_index >= len(player.playlist):
+                if player.loop_playlist:
+                    next_index = 0
+                else:
+                    return jsonify({"status": "error", "message": "End of playlist"}), 400
+            
+            # Get next video path
+            next_video_path = player.playlist[next_index]
+            
+            was_playing = player.is_playing
+        
+            video_source = VideoSource(next_video_path, player.canvas_width, player.canvas_height, config)
+            success = player.switch_source(video_source)
+        
+            if not success:
+                return jsonify({"status": "error", "message": "Failed to load video"}), 500
+        
+            # Update playlist index
+            player.playlist_index = next_index
+            
+            if was_playing:
+                player.play()
+        
+            # Return relative path for frontend
+            rel_path = os.path.relpath(next_video_path, video_dir)
+            return jsonify({
+                "status": "success",
+                "message": "Next video loaded",
+                "video": rel_path
+            })
+        
+        except Exception as e:
+            logger.error(f"Error loading next video: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    @app.route('/api/video/previous', methods=['POST'])
+    def previous_video():
+        """Lädt das vorherige Video aus der Playlist."""
+        try:
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"status": "error", "message": "No video player available"}), 404
+        
+            # Check if player has playlist
+            if not hasattr(player, 'playlist') or not player.playlist:
+                return jsonify({"status": "error", "message": "No playlist configured"}), 404
+        
+            # Calculate previous index
+            prev_index = player.playlist_index - 1
+            if prev_index < 0:
+                if player.loop_playlist:
+                    prev_index = len(player.playlist) - 1
+                else:
+                    return jsonify({"status": "error", "message": "Start of playlist"}), 400
+            
+            # Get previous video path
+            prev_video_path = player.playlist[prev_index]
+        
+            was_playing = player.is_playing
+        
+            video_source = VideoSource(prev_video_path, player.canvas_width, player.canvas_height, config)
+            success = player.switch_source(video_source)
+        
+            if not success:
+                return jsonify({"status": "error", "message": "Failed to load video"}), 500
+        
+            # Update playlist index
+            player.playlist_index = prev_index
+            
+            if was_playing:
+                player.play()
+        
+            # Return relative path for frontend
+            rel_path = os.path.relpath(prev_video_path, video_dir)
+            return jsonify({
+                "status": "success",
+                "message": "Previous video loaded",
+                "video": rel_path
+            })
+        
+        except Exception as e:
+            logger.error(f"Error loading previous video: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    @app.route('/api/video/status', methods=['GET'])
+    def video_status():
+        """Gibt den Status des Video Players zurück."""
+        try:
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"status": "error", "message": "No video player available"}), 404
+            
+            current_video = None
+            if hasattr(player, 'source') and player.source and hasattr(player.source, 'video_path'):
+                current_video = os.path.relpath(player.source.video_path, video_dir)
+            
+            # Get playlist as relative paths
+            playlist = []
+            if hasattr(player, 'playlist'):
+                for path in player.playlist:
+                    try:
+                        rel_path = os.path.relpath(path, video_dir)
+                        playlist.append(rel_path)
+                    except:
+                        playlist.append(path)
+            
+            return jsonify({
+                "status": "success",
+                "is_playing": player.is_playing,
+                "is_paused": player.is_paused,
+                "current_frame": player.current_frame,
+                "total_frames": getattr(player.source, 'total_frames', 0) if player.source else 0,
+                "current_video": current_video,
+                "playlist": playlist,
+                "playlist_index": getattr(player, 'playlist_index', -1),
+                "autoplay": getattr(player, 'autoplay', False),
+                "loop": getattr(player, 'loop_playlist', False)
+            })
+        except Exception as e:
+            logger.error(f"Error getting video status: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    # NOTE: /api/artnet/video/status is in api_artnet_videos.py
+    
+    @app.route('/api/video/playlist/set', methods=['POST'])
+    def set_video_playlist():
+        """Setzt die Playlist für den Video Player."""
+        try:
+            data = request.get_json()
+            playlist = data.get('playlist', [])
+            autoplay = data.get('autoplay', False)
+            loop = data.get('loop', False)
+            
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"status": "error", "message": "No video player available"}), 404
+            
+            # Konvertiere relative Pfade zu absoluten
+            absolute_playlist = []
+            for item in playlist:
+                path = item if isinstance(item, str) else item.get('path', '')
+                if not os.path.isabs(path):
+                    path = os.path.join(video_dir, path)
+                absolute_playlist.append(path)
+            
+            player.playlist = absolute_playlist
+            player.autoplay = autoplay
+            player.loop_playlist = loop
+            player.max_loops = 1  # Immer nur 1x abspielen, Playlist übernimmt Loop
+            
+            # Setze Index auf aktuelles Video wenn vorhanden
+            if hasattr(player.source, 'video_path') and player.source.video_path:
+                try:
+                    player.playlist_index = absolute_playlist.index(player.source.video_path)
+                    logger.debug(f"📋 Current video in playlist: Index {player.playlist_index}")
+                except ValueError:
+                    player.playlist_index = -1
+                    logger.debug(f"📋 Current video not in playlist")
+            
+            logger.info(f"Video playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}, playlist_index={player.playlist_index}")
+            return jsonify({
+                "status": "success",
+                "playlist_length": len(absolute_playlist),
+                "autoplay": autoplay,
+                "loop": loop
+            })
+        except Exception as e:
+            logger.error(f"Error setting video playlist: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    # NOTE: Art-Net video endpoints (next, previous, playlist/set) are in api_artnet_videos.py
+    
+    @app.route('/api/playlist/save', methods=['POST'])
+    def save_playlist():
+        """Speichert beide Playlists zusammen."""
+        try:
+            import json
+            from datetime import datetime
+            
+            data = request.get_json()
+            name = data.get('name', f'playlist_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+            video_playlist = data.get('video_playlist', [])
+            artnet_playlist = data.get('artnet_playlist', [])
+            
+            # Create playlists directory if it doesn't exist
+            playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
+            os.makedirs(playlists_dir, exist_ok=True)
+            
+            # Save combined playlist as JSON
+            playlist_path = os.path.join(playlists_dir, f'{name}.json')
+            playlist_data = {
+                'name': name,
+                'created': datetime.now().isoformat(),
+                'video_playlist': video_playlist,
+                'artnet_playlist': artnet_playlist,
+                'total_videos': len(video_playlist) + len(artnet_playlist)
+            }
+            
+            with open(playlist_path, 'w', encoding='utf-8') as f:
+                json.dump(playlist_data, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Playlists saved: {name} (Video: {len(video_playlist)}, Art-Net: {len(artnet_playlist)})")
+            return jsonify({
+                "status": "success",
+                "message": f"Playlists '{name}' saved",
+                "path": playlist_path,
+                "video_count": len(video_playlist),
+                "artnet_count": len(artnet_playlist)
+            })
+        
+        except Exception as e:
+            logger.error(f"Error saving playlists: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    @app.route('/api/playlist/load/<name>', methods=['GET'])
+    def load_playlist(name):
+        """Lädt eine gespeicherte Playlist."""
+        try:
+            import json
+            
+            playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
+            playlist_path = os.path.join(playlists_dir, f'{name}.json')
+            
+            if not os.path.exists(playlist_path):
+                return jsonify({"status": "error", "message": "Playlist not found"}), 404
+            
+            with open(playlist_path, 'r', encoding='utf-8') as f:
+                playlist_data = json.load(f)
+            
+            logger.info(f"Playlist loaded: {name} ({len(playlist_data.get('videos', []))} videos)")
+            return jsonify({
+                "status": "success",
+                "playlist": playlist_data
+            })
+        
+        except Exception as e:
+            logger.error(f"Error loading playlist: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    @app.route('/api/playlists', methods=['GET'])
+    def list_playlists():
+        """Listet alle gespeicherten Playlists auf."""
+        try:
+            import json
+            
+            playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
+            
+            if not os.path.exists(playlists_dir):
+                return jsonify({"status": "success", "playlists": []})
+            
+            playlists = []
+            for filename in os.listdir(playlists_dir):
+                if filename.endswith('.json'):
+                    try:
+                        with open(os.path.join(playlists_dir, filename), 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                            # Handle both old and new format
+                            video_count = len(data.get('video_playlist', data.get('videos', [])))
+                            artnet_count = len(data.get('artnet_playlist', []))
+                            
+                            playlists.append({
+                                'name': data.get('name', filename[:-5]),
+                                'created': data.get('created', ''),
+                                'video_count': video_count,
+                                'artnet_count': artnet_count,
+                                'total_count': video_count + artnet_count
+                            })
+                    except Exception as e:
+                        logger.warning(f"Could not read playlist {filename}: {e}")
+            
+            playlists.sort(key=lambda x: x.get('created', ''), reverse=True)
+            
+            return jsonify({
+                "status": "success",
+                "playlists": playlists
+            })
+        
+        except Exception as e:
+            logger.error(f"Error listing playlists: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    @app.route('/api/playlist/delete/<name>', methods=['DELETE'])
+    def delete_playlist(name):
+        """Löscht eine gespeicherte Playlist."""
+        try:
+            playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
+            playlist_path = os.path.join(playlists_dir, f'{name}.json')
+            
+            if not os.path.exists(playlist_path):
+                return jsonify({"status": "error", "message": "Playlist not found"}), 404
+            
+            os.remove(playlist_path)
+            
+            logger.info(f"Playlist deleted: {name}")
+            return jsonify({
+                "status": "success",
+                "message": f"Playlist '{name}' deleted"
+            })
+        
+        except Exception as e:
+            logger.error(f"Error deleting playlist: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500

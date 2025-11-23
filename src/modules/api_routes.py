@@ -12,10 +12,10 @@ def register_playback_routes(app, player_manager):
     
     @app.route('/api/play', methods=['POST'])
     def play():
-        """Startet Video-Wiedergabe."""
-        player = player_manager.player
-        player.start()
-        return jsonify({"status": "success", "message": "Video gestartet"})
+        """Startet oder setzt Video-Wiedergabe fort."""
+        player = player_manager.get_video_player()
+        player.play()
+        return jsonify({"status": "success", "message": "Video play"})
     
     @app.route('/api/stop', methods=['POST'])
     def stop():

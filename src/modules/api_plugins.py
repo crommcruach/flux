@@ -34,6 +34,7 @@ def list_plugins():
         }
     """
     pm = get_plugin_manager()
+    print(f"🔍 API /list called. PluginManager registry has {len(pm.registry)} plugins")
     
     # Optional: Filter by type
     plugin_type = request.args.get('type')
@@ -46,6 +47,8 @@ def list_plugins():
             return jsonify({"error": f"Invalid plugin type: {plugin_type}"}), 400
     else:
         plugins = pm.list_plugins()
+    
+    print(f"✅ Returning {len(plugins)} plugins to API client")
     
     return jsonify({
         "success": True,

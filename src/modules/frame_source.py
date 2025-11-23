@@ -315,3 +315,45 @@ class ScriptSource(FrameSource):
             info.update(script_info)
         
         return info
+
+
+class DummySource(FrameSource):
+    """Dummy Source für leere Playlists - zeigt schwarzes Bild."""
+    
+    def __init__(self, canvas_width, canvas_height):
+        super().__init__(canvas_width, canvas_height)
+        self.frame = None
+        self.fps = 30
+        self.total_frames = 0
+        self.is_infinite = True
+    
+    def initialize(self):
+        """Erstellt schwarzes Dummy-Frame."""
+        self.frame = np.zeros((self.canvas_height, self.canvas_width, 3), dtype=np.uint8)
+        logger.info("Dummy Source initialisiert (leere Playlist)")
+        return True
+    
+    def get_next_frame(self):
+        """Gibt schwarzes Frame zurück."""
+        if self.frame is None:
+            self.initialize()
+        return self.frame, 1.0 / self.fps
+    
+    def reset(self):
+        """Nichts zu resetten."""
+        pass
+    
+    def cleanup(self):
+        """Nichts zu cleanupen."""
+        pass
+    
+    def get_source_name(self):
+        """Source Name."""
+        return "Empty Playlist"
+    
+    def get_info(self):
+        """Source Info."""
+        info = super().get_info()
+        info['type'] = 'dummy'
+        info['description'] = 'Waiting for video...'
+        return info

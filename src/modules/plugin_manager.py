@@ -75,11 +75,18 @@ class PluginManager:
                     # Finde alle PluginBase-Subklassen im Modul
                     for name, obj in inspect.getmembers(module, inspect.isclass):
                         if issubclass(obj, PluginBase) and obj is not PluginBase:
-                            self.register_plugin(obj)
-                            print(f"✓ Plugin geladen: {obj.METADATA.get('id', 'unknown')} ({module_path})")
+                            try:
+                                self.register_plugin(obj)
+                                print(f"✓ Plugin geladen: {obj.METADATA.get('id', 'unknown')} ({module_path})")
+                            except Exception as reg_err:
+                                import traceback
+                                print(f"✗ Fehler beim Registrieren von {obj.__name__}: {reg_err}")
+                                traceback.print_exc()
                 
                 except Exception as e:
+                    import traceback
                     print(f"✗ Fehler beim Laden von {module_path}: {e}")
+                    traceback.print_exc()
     
     def register_plugin(self, plugin_class: Type[PluginBase]):
         """
@@ -99,10 +106,14 @@ class PluginManager:
             print(f"⚠️ Plugin mit ID '{plugin_id}' existiert bereits - überschreibe mit {plugin_class.__name__}")
         
         self.registry[plugin_id] = plugin_class
+        print(f"   ➡️ Registered '{plugin_id}' in registry (total: {len(self.registry)})")
     
     def load_plugin(self, plugin_id: str, config: Optional[Dict] = None) -> Optional[PluginBase]:
         """
-        Lädt Plugin und erstellt Instanz.
+        Lädt Plugin und erstellt NEUE Instanz.
+        
+        WICHTIG: Erstellt jedes Mal eine neue Instanz, da Effekte 
+        mehrfach mit unterschiedlichen Configs in Chains verwendet werden können.
         
         Args:
             plugin_id: Plugin-ID aus METADATA
@@ -117,8 +128,8 @@ class PluginManager:
         
         try:
             plugin_class = self.registry[plugin_id]
+            # Erstelle NEUE Instanz (nicht cachen, da Effekte mehrfach verwendbar)
             instance = plugin_class(config=config)
-            self.instances[plugin_id] = instance
             print(f"✓ Plugin '{plugin_id}' erfolgreich geladen")
             return instance
         except Exception as e:
@@ -149,20 +160,28 @@ class PluginManager:
         Returns:
             Liste von Plugin-Metadaten
         """
+        print(f"🔍 list_plugins called. Registry has {len(self.registry)} plugins: {list(self.registry.keys())}")
+        
         result = []
         for plugin_id, plugin_class in self.registry.items():
-            metadata = plugin_class.METADATA.copy()
-            
-            # Filter by type
-            if plugin_type and metadata.get('type') != plugin_type:
-                continue
-            
-            # Konvertiere PluginType Enum zu String für JSON-Serialisierung
-            if 'type' in metadata and isinstance(metadata['type'], PluginType):
-                metadata['type'] = metadata['type'].value
-            
-            result.append(metadata)
+            try:
+                metadata = plugin_class.METADATA.copy()
+                
+                # Filter by type
+                if plugin_type and metadata.get('type') != plugin_type:
+                    continue
+                
+                # Konvertiere PluginType Enum zu String für JSON-Serialisierung
+                if 'type' in metadata and isinstance(metadata['type'], PluginType):
+                    metadata['type'] = metadata['type'].value
+                
+                result.append(metadata)
+            except Exception as e:
+                print(f"✗ Error processing plugin {plugin_id}: {e}")
+                import traceback
+                traceback.print_exc()
         
+        print(f"✅ Returning {len(result)} plugins from list_plugins")
         return result
     
     def get_plugin_metadata(self, plugin_id: str) -> Optional[Dict]:

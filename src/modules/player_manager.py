@@ -8,40 +8,47 @@ logger = get_logger(__name__)
 
 class PlayerManager:
     """
-    Central container for player management.
+    Central container for dual-player management.
     
-    This class serves as a Single Source of Truth for player access,
-    eliminating the architectural issue where DMXController was misused
-    as a player container.
+    Manages two independent players:
+    - Video Player: For video preview display (no Art-Net output)
+    - Art-Net Player: For Art-Net output (no video preview)
     
-    Benefits:
-    - Clear separation of concerns
-    - Single Responsibility Principle
-    - Reduced coupling between modules
-    - Better testability
-    - Easier player switching
+    Each player has:
+    - Own frame source
+    - Own playlist
+    - Own effect chain
+    - Independent playback state
     """
     
-    def __init__(self, player=None):
+    def __init__(self, player=None, artnet_player=None):
         """
-        Initialize PlayerManager.
+        Initialize PlayerManager with dual players.
         
         Args:
-            player: Initial player instance (optional)
+            player: Main video player (for backward compatibility, becomes video_player)
+            artnet_player: Art-Net player instance (optional)
         """
+        # Main player (legacy, maps to video_player for backward compatibility)
         self._player = player
-        logger.debug("PlayerManager initialized")
+        
+        # Dual-player system
+        self.video_player = player  # Player for video preview (no Art-Net)
+        self.artnet_player = artnet_player  # Player for Art-Net output (no preview)
+        
+        logger.debug(f"PlayerManager initialized (video_player: {player is not None}, artnet_player: {artnet_player is not None})")
     
     @property
     def player(self):
-        """Get current player instance."""
-        return self._player
+        """Get main player instance (legacy, maps to video_player)."""
+        return self._player or self.video_player
     
     @player.setter
     def player(self, new_player):
-        """Set player instance."""
+        """Set main player instance (legacy, updates video_player)."""
         old_player = self._player
         self._player = new_player
+        self.video_player = new_player
         
         if old_player and old_player != new_player:
             logger.debug(f"Player switched: {type(old_player).__name__} → {type(new_player).__name__}")
@@ -74,3 +81,26 @@ class PlayerManager:
             bool: True if player exists
         """
         return self._player is not None
+    
+    # Dual-Player Methods
+    def set_artnet_player(self, new_player):
+        """Set Art-Net player instance."""
+        old_player = self.artnet_player
+        self.artnet_player = new_player
+        
+        if old_player and old_player != new_player:
+            logger.debug(f"Art-Net player switched: {type(old_player).__name__} → {type(new_player).__name__}")
+        elif new_player:
+            logger.debug(f"Art-Net player set: {type(new_player).__name__}")
+    
+    def get_video_player(self):
+        """Get video player instance."""
+        return self.video_player
+    
+    def get_artnet_player(self):
+        """Get Art-Net player instance."""
+        return self.artnet_player
+    
+    def has_artnet_player(self):
+        """Check if Art-Net player is set."""
+        return self.artnet_player is not None

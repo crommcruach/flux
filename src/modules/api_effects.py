@@ -13,7 +13,7 @@ def register_effects_api(app, player_manager):
     @app.route('/api/player/effects', methods=['GET'])
     def get_effects():
         """
-        Gibt die aktuelle Effect Chain zurück.
+        Gibt die aktuelle Video Effect Chain zurück.
         
         Returns:
             200: {effects: [...], count: int}
@@ -24,7 +24,7 @@ def register_effects_api(app, player_manager):
         if not player:
             return jsonify({'error': 'No active player'}), 404
         
-        effects = player.get_effect_chain()
+        effects = player.get_effect_chain(chain_type='video')
         return jsonify({
             'success': True,
             'effects': effects,
@@ -62,11 +62,11 @@ def register_effects_api(app, player_manager):
         plugin_id = data['plugin_id']
         config = data.get('config', None)
         
-        success, message = player.add_effect(plugin_id, config)
+        success, message = player.add_effect_to_chain(plugin_id, config, chain_type='video')
         
         if success:
             # Get new chain length for index
-            effects = player.get_effect_chain()
+            effects = player.get_effect_chain(chain_type='video')
             return jsonify({
                 'success': True,
                 'message': message,
@@ -96,7 +96,7 @@ def register_effects_api(app, player_manager):
         if not player:
             return jsonify({'error': 'No active player'}), 404
         
-        success, message = player.remove_effect(index)
+        success, message = player.remove_effect_from_chain(index, chain_type='video')
         
         if success:
             return jsonify({
@@ -123,7 +123,7 @@ def register_effects_api(app, player_manager):
         if not player:
             return jsonify({'error': 'No active player'}), 404
         
-        success, message = player.clear_effects()
+        success, message = player.clear_effects_chain(chain_type='video')
         
         return jsonify({
             'success': True,
@@ -160,7 +160,7 @@ def register_effects_api(app, player_manager):
             }), 400
         
         value = data['value']
-        success, message = player.update_effect_parameter(index, param_name, value)
+        success, message = player.update_effect_parameter(index, param_name, value, chain_type='video')
         
         if success:
             return jsonify({

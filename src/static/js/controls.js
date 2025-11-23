@@ -1,429 +1,1770 @@
 /**
- * Controls.js - Optimized version using common utilities
- * Video/Script player controls with preview and settings
+ * Controls.js - New Dual-Player Layout
+ * Video + Art-Net players with FX control
  */
 
-import { 
-    loadConfig, 
-    initWebSocket, 
-    showToast, 
-    apiCall, 
-    getSocket, 
-    isSocketConnected,
-    initErrorLogging,
-    API_BASE 
-} from './common.js';
+import { showToast } from './common.js';
 
-// ========================================
-// PLAYBACK CONTROLS
-// ========================================
+const API_BASE = '';
+let availableEffects = [];
+let videoEffects = [];
+let artnetEffects = [];
+let updateInterval = null;
+let playlistUpdateInterval = null;
 
-async function executeCliCommand(command) {
-    const result = await apiCall('/console/command', 'POST', { command });
-    if (result?.status === 'success') {
-        showToast(`Befehl '${command}' ausgeführt`);
-        updateStatus();
-    } else if (result) {
-        showToast(`Fehler: ${result.message}`, 'error');
-    }
-}
-
-// ========================================
-// SETTINGS - Optimized with less duplication
-// ========================================
-
-const sliderConfig = {
-    brightness: {
-        selector: 'brightness',
-        unit: '%',
-        endpoint: '/brightness',
-        format: (v) => parseInt(v),
-        display: (v) => `${v}%`
-    },
-    speed: {
-        selector: 'speed',
-        unit: 'x',
-        endpoint: '/speed',
-        format: (v) => parseFloat(v),
-        display: (v) => `${v.toFixed(1)}x`,
-        validate: (v) => v > 0 && v <= 10
-    },
-    hue: {
-        selector: 'hue',
-        unit: '°',
-        endpoint: '/hue',
-        format: (v) => parseInt(v),
-        display: (v) => `${v}°`,
-        validate: (v) => v >= 0 && v <= 360
-    }
-};
-
-function createSliderHandlers(config) {
-    const { selector, format, display, endpoint, validate } = config;
-    
-    return {
-        updateSlider: (value) => {
-            const val = format(value);
-            document.getElementById(`${selector}Value`).textContent = display(val);
-            document.getElementById(`${selector}Input`).value = val;
-        },
-        
-        updateInput: async (value) => {
-            const val = format(value);
-            if (isNaN(val) || (validate && !validate(val))) return;
-            
-            document.getElementById(`${selector}Value`).textContent = display(val);
-            document.getElementById(`${selector}Slider`).value = val;
-            
-            const result = await apiCall(endpoint, 'POST', { value: val });
-            if (result) {
-                showToast(`${selector.charAt(0).toUpperCase() + selector.slice(1)} auf ${display(val)} gesetzt`);
-            }
-        }
-    };
-}
-
-// Create handlers for all sliders
-const brightnessHandlers = createSliderHandlers(sliderConfig.brightness);
-const speedHandlers = createSliderHandlers(sliderConfig.speed);
-const hueHandlers = createSliderHandlers(sliderConfig.hue);
-
-// Export for HTML onchange attributes
-window.updateBrightnessSlider = brightnessHandlers.updateSlider;
-window.updateBrightnessInput = brightnessHandlers.updateInput;
-window.updateSpeedSlider = speedHandlers.updateSlider;
-window.updateSpeedInput = speedHandlers.updateInput;
-window.updateHueSlider = hueHandlers.updateSlider;
-window.updateHueInput = hueHandlers.updateInput;
-
-// ========================================
-// ART-NET
-// ========================================
-
-async function blackout() {
-    const result = await apiCall('/blackout', 'POST');
-    if (result) showToast(result.message);
-}
-
-async function testPattern(color) {
-    const result = await apiCall('/test', 'POST', { color });
-    if (result) showToast(`Testmuster: ${color}`);
-}
-
-window.blackout = blackout;
-window.testPattern = testPattern;
-
-// ========================================
-// MEDIA (VIDEOS & SCRIPTS)
-// ========================================
-
-async function loadVideos() {
-    const result = await apiCall('/videos');
-    if (!result?.videos) return;
-    
-    const mediaList = document.getElementById('mediaList');
-    mediaList.innerHTML = '<h3 style="margin-top: 0;">🎬 Videos</h3>';
-    
-    // Group by channel
-    const grouped = result.videos.reduce((acc, video) => {
-        const kanal = video.kanal > 0 ? `Kanal ${video.kanal}` : 'Andere';
-        (acc[kanal] = acc[kanal] || []).push(video);
-        return acc;
-    }, {});
-    
-    // Create collapsible sections
-    Object.keys(grouped).sort().forEach((kanal, index) => {
-        const videos = grouped[kanal];
-        const kanalId = `kanal-${index}`;
-        
-        const header = document.createElement('div');
-        header.className = 'kanal-header';
-        header.innerHTML = `
-            <span class="kanal-toggle">▶</span>
-            <span class="kanal-title">${kanal}</span>
-            <span class="kanal-count">${videos.length}</span>
-        `;
-        header.onclick = () => toggleKanal(kanalId);
-        mediaList.appendChild(header);
-        
-        const container = document.createElement('div');
-        container.id = kanalId;
-        container.className = 'kanal-videos collapsed';
-        
-        videos.forEach(video => {
-            const div = document.createElement('div');
-            div.className = 'video-item';
-            div.textContent = video.name;
-            div.onclick = (e) => {
-                e.stopPropagation();
-                loadVideo(video.path, video.name);
-            };
-            container.appendChild(div);
-        });
-        
-        mediaList.appendChild(container);
-    });
-    
-    showToast(`${result.videos.length} Videos in ${Object.keys(grouped).length} Kanälen`);
-}
-
-function toggleKanal(kanalId) {
-    const container = document.getElementById(kanalId);
-    const toggle = container.previousElementSibling.querySelector('.kanal-toggle');
-    
-    container.classList.toggle('collapsed');
-    toggle.textContent = container.classList.contains('collapsed') ? '▶' : '▼';
-}
-
-async function loadVideo(path, name) {
-    const relativePath = path.replace(/\\/g, '/');
-    const result = await apiCall('/console/command', 'POST', { 
-        command: `video:${relativePath}` 
-    });
-    
-    if (result?.status === 'success') {
-        showToast(`Video startet: ${name}`);
-        updateStatus();
-        await executeCliCommand('start');
-    } else if (result) {
-        showToast(`Fehler: ${result.message}`, 'error');
-    }
-}
-
-async function loadScripts() {
-    const result = await apiCall('/scripts');
-    if (!result?.scripts) return;
-    
-    const mediaList = document.getElementById('mediaList');
-    mediaList.innerHTML = '<h3 style="margin-top: 0;">📜 Scripts</h3>';
-    
-    if (result.scripts.length === 0) {
-        mediaList.innerHTML += '<p style="text-align: center; color: #999;">Keine Scripts gefunden</p>';
-        return;
-    }
-    
-    result.scripts.forEach(script => {
-        const div = document.createElement('div');
-        div.className = 'video-item';
-        div.innerHTML = `
-            <div>
-                <strong>${script.filename}</strong>
-                ${script.description ? `<br><small style="color: #999;">${script.description}</small>` : ''}
-            </div>
-        `;
-        div.onclick = () => loadScript(script.filename);
-        mediaList.appendChild(div);
-    });
-}
-
-async function loadScript(scriptName) {
-    const cleanName = scriptName.replace(/\.py$/, '');
-    const result = await apiCall('/console/command', 'POST', { 
-        command: `script:${cleanName}` 
-    });
-    
-    if (result?.status === 'success') {
-        showToast(`Script startet: ${cleanName}`);
-        updateStatus();
-        await executeCliCommand('start');
-    } else if (result) {
-        showToast(`Fehler: ${result.message}`, 'error');
-    }
-}
-
-window.loadVideos = loadVideos;
-window.loadScripts = loadScripts;
-window.executeCliCommand = executeCliCommand;
-
-// ========================================
-// STATUS - Optimized update logic
-// ========================================
-
-function updateStatusFromWebSocket(data) {
-    updatePreview(data);
-    
-    if (data.active_mode && window.updateActiveModeDisplay) {
-        window.updateActiveModeDisplay(data.active_mode);
-    }
-    
-    // Sync sliders efficiently
-    const sliderUpdates = {
-        brightness: { value: Math.round(data.brightness), display: brightnessHandlers.updateSlider },
-        speed: { value: parseFloat(data.speed), display: speedHandlers.updateSlider },
-        hue_shift: { value: parseInt(data.hue_shift), display: hueHandlers.updateSlider }
-    };
-    
-    Object.entries(sliderUpdates).forEach(([key, { value, display }]) => {
-        if (data[key] !== undefined && !isNaN(value)) {
-            display(value);
-        }
-    });
-}
-
-async function updateStatus() {
-    const result = await apiCall('/status');
-    if (result) updateStatusFromWebSocket(result);
-}
-
-// ========================================
-// PREVIEW - Optimized with better error handling
-// ========================================
-
-let previewStream = null;
-let previewRetryCount = 0;
-const MAX_PREVIEW_RETRIES = 3;
-
-function initPreview() {
-    previewStream = document.getElementById('previewStream');
-    if (!previewStream) {
-        console.error('Preview Stream Element not found!');
-        return;
-    }
-    
-    const streamUrl = `${API_BASE}/preview/stream`;
-    
-    previewStream.onerror = () => {
-        console.error('Preview Stream error');
-        
-        if (previewRetryCount < MAX_PREVIEW_RETRIES) {
-            previewRetryCount++;
-            setTimeout(() => {
-                console.log(`Retry preview stream (${previewRetryCount}/${MAX_PREVIEW_RETRIES})`);
-                previewStream.src = `${streamUrl}?t=${Date.now()}`;
-            }, 1000 * previewRetryCount); // Exponential backoff
-        }
-    };
-    
-    previewStream.onload = () => {
-        console.log('Preview stream loaded:', previewStream.naturalWidth, 'x', previewStream.naturalHeight);
-        previewRetryCount = 0; // Reset on success
-    };
-    
-    previewStream.src = streamUrl;
-}
-
-function updatePreview(data) {
-    const videoName = data.video || data.status?.video_path?.split('\\').pop() || '-';
-    document.getElementById('previewVideoName').textContent = videoName;
-    
-    const isScript = data.is_script || false;
-    
-    if (isScript) {
-        document.getElementById('previewFrame').textContent = 'Endlos';
-        document.getElementById('previewProgress').style.width = '100%';
-    } else {
-        const currentFrame = data.current_frame || 0;
-        const totalFrames = data.total_frames || 0;
-        document.getElementById('previewFrame').textContent = `${currentFrame}/${totalFrames}`;
-        
-        const progress = totalFrames > 0 ? (currentFrame / totalFrames * 100) : 0;
-        document.getElementById('previewProgress').style.width = `${progress}%`;
-    }
-}
-
-async function updatePreviewInfo() {
-    const [info, traffic] = await Promise.all([
-        apiCall('/info'),
-        apiCall('/stream/traffic')
-    ]);
-    
-    if (info?.canvas_width && info?.canvas_height) {
-        document.getElementById('previewCanvasSize').textContent = 
-            `${info.canvas_width}x${info.canvas_height}`;
-    }
-    
-    if (traffic?.preview && traffic?.fullscreen && traffic?.total) {
-        const elements = {
-            trafficPreview: traffic.preview.formatted,
-            trafficPreviewMbps: traffic.preview.mbps,
-            trafficFullscreen: traffic.fullscreen.formatted,
-            trafficFullscreenMbps: traffic.fullscreen.mbps,
-            trafficTotal: traffic.total.formatted,
-            trafficTotalMbps: traffic.total.mbps
-        };
-        
-        Object.entries(elements).forEach(([id, text]) => {
-            const el = document.getElementById(id);
-            if (el) el.textContent = text;
-        });
-    }
-}
-
-function openPreviewWindow() {
-    const width = 900, height = 700;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    window.open(
-        '/fullscreen.html', 
-        'FullscreenWindow',
-        `width=${width},height=${height},left=${left},top=${top},resizable=yes`
-    );
-}
-
-window.openPreviewWindow = openPreviewWindow;
-
-// ========================================
-// THEME TOGGLE
-// ========================================
-
-function initThemeToggle() {
-    const themeToggle = document.getElementById('themeToggle');
-    const themeLabel = document.getElementById('themeLabel');
-    
-    if (!themeToggle) return;
-    
-    const savedTheme = localStorage.getItem('theme') || 'light';
-    const isDark = savedTheme === 'dark';
-    
-    if (isDark) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-        themeToggle.checked = true;
-    }
-    
-    if (themeLabel) {
-        themeLabel.textContent = isDark ? 'Dunkel' : 'Hell';
-    }
-    
-    themeToggle.addEventListener('change', () => {
-        const isDark = themeToggle.checked;
-        
-        if (isDark) {
-            document.documentElement.setAttribute('data-theme', 'dark');
-        } else {
-            document.documentElement.removeAttribute('data-theme');
-        }
-        
-        if (themeLabel) themeLabel.textContent = isDark ? 'Dunkel' : 'Hell';
-        localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    });
-}
+// Autoplay & Loop State
+let videoAutoplay = false;
+let videoLoop = false;
+let artnetAutoplay = false;
+let artnetLoop = false;
 
 // ========================================
 // INITIALIZATION
 // ========================================
 
-document.addEventListener('DOMContentLoaded', async () => {
-    initErrorLogging();
-    await loadConfig();
+document.addEventListener('DOMContentLoaded', init);
+
+async function init() {
+    await loadAvailableEffects();
+    await loadVideoPlaylist();
+    await loadArtnetPlaylist();
+    await refreshVideoEffects();
+    await refreshArtnetEffects();
+    startPreviewStream();
+    startArtnetPreviewStream();
+    setupEffectDropZones();
     
-    initWebSocket({
-        onStatus: updateStatusFromWebSocket
+    // Start auto-refresh
+    updateInterval = setInterval(async () => {
+        await refreshVideoEffects();
+        await refreshArtnetEffects();
+    }, 2000);
+    
+    // Schneller Poll für aktuelle Videos (500ms) - nur wenn autoplay aktiv
+    playlistUpdateInterval = setInterval(async () => {
+        if (videoAutoplay || artnetAutoplay) {
+            await updateCurrentVideoFromPlayer();
+            await updateCurrentArtnetFromPlayer();
+        }
+    }, 500);
+}
+
+// Update current video from player status
+async function updateCurrentVideoFromPlayer() {
+    try {
+        const response = await fetch(`${API_BASE}/api/video/status`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Normalisiere Pfad (entferne führende Slashes/Backslashes)
+            const newVideo = data.current_video ? data.current_video.replace(/^[\\\/]+/, '') : null;
+            const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
+            
+            if (normalizedCurrent !== newVideo) {
+                currentVideo = newVideo;
+                renderVideoPlaylist();
+            }
+        }
+    } catch (error) {
+        // Silent fail - don't spam console
+    }
+}
+
+// Update current Art-Net video from player status
+async function updateCurrentArtnetFromPlayer() {
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/video/status`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Normalisiere Pfad (entferne führende Slashes/Backslashes)
+            const newVideo = data.current_video ? data.current_video.replace(/^[\\\/]+/, '') : null;
+            const normalizedCurrent = currentArtnet ? currentArtnet.replace(/^[\\\/]+/, '') : null;
+            
+            if (normalizedCurrent !== newVideo) {
+                currentArtnet = newVideo;
+                renderArtnetPlaylist();
+            }
+        }
+    } catch (error) {
+        // Silent fail - don't spam console
+    }
+}
+
+// ========================================
+// TAB SWITCHING
+// ========================================
+
+window.switchTab = function(tabName) {
+    // Remove active from all tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+    
+    // Add active to selected tab
+    event.target.classList.add('active');
+    document.getElementById(`tab-${tabName}`).classList.add('active');
+};
+
+// ========================================
+// EFFECTS LIBRARY
+// ========================================
+
+async function loadAvailableEffects() {
+    try {
+        console.log('📥 Loading available effects from API...');
+        const response = await fetch(`${API_BASE}/api/plugins/list`);
+        const data = await response.json();
+        
+        console.log('📦 API Response:', data);
+        
+        if (data.success) {
+            availableEffects = data.plugins.filter(p => p.type && p.type.toLowerCase() === 'effect');
+            console.log(`✅ Loaded ${availableEffects.length} effects:`, availableEffects.map(e => e.id));
+            renderAvailableEffects();
+        } else {
+            console.error('❌ Failed to load effects:', data.message);
+        }
+    } catch (error) {
+        console.error('❌ Error loading effects:', error);
+    }
+}
+
+function renderAvailableEffects() {
+    const container = document.getElementById('availableEffects');
+    
+    if (availableEffects.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>No effect plugins found</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = availableEffects.map(effect => `
+        <div class="effect-card" 
+             draggable="true" 
+             data-effect-id="${effect.id}"
+             ondragstart="startEffectDrag(event, '${effect.id}')">
+            <div class="effect-card-title">🎨 ${effect.name}</div>
+            <div class="effect-card-description">${effect.description || 'No description'}</div>
+            <small class="text-muted">v${effect.version} • Drag to FX panel</small>
+        </div>
+    `).join('');
+}
+
+// Drag & Drop for Effects
+window.startEffectDrag = function(event, effectId) {
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData('effectId', effectId);
+};
+
+// Setup drop zones for FX panels
+function setupEffectDropZones() {
+    const videoFxPanel = document.getElementById('videoFxList');
+    const artnetFxPanel = document.getElementById('artnetFxList');
+    
+    [videoFxPanel, artnetFxPanel].forEach((panel, index) => {
+        const playerType = index === 0 ? 'video' : 'artnet';
+        
+        panel.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            panel.style.background = 'var(--bg-tertiary)';
+        });
+        
+        panel.addEventListener('dragleave', (e) => {
+            panel.style.background = '';
+        });
+        
+        panel.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            panel.style.background = '';
+            
+            const effectId = e.dataTransfer.getData('effectId');
+            if (effectId) {
+                if (playerType === 'video') {
+                    await addEffectToVideo(effectId);
+                } else {
+                    await addEffectToArtnet(effectId);
+                }
+            }
+        });
+    });
+}
+
+// ========================================
+// VIDEO PREVIEW STREAM
+// ========================================
+
+function startPreviewStream() {
+    const previewImg = document.getElementById('videoPreviewImg');
+    previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
+    
+    // Refresh preview every 100ms
+    setInterval(() => {
+        previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
+    }, 100);
+}
+
+window.openVideoFullscreen = function() {
+    window.open('/fullscreen', 'Flux Fullscreen', 'width=1920,height=1080');
+};
+
+// ========================================
+// VIDEO PLAYLIST
+// ========================================
+
+let videoFiles = [];
+let currentVideo = null;
+
+async function loadVideoPlaylist() {
+    try {
+        // Load player configuration from server
+        const response = await fetch(`${API_BASE}/api/video/status`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.playlist) {
+            // Restore playlist
+            videoFiles = data.playlist.map(path => ({
+                name: path.split('/').pop().split('\\').pop(),
+                path: path
+            }));
+            
+            // Restore autoplay/loop state
+            videoAutoplay = data.autoplay || false;
+            videoLoop = data.loop || false;
+            
+            // Restore current video
+            if (data.current_video) {
+                currentVideo = data.current_video.replace(/^[\\\/]+/, '');
+            }
+            
+            // Update UI buttons
+            const autoplayBtn = document.getElementById('videoAutoplayBtn');
+            const loopBtn = document.getElementById('videoLoopBtn');
+            if (autoplayBtn) {
+                if (videoAutoplay) {
+                    autoplayBtn.classList.remove('btn-outline-primary');
+                    autoplayBtn.classList.add('btn-primary');
+                } else {
+                    autoplayBtn.classList.remove('btn-primary');
+                    autoplayBtn.classList.add('btn-outline-primary');
+                }
+            }
+            if (loopBtn) {
+                if (videoLoop) {
+                    loopBtn.classList.remove('btn-outline-primary');
+                    loopBtn.classList.add('btn-primary');
+                } else {
+                    loopBtn.classList.remove('btn-primary');
+                    loopBtn.classList.add('btn-outline-primary');
+                }
+            }
+            
+            // Video playlist loaded successfully
+        } else {
+            // Start with empty playlist
+            videoFiles = [];
+        }
+    } catch (error) {
+        console.error('❌ Failed to load video playlist:', error);
+        videoFiles = [];
+    }
+    
+    renderVideoPlaylist();
+}
+
+function renderVideoPlaylist() {
+    const container = document.getElementById('videoPlaylist');
+    
+    if (videoFiles.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" style="width: 100%; padding: 2rem; text-align: center;">
+                <div style="font-size: 2rem; margin-bottom: 0.5rem;">📂</div>
+                <p style="margin: 0.5rem 0;">Playlist leer</p>
+                <small style="color: var(--text-secondary, #999);">Drag & Drop aus Files Tab</small>
+            </div>
+        `;
+        return;
+    }
+    
+    // Build HTML with drop zones between items
+    let html = '';
+    videoFiles.forEach((video, index) => {
+        // Normalisiere Pfade für Vergleich (entferne führende Slashes)
+        const normalizedVideoPath = video.path.replace(/^[\\\/]+/, '');
+        const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
+        const isActive = normalizedCurrent === normalizedVideoPath;
+        
+        // Drop zone before item
+        html += `<div class="drop-zone" data-drop-index="${index}" data-playlist="video"></div>`;
+        
+        // Playlist item
+        html += `
+            <div class="playlist-item ${isActive ? 'active' : ''}" 
+                 data-video-index="${index}"
+                 data-playlist="video"
+                 draggable="true">
+                <div class="playlist-item-name">${video.name}</div>
+                <button class="playlist-item-remove" onclick="removeFromVideoPlaylist(${index}); event.stopPropagation();" title="Remove from playlist">×</button>
+            </div>
+        `;
     });
     
-    initThemeToggle();
-    initPreview();
-    updateStatus();
-    updatePreviewInfo();
+    // Drop zone at the end
+    html += `<div class="drop-zone" data-drop-index="${videoFiles.length}" data-playlist="video"></div>`;
     
-    // Fallback polling
-    let POLLING_INTERVAL = 3000;
-    setInterval(() => {
-        if (!isSocketConnected()) {
-            updateStatus();
+    container.innerHTML = html;
+    
+    // Add event handlers after rendering
+    let isDragging = false;
+    
+    // Playlist item handlers (click and dragstart)
+    container.querySelectorAll('.playlist-item').forEach((item) => {
+        const index = parseInt(item.dataset.videoIndex);
+        
+        // Click handler - nur abspielen, NICHT zur Playlist hinzufügen
+        item.addEventListener('click', async (e) => {
+            if (!isDragging && !e.target.classList.contains('playlist-item-remove')) {
+                await loadVideoFile(videoFiles[index].path);
+            }
+        });
+        
+        // Dragstart
+        item.addEventListener('dragstart', (e) => {
+            isDragging = true;
+            draggedIndex = index;
+            draggedPlaylist = 'video';
+            item.style.opacity = '0.5';
+            e.dataTransfer.effectAllowed = 'all';
+            e.dataTransfer.setData('text/plain', index.toString());
+            e.dataTransfer.setData('application/x-playlist-item', index.toString());
+        });
+        
+        // Dragend
+        item.addEventListener('dragend', (e) => {
+            // Delay cleanup to allow drop event to fire first
+            setTimeout(() => {
+                item.style.opacity = '1';
+                container.querySelectorAll('.drop-zone').forEach(zone => zone.classList.remove('drag-over'));
+                isDragging = false;
+                draggedIndex = null;
+                draggedPlaylist = null;
+            }, 50);
+        });
+    });
+    
+    // Drop zone handlers
+    container.querySelectorAll('.drop-zone').forEach((zone) => {
+        
+        zone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer) {
+                e.dataTransfer.dropEffect = 'move';
+            }
+            zone.classList.add('drag-over');
+        });
+        
+        zone.addEventListener('dragleave', (e) => {
+            zone.classList.remove('drag-over');
+        });
+        
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.remove('drag-over');
+            
+            const dropIndex = parseInt(zone.dataset.dropIndex);
+            
+            // Check if dropping a file from file browser
+            const videoPath = e.dataTransfer.getData('video-path');
+            if (videoPath) {
+                console.log('🎯 DROP FILE from browser at index:', dropIndex, 'path:', videoPath);
+                const fileName = videoPath.split(/[/\\]/).pop();
+                const newVideo = {
+                    path: videoPath,
+                    name: fileName,
+                    id: Date.now() + Math.random()
+                };
+                videoFiles.splice(dropIndex, 0, newVideo);
+                renderVideoPlaylist();
+                console.log(`📋 Added file ${fileName} at position ${dropIndex}`);
+                return false;
+            }
+            
+            // Check if reordering within playlist
+            console.log('🎯 DROP: draggedPlaylist =', draggedPlaylist, 'draggedIndex =', draggedIndex);
+            
+            if (draggedPlaylist !== 'video' || draggedIndex === null) {
+                return;
+            }
+            
+            // Adjust drop index if dragging from before the drop position
+            let adjustedDropIndex = dropIndex;
+            if (draggedIndex < dropIndex) {
+                adjustedDropIndex--;
+            }
+            
+            if (draggedIndex !== adjustedDropIndex) {
+                const [movedItem] = videoFiles.splice(draggedIndex, 1);
+                videoFiles.splice(adjustedDropIndex, 0, movedItem);
+                renderVideoPlaylist();
+            }
+            
+            return false;
+        });
+    });
+    
+    // Sync playlist to player after rendering
+    updateVideoPlaylist().catch(err => console.error('Failed to sync video playlist:', err));
+}
+
+// Load video file WITHOUT adding to playlist (used for playlist clicks)
+window.loadVideoFile = async function(videoPath) {
+    try {
+        const response = await fetch(`${API_BASE}/api/video/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: videoPath })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentVideo = videoPath.replace(/^[\\\/]+/, '');
+            renderVideoPlaylist();
+        } else {
+            showToast(`Failed to load video: ${data.message}`, 'error');
         }
-    }, POLLING_INTERVAL);
+    } catch (error) {
+        console.error('❌ Error loading video:', error);
+        showToast('Error loading video', 'error');
+    }
+};
+
+// Load video and ADD to playlist (used for file browser drops)
+window.loadVideo = async function(videoPath) {
+    try {
+        const response = await fetch(`${API_BASE}/api/video/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: videoPath })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentVideo = videoPath.replace(/^[\\\/]+/, '');
+            
+            // Always add to playlist (allow duplicates)
+            const filename = videoPath.split('/').pop();
+            const folder = videoPath.includes('/') ? videoPath.split('/')[0] : 'root';
+            videoFiles.push({
+                filename: filename,
+                path: videoPath,
+                folder: folder,
+                name: filename,
+                id: Date.now() + Math.random() // Unique ID for each entry
+            });
+            
+            renderVideoPlaylist();
+            console.log('✅ Video loaded:', videoPath);
+        } else {
+            showToast(`Failed to load video: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error loading video:', error);
+        showToast('Error loading video', 'error');
+    }
+};
+
+window.refreshVideoPlaylist = async function() {
+    await loadVideoPlaylist();
+};
+
+window.removeFromVideoPlaylist = function(index) {
+    const video = videoFiles[index];
+    videoFiles.splice(index, 1);
     
-    // Preview info updates
-    setInterval(updatePreviewInfo, 5000);
+    // If removed video was current, clear current
+    if (currentVideo === video.path) {
+        currentVideo = null;
+    }
+    
+    renderVideoPlaylist();
+};
+
+// ========================================
+// VIDEO PLAYER CONTROLS
+// ========================================
+
+window.playVideo = async function() {
+    await fetch(`${API_BASE}/api/play`, { method: 'POST' });
+};
+
+window.pauseVideo = async function() {
+    await fetch(`${API_BASE}/api/pause`, { method: 'POST' });
+};
+
+window.stopVideo = async function() {
+    await fetch(`${API_BASE}/api/stop`, { method: 'POST' });
+};
+
+window.restartVideo = async function() {
+    await fetch(`${API_BASE}/api/restart`, { method: 'POST' });
+};
+
+window.nextVideo = async function() {
+    try {
+        const response = await fetch(`${API_BASE}/api/video/next`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentVideo = data.video;
+            renderVideoPlaylist();
+            console.log('⏭️ Next video:', data.video);
+        } else {
+            console.error('Failed to load next video:', data.message);
+        }
+    } catch (error) {
+        console.error('❌ Error loading next video:', error);
+    }
+};
+
+window.previousVideo = async function() {
+    try {
+        const response = await fetch(`${API_BASE}/api/video/previous`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentVideo = data.video;
+            renderVideoPlaylist();
+            console.log('⏮️ Previous video:', data.video);
+        } else {
+            console.error('Failed to load previous video:', data.message);
+        }
+    } catch (error) {
+        console.error('❌ Error loading previous video:', error);
+    }
+};
+
+// Autoplay & Loop Toggle für Video Player
+window.toggleVideoAutoplay = async function() {
+    videoAutoplay = !videoAutoplay;
+    const btn = document.getElementById('videoAutoplayBtn');
+    if (videoAutoplay) {
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-primary');
+        showToast('Video Autoplay aktiviert', 'success');
+    } else {
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline-primary');
+        showToast('Video Autoplay deaktiviert', 'info');
+    }
+    
+    // Update Player ZUERST - damit autoplay flag gesetzt ist
+    await updateVideoPlaylist();
+    
+    // Dann starte Wiedergabe wenn autoplay aktiviert und Playlist vorhanden
+    if (videoAutoplay && videoFiles.length > 0) {
+        const statusResponse = await fetch(`${API_BASE}/api/video/status`);
+        const statusData = await statusResponse.json();
+        if (statusData.status === 'success' && !statusData.is_playing) {
+            // Lade und starte erstes Video wenn keins läuft
+            await loadVideoFile(videoFiles[0].path);
+            await playVideo();
+            console.log('🎬 Autoplay: Starte erstes Video');
+        }
+    }
+};
+
+window.toggleVideoLoop = async function() {
+    videoLoop = !videoLoop;
+    const btn = document.getElementById('videoLoopBtn');
+    if (videoLoop) {
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-primary');
+        showToast('Video Loop aktiviert', 'success');
+    } else {
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline-primary');
+        showToast('Video Loop deaktiviert', 'info');
+    }
+    // Update Player
+    await updateVideoPlaylist();
+};
+
+// Sendet aktuelle Playlist an Video Player
+async function updateVideoPlaylist() {
+    try {
+        const response = await fetch(`${API_BASE}/api/video/playlist/set`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist: videoFiles.map(v => v.path),
+                autoplay: videoAutoplay,
+                loop: videoLoop
+            })
+        });
+        const data = await response.json();
+        // Playlist updated successfully
+    } catch (error) {
+        console.error('❌ Error updating video playlist:', error);
+    }
+}
+
+
+// ========================================
+// ART-NET PLAYLIST
+// ========================================
+
+let artnetFiles = [];
+let currentArtnet = null;
+
+async function loadArtnetPlaylist() {
+    try {
+        // Load player configuration from server
+        const response = await fetch(`${API_BASE}/api/artnet/video/status`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.playlist) {
+            // Restore playlist
+            artnetFiles = data.playlist.map(path => ({
+                name: path.split('/').pop().split('\\').pop(),
+                path: path
+            }));
+            
+            // Restore autoplay/loop state
+            artnetAutoplay = data.autoplay || false;
+            artnetLoop = data.loop || false;
+            
+            // Restore current Art-Net video
+            if (data.current_video) {
+                currentArtnet = data.current_video.replace(/^[\\\/]+/, '');
+            }
+            
+            // Update UI buttons
+            const autoplayBtn = document.getElementById('artnetAutoplayBtn');
+            const loopBtn = document.getElementById('artnetLoopBtn');
+            if (autoplayBtn) {
+                if (artnetAutoplay) {
+                    autoplayBtn.classList.remove('btn-outline-primary');
+                    autoplayBtn.classList.add('btn-primary');
+                } else {
+                    autoplayBtn.classList.remove('btn-primary');
+                    autoplayBtn.classList.add('btn-outline-primary');
+                }
+            }
+            if (loopBtn) {
+                if (artnetLoop) {
+                    loopBtn.classList.remove('btn-outline-primary');
+                    loopBtn.classList.add('btn-primary');
+                } else {
+                    loopBtn.classList.remove('btn-primary');
+                    loopBtn.classList.add('btn-outline-primary');
+                }
+            }
+            
+            // Art-Net playlist loaded successfully
+        } else {
+            // Start with empty playlist
+            artnetFiles = [];
+        }
+    } catch (error) {
+        console.error('❌ Failed to load Art-Net playlist:', error);
+        artnetFiles = [];
+    }
+    
+    renderArtnetPlaylist();
+}
+
+function renderArtnetPlaylist() {
+    const container = document.getElementById('artnetPlaylist');
+    
+    if (artnetFiles.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" style="width: 100%; padding: 2rem; text-align: center;">
+                <div style="font-size: 2rem; margin-bottom: 0.5rem;">📂</div>
+                <p style="margin: 0.5rem 0;">Playlist leer</p>
+                <small style="color: var(--text-secondary, #999);">Drag & Drop aus Files Tab</small>
+            </div>
+        `;
+        return;
+    }
+    
+    // Build HTML with drop zones between items
+    let html = '';
+    artnetFiles.forEach((video, index) => {
+        // Normalisiere Pfade für Vergleich (entferne führende Slashes)
+        const normalizedVideoPath = video.path.replace(/^[\\\/]+/, '');
+        const normalizedCurrent = currentArtnet ? currentArtnet.replace(/^[\\\/]+/, '') : null;
+        const isActive = normalizedCurrent === normalizedVideoPath;
+        
+        // Drop zone before item
+        html += `<div class="drop-zone" data-drop-index="${index}" data-playlist="artnet"></div>`;
+        
+        // Playlist item
+        html += `
+            <div class="playlist-item ${isActive ? 'active' : ''}" 
+                 data-artnet-index="${index}"
+                 data-playlist="artnet"
+                 draggable="true">
+                <div class="playlist-item-name">${video.name}</div>
+                <button class="playlist-item-remove" onclick="removeFromArtnetPlaylist(${index}); event.stopPropagation();" title="Remove from playlist">×</button>
+            </div>
+        `;
+    });
+    
+    // Drop zone at the end
+    html += `<div class="drop-zone" data-drop-index="${artnetFiles.length}" data-playlist="artnet"></div>`;
+    
+    container.innerHTML = html;
+    
+    // Add event handlers after rendering
+    let isDragging = false;
+    
+    // Playlist item handlers (click and dragstart)
+    container.querySelectorAll('.playlist-item').forEach((item) => {
+        const index = parseInt(item.dataset.artnetIndex);
+        
+        // Click handler - nur abspielen, NICHT zur Playlist hinzufügen
+        item.addEventListener('click', async (e) => {
+            if (!isDragging && !e.target.classList.contains('playlist-item-remove')) {
+                await loadArtnetFile(artnetFiles[index].path);
+            }
+        });
+        
+        // Dragstart
+        item.addEventListener('dragstart', (e) => {
+            isDragging = true;
+            draggedIndex = index;
+            draggedPlaylist = 'artnet';
+            item.style.opacity = '0.5';
+            e.dataTransfer.effectAllowed = 'all';
+            e.dataTransfer.setData('text/plain', index.toString());
+            e.dataTransfer.setData('application/x-playlist-item', index.toString());
+            console.log('🎯 ARTNET DRAGSTART: draggedIndex =', draggedIndex);
+        });
+        
+        // Dragend
+        item.addEventListener('dragend', (e) => {
+            console.log('🎯 ARTNET DRAGEND');
+            // Delay cleanup to allow drop event to fire first
+            setTimeout(() => {
+                item.style.opacity = '1';
+                container.querySelectorAll('.drop-zone').forEach(zone => zone.classList.remove('drag-over'));
+                isDragging = false;
+                draggedIndex = null;
+                draggedPlaylist = null;
+            }, 50);
+        });
+    });
+    
+    // Drop zone handlers
+    container.querySelectorAll('.drop-zone').forEach((zone) => {
+        
+        zone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer) {
+                e.dataTransfer.dropEffect = 'move';
+            }
+            zone.classList.add('drag-over');
+        });
+        
+        zone.addEventListener('dragleave', (e) => {
+            zone.classList.remove('drag-over');
+        });
+        
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.remove('drag-over');
+            
+            const dropIndex = parseInt(zone.dataset.dropIndex);
+            
+            // Check if dropping a file from file browser
+            const videoPath = e.dataTransfer.getData('video-path');
+            if (videoPath) {
+                console.log('🎯 ARTNET DROP FILE from browser at index:', dropIndex, 'path:', videoPath);
+                const fileName = videoPath.split(/[/\\]/).pop();
+                const newVideo = {
+                    path: videoPath,
+                    name: fileName,
+                    id: Date.now() + Math.random()
+                };
+                artnetFiles.splice(dropIndex, 0, newVideo);
+                renderArtnetPlaylist();
+                console.log(`📋 Added file ${fileName} at position ${dropIndex}`);
+                return false;
+            }
+            
+            // Check if reordering within playlist
+            console.log('🎯 ARTNET DROP: draggedPlaylist =', draggedPlaylist, 'draggedIndex =', draggedIndex);
+            
+            if (draggedPlaylist !== 'artnet' || draggedIndex === null) {
+                console.log('🎯 ARTNET DROP: REJECTED - wrong playlist or null index');
+                return;
+            }
+            
+            console.log('🎯 ARTNET DROP: draggedIndex =', draggedIndex, 'dropIndex =', dropIndex);
+            console.log('🎯 ARTNET DROP: artnetFiles before =', artnetFiles.map((v, i) => `${i}:${v.name}`));
+            
+            // Adjust drop index if dragging from before the drop position
+            let adjustedDropIndex = dropIndex;
+            if (draggedIndex < dropIndex) {
+                adjustedDropIndex--;
+            }
+            
+            if (draggedIndex !== adjustedDropIndex) {
+                const [movedItem] = artnetFiles.splice(draggedIndex, 1);
+                artnetFiles.splice(adjustedDropIndex, 0, movedItem);
+                renderArtnetPlaylist();
+            }
+            
+            return false;
+        });
+    });
+    
+    // Sync playlist to player after rendering
+    updateArtnetPlaylist().catch(err => console.error('Failed to sync artnet playlist:', err));
+}
+
+// Load Art-Net video file WITHOUT adding to playlist (used for playlist clicks)
+window.loadArtnetFile = async function(videoPath) {
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/video/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: videoPath })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentArtnet = videoPath.replace(/^[\\\/]+/, '');
+            renderArtnetPlaylist();
+        } else {
+            showToast(`Failed to load Art-Net video: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error loading Art-Net video:', error);
+        showToast('Error loading Art-Net video', 'error');
+    }
+};
+
+// Load Art-Net video and ADD to playlist (used for file browser drops)
+window.loadArtnetVideo = async function(videoPath) {
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/video/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: videoPath })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentArtnet = videoPath.replace(/^[\\\/]+/, '');
+            
+            // Always add to playlist (allow duplicates)
+            const filename = videoPath.split('/').pop();
+            const folder = videoPath.includes('/') ? videoPath.split('/')[0] : 'root';
+            artnetFiles.push({
+                filename: filename,
+                path: videoPath,
+                folder: folder,
+                name: filename,
+                id: Date.now() + Math.random() // Unique ID for each entry
+            });
+            
+            renderArtnetPlaylist();
+        } else {
+            showToast(`Failed to load Art-Net video: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error loading Art-Net video:', error);
+        showToast('Error loading Art-Net video', 'error');
+    }
+};
+
+window.refreshArtnetPlaylist = async function() {
+    await loadArtnetPlaylist();
+};
+
+window.removeFromArtnetPlaylist = function(index) {
+    const video = artnetFiles[index];
+    artnetFiles.splice(index, 1);
+    
+    // If removed video was current, clear current
+    if (currentArtnet === video.path) {
+        currentArtnet = null;
+    }
+    
+    renderArtnetPlaylist();
+};
+
+function startArtnetPreviewStream() {
+    const previewImg = document.getElementById('artnetPreviewImg');
+    
+    // Use separate Art-Net preview endpoint
+    previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+    setInterval(() => {
+        previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+    }, 100);
+}
+
+window.openArtnetFullscreen = function() {
+    window.open('/fullscreen', 'Art-Net Fullscreen', 'width=1920,height=1080');
+};
+
+// ========================================
+// ART-NET PLAYER CONTROLS
+// ========================================
+
+window.playArtnet = async function() {
+    await fetch(`${API_BASE}/api/artnet/play`, { method: 'POST' });
+};
+
+window.pauseArtnet = async function() {
+    await fetch(`${API_BASE}/api/artnet/pause`, { method: 'POST' });
+};
+
+window.stopArtnet = async function() {
+    await fetch(`${API_BASE}/api/artnet/stop`, { method: 'POST' });
+};
+
+window.restartArtnet = async function() {
+    await fetch(`${API_BASE}/api/artnet/restart`, { method: 'POST' });
+};
+
+window.nextArtnet = async function() {
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/video/next`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentArtnet = data.video;
+            renderArtnetPlaylist();
+            console.log('⏭️ Next Art-Net video:', data.video);
+        } else {
+            console.error('Failed to load next Art-Net video:', data.message);
+        }
+    } catch (error) {
+        console.error('❌ Error loading next Art-Net video:', error);
+    }
+};
+
+window.previousArtnet = async function() {
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/video/previous`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            currentArtnet = data.video;
+            renderArtnetPlaylist();
+            console.log('⏮️ Previous Art-Net video:', data.video);
+        } else {
+            console.error('Failed to load previous Art-Net video:', data.message);
+        }
+    } catch (error) {
+        console.error('❌ Error loading previous Art-Net video:', error);
+    }
+};
+
+// Autoplay & Loop Toggle für Art-Net Player
+window.toggleArtnetAutoplay = async function() {
+    artnetAutoplay = !artnetAutoplay;
+    const btn = document.getElementById('artnetAutoplayBtn');
+    if (artnetAutoplay) {
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-primary');
+        showToast('Art-Net Autoplay aktiviert', 'success');
+    } else {
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline-primary');
+        showToast('Art-Net Autoplay deaktiviert', 'info');
+    }
+    
+    // Update Player ZUERST - damit autoplay flag gesetzt ist
+    await updateArtnetPlaylist();
+    
+    // Dann starte Wiedergabe wenn autoplay aktiviert und Playlist vorhanden
+    if (artnetAutoplay && artnetFiles.length > 0) {
+        const statusResponse = await fetch(`${API_BASE}/api/artnet/video/status`);
+        const statusData = await statusResponse.json();
+        if (statusData.status === 'success' && !statusData.is_playing) {
+            // Lade und starte erstes Video wenn keins läuft
+            await loadArtnetFile(artnetFiles[0].path);
+            await playArtnet();
+            console.log('🎬 Art-Net Autoplay: Starte erstes Video');
+        }
+    }
+};
+
+window.toggleArtnetLoop = async function() {
+    artnetLoop = !artnetLoop;
+    const btn = document.getElementById('artnetLoopBtn');
+    if (artnetLoop) {
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-primary');
+        showToast('Art-Net Loop aktiviert', 'success');
+    } else {
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline-primary');
+        showToast('Art-Net Loop deaktiviert', 'info');
+    }
+    // Update Player
+    await updateArtnetPlaylist();
+};
+
+// Sendet aktuelle Playlist an Art-Net Player
+async function updateArtnetPlaylist() {
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/video/playlist/set`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist: artnetFiles.map(v => v.path),
+                autoplay: artnetAutoplay,
+                loop: artnetLoop
+            })
+        });
+        const data = await response.json();
+        // Art-Net playlist updated successfully
+    } catch (error) {
+        console.error('❌ Error updating Art-Net playlist:', error);
+    }
+}
+
+// ========================================
+// VIDEO FX MANAGEMENT
+// ========================================
+
+window.addEffectToVideo = async function(pluginId) {
+    try {
+        const response = await fetch(`${API_BASE}/api/player/effects/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plugin_id: pluginId })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            console.log('✅ Effect added to video:', pluginId);
+            await refreshVideoEffects();
+        } else {
+            const errorMsg = data.error || data.message || 'Unknown error';
+            console.error('❌ Failed to add effect:', errorMsg);
+            showToast(`Failed to add effect: ${errorMsg}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error adding effect:', error);
+        showToast('Error adding effect', 'error');
+    }
+};
+
+async function refreshVideoEffects() {
+    try {
+        const response = await fetch(`${API_BASE}/api/player/effects`);
+        const data = await response.json();
+        
+        if (data.success) {
+            videoEffects = data.effects;
+            renderVideoEffects();
+        }
+    } catch (error) {
+        console.error('❌ Error refreshing video effects:', error);
+    }
+}
+
+function renderVideoEffects() {
+    const container = document.getElementById('videoFxList');
+    
+    // Save expanded states before rerender
+    const expandedStates = new Set();
+    container.querySelectorAll('.effect-item.expanded').forEach(item => {
+        expandedStates.add(item.id);
+    });
+    
+    if (videoEffects.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">✨</div>
+                <h6>No Effects</h6>
+                <p>Add effects from the left panel</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = videoEffects.map((effect, index) => 
+        renderEffectItem(effect, index, 'video')
+    ).join('');
+    
+    // Restore expanded states after rerender
+    expandedStates.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.classList.add('expanded');
+        }
+    });
+}
+
+let clearVideoEffectsClicks = 0;
+let clearVideoEffectsTimer = null;
+
+window.clearVideoEffects = async function() {
+    clearVideoEffectsClicks++;
+    
+    if (clearVideoEffectsClicks === 1) {
+        showToast('Click again to confirm clearing all video effects', 'warning');
+        clearVideoEffectsTimer = setTimeout(() => {
+            clearVideoEffectsClicks = 0;
+        }, 3000);
+        return;
+    }
+    
+    // Second click - clear effects
+    clearTimeout(clearVideoEffectsTimer);
+    clearVideoEffectsClicks = 0;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/player/effects/clear`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Video effects cleared', 'success');
+            await refreshVideoEffects();
+        }
+    } catch (error) {
+        console.error('❌ Error clearing effects:', error);
+        showToast('Error clearing video effects', 'error');
+    }
+};
+
+// ========================================
+// ART-NET FX MANAGEMENT
+// ========================================
+
+window.addEffectToArtnet = async function(pluginId) {
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/effects/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plugin_id: pluginId })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            console.log('✅ Effect added to Art-Net:', pluginId);
+            await refreshArtnetEffects();
+        } else {
+            const errorMsg = data.error || data.message || 'Unknown error';
+            console.error('❌ Failed to add Art-Net effect:', errorMsg);
+            showToast(`Failed to add effect: ${errorMsg}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error adding Art-Net effect:', error);
+        showToast('Error adding Art-Net effect', 'error');
+    }
+};
+
+async function refreshArtnetEffects() {
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/effects`);
+        const data = await response.json();
+        
+        if (data.success) {
+            artnetEffects = data.effects || [];
+            renderArtnetEffects();
+        }
+    } catch (error) {
+        console.error('❌ Error loading Art-Net effects:', error);
+        artnetEffects = [];
+        renderArtnetEffects();
+    }
+}
+
+function renderArtnetEffects() {
+    const container = document.getElementById('artnetFxList');
+    
+    // Save expanded states before rerender
+    const expandedStates = new Set();
+    container.querySelectorAll('.effect-item.expanded').forEach(item => {
+        expandedStates.add(item.id);
+    });
+    
+    if (artnetEffects.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">✨</div>
+                <h6>No Effects</h6>
+                <p>Add effects from the left panel</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = artnetEffects.map((effect, index) => 
+        renderEffectItem(effect, index, 'artnet')
+    ).join('');
+    
+    // Restore expanded states after rerender
+    expandedStates.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.classList.add('expanded');
+        }
+    });
+}
+
+let clearArtnetEffectsClicks = 0;
+let clearArtnetEffectsTimer = null;
+
+window.clearArtnetEffects = async function() {
+    clearArtnetEffectsClicks++;
+    
+    if (clearArtnetEffectsClicks === 1) {
+        showToast('Click again to confirm clearing all Art-Net effects', 'warning');
+        clearArtnetEffectsTimer = setTimeout(() => {
+            clearArtnetEffectsClicks = 0;
+        }, 3000);
+        return;
+    }
+    
+    // Second click - clear effects
+    clearTimeout(clearArtnetEffectsTimer);
+    clearArtnetEffectsClicks = 0;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/artnet/effects/clear`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Art-Net effects cleared', 'success');
+            await refreshArtnetEffects();
+        }
+    } catch (error) {
+        console.error('❌ Error clearing Art-Net effects:', error);
+        showToast('Error clearing Art-Net effects', 'error');
+    }
+};
+
+// ========================================
+// EFFECT RENDERING
+// ========================================
+
+function renderEffectItem(effect, index, player) {
+    const metadata = effect.metadata || {};
+    const parameters = metadata.parameters || [];
+    
+    // Debug: Log effect data
+    if (parameters.length === 0) {
+        console.warn(`⚠️ Effect "${metadata.name || effect.plugin_id}" has no parameters:`, effect);
+    }
+    
+    return `
+        <div class="effect-item" id="${player}-effect-${index}">
+            <div class="effect-header" onclick="toggleEffect('${player}', ${index}, event)">
+                <div class="effect-title">
+                    <span class="effect-toggle"></span>
+                    <span>${metadata.name || effect.plugin_id}</span>
+                </div>
+                <div class="effect-actions">
+                    <button class="btn btn-sm btn-danger btn-icon" onclick="event.stopPropagation(); removeEffect('${player}', ${index})">🗑️</button>
+                </div>
+            </div>
+            <div class="effect-body">
+                ${parameters.length > 0 ? 
+                    parameters.map(param => renderParameterControl(param, effect.parameters[param.name], index, player)).join('') :
+                    '<p class="text-muted">No configurable parameters</p>'
+                }
+            </div>
+        </div>
+    `;
+}
+
+window.toggleEffect = function(player, index, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    const element = document.getElementById(`${player}-effect-${index}`);
+    if (element) {
+        element.classList.toggle('expanded');
+    }
+};
+
+window.removeEffect = async function(player, index) {
+    try {
+        const endpoint = player === 'video' 
+            ? `${API_BASE}/api/player/effects/${index}`
+            : `${API_BASE}/api/artnet/effects/remove/${index}`;
+        
+        const response = await fetch(endpoint, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log(`✅ ${player} effect removed:`, index);
+            if (player === 'video') {
+                await refreshVideoEffects();
+            } else {
+                await refreshArtnetEffects();
+            }
+        }
+    } catch (error) {
+        console.error(`❌ Error removing ${player} effect:`, error);
+    }
+};
+
+// ========================================
+// PARAMETER CONTROLS
+// ========================================
+
+function renderParameterControl(param, currentValue, effectIndex, player) {
+    const value = currentValue !== undefined ? currentValue : param.default;
+    const controlId = `${player}_effect_${effectIndex}_${param.name}`;
+    
+    const paramType = (param.type || '').toUpperCase();
+    
+    let control = '';
+    
+    switch (paramType) {
+        case 'FLOAT':
+        case 'INT':
+            const step = paramType === 'INT' ? 1 : 0.1;
+            control = `
+                <div class="parameter-control">
+                    <div class="parameter-label">
+                        <label for="${controlId}">${param.name}</label>
+                        <span class="parameter-value" id="${controlId}_value">${value}</span>
+                    </div>
+                    <input 
+                        type="range" 
+                        class="form-range" 
+                        id="${controlId}"
+                        min="${param.min || 0}" 
+                        max="${param.max || 100}" 
+                        step="${step}"
+                        value="${value}"
+                        oninput="updateParameter('${player}', ${effectIndex}, '${param.name}', parseFloat(this.value), '${controlId}_value')"
+                    >
+                </div>
+            `;
+            break;
+            
+        case 'BOOL':
+            control = `
+                <div class="parameter-control">
+                    <div class="form-check form-switch">
+                        <input 
+                            class="form-check-input" 
+                            type="checkbox" 
+                            id="${controlId}"
+                            ${value ? 'checked' : ''}
+                            onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.checked)"
+                        >
+                        <label class="form-check-label" for="${controlId}">
+                            ${param.name}
+                        </label>
+                    </div>
+                </div>
+            `;
+            break;
+            
+        default:
+            control = `<p class="text-warning">Unknown parameter type: ${param.type}</p>`;
+    }
+    
+    return control;
+}
+
+window.updateParameter = async function(player, effectIndex, paramName, value, valueDisplayId = null) {
+    try {
+        if (valueDisplayId) {
+            document.getElementById(valueDisplayId).textContent = value;
+        }
+        
+        const endpoint = player === 'video'
+            ? `${API_BASE}/api/player/effects/${effectIndex}/parameters/${paramName}`
+            : `${API_BASE}/api/artnet/effects/${effectIndex}/parameter`;
+        
+        const body = player === 'video'
+            ? { value: value }
+            : { name: paramName, value: value };
+        
+        const method = player === 'video' ? 'POST' : 'PUT';
+        
+        const response = await fetch(endpoint, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log(`✅ Updated ${player} ${paramName} = ${value}`);
+        }
+    } catch (error) {
+        console.error(`❌ Error updating ${player} parameter:`, error);
+    }
+};
+
+// ========================================
+// FILE BROWSER
+// ========================================
+
+async function loadFileBrowser() {
+    try {
+        const response = await fetch(`${API_BASE}/api/files/tree`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            renderFileTree(data.tree);
+        }
+    } catch (error) {
+        console.error('❌ Error loading file browser:', error);
+    }
+}
+
+function renderFileTree(tree, container = null, level = 0) {
+    if (!container) {
+        container = document.getElementById('fileBrowser');
+        container.innerHTML = '<div class="file-tree"></div>';
+        container = container.querySelector('.file-tree');
+    }
+    
+    tree.forEach(item => {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'file-item';
+        itemDiv.style.paddingLeft = `${level * 20 + 8}px`;
+        
+        if (item.type === 'folder') {
+            itemDiv.innerHTML = `
+                <div class="file-item-content folder" onclick="toggleFolder(this)">
+                    <span class="folder-icon">📁</span>
+                    <span class="file-name">${item.name}</span>
+                    <span class="folder-toggle">▶</span>
+                </div>
+                <div class="folder-children" style="display: none;"></div>
+            `;
+            container.appendChild(itemDiv);
+            
+            // Recursively render children
+            const childContainer = itemDiv.querySelector('.folder-children');
+            if (item.children && item.children.length > 0) {
+                renderFileTree(item.children, childContainer, level + 1);
+            }
+        } else {
+            itemDiv.innerHTML = `
+                <div class="file-item-content video" 
+                     draggable="true"
+                     ondragstart="startVideoDrag(event, '${item.path}')"
+                     title="${item.size_human}">
+                    <span class="file-icon">🎬</span>
+                    <span class="file-name">${item.name}</span>
+                    <span class="file-size">${item.size_human}</span>
+                </div>
+            `;
+            container.appendChild(itemDiv);
+        }
+    });
+}
+
+window.toggleFolder = function(element) {
+    const parent = element.parentElement;
+    const children = parent.querySelector('.folder-children');
+    const toggle = element.querySelector('.folder-toggle');
+    
+    if (children.style.display === 'none') {
+        children.style.display = 'block';
+        toggle.textContent = '▼';
+    } else {
+        children.style.display = 'none';
+        toggle.textContent = '▶';
+    }
+};
+
+window.startVideoDrag = function(event, videoPath) {
+    event.dataTransfer.setData('video-path', videoPath);
+    event.dataTransfer.effectAllowed = 'copy';
+};
+
+// ========================================
+// DRAG & DROP STATE
+// ========================================
+
+let draggedIndex = null;
+let draggedPlaylist = null;
+
+// ========================================
+// DRAG & DROP FOR PLAYLISTS
+// ========================================
+
+// Make playlists drop targets
+document.addEventListener('DOMContentLoaded', () => {
+    // Load file browser when tab is activated
+    document.querySelector('[onclick*="files"]').addEventListener('click', loadFileBrowser);
+    
+    const videoPlaylist = document.getElementById('videoPlaylist');
+    const artnetPlaylist = document.getElementById('artnetPlaylist');
+    
+    [videoPlaylist, artnetPlaylist].forEach(playlist => {
+        playlist.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            playlist.classList.add('drag-over');
+        });
+        
+        playlist.addEventListener('dragleave', (e) => {
+            playlist.classList.remove('drag-over');
+        });
+        
+        playlist.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            playlist.classList.remove('drag-over');
+            
+            const videoPath = e.dataTransfer.getData('video-path');
+            if (!videoPath) return;
+            
+            const isArtnet = playlist.id === 'artnetPlaylist';
+            
+            if (isArtnet) {
+                await loadArtnetVideo(videoPath);
+            } else {
+                await loadVideo(videoPath);
+            }
+        });
+    });
+});
+
+window.dragStart = function(event, effectId) {
+    event.dataTransfer.setData('effect-id', effectId);
+};
+
+// ========================================
+// PLAYLIST PERSISTENCE
+// ========================================
+
+window.savePlaylists = async function() {
+    const name = prompt('Playlist Name:', `playlist_${new Date().toISOString().slice(0, 10)}`);
+    if (!name) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/playlist/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                video_playlist: videoFiles,
+                artnet_playlist: artnetFiles
+            })
+        });
+        
+        const data = await response.json();
+        if (data.status === 'success') {
+            showToast(`Playlists "${name}" saved (Video: ${data.video_count}, Art-Net: ${data.artnet_count})`, 'success');
+        } else {
+            showToast(`Failed to save playlists: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error saving playlists:', error);
+        showToast('Error saving playlists', 'error');
+    }
+};
+
+window.refreshPlaylistModal = async function() {
+    try {
+        // Get list of available playlists
+        const response = await fetch(`${API_BASE}/api/playlists`);
+        const data = await response.json();
+        
+        const modalBody = document.getElementById('playlistModalBody');
+        
+        if (data.status !== 'success' || !data.playlists || data.playlists.length === 0) {
+            modalBody.innerHTML = `
+                <div class="text-center">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
+                    <p>No saved playlists found</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Build playlist selection list
+        let html = '<div class="list-group">';
+        data.playlists.forEach((playlist, index) => {
+            const date = new Date(playlist.created).toLocaleDateString('de-DE', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            const videoCount = playlist.video_count || 0;
+            const artnetCount = playlist.artnet_count || 0;
+            
+            html += `
+                <div class="list-group-item" 
+                     style="background: var(--bg-tertiary, #333); color: var(--text-primary, #e0e0e0); border: 1px solid var(--border-color, #444); margin-bottom: 0.5rem; border-radius: 4px; padding: 0;">
+                    <div class="d-flex">
+                        <button type="button" 
+                                class="flex-grow-1 btn text-start p-3" 
+                                style="background: none; border: none; color: inherit;"
+                                onclick="selectPlaylist('${playlist.name}')">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">${playlist.name}</h6>
+                                <small>${date}</small>
+                            </div>
+                            <p class="mb-0">
+                                <span class="badge bg-primary">Video: ${videoCount}</span>
+                                <span class="badge bg-info">Art-Net: ${artnetCount}</span>
+                            </p>
+                        </button>
+                        <button type="button" 
+                                class="btn btn-danger" 
+                                style="border-radius: 0 4px 4px 0; min-width: 60px;"
+                                onclick="deletePlaylist('${playlist.name}', event)"
+                                title="Playlist löschen">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+        
+        modalBody.innerHTML = html;
+        
+    } catch (error) {
+        console.error('❌ Error refreshing playlists:', error);
+        showToast('Error loading playlists', 'error');
+    }
+};
+
+window.loadPlaylists = async function() {
+    try {
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('playlistModal'));
+        modal.show();
+        
+        // Load playlist list
+        await refreshPlaylistModal();
+        
+    } catch (error) {
+        console.error('❌ Error loading playlists:', error);
+        showToast('Error loading playlists', 'error');
+        bootstrap.Modal.getInstance(document.getElementById('playlistModal'))?.hide();
+    }
+};
+
+window.selectPlaylist = async function(playlistName) {
+    try {
+        console.log('🎯 Loading playlist:', playlistName);
+        
+        // Load the playlist
+        const loadResponse = await fetch(`${API_BASE}/api/playlist/load/${playlistName}`);
+        const loadData = await loadResponse.json();
+        
+        console.log('🎯 Playlist data received:', loadData);
+        
+        if (loadData.status === 'success') {
+            // Load both playlists
+            videoFiles = loadData.playlist.video_playlist || loadData.playlist.videos || [];
+            artnetFiles = loadData.playlist.artnet_playlist || [];
+            
+            console.log('🎯 Video files:', videoFiles.length);
+            console.log('🎯 Art-Net files:', artnetFiles.length);
+            
+            renderVideoPlaylist();
+            renderArtnetPlaylist();
+            
+            showToast(`Playlists "${playlistName}" loaded (Video: ${videoFiles.length}, Art-Net: ${artnetFiles.length})`, 'success');
+            
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('playlistModal')).hide();
+        } else {
+            showToast(`Failed to load playlists: ${loadData.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error selecting playlist:', error);
+        showToast('Error loading playlist', 'error');
+    }
+};
+
+window.deletePlaylist = async function(playlistName, event) {
+    event.stopPropagation(); // Prevent triggering the load action
+    
+    // Change button text to confirm
+    const button = event.target;
+    const originalText = button.innerHTML;
+    const originalOnclick = button.onclick;
+    
+    button.innerHTML = '✓ Confirm';
+    button.classList.remove('btn-danger');
+    button.classList.add('btn-warning');
+    
+    // Reset after 3 seconds
+    const resetTimer = setTimeout(() => {
+        button.innerHTML = originalText;
+        button.classList.remove('btn-warning');
+        button.classList.add('btn-danger');
+        button.onclick = originalOnclick;
+    }, 3000);
+    
+    // If clicked again within 3 seconds, actually delete
+    button.onclick = async (e) => {
+        e.stopPropagation();
+        clearTimeout(resetTimer);
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/playlist/delete/${playlistName}`, {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                showToast(`Playlist "${playlistName}" gelöscht`, 'success');
+                // Refresh the playlist list without closing modal
+                await refreshPlaylistModal();
+            } else {
+                showToast(`Fehler beim Löschen: ${data.message}`, 'error');
+                // Reset button on error
+                button.innerHTML = originalText;
+                button.classList.remove('btn-warning');
+                button.classList.add('btn-danger');
+                button.onclick = originalOnclick;
+            }
+        } catch (error) {
+            console.error('❌ Error deleting playlist:', error);
+            showToast('Fehler beim Löschen der Playlist', 'error');
+            // Reset button on error
+            button.innerHTML = originalText;
+            button.classList.remove('btn-warning');
+            button.classList.add('btn-danger');
+            button.onclick = originalOnclick;
+        }
+    };
+};
+
+// Cleanup
+window.addEventListener('beforeunload', () => {
+    if (updateInterval) {
+        clearInterval(updateInterval);
+    }
 });

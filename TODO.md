@@ -305,17 +305,17 @@
 ### 🎨 Video-Effekt-Bibliothek (Plugin-basiert)
 - [ ] **Basis-Effekte (leicht implementierbar mit OpenCV/NumPy)**
   - **Farb-Manipulation (2-4h):**
-    - [ ] AddSubtract - RGB-Werte addieren/subtrahieren
-    - [ ] Brightness/Contrast - Basic Helligkeits-/Kontraststeuerung (bereits geplant)
-    - [ ] Colorize - Einfärben mit Hue-Beibehaltung der Luminanz
-    - [ ] Tint - Bild mit Basisfarbe einfärben (z.B. Rot-Tint: Bild × [1.0, 0.5, 0.5])
-    - [ ] Hue Rotate - Hue-Verschiebung auf HSV
-    - [ ] Invert RGB - Kanal-weise Invertierung
-    - [ ] Saturation - Entsättigung zu Greyscale
-    - [ ] Exposure - Exposure-Kurve (cv2.LUT)
-    - [ ] Levels - Input/Output Levels (cv2.normalize)
-    - [ ] Posterize - Farbreduktion (bit-shift)
-    - [ ] Threshold - 2-Farben-Bild (cv2.threshold)
+    - [x] AddSubtract - RGB-Werte addieren/subtrahieren
+    - [x] Brightness/Contrast - Basic Helligkeits-/Kontraststeuerung
+    - [x] Colorize - Einfärben mit Hue-Beibehaltung der Luminanz
+    - [x] Tint - Bild mit Basisfarbe einfärben (z.B. Rot-Tint: Bild × [1.0, 0.5, 0.5])
+    - [x] Hue Rotate - Hue-Verschiebung auf HSV
+    - [x] Invert RGB - Kanal-weise Invertierung
+    - [x] Saturation - Entsättigung zu Greyscale
+    - [x] Exposure - Exposure-Kurve (cv2.LUT)
+    - [x] Levels - Input/Output Levels (cv2.normalize)
+    - [x] Posterize - Farbreduktion (bit-shift)
+    - [x] Threshold - 2-Farben-Bild (cv2.threshold)
   - **Geometrie & Transform (3-5h):**
     - [ ] Flip - Horizontal/Vertikal spiegeln (cv2.flip)
     - [ ] Mirror - Spiegel an X/Y-Position
@@ -338,11 +338,11 @@
     - [ ] Vignette - Radiales Fade zu Schwarz (Gaußsche Maske)
     - [ ] Drop Shadow - Schatten für transparente Clips (cv2.filter2D)
   - **Time & Motion (2-3h):**
-    - [ ] Trails - Ghost-Trails (Frame-Blending mit Deque)
-    - [ ] Stop Motion - Frame-Hold mit Frequenz
-    - [ ] Delay RGB - RGB-Kanal-Verzögerung (Frame-Buffer)
-    - [ ] Freeze - Frame einfrieren (statisch oder partiell)
-    - [ ] Strobe - Alternierend blank frames
+    - [x] Trails - Ghost-Trails (Frame-Blending mit Deque)
+    - [x] Stop Motion - Frame-Hold mit Frequenz
+    - [x] Delay RGB - RGB-Kanal-Verzögerung (Frame-Buffer)
+    - [x] Freeze - Frame einfrieren (statisch oder partiell)
+    - [x] Strobe - Alternierend blank frames
   - **Glitch & Noise (2-3h):**
     - [ ] Shift Glitch - Zufälliges horizontales Shifting
     - [ ] Distortion - TV-Glitch-Effekt (Zeilen-Verschiebung)
