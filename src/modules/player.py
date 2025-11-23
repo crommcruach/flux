@@ -523,13 +523,17 @@ class Player:
         """
         try:
             # Lade Plugin-Instanz
+            logger.debug(f"Loading plugin '{plugin_id}' with config: {config}")
             plugin_instance = self.plugin_manager.load_plugin(plugin_id, config)
             if not plugin_instance:
                 return False, f"Plugin '{plugin_id}' konnte nicht geladen werden"
             
             # Prüfe ob es ein EFFECT-Plugin ist
+            from plugins import PluginType
             plugin_type = plugin_instance.METADATA.get('type')
-            if plugin_type != 'effect':
+            logger.debug(f"Plugin '{plugin_id}' type: {plugin_type} (expected: {PluginType.EFFECT})")
+            
+            if plugin_type != PluginType.EFFECT:
                 return False, f"Plugin '{plugin_id}' ist kein EFFECT-Plugin (type={plugin_type})"
             
             # Füge zur Effect Chain hinzu
@@ -543,7 +547,9 @@ class Player:
             return True, f"Effect '{plugin_id}' added to chain"
             
         except Exception as e:
+            import traceback
             logger.error(f"❌ Fehler beim Hinzufügen von Effect '{plugin_id}': {e}")
+            logger.error(traceback.format_exc())
             return False, str(e)
     
     def remove_effect(self, index):
