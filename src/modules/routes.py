@@ -61,6 +61,11 @@ def register_web_routes(app, config=None):
         """Serve the configuration panel."""
         return send_from_directory(app.static_folder, 'config.html')
     
+    @app.route('/effects')
+    def effects():
+        """Serve the effects panel."""
+        return send_from_directory(app.static_folder, 'effects.html')
+    
     # ========================================
     # STATISCHE DATEIEN
     # ========================================
