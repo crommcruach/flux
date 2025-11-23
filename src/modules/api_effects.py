@@ -46,9 +46,7 @@ def register_effects_api(app, player_manager):
             400: {success: false, message: "..."}
             404: {error: "No active player"}
         """
-        from .player_manager import PlayerManager
-        player_manager = PlayerManager.get_instance()
-        player = player_manager.get_active_player()
+        player = player_manager.player
         
         if not player:
             return jsonify({'error': 'No active player'}), 404
