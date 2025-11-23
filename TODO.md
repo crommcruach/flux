@@ -4,6 +4,30 @@
 
 ### 🔌 Plugin-System (Vorbereitung für Sequenzer)
 ### 🎥 Player & Video System
+- [ ] **NEU: Effect-Profile/Presets für einzelne Videos (Konzept 2025-11-24)**
+  - **Grundidee:** Vordefinierte Effect-Kombinationen die einzelnen Videos zugewiesen werden können
+  - **Features:**
+    - Named Presets mit Effect-Konfigurationen (z.B. "psychedelic", "glitch", "vintage")
+    - Per-Video Preset-Zuweisung in Playlist
+    - Preset-Manager API (create, update, delete, list)
+    - Import/Export von Preset-Bibliotheken (JSON)
+    - Live-Switching zwischen Presets während Playback
+  - **Architektur:**
+    - Preset-Speicherung: `data/effect_presets.json`
+    - Playlist erweitert: `{'path': 'video.mp4', 'preset': 'psychedelic'}`
+    - Player lädt Effect-Chain automatisch beim Video-Wechsel
+    - API-Endpoints: `/api/presets/*` (CRUD operations)
+  - **Use-Cases:**
+    - Konsistente Effect-Styles über mehrere Videos
+    - Schnelles Experimentieren mit Effect-Kombinationen
+    - Preset-Bibliotheken für verschiedene Events/Shows
+    - Community-Sharing von Effect-Setups
+  - **Implementierung:**
+    - Phase 1: Preset-Manager Modul (CRUD, Speicherung)
+    - Phase 2: Player Integration (Auto-Load beim Video-Wechsel)
+    - Phase 3: API-Endpoints (Preset-Management)
+    - Phase 4: UI-Integration (Preset-Selector, Editor)
+
 - [ ] **MITTEL: Dual-Source Player - Separate Preview & ArtNet Ausgaben (Konzept 2025-11-23)**
   - **Grundidee:** Zwei unabhängige Video-Quellen gleichzeitig abspielen
     - **Preview-Ausgabe:** Volle Auflösung mit Layern, Effekten, Overlays (Web-Interface)
