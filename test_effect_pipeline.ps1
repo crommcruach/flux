@@ -4,6 +4,23 @@
 Write-Host "=== Effect Pipeline Integration Tests ===" -ForegroundColor Cyan
 Write-Host ""
 
+# Pre-Check: Load a video first to have an active player
+Write-Host "Pre-Check: Loading video..." -ForegroundColor Magenta
+try {
+    $videos = Invoke-WebRequest -Uri "http://localhost:5000/api/videos/list" -Method GET | ConvertFrom-Json
+    if ($videos.videos.Count -gt 0) {
+        $videoPath = $videos.videos[0].path
+        $loadBody = @{ video_path = $videoPath } | ConvertTo-Json
+        $loadResult = Invoke-WebRequest -Uri "http://localhost:5000/api/load" -Method POST -ContentType "application/json" -Body $loadBody | ConvertFrom-Json
+        Write-Host "✓ Video loaded: $videoPath" -ForegroundColor Green
+    } else {
+        Write-Host "⚠ No videos found, effects API may return 404" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "⚠ Could not load video: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+Write-Host ""
+
 # Test 1: Get empty effect chain
 Write-Host "Test 1: GET /api/player/effects (leer)" -ForegroundColor Yellow
 $response = Invoke-WebRequest -Uri "http://localhost:5000/api/player/effects" -Method GET

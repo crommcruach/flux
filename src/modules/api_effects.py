@@ -7,7 +7,7 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 
-def register_effects_api(app):
+def register_effects_api(app, player_manager):
     """Registriert Effect Chain API Endpoints."""
     
     @app.route('/api/player/effects', methods=['GET'])
@@ -19,9 +19,7 @@ def register_effects_api(app):
             200: {effects: [...], count: int}
             404: {error: "No active player"}
         """
-        from .player_manager import PlayerManager
-        player_manager = PlayerManager.get_instance()
-        player = player_manager.get_active_player()
+        player = player_manager.player
         
         if not player:
             return jsonify({'error': 'No active player'}), 404
@@ -94,9 +92,7 @@ def register_effects_api(app):
             400: {success: false, message: "..."}
             404: {error: "No active player"}
         """
-        from .player_manager import PlayerManager
-        player_manager = PlayerManager.get_instance()
-        player = player_manager.get_active_player()
+        player = player_manager.player
         
         if not player:
             return jsonify({'error': 'No active player'}), 404
@@ -123,9 +119,7 @@ def register_effects_api(app):
             200: {success: true, message: "..."}
             404: {error: "No active player"}
         """
-        from .player_manager import PlayerManager
-        player_manager = PlayerManager.get_instance()
-        player = player_manager.get_active_player()
+        player = player_manager.player
         
         if not player:
             return jsonify({'error': 'No active player'}), 404
@@ -154,9 +148,7 @@ def register_effects_api(app):
             400: {success: false, message: "..."}
             404: {error: "No active player"}
         """
-        from .player_manager import PlayerManager
-        player_manager = PlayerManager.get_instance()
-        player = player_manager.get_active_player()
+        player = player_manager.player
         
         if not player:
             return jsonify({'error': 'No active player'}), 404

@@ -146,7 +146,7 @@ class RestAPI:
         register_config_routes(self.app)
         register_log_routes(self.app)
         register_plugins_api(self.app)
-        register_effects_api(self.app)
+        register_effects_api(self.app, self.player_manager)
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
