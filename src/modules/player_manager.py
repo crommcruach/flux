@@ -19,6 +19,8 @@ class PlayerManager:
     - Own playlist
     - Own effect chain
     - Independent playback state
+    
+    UNIFIED ACCESS: Use get_player(player_id) for consistent access
     """
     
     def __init__(self, player=None, artnet_player=None):
@@ -26,26 +28,32 @@ class PlayerManager:
         Initialize PlayerManager with dual players.
         
         Args:
-            player: Main video player (for backward compatibility, becomes video_player)
-            artnet_player: Art-Net player instance (optional)
+            player: Video player instance (preview)
+            artnet_player: Art-Net player instance (output)
         """
-        # Main player (legacy, maps to video_player for backward compatibility)
+        # Main player reference
         self._player = player
         
         # Dual-player system
         self.video_player = player  # Player for video preview (no Art-Net)
         self.artnet_player = artnet_player  # Player for Art-Net output (no preview)
         
+        # Unified player registry with IDs
+        self.players = {
+            'video': self.video_player,
+            'artnet': self.artnet_player
+        }
+        
         logger.debug(f"PlayerManager initialized (video_player: {player is not None}, artnet_player: {artnet_player is not None})")
     
     @property
     def player(self):
-        """Get main player instance (legacy, maps to video_player)."""
+        """Get main player instance (shortcut to video_player)."""
         return self._player or self.video_player
     
     @player.setter
     def player(self, new_player):
-        """Set main player instance (legacy, updates video_player)."""
+        """Set main player instance (updates video_player)."""
         old_player = self._player
         self._player = new_player
         self.video_player = new_player
@@ -100,6 +108,36 @@ class PlayerManager:
     def get_artnet_player(self):
         """Get Art-Net player instance."""
         return self.artnet_player
+    
+    # UNIFIED ACCESS METHOD
+    def get_player(self, player_id: str):
+        """
+        Get player by ID (unified access method).
+        
+        Args:
+            player_id: Player identifier ('video' or 'artnet')
+        
+        Returns:
+            Player instance or None if not found
+        """
+        if player_id not in self.players:
+            logger.warning(f"Invalid player_id: {player_id}. Valid IDs: {list(self.players.keys())}")
+            return None
+        
+        player = self.players.get(player_id)
+        if player is None:
+            logger.warning(f"Player '{player_id}' is not initialized")
+        
+        return player
+    
+    def get_all_player_ids(self):
+        """
+        Get list of all available player IDs.
+        
+        Returns:
+            List of player IDs
+        """
+        return list(self.players.keys())
     
     def has_artnet_player(self):
         """Check if Art-Net player is set."""

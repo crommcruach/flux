@@ -1,639 +1,498 @@
 # Py_artnet - TODO Liste
 
-## 🚀 Geplante Features
+> **Siehe [HISTORY.md](HISTORY.md) für abgeschlossene Features (v1.x - v2.3)**
 
-### 🔌 Plugin-System (Vorbereitung für Sequenzer)
-### 🎥 Player & Video System
-- [ ] **NEU: Effect-Profile/Presets für einzelne Videos (Konzept 2025-11-24)**
-  - **Grundidee:** Vordefinierte Effect-Kombinationen die einzelnen Videos zugewiesen werden können
+## 🚀 Geplante Features (nach Komplexität & Priorität)
+
+Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementierungs-Komplexität** und **Business-Value**:
+- **P1**: Quick Wins (niedriger Aufwand, hoher Nutzen)
+- **P2**: Mittlere Komplexität, hoher Nutzen
+- **P3**: Mittlere Komplexität, mittlerer Nutzen
+- **P4**: Hohe Komplexität, hoher Nutzen
+- **P5**: Niedrige Priorität / Maintenance
+- **P6**: Optional / Langfristig
+
+---
+
+## 🔥 PRIORITÄT 1 - Quick Wins (~30-42h)
+**Niedriger Aufwand, hoher Nutzen - sofort umsetzbar**
+
+### 1.1 🔌 Plugin-System erweitern (~8-12h)
+
+- [ ] **Generator-Plugins (3-4h):**
+  - Scripts nach `plugins/generators/` migrieren
+  - plasma, rainbow_wave, pulse, matrix_rain, fire, etc.
+  - METADATA + PARAMETERS für alle Generatoren
+  
+- [ ] **Preset-System (2-3h):**
+  - Parameter-Sets speichern/laden
+  - Preset-Manager API (CRUD)
+  - UI: Preset-Selector & Editor
+
+- [ ] **UI-Generierung (3-4h):**
+  - Automatische Form-Generierung aus PARAMETERS-Array
+  - Parameter-Panel im Web-Interface
+  - Live-Preview beim Parameter-Ändern
+
+- [ ] **Source-Plugins (optional, 4-6h):**
+  - Webcam, LiveStream, Screencapture
+
+---
+
+### 1.2 🔄 Transition-Plugin-System (~8-10h)
+
+- [ ] **PluginType.TRANSITION (3h):**
+  - `process_transition(frame_a, frame_b, progress)` Methode
+  - Basis Transition-Plugins: Fade, Wipe (Left/Right/Top/Bottom), Dissolve
+
+- [ ] **Player Integration (2h):**
+  - Transition-Buffering (letzter Frame)
+  - apply_transition() bei Clip-Wechsel
+
+- [ ] **API & Config (2h):**
+  - `/api/player/transition/config` Endpoints
+  - Global & Per-Clip Transition-Settings
+
+- [ ] **UI (3h):**
+  - Transition-Settings Section
+  - Enable/Disable Toggle
+  - Effect-Dropdown + Duration-Slider (0.1s - 5.0s)
+  - Easing-Function Selector
+
+---
+
+### 1.3 🎬 Playlist-Sequenzer (~8-12h)
+
+- [ ] **Show-Editor UI (4h):**
+  - Liste von Clips mit Drag & Drop
+  - Clip-Properties: Video/Script, Duration, Transition, Brightness
+
+- [ ] **Persistence (2h):**
+  - Save/Load Show-Dateien (JSON `.fluxshow`)
+  - Show-Library (Liste aller Shows)
+
+- [ ] **Playback Engine (4h):**
+  - Sequential Playback mit Transitions
+  - Cue-System (Next Cue, Jump to Cue N)
+  - Loop-Mode
+
+- [ ] **REST API (2h):**
+  - GET/POST/PUT/DELETE `/api/sequencer/shows`
+  - POST `/api/sequencer/play`, `/api/sequencer/stop`
+  - POST `/api/sequencer/cue/<index>`
+
+**JSON-Format Beispiel:**
+```json
+{
+  "name": "Halloween Show 2025",
+  "clips": [
+    {"type": "video", "source": "kanal_1/intro.mp4", "duration": 15, "transition": "fade", "brightness": 1.0},
+    {"type": "script", "source": "plasma", "duration": 30, "transition": "cut"}
+  ],
+  "loop": true
+}
+```
+
+---
+
+### 1.4 🎹 MIDI-over-Ethernet Support (~6-10h)
+
+- [ ] **MIDI Control via Ethernet (minimale Latenz) (6-10h):**
+  - **Grundidee:** MIDI-Signale über Ethernet statt USB für <5ms Latenz
+  - **WebSocket-MIDI (empfohlen):**
+    - Web-MIDI API (Browser nativ)
+    - Bidirektional (Server → Client Feedback)
+    - <5ms Latenz (LAN), <20ms (WiFi)
+  - **RTP-MIDI (optional):**
+    - Standard-Protokoll (Apple MIDI-Network)
+    - UDP-basiert (noch niedriger Latenz)
   - **Features:**
-    - Named Presets mit Effect-Konfigurationen (z.B. "psychedelic", "glitch", "vintage")
-    - Per-Video Preset-Zuweisung in Playlist
-    - Preset-Manager API (create, update, delete, list)
-    - Import/Export von Preset-Bibliotheken (JSON)
-    - Live-Switching zwischen Presets während Playback
-  - **Architektur:**
-    - Preset-Speicherung: `data/effect_presets.json`
-    - Playlist erweitert: `{'path': 'video.mp4', 'preset': 'psychedelic'}`
-    - Player lädt Effect-Chain automatisch beim Video-Wechsel
-    - API-Endpoints: `/api/presets/*` (CRUD operations)
-  - **Use-Cases:**
-    - Konsistente Effect-Styles über mehrere Videos
-    - Schnelles Experimentieren mit Effect-Kombinationen
-    - Preset-Bibliotheken für verschiedene Events/Shows
-    - Community-Sharing von Effect-Setups
+    - MIDI-Learn: Click auf Parameter → nächster MIDI-Input wird gemappt
+    - Multi-Controller: Mehrere MIDI-Geräte gleichzeitig
+    - Feedback: LED-Status zurück an Controller
+    - Curve-Mapping: Linear, Exponential, Logarithmic
   - **Implementierung:**
-    - Phase 1: Preset-Manager Modul (CRUD, Speicherung)
-    - Phase 2: Player Integration (Auto-Load beim Video-Wechsel)
-    - Phase 3: API-Endpoints (Preset-Management)
-    - Phase 4: UI-Integration (Preset-Selector, Editor)
+    - Phase 1: WebSocket-MIDI-Handler (~2h)
+    - Phase 2: MIDI-Mapping-Engine (~2h)
+    - Phase 3: MIDI-Learn UI (~2h)
+    - Phase 4: Client-Library (Browser) (~1h)
+    - Phase 5: Feedback-System (~1h)
+    - Phase 6: RTP-MIDI Support (optional) (~2h)
 
-- [ ] **MITTEL: Dual-Source Player - Separate Preview & ArtNet Ausgaben (Konzept 2025-11-23)**
-  - **Grundidee:** Zwei unabhängige Video-Quellen gleichzeitig abspielen
-    - **Preview-Ausgabe:** Volle Auflösung mit Layern, Effekten, Overlays (Web-Interface)
-    - **ArtNet-Ausgabe:** Optimiertes Video nur für LED-Mapping (Performance)
-  - **Architektur: Option 1 - Dual-Source Player (Empfohlen)**
-    - Player bekommt `preview_source` und `artnet_source` Parameter
-    - `_play_loop()` rendert beide Sources parallel im gleichen Thread
-    - Beide synchron (gleicher Frame-Counter, gleiche Playback-Controls)
-    - `last_video_frame` kommt von preview_source
-    - `artnet_manager.send_frame()` nutzt artnet_source
+---
+
+## ⚡ PRIORITÄT 2 - Mittel-Komplex, Hoch-Wert (~14-24h)
+**Mittlerer Aufwand, hoher Performance-Gewinn**
+
+### 2.1 ⚡ WebSocket Command Channel (~4-6h)
+
+- [ ] **Zeitkritische Commands über WebSocket:**
+  - **Problem mit REST:** 10-50ms Latenz pro Request
+  - **WebSocket-Vorteile:** <5ms Latenz, Persistent Connection
+  - **Zeitkritische Commands:**
+    - Playback: play, pause, stop, seek
+    - Parameter: brightness, speed, effect_param
+    - Blackout: sofortiger Blackout-Toggle
   - **Features:**
-    - Unabhängige Video-Auswahl für Preview/ArtNet
-    - Preview kann LayerSource sein (mehrere Videos überlagert)
-    - ArtNet bleibt einfache VideoSource (Performance)
-    - API-Erweiterung: `/api/player/source/preview` und `/api/player/source/artnet`
-    - Switch zwischen Sources ohne Playback zu stoppen
-  - **Use-Cases:**
-    - Hochaufgelöster Preview mit Overlays, komprimiertes Video für LEDs
-    - Test-Video im Preview, finales Video über ArtNet
-    - Layer-Compositing nur für Visualisierung, nicht für LED-Output
-  - **Vorteile:**
-    - Minimale Code-Änderungen (Player-Struktur bleibt gleich)
-    - Ein Thread, ein Timing (keine Sync-Probleme)
-    - Ressourcen-effizient
-    - Erweiterbar für zukünftige Layer-System Integration
+    - Command-Queue mit Priority-System
+    - Batch-Commands
+    - MessagePack Support (optional)
   - **Implementierung:**
-    - Phase 1: Player-Refactoring (dual sources support)
-    - Phase 2: API-Erweiterung (source switching endpoints)
-    - Phase 3: UI-Integration (separate Source-Auswahl)
-    - Phase 4: LayerSource-Implementierung (optional)
+    - Phase 1: WebSocket Command Handler (~2h)
+    - Phase 2: Command-Queue & Priority (~1h)
+    - Phase 3: MessagePack Support (~1h)
+    - Phase 4: Client-Library (~1h)
 
-### ⚡ Performance-Optimierung
-- [ ] **HOCH:** Async JPEG-Encoding (api_routes.py Stream-Generator)
-    - Thread-Pool für cv2.imencode() oder Frame-Skip (30→15 FPS)
-    - **NUR für Preview-Ansichten** (Web-Interface Thumbnails, Status-Updates)
-    - **NICHT für:** Fullscreen-Ausgabe, Art-Net Output (Performance kritisch)
-    - Geschätzter Gewinn: 25-35% CPU-Reduktion bei Preview-Streams, -8ms Latenz
-    - Betroffene Endpoints: `/api/stream/preview`, `/api/stream/thumbnail`
-    - Art-Net und Fullscreen bleiben synchron (keine Encoding-Latenz)
-- [ ] Video-Optimierungs-Script erstellen
-  - [ ] Automatische Skalierung auf Canvas-Größe
-  - [ ] Hardware-Codec Encoding (H.264 mit NVENC/QSV)
-  - [ ] Bitrate-Optimierung für schnelleres Decoding
-  - [ ] Keyframe-Intervall anpassen (g=30 für bessere Loop-Performance)
-  - [ ] Batch-Processing für alle Videos in Kanal-Ordnern
+---
 
-### 🎬 Show-Sequenzer
-- [ ] **HOCH: Plugin-basiertes Script/Effect-System mit Parametrierung (14-18h Aufwand)**
-  - **Grundidee:** Scripts und Effekte als austauschbare Plugins mit UI-konfigurierbaren Parametern
-  - **Plugin-Architektur:**
-    - **Base-Class:** `PluginBase` mit standardisiertem Interface
-      ```python
-      class PluginBase:
-          METADATA = {
-              "name": "Plugin Name",
-              "author": "Author",
-              "version": "1.0",
-              "description": "Plugin description",
-              "category": "generator|effect|source|transition"
-          }
-          
-          # Parameter-Definition für UI-Generierung
-          PARAMETERS = [
-              {
-                  "name": "speed",
-                  "type": "float",
-                  "default": 1.0,
-                  "min": 0.1,
-                  "max": 5.0,
-                  "step": 0.1,
-                  "label": "Animation Speed",
-                  "description": "How fast the effect animates"
-              },
-              {
-                  "name": "intensity",
-                  "type": "int",
-                  "default": 50,
-                  "min": 0,
-                  "max": 100,
-                  "step": 1,
-                  "label": "Effect Intensity",
-                  "description": "Strength of the effect"
-              },
-              {
-                  "name": "color_mode",
-                  "type": "select",
-                  "default": "rainbow",
-                  "options": ["rainbow", "monochrome", "gradient"],
-                  "label": "Color Mode",
-                  "description": "Color scheme to use"
-              },
-              {
-                  "name": "enable_glow",
-                  "type": "bool",
-                  "default": False,
-                  "label": "Enable Glow",
-                  "description": "Add glow effect"
-              },
-              {
-                  "name": "custom_color",
-                  "type": "color",
-                  "default": "#FF0000",
-                  "label": "Custom Color",
-                  "description": "Pick a custom color"
-              }
-          ]
-          
-          def __init__(self):
-              self.params = {}  # Aktuelle Parameter-Werte
-          
-          def initialize(self, config: dict) -> None:
-              """Plugin initialisieren mit Config"""
-              # Merge user config mit defaults
-              self.params = self._merge_params(config)
-              pass
-          
-          def generate_frame(self, frame_number: int, width: int, height: int, time: float, **kwargs) -> np.ndarray:
-              """Frame generieren (für Scripts) mit self.params"""
-              pass
-          
-          def process_frame(self, frame: np.ndarray, **kwargs) -> np.ndarray:
-              """Frame verarbeiten (für Effekte) mit self.params"""
-              pass
-          
-          def update_parameter(self, name: str, value: any) -> None:
-              """Parameter zur Laufzeit ändern"""
-              if self._validate_param(name, value):
-                  self.params[name] = value
-          
-          def get_parameters(self) -> dict:
-              """Aktuelle Parameter-Werte zurückgeben"""
-              return self.params.copy()
-          
-          def cleanup(self) -> None:
-              """Plugin aufräumen"""
-              pass
-      ```
-    - **Plugin-Typen:**
-      - **Generator-Plugins:** Erstellen Frames von Grund auf (bisherige Scripts: plasma, rainbow_wave, etc.)
-      - **Effect-Plugins:** Verarbeiten existierende Frames (blur, color_grading, distortion, etc.)
-      - **Source-Plugins:** Externe Quellen (webcam, livestream, screencapture, etc.)
-      - **Transition-Plugins:** Übergänge zwischen Clips (crossfade, wipe, dissolve, etc.)
-    - **Plugin-Loader:**
-      - Automatisches Discovery aus `plugins/` Ordner
-      - Lazy Loading (Import nur wenn benötigt)
-      - Hot-Reload (Plugins zur Laufzeit neu laden)
-      - Dependency-Check (numpy, opencv, etc.)
-      - Error-Isolation (Fehler in einem Plugin crasht nicht das System)
-    - **Plugin-Registry:**
-      - Zentrale Registry für alle verfügbaren Plugins
-      - Kategorisierung (Generators, Effects, Sources, Transitions)
-      - Metadata-Parsing aus METADATA-Dict
-      - API-Endpoint: `GET /api/plugins` (Liste aller Plugins mit Metadata)
-  - **Ordner-Struktur:**
-    ```
-    plugins/
-    ├── generators/          # Frame-Generatoren (bisherige scripts/)
-    │   ├── __init__.py
-    │   ├── plasma.py
-    │   ├── rainbow_wave.py
-    │   └── ...
-    ├── effects/             # Frame-Prozessoren (NEU)
-    │   ├── __init__.py
-    │   ├── blur.py
-    │   ├── color_grading.py
-    │   ├── brightness.py
-    │   └── ...
-    ├── sources/             # Externe Quellen (NEU)
-    │   ├── __init__.py
-    │   ├── webcam.py
-    │   ├── livestream.py
-    │   └── screencapture.py
-    ├── transitions/         # Übergänge (NEU)
-    │   ├── __init__.py
-    │   ├── crossfade.py
-    │   ├── wipe.py
-    │   └── dissolve.py
-    └── README.md            # Plugin Development Guide
-    ```
-  - **Migration:**
-    - Bestehende Scripts (`scripts/*.py`) nach `plugins/generators/` migrieren
-    - `ScriptGenerator` → `PluginManager` umbenennen
-    - `ScriptSource` → `GeneratorSource` umbenennen
-    - Backward Compatibility: Alte API-Endpunkte weiterleiten
-  - **Effect-Pipeline (NEU):**
-    - Plugins können gekettet werden: `Video → Blur → ColorGrading → Output`
-    - Config pro Plugin: `{"plugin": "blur", "config": {"strength": 5}}`
-    - Per-Clip Effect-Stack im Sequenzer
-  - **Parameter-Typen:**
-    - **float/int:** Slider mit min/max/step (z.B. Geschwindigkeit, Intensität)
-    - **bool:** Checkbox (z.B. Enable/Disable Feature)
-    - **select:** Dropdown-Auswahl (z.B. Color-Mode, Blend-Mode)
-    - **color:** Color-Picker (z.B. Custom-Color)
-    - **string:** Text-Input (z.B. Text-Overlay, Filename)
-    - **range:** Dual-Slider für Min/Max (z.B. Brightness-Range)
-  - **Parameter-Features:**
-    - **Default-Werte:** Jeder Parameter hat sinnvollen Default
-    - **Validation:** Min/Max/Options werden enforced
-    - **Runtime-Updates:** Parameter können während Playback geändert werden
-    - **Presets:** Speichern/Laden von Parameter-Sets
-    - **Automation:** Parameter über Zeit animieren (Keyframes)
-    - **API-Zugriff:** Parameter über REST API lesen/schreiben
-  - **API-Endpunkte (NEU):**
-    - `GET /api/plugins` - Liste aller Plugins mit METADATA + PARAMETERS
-    - `GET /api/plugins/<name>` - Details zu einem Plugin
-    - `GET /api/plugins/<name>/parameters` - Aktuelle Parameter-Werte
-    - `PUT /api/plugins/<name>/parameters` - Parameter setzen (Runtime)
-    - `POST /api/plugins/<name>/presets` - Preset speichern
-    - `GET /api/plugins/<name>/presets` - Presets auflisten
-    - `POST /api/plugins/<name>/presets/<preset>/load` - Preset laden
-  - **UI-Generierung:**
-    - Automatische Form-Generierung aus PARAMETERS-Array
-    - Parameter-Panel im Web-Interface (rechts neben Preview)
-    - Live-Preview beim Parameter-Ändern
-    - Preset-Auswahl-Dropdown
-  - **Beispiel-Plugin (Blur Effect):**
-    ```python
-    class BlurEffect(PluginBase):
-        METADATA = {
-            "name": "Blur",
-            "category": "effect",
-            "description": "Gaussian blur effect"
-        }
-        
-        PARAMETERS = [
-            {
-                "name": "strength",
-                "type": "int",
-                "default": 5,
-                "min": 1,
-                "max": 31,
-                "step": 2,  # Muss ungerade sein für cv2.GaussianBlur
-                "label": "Blur Strength",
-                "description": "Kernel size for blur"
-            },
-            {
-                "name": "sigma",
-                "type": "float",
-                "default": 0.0,
-                "min": 0.0,
-                "max": 10.0,
-                "step": 0.1,
-                "label": "Sigma",
-                "description": "Gaussian kernel standard deviation"
-            }
-        ]
-        
-        def process_frame(self, frame: np.ndarray, **kwargs) -> np.ndarray:
-            strength = self.params["strength"]
-            sigma = self.params["sigma"]
-            return cv2.GaussianBlur(frame, (strength, strength), sigma)
-    ```
-  - **Implementierung:**
-    - Phase 1: PluginBase mit PARAMETERS & Validation (~4h)
-    - Phase 2: PluginManager & Registry (~3h)
-    - Phase 3: Parameter-API-Endpunkte (~3h)
-    - Phase 4: UI-Generierung & Parameter-Panel (~4h)
-    - Phase 5: Bestehende Scripts migrieren & parametrieren (~3h)
-    - Phase 6: Effect-Pipeline Integration (~3h)
-    - Phase 7: Preset-System (~2h)
-  - **Vorteile:**
-    - Maximale Flexibilität (User können eigene Plugins erstellen)
-    - Hot-Reload (Plugins ändern ohne Neustart)
-    - Saubere Separation of Concerns
-    - Einfaches Hinzufügen neuer Features (z.B. Blur-Effect)
-    - Community-Plugins möglich
-    - Besser testbar (jedes Plugin isoliert)
-  - **Use-Cases:**
-    - **Generator:** `plasma` mit parametrierbarer Geschwindigkeit, Farbschema, Wellenlänge
-    - **Effect:** `blur` mit einstellbarer Stärke, `color_grading` mit Brightness/Contrast/Saturation
-    - **Transition:** `crossfade` mit einstellbarer Duration, `wipe` mit Direction-Parameter
-    - **Source:** `webcam` mit Device-ID-Auswahl, Resolution-Parameter
-  - **Vorteile der Parametrierung:**
-    - **UI-Friendly:** User müssen keinen Code anfassen
-    - **Live-Tuning:** Parameter während Playback anpassen (instant feedback)
-    - **Presets:** Speichern von "Plasma Langsam", "Plasma Schnell" etc.
-    - **Sequenzer-Integration:** Pro Clip eigene Parameter-Sets
-    - **A/B-Testing:** Einfaches Vergleichen verschiedener Settings
-    - **User-Friendly:** Auch für Non-Coder benutzbar
-  - **Empfehlung:** Vor Sequenzer implementieren, da Sequenzer auf Plugins aufbaut
+### 2.2 🌐 Multi-Network-Adapter Support (~4-6h)
 
-### 🔮 Neue Frame Sources
-- [ ] ShaderToy Source (Echtzeit-3D-Shader)
-  - [ ] ModernGL/PyOpenGL Integration
-  - [ ] GLSL Shader Support (Shadertoy-kompatibel)
-  - [ ] Uniform Variables (iTime, iResolution, iMouse)
-  - [ ] Shader-Dateien aus shaders/ Ordner laden
-  - [ ] Shadertoy-URL Import (API oder Scraping)
-  - [ ] Performance-Profiling und GPU-Monitoring
-- [ ] ImageSequence Source
-  - [ ] PNG/JPG Sequenz-Support
-  - [ ] Automatische Frame-Nummerierung
-  - [ ] Variable Frame-Delays
-- [ ] LiveStream Source
-  - [ ] RTSP/HTTP Stream Support
-  - [ ] FFmpeg/GStreamer Integration
-  - [ ] Stream-Buffering und Reconnect
-
-### 🎨 Video-Effekt-Bibliothek (Plugin-basiert)
-- [ ] **Basis-Effekte (leicht implementierbar mit OpenCV/NumPy)**
-  - **Farb-Manipulation (2-4h):**
-    - [x] AddSubtract - RGB-Werte addieren/subtrahieren
-    - [x] Brightness/Contrast - Basic Helligkeits-/Kontraststeuerung
-    - [x] Colorize - Einfärben mit Hue-Beibehaltung der Luminanz
-    - [x] Tint - Bild mit Basisfarbe einfärben (z.B. Rot-Tint: Bild × [1.0, 0.5, 0.5])
-    - [x] Hue Rotate - Hue-Verschiebung auf HSV
-    - [x] Invert RGB - Kanal-weise Invertierung
-    - [x] Saturation - Entsättigung zu Greyscale
-    - [x] Exposure - Exposure-Kurve (cv2.LUT)
-    - [x] Levels - Input/Output Levels (cv2.normalize)
-    - [x] Posterize - Farbreduktion (bit-shift)
-    - [x] Threshold - 2-Farben-Bild (cv2.threshold)
-  - **Geometrie & Transform (3-5h):**
-    - [ ] Flip - Horizontal/Vertikal spiegeln (cv2.flip)
-    - [ ] Mirror - Spiegel an X/Y-Position
-    - [ ] Slide - Horizontales/Vertikales Looping-Shift (np.roll)
-    - [ ] Keystone - 4-Punkt-Perspektive (cv2.getPerspectiveTransform)
-    - [ ] Fish Eye - Linsen-Verzerrung (cv2.remap)
-    - [ ] Twist - Spiral-Rotation um Zentrum (polar coordinates)
-  - **Blur & Distortion (2-3h):**
-    - [ ] Blur - Gaussian/Box Blur (cv2.GaussianBlur) - bereits geplant
-    - [ ] Radial Blur - Zoom-Blur vom Zentrum
-    - [ ] Pixelate (LoRez) - Blocky-Effekt (resize down+up)
-    - [ ] Displace - Luminanz-basierte Verschiebung
-    - [ ] Wave Warp - Sinus-basierte Verzerrung (cv2.remap)
-  - **Edge & Detection (1-2h):**
-    - [ ] Edge Detection - Sobel/Canny (cv2.Canny)
-    - [ ] Auto Mask - Luminanz → Alpha (cv2.cvtColor)
-  - **Composite & Mask (2-3h):**
-    - [ ] ChromaKey - Farb-basierte Transparenz (HSV-Range)
-    - [ ] Keystone Mask - Transparenz außerhalb Keystone-Bereich
-    - [ ] Vignette - Radiales Fade zu Schwarz (Gaußsche Maske)
-    - [ ] Drop Shadow - Schatten für transparente Clips (cv2.filter2D)
-  - **Time & Motion (2-3h):**
-    - [x] Trails - Ghost-Trails (Frame-Blending mit Deque)
-    - [x] Stop Motion - Frame-Hold mit Frequenz
-    - [x] Delay RGB - RGB-Kanal-Verzögerung (Frame-Buffer)
-    - [x] Freeze - Frame einfrieren (statisch oder partiell)
-    - [x] Strobe - Alternierend blank frames
-  - **Glitch & Noise (2-3h):**
-    - [ ] Shift Glitch - Zufälliges horizontales Shifting
-    - [ ] Distortion - TV-Glitch-Effekt (Zeilen-Verschiebung)
-    - [ ] Static - TV-Rauschen (np.random)
-    - [ ] Shift RGB - Kanal-Verschiebung horizontal/vertikal
-  - **Simple 3D & Kaleidoscope (3-5h):**
-    - [ ] Kaleidoscope - Spiegel-Effekt mit N Segmenten
-    - [ ] Tile - Grid-basierte Wiederholung
-    - [ ] Circles - Konzentrische Kreis-Interpretation
-    - [ ] Bendoscope - Kurven-Kaleidoskop
-
-- [ ] **Leicht implementierbare Zusatz-Effekte (Empfohlen für MVP)**
-  - [ ] **Sharpen** - Schärfen (cv2.filter2D mit Kernel) - 1h
-  - [ ] **Emboss** - Präge-Effekt (Sobel-basiert) - 1h
-  - [ ] **Sepia** - Vintage-Farbton (Matrix-Multiplikation) - 1h
-  - [ ] **Gamma Correction** - Gamma-Kurve (cv2.LUT) - 1h
-  - [ ] **Color Temperature** - Warm/Cool (RGB-Shift) - 1h
-  - [ ] **Channel Mixer** - RGB-Kanal-Kreuzung - 2h
-  - [ ] **Noise** - Grain/Noise hinzufügen (np.random) - 1h
-  - [ ] **Solarize** - Helligkeits-Invertierung ab Threshold - 1h
-  - [ ] **Duotone** - 2-Farben-Gradient-Mapping - 2h
-  - [ ] **Oil Paint** - Öl-Malerei-Effekt (Median-Filter) - 2h
-  - [ ] **Mosaic** - Pixelate mit variablen Tile-Größen - 2h
-  - [ ] **Zoom** - Einfacher Zoom-In/Out (cv2.resize) - 1h
-  - [ ] **Rotate** - Rotation um Zentrum (cv2.getRotationMatrix2D) - 1h
-  - [ ] **Border** - Rahmen hinzufügen (cv2.copyMakeBorder) - 1h
-  - [ ] **Crop** - Rechteckiger Zuschnitt - 1h
-  - [ ] **Alpha Blend** - Transparenz-basiertes Blending - 2h
-  - [ ] **Lumetri Color** - Cinema-Grade-Grading (Lift/Gamma/Gain) - 3h
-
-- [ ] **Implementierungs-Hinweise:**
-  - Alle Effekte als Plugins mit PARAMETERS-Array
-  - Effekte kombinierbar via Effect-Pipeline
-  - Presets für jeden Effekt (z.B. "Blur Soft", "Blur Heavy")
-  - Performance-Optimierung mit NumPy-Vektorisierung
-  - GPU-Beschleunigung für rechenintensive Effekte (cv2.UMat)
-  - Real-time Preview im Web-Interface
-
-### 🎵 Audio-Reactive Support
-- [ ] **MITTEL: Audio-Analyse & Reaktive Effekte (10-14h Aufwand)**
-  - **Grundidee:** Echtzeit-Audio-Analyse für reaktive Visualisierungen
-  - **Audio-Input:**
-    - Microphone-Input (pyaudio, sounddevice)
-    - Audio-File-Playback (wav, mp3, flac)
-    - System-Audio-Capture (WASAPI Loopback auf Windows)
-    - Line-In / External Audio-Interface
-  - **Audio-Analyse Features:**
-    - **FFT (Fast Fourier Transform):** Frequenz-Spektrum-Analyse
-      - Bass (20-250 Hz), Mid (250-4000 Hz), Treble (4000-20000 Hz)
-      - Frequenz-Bänder konfigurierbar (z.B. 8, 16, 32, 64 Bins)
-    - **BPM-Detection:** Automatische Beat-Erkennung (tempo tracking)
-    - **Onset-Detection:** Transient/Beat-Trigger für Effekte
-    - **RMS/Peak-Level:** Lautstärke-Tracking
-    - **Waveform-Buffer:** Zeitbasierte Audio-Visualisierung
-  - **Reaktive Parameter:**
-    - **Brightness:** Gekoppelt an RMS/Peak-Level (laut = heller)
-    - **Speed:** Gekoppelt an BPM (tempo-sync für Animationen)
-    - **Color:** Frequenz → Farbe (Bass = Rot, Mid = Grün, Treble = Blau)
-    - **Effect-Intensity:** Plugin-Parameter reaktiv (z.B. Blur-Stärke)
-    - **Pattern-Switch:** Automatischer Wechsel bei Beat-Detection
-  - **Audio-Reactive Plugins:**
-    - **Spectrum-Visualizer:** Frequenz-Balken als LED-Output
-    - **Beat-Pulse:** Flash/Pulse-Effekt bei Onset
-    - **Waveform-Renderer:** Audio-Wellenform als Grafik
-    - **VU-Meter:** Classic Lautstärke-Anzeige
-    - **Audio-Driven-Plasma:** Plasma-Geschwindigkeit folgt BPM
-  - **Konfiguration:**
-    - Audio-Device-Auswahl (Dropdown mit verfügbaren Inputs)
-    - FFT-Größe (512, 1024, 2048, 4096)
-    - Frequenz-Range (Low/High Cutoff)
-    - Smoothing-Factor (Glättung für weniger Flackern)
-    - Gain/Sensitivity (Input-Verstärkung)
-  - **API-Endpunkte:**
-    - `GET /api/audio/devices` - Liste verfügbarer Audio-Inputs
-    - `POST /api/audio/start` - Audio-Capture starten
-    - `POST /api/audio/stop` - Audio-Capture stoppen
-    - `GET /api/audio/spectrum` - Aktuelles Frequenz-Spektrum (JSON)
-    - `GET /api/audio/bpm` - Aktuelles BPM (Beats per Minute)
-    - `PUT /api/audio/config` - Audio-Analyse Config ändern
-  - **UI-Features:**
-    - Live-Spektrum-Anzeige (Frequenz-Balken)
-    - BPM-Display mit Tap-Tempo-Button
-    - Audio-Level-Meter (Echtzeit-Lautstärke)
-    - Parameter-Mapping-Editor (Audio → Plugin-Parameter)
-  - **Implementierung:**
-    - Phase 1: Audio-Input & FFT-Analyse (~4h)
-    - Phase 2: BPM/Onset-Detection (~3h)
-    - Phase 3: Parameter-Mapping-System (~3h)
-    - Phase 4: Audio-Reactive Plugins (~3h)
-    - Phase 5: UI & API Integration (~2h)
-  - **Dependencies:**
-    - `numpy` (bereits vorhanden) - FFT-Berechnung
-    - `pyaudio` oder `sounddevice` - Audio-Input
-    - `librosa` (optional) - Fortgeschrittene Audio-Analyse (BPM, Onset)
-    - `scipy` (optional) - Signal-Processing
-  - **Use-Cases:**
-    - Club/Party-Visualisierungen (Beat-synchronized)
-    - Live-Musik-Events (reaktive LED-Shows)
-    - Installation mit Ambient-Audio-Reaktion
-    - VJ-Setup mit Audio-Input
-  - **Performance-Hinweis:**
-    - FFT-Berechnung: ~2-5 ms (1024 samples)
-    - Audio-Thread läuft parallel zu Player (kein Blocking)
-    - Smoothing reduziert CPU-Last (weniger Frame-Updates)
-
-### 🎬 Show-Sequenzer
-- [ ] **HOCH: Playlist-Sequenzer (8-12h Aufwand) - Für Standard-Wiedergabe**
-  - **Grundidee:** Einfache Liste statt Timeline für Show-Abläufe
+- [ ] **Separate Netzwerk-Interfaces:**
+  - **Grundidee:** Control-Traffic (API) getrennt von Art-Net-Output
   - **Features:**
-    - Show-Editor UI (Liste von Clips mit Duration, Transition, Settings)
-    - Drag & Drop zum Umordnen von Clips
-    - Clip-Properties: Video/Script-Auswahl, Duration, Transition-Typ (Crossfade, Cut, Fade), Brightness
-    - Transition-Typen: Crossfade (0.5-5s), Hard Cut (0s), Fade to/from Black
-    - Save/Load Show-Dateien (JSON-Format `.fluxshow`)
-    - Show-Library (Liste aller gespeicherten Shows)
-    - Playback-Controls: Play, Stop, Pause, Resume, Loop-Mode
-    - Cue-System: Index-basierte Sprungpunkte (Next Cue, Jump to Cue N)
-  - **JSON-Format:**
-    ```json
-    {
-      "name": "Halloween Show 2025",
-      "clips": [
-        {"type": "video", "source": "kanal_1/intro.mp4", "duration": 15, "transition": "fade", "transition_duration": 1.0, "brightness": 1.0},
-        {"type": "video", "source": "kanal_1/main.mp4", "duration": 60, "transition": "crossfade", "transition_duration": 2.0, "brightness": 0.8},
-        {"type": "script", "source": "plasma", "duration": 30, "transition": "cut", "brightness": 1.0}
-      ],
-      "loop": true,
-      "cues": [0, 1, 2]
+    - API-Binding auf spezifisches Interface
+    - Art-Net-Routing: Universes auf verschiedenen Adaptern
+    - Multi-Art-Net: Mehrere Art-Net-Netzwerke parallel
+    - Failover: Automatischer Switch auf Backup-Adapter
+  - **Use-Cases:**
+    - Adapter 1: Management (192.168.1.x)
+    - Adapter 2: Art-Net Output 1 (10.0.0.x)
+    - Adapter 3: Art-Net Output 2 (10.0.1.x)
+  - **Implementierung:**
+    - Phase 1: Network-Interface-Discovery (~1h)
+    - Phase 2: API-Binding-Config (~1h)
+    - Phase 3: Art-Net Multi-Adapter-Routing (~2h)
+    - Phase 4: UI (Network-Adapter-Auswahl) (~1h)
+
+**Config-Beispiel:**
+```json
+{
+  "network": {
+    "api": {"bind_address": "192.168.1.10", "port": 5000},
+    "artnet": {
+      "adapters": [
+        {"interface": "10.0.0.50", "universes": [1,2,3,4,5]},
+        {"interface": "10.0.1.50", "universes": [6,7,8,9,10]}
+      ]
     }
-    ```
-  - **REST API:**
-    - GET `/api/sequencer/shows` - Liste aller Shows
-    - POST `/api/sequencer/shows` - Neue Show erstellen
-    - GET `/api/sequencer/shows/<name>` - Show laden
-    - PUT `/api/sequencer/shows/<name>` - Show aktualisieren
-    - DELETE `/api/sequencer/shows/<name>` - Show löschen
-    - POST `/api/sequencer/play` - Show abspielen
-    - POST `/api/sequencer/stop` - Show stoppen
-    - POST `/api/sequencer/cue/<index>` - Zu Cue springen
-  - **Implementierung:**
-    - Phase 1: Show-Editor UI (Liste, Properties Panel) (~4h)
-    - Phase 2: Save/Load/CRUD Operations (~2h)
-    - Phase 3: Playback Engine (Sequential mit Transitions) (~4h)
-    - Phase 4: Cue-System & Loop-Mode (~2h)
-  - **Vorteile:**
-    - Deckt 80% der Use-Cases (Shows mit festen Clip-Abfolgen)
-    - Viel schneller als Timeline-Editor
-    - Perfekt für wiederkehrende Shows (Events, Installationen)
-    - Einfach erweiterbar zu Timeline später
-  - **Use-Cases:**
-    - Event-Shows mit festem Ablauf
-    - Installation mit Loop-Wiedergabe
-    - Automatisierte Nacht-Shows
+  }
+}
+```
 
-- [ ] **NIEDRIG: Script-basierter Sequenzer (4-6h Aufwand) - Für Power-User**
-  - **Grundidee:** Python-Script definiert Show-Ablauf (Code-First Approach)
+---
+
+### 2.3 ⚡ Preview Stream Optimierung (~6-10h)
+
+- [ ] **WebRTC statt MJPEG:**
+  - **Problem aktuell:** MJPEG = hohe CPU-Last, hohe Bandbreite
+  - **Lösung: WebRTC:**
+    - Hardware-beschleunigtes H.264-Encoding (GPU)
+    - ~10x weniger CPU-Last vs. MJPEG
+    - ~5x weniger Bandbreite (0.2-1 Mbps)
+    - Ultra-niedrige Latenz (<100ms)
   - **Features:**
-    - Python-DSL für Show-Definition
-    - CLI-Befehl: `show play <script.py>` oder `show:<script_name>`
-    - Script-Loader in `shows/` Ordner (analog zu `scripts/`)
-    - Volle Python-Kontrolle: Loops, Conditionals, Random, Math
-    - Zugriff auf alle Player-APIs (brightness, speed, artnet)
-  - **Python-DSL-Beispiel:**
-    ```python
-    from show_dsl import Show, Clip, wait, cue
-    
-    show = Show("My Show")
-    
-    # Sequentielle Clips
-    show.play_video("intro.mp4", duration=15, fade_in=1.0)
-    show.play_video("main.mp4", duration=60, crossfade=2.0, brightness=0.8)
-    show.play_script("plasma", duration=30, fade_out=1.0)
-    
-    # Cue-Marker
-    cue("Chorus")
-    show.play_video("chorus.mp4", duration=30)
-    
-    # Loops & Conditionals
-    for i in range(3):
-        show.play_script(f"rainbow_wave", duration=10)
-        wait(1.0)  # Pause zwischen Clips
-    
-    # Brightness-Ramps
-    show.brightness_ramp(from=0.0, to=1.0, duration=5.0)
-    ```
-  - **REST API:**
-    - GET `/api/sequencer/scripts` - Liste aller Show-Scripts
-    - POST `/api/sequencer/scripts/<name>/play` - Script ausführen
-    - POST `/api/sequencer/scripts/<name>/stop` - Script abbrechen
+    - Multi-Quality: Low (480p), Medium (720p), High (1080p)
+    - Adaptive FPS: 10-30 FPS je nach CPU-Last
+    - Connection-Limit: Max. 5 Preview-Clients
+    - Bandwidth-Limiter: Max. Bitrate konfigurierbar
   - **Implementierung:**
-    - Phase 1: Show-DSL Modul (`show_dsl.py`) (~2h)
-    - Phase 2: Show-Script-Loader & Executor (~2h)
-    - Phase 3: CLI & API Integration (~2h)
-  - **Vorteile:**
-    - Maximale Flexibilität für Power-User
-    - Programmierbare Shows (Random, Conditionals, API-Calls)
-    - Versionierbar mit Git
-    - Kein UI-Overhead
-  - **Use-Cases:**
-    - Komplexe generative Shows
-    - Shows mit externen Triggern (MQTT, HTTP, Files)
-    - Prozedural generierte Clip-Reihenfolgen
-    - A/B-Testing verschiedener Sequenzen
-  - **Empfehlung:** Nice-to-have für Freaks, niedrige Priorität
+    - Phase 1: Adaptive FPS & Quality (~2h)
+    - Phase 2: WebRTC Integration (~2h)
+    - Phase 3: Connection-Limit & Bandwidth-Limiter (~1h)
+    - Phase 4: UI (Quality-Selector, Stats) (~1h)
+  - **Performance-Ziel:**
+    - MJPEG: ~40-60% CPU, 2-5 Mbps
+    - WebRTC: ~5-10% CPU, 0.2-1 Mbps
 
-- [ ] **OPTIONAL: Timeline-Sequenzer (60-80h Aufwand) - Full-Featured Show-Control**
-  - Upgrade von Playlist-Sequenzer zu visueller Timeline (später)
-  - Features: Clip-Trimming, Scrubbing, Multi-Track, Audio-Sync, Automation-Tracks
-  - Nur wenn User komplexere Anforderungen haben (Trimming, Overlays, etc.)
+---
 
-### 🎨 GUI-Optimierungen
-- [ ] **MITTEL: Drag & Drop Layout-Editor (8-12h Aufwand)**
-  - **Library-Optionen:**
-    - GridStack.js (Empfohlen) - Bewährte Dashboard-Library mit Grid-Snapping
-    - Muuri.js - Leichtgewichtig mit schönen Animationen
-    - Eigene Implementierung mit HTML5 Drag & Drop API
+## 🔧 PRIORITÄT 3 - Mittel-Komplex, Mittel-Wert (~33-51h)
+**Mittlerer Aufwand, mittlere Business-Priorität**
+
+### 3.1 🎨 Effect-Bibliothek erweitern (~15-25h)
+
+- [ ] **Geometrie & Transform (3-5h):**
+  - Flip, Mirror, Slide, Keystone, Fish Eye, Twist
+
+- [ ] **Blur & Distortion (2-3h):**
+  - Radial Blur, Pixelate (LoRez), Displace, Wave Warp
+
+- [ ] **Glitch & Noise (2-3h):**
+  - Shift Glitch, Distortion, Static, Shift RGB
+
+- [ ] **Edge & Detection (1-2h):**
+  - Edge Detection, Auto Mask
+
+- [ ] **Composite & Mask (2-3h):**
+  - ChromaKey, Keystone Mask, Vignette, Drop Shadow
+
+- [ ] **Simple 3D & Kaleidoscope (3-5h):**
+  - Kaleidoscope, Tile, Circles, Bendoscope
+
+- [ ] **Leicht implementierbare Zusatz-Effekte:**
+  - Sharpen, Emboss, Sepia, Gamma Correction
+  - Color Temperature, Channel Mixer, Noise, Solarize
+  - Duotone, Oil Paint, Mosaic, Zoom, Rotate
+  - Border, Crop, Alpha Blend, Lumetri Color
+
+---
+
+### 3.2 🎵 Audio-Reactive Support (~10-14h)
+
+- [ ] **Audio-Input (4h):**
+  - Microphone-Input (pyaudio/sounddevice)
+  - System-Audio-Capture (WASAPI Loopback)
+  
+- [ ] **Audio-Analyse (3h):**
+  - FFT (Bass/Mid/Treble Frequenz-Bänder)
+  - BPM-Detection (tempo tracking)
+  - Onset-Detection (Beat-Trigger)
+  
+- [ ] **Reaktive Parameter (3h):**
+  - Brightness ← RMS/Peak-Level
+  - Speed ← BPM
+  - Color ← Frequenz-Mapping
+  - Effect-Intensity ← Audio-Level
+  
+- [ ] **UI & API (2h):**
+  - Audio-Device-Auswahl
+  - Live-Spektrum-Anzeige
+  - Parameter-Mapping-Editor
+
+---
+
+### 3.3 🎬 HAP Codec Support & Video Converter (~8-12h)
+
+- [ ] **HAP Codec Decoder (4-5h):**
+  - **HAP Varianten:** HAP (DXT1), HAP Alpha (DXT5), HAP Q (BC7)
+  - **Vorteile:** 5-10x schnelleres Decoding vs. H.264
+  - **FFmpeg Integration:** libavcodec HAP Support
   - **Features:**
-    - Panels frei verschieben (Preview, Playback, Settings, Videos, etc.)
-    - Resize-Handles für Größenanpassung
-    - Grid-Snapping für automatisches Ausrichten
-    - LocalStorage-Persistierung (Position + Größe)
-    - JSON-Export/Import für Layout-Backup
-    - Preset-Layouts: "Standard", "Video-Focus", "Compact", "Multi-Monitor"
-    - Panel-Collapse (Ein-/Ausklappen einzelner Bereiche)
-    - Mobile-responsive Fallback
-  - **Implementierung:**
-    - Phase 1: GridStack.js Integration (~4h)
-    - Phase 2: Panel-Header mit Drag-Handles (~2h)
-    - Phase 3: Layout-Persistierung & Presets (~3h)
-    - Phase 4: Mobile-Optimierung (~3h)
-  - **Vorteile:**
-    - Personalisierbare UI für verschiedene Use-Cases
-    - Bessere UX für Multi-Monitor Setups
-    - Professioneller Look
-  - **Alternativen mit weniger Aufwand:**
-    - Quick-Win: Panel-Collapse (2-3h) - Panels nur ein/ausklappen
-    - Medium: Tab-Layout (4-6h) - Panels als Tabs organisieren
-  - **Empfehlung:** Erst nach User-Feedback zu aktuellem Layout
+    - Automatische HAP-Format-Erkennung
+    - Fallback auf Standard-Codecs
+    - Performance-Messung
 
-### 🛠️ Weitere Verbesserungen
+- [ ] **Universal Video Converter (4-7h):**
+  - **Input-Formate:** AVI, MP4, MOV, GIF, PNG-Sequences
+  - **Output-Profile:** HAP (Performance), H.264 (Hardware-Encoding)
+  - **Features:**
+    - Batch-Processing: Ganze Ordner konvertieren
+    - Auto-Resize: Auf Canvas-Größe skalieren
+    - Loop-Optimierung: Nahtlose Loops
+  - **Implementierung:**
+    - Phase 1: FFmpeg-Wrapper (~2h)
+    - Phase 2: Batch-Processing (~2h)
+    - Phase 3: CLI-Tool (~1h)
+    - Phase 4: Web-UI (~2h)
+
+**CLI-Beispiele:**
+```bash
+# Einzelnes Video zu HAP
+python convert.py video.mp4 --format hap --resize 60x300
+
+# Batch-Convert ganzer Ordner
+python convert.py kanal_1/*.mp4 --format hap --auto-resize
+```
+
+---
+
+## 🚀 PRIORITÄT 4 - Hoch-Komplex, Hoch-Wert (~24-40h)
+**Hoher Aufwand, strategisch wichtig**
+
+### 4.1 🎥 Multi-Video-Routing per Art-Net-Objekt (~12-20h)
+
+- [ ] **Grundidee:** Mehrere Videos gleichzeitig, jedes LED-Objekt bekommt eigenes Video
+- [ ] **Architektur:**
+  - Mehrere Player-Instanzen parallel (Video1, Video2, Video3)
+  - LED-Objekte definieren (Name, Universe-Range, Pixel-Count)
+  - Routing-Config: `{"object": "strip_1", "video_player_id": "video_1"}`
+  
+- [ ] **Kartendeck-UI:**
+  ```
+  PLAYLIST (Horizontal Scroll)
+  ┌─────────────┬─────────────┬─────────────┬─────────────┐
+  │   DECK 1    │   DECK 2    │   DECK 3    │   DECK 4    │
+  │ ┌─────────┐ │ ┌─────────┐ │ ┌─────────┐ │    [+]    │ │
+  │ │ Clip 1  │ │ │ Clip 5  │ │ │ Clip 8  │ │ Neu       │ │
+  │ │fire.mp4 │ │ │water.mp4│ │ │plasma   │ │           │ │
+  │ │▶ 00:15  │ │ │▶ 00:30  │ │ │▶ 01:00  │ │           │ │
+  │ │→strip_1 │ │ │→panel_1 │ │ │→ring_1  │ │           │ │
+  │ └─────────┘ │ └─────────┘ │ └─────────┘ │           │ │
+  │   ┌───────┐ │   ┌───────┐ │             │           │ │
+  │   │Clip 2 │ │   │Clip 6 │ │             │           │ │
+  │   │glow   │ │   │spark  │ │             │           │ │
+  │   └───────┘ │   └───────┘ │             │           │ │
+  │     ┌─────┐ │     ┌─────┐ │             │           │ │
+  │     │Clip3│ │     │Clip7│ │             │           │ │
+  │     └─────┘ │     └─────┘ │             │           │ │
+  └─────────────┴─────────────┴─────────────┴─────────────┘
+       ↑ Clips gestapelt wie Karten - Platzsparend!
+  ```
+
+- [ ] **Features:**
+  - Deck = Spalte (enthält gestapelte Clips)
+  - Clips = übereinander gestapelt, minimiert
+  - Click auf Deck → Detail-Ansicht mit allen Clips
+  - Pro Clip: Eigene Effekte, eigene Output-Zuweisung
+  - Playback-Modi: Parallel (alle gleichzeitig) oder Sequential
+
+- [ ] **Implementierung:**
+  - Phase 1: LED-Objekt-Definition & Config (~2h)
+  - Phase 2: Multi-Player-Manager (~2h)
+  - Phase 3: Routing-System & Frame-Collection (~2h)
+  - Phase 4: API-Endpoints (~2h)
+  - Phase 5: UI (Deck-System, Multi-Preview) (~3h)
+
+**JSON-Config Beispiel:**
+```json
+{
+  "led_objects": [
+    {"name": "strip_left", "universes": [1,2], "pixels": 200},
+    {"name": "strip_right", "universes": [3,4], "pixels": 200},
+    {"name": "panel_center", "universes": [5,6], "pixels": 256}
+  ],
+  "routing": [
+    {"object": "strip_left", "player_id": "video_1"},
+    {"object": "strip_right", "player_id": "video_2"},
+    {"object": "panel_center", "player_id": "video_3"}
+  ]
+}
+```
+
+---
+
+### 4.2 🔮 Neue Frame Sources (~12-20h)
+
+- [ ] **ShaderToy Source (8-12h):**
+  - ModernGL/PyOpenGL Integration
+  - GLSL Shader Support (Shadertoy-kompatibel)
+  - Uniform Variables (iTime, iResolution, iMouse)
+
+- [ ] **ImageSequence Source (2-3h):**
+  - PNG/JPG Sequenz-Support
+  - Automatische Frame-Nummerierung
+
+- [ ] **LiveStream Source (2-5h):**
+  - RTSP/HTTP Stream Support
+  - FFmpeg/GStreamer Integration
+
+---
+
+## 🎨 PRIORITÄT 5 - Niedrig-Komplex, Niedrig-Priorität (~8-12h)
+**Maintenance, Polishing, Nice-to-have**
+
+### 5.1 🎨 GUI-Optimierungen (~8-12h)
+
+- [ ] **Drag & Drop Layout-Editor:**
+  - GridStack.js Integration
+  - Panels frei verschieben & resizen
+  - LocalStorage-Persistierung
+  - Preset-Layouts: "Standard", "Video-Focus", "Compact"
+
+---
+
+### 5.2 🛠️ Weitere Verbesserungen
+
 - [ ] Unit Tests erweitern (Player, FrameSource, API)
 - [ ] API-Authentifizierung (Basic Auth/Token)
 - [ ] PyInstaller EXE Build Setup
-  - [ ] Spec-Datei erstellen mit allen Dependencies
-  - [ ] Single-File oder Folder-basierte Distribution testen
-- [ ] Konfiguration erweitern
-  - [ ] Environment Variable Support (target_ip, ports)
-  - [ ] JSON Schema Validation für config.json
-  - [ ] Hot-Reload (config.json watcher)
-- [ ] Projekt-Struktur
-  - [ ] Dockerfile erstellen
+- [ ] Environment Variable Support für config.json
+- [ ] JSON Schema Validation für config.json
+- [ ] Hot-Reload (config.json watcher)
+- [ ] Dockerfile erstellen
 
 ---
 
-## ✅ Aktuell in Arbeit
-- [ ] **Test & Validate Delta-Encoding**
-  - Test mit verschiedenen Videos (static, high-motion)
-  - CPU/Network Savings messen
-  - Visuelle Artefakte prüfen
+## 🔬 PRIORITÄT 6 - Optional / Langfristig (~64-86h)
+**Zukünftige Features mit hohem Aufwand**
+
+### 6.1 ⏱️ Script-basierter Sequenzer (Optional, ~4-6h)
+
+- **Power-User Feature:** Python-DSL für Show-Definition
+- **Features:** CLI-Befehl, Script-Loader, Volle Python-Kontrolle
+- **Empfehlung:** Nice-to-have, niedrige Priorität
 
 ---
 
-## 📚 Hinweise
-- **Plugin-System vor Sequenzer implementieren** - Sequenzer baut auf Plugins auf
-- **Playlist-Sequenzer als MVP** - Deckt 80% der Use-Cases ab
-- **Timeline-Sequenzer optional** - Nur bei komplexeren Anforderungen
+### 6.2 📈 Timeline-Sequenzer (Optional, ~60-80h)
+
+- Upgrade von Playlist-Sequenzer zu visueller Timeline
+- Features: Clip-Trimming, Scrubbing, Multi-Track, Audio-Sync
+- **Nur bei komplexeren Anforderungen**
 
 ---
 
-*Siehe [HISTORY.md](HISTORY.md) für abgeschlossene Features (v1.x - v2.2)*
+## 📊 Zusammenfassung nach Priorität
+
+| Priorität | Aufwand | Nutzen | Summe Stunden |
+|-----------|---------|--------|---------------|
+| **P1** | Niedrig | Hoch | ~30-42h |
+| **P2** | Mittel | Hoch | ~14-24h |
+| **P3** | Mittel | Mittel | ~33-51h |
+| **P4** | Hoch | Hoch | ~24-40h |
+| **P5** | Niedrig | Niedrig | ~8-12h |
+| **P6** | Sehr Hoch | Mittel | ~64-86h |
+| **GESAMT** | | | **~173-255h** |
+
+---
+
+## 🎯 Empfohlene Umsetzungs-Reihenfolge
+
+### Phase 1: Foundation (P1) - ~30-42h
+1. Plugin-System erweitern (Generator-Plugins, Presets, UI)
+2. Transition-System implementieren
+3. Playlist-Sequenzer
+4. MIDI-over-Ethernet Support
+
+**Ziel:** Vollständige Show-Control mit Effects & Transitions
+
+---
+
+### Phase 2: Performance (P2) - ~14-24h
+1. WebSocket Command Channel
+2. Multi-Network-Adapter Support
+3. Preview Stream Optimierung (WebRTC)
+
+**Ziel:** Production-ready Performance & Latenz-Optimierung
+
+---
+
+### Phase 3: Content (P3) - ~33-51h
+1. Effect-Bibliothek erweitern (~30 neue Effekte)
+2. Audio-Reactive Support
+3. HAP Codec & Video Converter
+
+**Ziel:** Umfangreiche Effect-Library & bessere Video-Performance
+
+---
+
+### Phase 4: Advanced (P4) - ~24-40h
+1. Multi-Video-Routing mit Kartendeck-UI
+2. Neue Frame Sources (ShaderToy, LiveStream)
+
+**Ziel:** Multi-Output-Setups & Advanced Content-Sources
+
+---
+
+### Phase 5+: Polish & Future (P5+P6) - ~72-98h
+1. GUI-Optimierungen
+2. Maintenance & Tests
+3. Optional: Timeline-Sequenzer
+
+**Ziel:** Production-Polishing & Langzeit-Features
+
+---
+
+## 📚 Status (Stand: 2025-11-26)
+
+### ✅ Fertiggestellt (v2.3)
+- **Unified API Architecture** mit UUID-basiertem Clip-Management
+- **Dual-Player-System** (Video Preview + Art-Net Output)
+- **Plugin-System** vollständig implementiert (PluginBase, PluginManager, API)
+- **17 Effect-Plugins:** 11 Farb-Manipulation, 5 Time & Motion, 1 Blur
+- **ClipRegistry** mit UUID-basierter Clip-Identifikation
+- **Code-Cleanup** (~1500 Zeilen deprecated Code entfernt)
+
+---
+
+*Siehe [HISTORY.md](HISTORY.md) für abgeschlossene Features (v1.x - v2.3)*

@@ -101,8 +101,8 @@ class RestAPI:
         return self.player_manager.player
     
     @player.setter
-    def player(self, new_player):
-        """Set player via PlayerManager (for backward compatibility)."""
+    def set_player(self, new_player):
+        """Set player via PlayerManager."""
         self.player_manager.player = new_player
     
     def _register_routes(self):
@@ -163,6 +163,10 @@ class RestAPI:
         # Register Files API
         from .api_files import register_files_api
         register_files_api(self.app, self.video_dir)
+        
+        # Register Unified Player API (NEW)
+        from .api_player_unified import register_unified_routes
+        register_unified_routes(self.app, self.player_manager, self.config)
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
@@ -370,7 +374,7 @@ class RestAPI:
             return f"Fehler: {str(e)}"
     
     def _execute_command_old(self, command):
-        """Legacy command execution (deprecated, kept for reference).
+        """Command execution via CLI handler.
         
         WICHTIG: Verwende NIEMALS print() in API-Funktionen!
         Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.

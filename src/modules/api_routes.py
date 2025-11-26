@@ -20,28 +20,28 @@ def register_playback_routes(app, player_manager):
     @app.route('/api/stop', methods=['POST'])
     def stop():
         """Stoppt Video-Wiedergabe."""
-        player = player_manager.player
+        player = player_manager.get_video_player()
         player.stop()
         return jsonify({"status": "success", "message": "Video gestoppt"})
     
     @app.route('/api/pause', methods=['POST'])
     def pause():
         """Pausiert Wiedergabe."""
-        player = player_manager.player
+        player = player_manager.get_video_player()
         player.pause()
         return jsonify({"status": "success", "message": "Video pausiert"})
     
     @app.route('/api/resume', methods=['POST'])
     def resume():
         """Setzt Wiedergabe fort."""
-        player = player_manager.player
+        player = player_manager.get_video_player()
         player.resume()
         return jsonify({"status": "success", "message": "Wiedergabe fortgesetzt"})
     
     @app.route('/api/restart', methods=['POST'])
     def restart():
         """Startet Video neu."""
-        player = player_manager.player
+        player = player_manager.get_video_player()
         player.restart()
         return jsonify({"status": "success", "message": "Video neu gestartet"})
     

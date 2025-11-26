@@ -162,7 +162,7 @@ def main():
         if default_points and default_points in json_files:
             points_json_path = os.path.join(data_dir, default_points)
             print(f"Punkte-Liste (config): {default_points}")
-        # 2. Fallback: Legacy points_json Setting
+        # 2. Fallback: Old config setting
         elif config['paths']['points_json'] in json_files:
             points_json_path = os.path.join(data_dir, config['paths']['points_json'])
             print(f"Punkte-Liste: {config['paths']['points_json']}")
@@ -200,11 +200,16 @@ def main():
     artnet_manager.start(artnet_config)
     logger.info(f"Art-Net gestartet: {target_ip}, Universen: {points_data['required_universes']}")
     
-    # Unified Player initialisieren mit VideoSource
+    # ClipRegistry initialisieren (ERST, bevor Player erstellt werden)
+    from modules.clip_registry import get_clip_registry
+    clip_registry = get_clip_registry()
+    logger.info("ClipRegistry initialisiert")
+    
+    # Video Player initialisieren (nur für Preview, KEIN Art-Net Output!)
     video_source = VideoSource(video_path, canvas_width, canvas_height, config)
-    player = Player(video_source, points_json_path, target_ip, start_universe, fps_limit, config)
-    player.set_artnet_manager(artnet_manager)  # Verbinde Player mit globalem Art-Net
-    logger.info(f"Player initialisiert: Source={os.path.basename(video_path)}, Points={os.path.basename(points_json_path)}")
+    player = Player(video_source, points_json_path, target_ip, start_universe, fps_limit, config, 
+                   enable_artnet=False, player_name="Video Player (Preview)", clip_registry=clip_registry)
+    logger.info(f"Video Player initialisiert (Preview only): Source={os.path.basename(video_path)}, Points={os.path.basename(points_json_path)}")
     
     # Replay Manager global initialisieren (mit Player-Referenz)
     from modules.replay_manager import ReplayManager
@@ -218,9 +223,17 @@ def main():
     player.set_brightness(config['video']['default_brightness'])
     player.set_speed(config['video']['default_speed'])
     
+    # Art-Net Player initialisieren (separat vom Video Player)
+    # Verwende das gleiche Video wie der Video Player als Ausgangspunkt
+    artnet_video_source = VideoSource(video_path, canvas_width, canvas_height, config)
+    artnet_player = Player(artnet_video_source, points_json_path, target_ip, start_universe, fps_limit, config,
+                          enable_artnet=True, player_name="Art-Net Player", clip_registry=clip_registry)
+    artnet_player.set_artnet_manager(artnet_manager)
+    logger.info(f"Art-Net Player initialisiert: Source={os.path.basename(video_path)}")
+    
     # PlayerManager initialisieren (Single Source of Truth)
-    player_manager = PlayerManager(player)
-    logger.info("PlayerManager initialisiert")
+    player_manager = PlayerManager(player, artnet_player)
+    logger.info("PlayerManager initialisiert mit Video Player und Art-Net Player")
     
     # DMX-Controller initialisieren (nur für DMX-Input zuständig)
     dmx_controller = DMXController(

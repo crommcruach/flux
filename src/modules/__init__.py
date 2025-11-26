@@ -2,8 +2,8 @@
 Flux Module Package
 """
 # Lazy imports to avoid circular dependencies
-__all__ = ['Player', 'VideoSource', 'ScriptSource', 'VideoPlayer', 'ScriptPlayer', 'DMXController', 'ArtNetManager', 'RestAPI', 'ScriptGenerator',
-           'PointsLoader', 'CacheManager', 'ConfigValidator', 'PlayerManager',
+__all__ = ['Player', 'VideoSource', 'ScriptSource', 'DMXController', 'ArtNetManager', 'RestAPI', 'ScriptGenerator',
+           'PointsLoader', 'CacheManager', 'ConfigValidator', 'PlayerManager', 'ClipRegistry',
            'list_videos', 'print_help', 'list_points_files', 'validate_points_file', 'validate_points_json']
 
 def __getattr__(name):
@@ -16,14 +16,9 @@ def __getattr__(name):
     elif name == 'ScriptSource':
         from .frame_source import ScriptSource
         return ScriptSource
-    elif name == 'VideoPlayer':
-        # Backward compatibility - deprecated
-        from .video_player import VideoPlayer
-        return VideoPlayer
-    elif name == 'ScriptPlayer':
-        # Backward compatibility - deprecated
-        from .script_player import ScriptPlayer
-        return ScriptPlayer
+    elif name == 'ClipRegistry':
+        from .clip_registry import ClipRegistry, get_clip_registry
+        return ClipRegistry
     elif name == 'DMXController':
         from .dmx_controller import DMXController
         return DMXController

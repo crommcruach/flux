@@ -46,8 +46,8 @@ class DMXController:
         return self.player_manager.player
     
     @player.setter
-    def player(self, new_player):
-        """Set player via PlayerManager (for backward compatibility)."""
+    def set_player(self, new_player):
+        """Set player via PlayerManager."""
         self.player_manager.player = new_player
         
     def start(self):

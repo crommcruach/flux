@@ -9,6 +9,7 @@ const API_BASE = '';
 let availableEffects = [];
 let videoEffects = [];
 let artnetEffects = [];
+let clipEffects = [];
 let updateInterval = null;
 let playlistUpdateInterval = null;
 
@@ -17,6 +18,26 @@ let videoAutoplay = false;
 let videoLoop = false;
 let artnetAutoplay = false;
 let artnetLoop = false;
+
+// Clip FX State (NEW: UUID-based)
+let selectedClipId = null;  // UUID from clip registry
+let selectedClipPath = null;  // Original path (for display)
+let selectedClipPlayerType = null;  // 'video' or 'artnet'
+
+// Transition State
+let videoTransitionConfig = {
+    enabled: false,
+    effect: 'fade',
+    duration: 1.0,
+    easing: 'ease_in_out'
+};
+
+let artnetTransitionConfig = {
+    enabled: false,
+    effect: 'fade',
+    duration: 1.0,
+    easing: 'ease_in_out'
+};
 
 // ========================================
 // INITIALIZATION
@@ -163,6 +184,7 @@ window.startEffectDrag = function(event, effectId) {
 function setupEffectDropZones() {
     const videoFxPanel = document.getElementById('videoFxList');
     const artnetFxPanel = document.getElementById('artnetFxList');
+    const clipFxPanel = document.getElementById('clipFxList');
     
     [videoFxPanel, artnetFxPanel].forEach((panel, index) => {
         const playerType = index === 0 ? 'video' : 'artnet';
@@ -190,6 +212,27 @@ function setupEffectDropZones() {
                 }
             }
         });
+    });
+    
+    // Clip FX Drop Zone
+    clipFxPanel.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        clipFxPanel.style.background = 'var(--bg-tertiary)';
+    });
+    
+    clipFxPanel.addEventListener('dragleave', (e) => {
+        clipFxPanel.style.background = '';
+    });
+    
+    clipFxPanel.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        clipFxPanel.style.background = '';
+        
+        const effectId = e.dataTransfer.getData('effectId');
+        if (effectId && selectedClipId && selectedClipPlayerType) {
+            await addEffectToClip(effectId);
+        }
     });
 }
 
@@ -424,7 +467,8 @@ function renderVideoPlaylist() {
 // Load video file WITHOUT adding to playlist (used for playlist clicks)
 window.loadVideoFile = async function(videoPath) {
     try {
-        const response = await fetch(`${API_BASE}/api/video/load`, {
+        // NEW: Use unified API
+        const response = await fetch(`${API_BASE}/api/player/video/clip/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: videoPath })
@@ -432,11 +476,18 @@ window.loadVideoFile = async function(videoPath) {
         
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             currentVideo = videoPath.replace(/^[\\\/]+/, '');
             renderVideoPlaylist();
+            
+            // NEW: Store clip ID and path
+            selectedClipId = data.clip_id;
+            selectedClipPath = videoPath;
+            selectedClipPlayerType = 'video';
+            console.log('✅ Video loaded with Clip-ID:', selectedClipId);
+            await refreshClipEffects();
         } else {
-            showToast(`Failed to load video: ${data.message}`, 'error');
+            showToast(`Failed to load video: ${data.error}`, 'error');
         }
     } catch (error) {
         console.error('❌ Error loading video:', error);
@@ -666,8 +717,6 @@ async function loadArtnetPlaylist() {
                     loopBtn.classList.add('btn-outline-primary');
                 }
             }
-            
-            // Art-Net playlist loaded successfully
         } else {
             // Start with empty playlist
             artnetFiles = [];
@@ -835,7 +884,8 @@ function renderArtnetPlaylist() {
 // Load Art-Net video file WITHOUT adding to playlist (used for playlist clicks)
 window.loadArtnetFile = async function(videoPath) {
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/video/load`, {
+        // NEW: Use unified API
+        const response = await fetch(`${API_BASE}/api/player/artnet/clip/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: videoPath })
@@ -843,11 +893,18 @@ window.loadArtnetFile = async function(videoPath) {
         
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             currentArtnet = videoPath.replace(/^[\\\/]+/, '');
             renderArtnetPlaylist();
+            
+            // NEW: Store clip ID and path
+            selectedClipId = data.clip_id;
+            selectedClipPath = videoPath;
+            selectedClipPlayerType = 'artnet';
+            console.log('✅ Art-Net video loaded with Clip-ID:', selectedClipId);
+            await refreshClipEffects();
         } else {
-            showToast(`Failed to load Art-Net video: ${data.message}`, 'error');
+            showToast(`Failed to load Art-Net video: ${data.error}`, 'error');
         }
     } catch (error) {
         console.error('❌ Error loading Art-Net video:', error);
@@ -1262,6 +1319,158 @@ window.clearArtnetEffects = async function() {
 };
 
 // ========================================
+// CLIP FX MANAGEMENT
+// ========================================
+
+window.addEffectToClip = async function(pluginId) {
+    if (!selectedClipId || !selectedClipPlayerType) {
+        showToast('No clip selected', 'warning');
+        return;
+    }
+    
+    try {
+        // NEW: Unified API endpoint
+        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/add`;
+        
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                plugin_id: pluginId
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            console.log('✅ Clip effect added:', pluginId, 'to Clip-ID:', selectedClipId);
+            await refreshClipEffects();
+        } else {
+            const errorMsg = data.error || data.message || 'Unknown error';
+            console.error('❌ Failed to add clip effect:', errorMsg);
+            showToast(`Failed to add clip effect: ${errorMsg}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error adding clip effect:', error);
+        showToast('Error adding clip effect', 'error');
+    }
+};
+
+async function refreshClipEffects() {
+    if (!selectedClipId || !selectedClipPlayerType) {
+        // Clear panel if no clip selected
+        const container = document.getElementById('clipFxList');
+        const title = document.getElementById('clipFxTitle');
+        container.innerHTML = '<div class="empty-state"><p>Select a clip to manage effects</p></div>';
+        title.innerHTML = '<span class="player-icon">🎬</span> Clip FX';
+        clipEffects = [];
+        return;
+    }
+    
+    try {
+        // NEW: Unified API endpoint (GET instead of POST)
+        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects`;
+        
+        const response = await fetch(endpoint, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            clipEffects = data.effects || [];
+            renderClipEffects();
+        }
+    } catch (error) {
+        console.error('❌ Error refreshing clip effects:', error);
+    }
+}
+
+function renderClipEffects() {
+    const container = document.getElementById('clipFxList');
+    const title = document.getElementById('clipFxTitle');
+    
+    // Update title with player icon and clip name
+    const icon = selectedClipPlayerType === 'video' ? '🎬' : '🎨';
+    const clipName = selectedClipPath ? selectedClipPath.split('/').pop() : 'No Clip';
+    title.innerHTML = `<span class="player-icon">${icon}</span> ${clipName}`;
+    
+    // Save expanded states
+    const expandedStates = new Set();
+    container.querySelectorAll('.effect-item.expanded').forEach(item => {
+        expandedStates.add(item.id);
+    });
+    
+    if (clipEffects.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">✨</div>
+                <h6>No Clip Effects</h6>
+                <p>Add effects from the left panel</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = clipEffects.map((effect, index) => 
+        renderEffectItem(effect, index, 'clip')
+    ).join('');
+    
+    // Restore expanded states after rerender
+    expandedStates.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.classList.add('expanded');
+        }
+    });
+}
+
+let clearClipEffectsClicks = 0;
+let clearClipEffectsTimer = null;
+
+window.clearClipEffects = async function() {
+    if (!selectedClip || !selectedClipPlayerType) {
+        showToast('No clip selected', 'warning');
+        return;
+    }
+    
+    clearClipEffectsClicks++;
+    
+    if (clearClipEffectsClicks === 1) {
+        showToast('Click again to confirm clearing clip effects', 'warning');
+        clearClipEffectsTimer = setTimeout(() => {
+            clearClipEffectsClicks = 0;
+        }, 3000);
+        return;
+    }
+    
+    // Second click - clear effects
+    clearTimeout(clearClipEffectsTimer);
+    clearClipEffectsClicks = 0;
+    
+    try {
+        // NEW: Unified API endpoint
+        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/clear`;
+        
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Clip effects cleared', 'success');
+            await refreshClipEffects();
+        }
+    } catch (error) {
+        console.error('❌ Error clearing clip effects:', error);
+        showToast('Error clearing clip effects', 'error');
+    }
+};
+
+// ========================================
 // EFFECT RENDERING
 // ========================================
 
@@ -1307,13 +1516,30 @@ window.toggleEffect = function(player, index, event) {
 
 window.removeEffect = async function(player, index) {
     try {
-        const endpoint = player === 'video' 
-            ? `${API_BASE}/api/player/effects/${index}`
-            : `${API_BASE}/api/artnet/effects/remove/${index}`;
+        let endpoint;
+        let bodyData = null;
         
-        const response = await fetch(endpoint, {
+        if (player === 'clip') {
+            // NEW: Unified API endpoint (no body needed, clip_id in URL)
+            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/${index}`;
+            bodyData = null;
+        } else {
+            // Player effects use URL-only
+            endpoint = player === 'video' 
+                ? `${API_BASE}/api/player/effects/${index}`
+                : `${API_BASE}/api/artnet/effects/remove/${index}`;
+        }
+        
+        const fetchOptions = {
             method: 'DELETE'
-        });
+        };
+        
+        if (bodyData) {
+            fetchOptions.headers = { 'Content-Type': 'application/json' };
+            fetchOptions.body = JSON.stringify(bodyData);
+        }
+        
+        const response = await fetch(endpoint, fetchOptions);
         
         const data = await response.json();
         
@@ -1321,8 +1547,10 @@ window.removeEffect = async function(player, index) {
             console.log(`✅ ${player} effect removed:`, index);
             if (player === 'video') {
                 await refreshVideoEffects();
-            } else {
+            } else if (player === 'artnet') {
                 await refreshArtnetEffects();
+            } else if (player === 'clip') {
+                await refreshClipEffects();
             }
         }
     } catch (error) {
@@ -1392,21 +1620,56 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
     return control;
 }
 
+// Debounce timer für Parameter-Updates
+const parameterUpdateTimers = {};
+
 window.updateParameter = async function(player, effectIndex, paramName, value, valueDisplayId = null) {
     try {
+        // Sofort UI-Update für responsives Feedback
         if (valueDisplayId) {
             document.getElementById(valueDisplayId).textContent = value;
         }
         
-        const endpoint = player === 'video'
-            ? `${API_BASE}/api/player/effects/${effectIndex}/parameters/${paramName}`
-            : `${API_BASE}/api/artnet/effects/${effectIndex}/parameter`;
+        // Debounce: Warte 150ms nach letzter Änderung
+        const timerKey = `${player}_${effectIndex}_${paramName}`;
         
-        const body = player === 'video'
-            ? { value: value }
-            : { name: paramName, value: value };
+        if (parameterUpdateTimers[timerKey]) {
+            clearTimeout(parameterUpdateTimers[timerKey]);
+        }
         
-        const method = player === 'video' ? 'POST' : 'PUT';
+        parameterUpdateTimers[timerKey] = setTimeout(async () => {
+            await sendParameterUpdate(player, effectIndex, paramName, value);
+            delete parameterUpdateTimers[timerKey];
+        }, 150);
+        
+    } catch (error) {
+        console.error(`❌ Error updating ${player} parameter:`, error);
+    }
+};
+
+async function sendParameterUpdate(player, effectIndex, paramName, value) {
+    try {
+        let endpoint;
+        let body;
+        let method;
+        
+        if (player === 'clip') {
+            // NEW: Unified API endpoint (clip_id in URL, no clip_path in body)
+            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/${effectIndex}/parameter`;
+            body = { 
+                name: paramName, 
+                value: value
+            };
+            method = 'PUT';
+        } else if (player === 'video') {
+            endpoint = `${API_BASE}/api/player/effects/${effectIndex}/parameters/${paramName}`;
+            body = { value: value };
+            method = 'POST';
+        } else {
+            endpoint = `${API_BASE}/api/artnet/effects/${effectIndex}/parameter`;
+            body = { name: paramName, value: value };
+            method = 'PUT';
+        }
         
         const response = await fetch(endpoint, {
             method: method,
@@ -1418,11 +1681,13 @@ window.updateParameter = async function(player, effectIndex, paramName, value, v
         
         if (data.success) {
             console.log(`✅ Updated ${player} ${paramName} = ${value}`);
+        } else {
+            console.error(`❌ Failed to update ${player} ${paramName}:`, data.message || data.error);
         }
     } catch (error) {
-        console.error(`❌ Error updating ${player} parameter:`, error);
+        console.error(`❌ Error sending ${player} parameter update:`, error);
     }
-};
+}
 
 // ========================================
 // FILE BROWSER
@@ -1544,6 +1809,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isArtnet = playlist.id === 'artnetPlaylist';
             
             if (isArtnet) {
+                // Try to load - loadArtnetVideo() will handle 503 and show appropriate message
                 await loadArtnetVideo(videoPath);
             } else {
                 await loadVideo(videoPath);
@@ -1761,6 +2027,79 @@ window.deletePlaylist = async function(playlistName, event) {
         }
     };
 };
+
+// ========================================
+// TRANSITION MENU
+// ========================================
+
+window.toggleTransitionMenu = function(player) {
+    const panel = document.getElementById(`${player}TransitionPanel`);
+    panel.classList.toggle('active');
+};
+
+window.closeTransitionMenu = function(player) {
+    const panel = document.getElementById(`${player}TransitionPanel`);
+    panel.classList.remove('active');
+};
+
+window.toggleTransitions = function(player, enabled) {
+    const config = player === 'video' ? videoTransitionConfig : artnetTransitionConfig;
+    config.enabled = enabled;
+    
+    const settings = document.getElementById(`${player}TransitionSettings`);
+    if (enabled) {
+        settings.classList.remove('disabled');
+        showToast(`${player === 'video' ? 'Video' : 'Art-Net'} Transitions enabled`, 'success');
+    } else {
+        settings.classList.add('disabled');
+        showToast(`${player === 'video' ? 'Video' : 'Art-Net'} Transitions disabled`, 'info');
+    }
+    
+    // Send to backend
+    updateTransitionConfig(player);
+};
+
+window.updateTransition = function(player) {
+    const config = player === 'video' ? videoTransitionConfig : artnetTransitionConfig;
+    
+    const effectSelect = document.getElementById(`${player}TransitionEffect`);
+    const durationSlider = document.getElementById(`${player}TransitionDuration`);
+    const easingSelect = document.getElementById(`${player}TransitionEasing`);
+    const durationValue = document.getElementById(`${player}DurationValue`);
+    
+    config.effect = effectSelect.value;
+    config.duration = parseFloat(durationSlider.value);
+    config.easing = easingSelect.value;
+    
+    // Update duration display
+    durationValue.textContent = config.duration.toFixed(1) + 's';
+    
+    // Send to backend
+    updateTransitionConfig(player);
+};
+
+async function updateTransitionConfig(player) {
+    const config = player === 'video' ? videoTransitionConfig : artnetTransitionConfig;
+    const endpoint = player === 'video' 
+        ? `${API_BASE}/api/video/transition/config`
+        : `${API_BASE}/api/artnet/transition/config`;
+    
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log(`✅ ${player} transition config updated:`, config);
+        }
+    } catch (error) {
+        console.error(`❌ Error updating ${player} transition config:`, error);
+    }
+}
 
 // Cleanup
 window.addEventListener('beforeunload', () => {

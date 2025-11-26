@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Type
 from plugins import PluginBase, PluginType
 from plugins.plugin_base import ParameterType
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class PluginManager:
@@ -48,10 +51,10 @@ class PluginManager:
         Scannt plugins/ Ordner nach Plugin-Klassen.
         Lädt alle Python-Module und registriert PluginBase-Subklassen.
         """
-        print(f"🔍 Plugin Discovery gestartet: {self.plugins_dir.absolute()}")
+        logger.info(f"Plugin Discovery gestartet: {self.plugins_dir.absolute()}")
         
         if not self.plugins_dir.exists():
-            print(f"⚠️ Plugins-Ordner nicht gefunden: {self.plugins_dir.absolute()}")
+            logger.warning(f"Plugins-Ordner nicht gefunden: {self.plugins_dir.absolute()}")
             return
         
         # Durchsuche alle Subordner (effects/, generators/, sources/, transitions/)
@@ -77,15 +80,15 @@ class PluginManager:
                         if issubclass(obj, PluginBase) and obj is not PluginBase:
                             try:
                                 self.register_plugin(obj)
-                                print(f"✓ Plugin geladen: {obj.METADATA.get('id', 'unknown')} ({module_path})")
+                                logger.debug(f"Plugin geladen: {obj.METADATA.get('id', 'unknown')} ({module_path})")
                             except Exception as reg_err:
                                 import traceback
-                                print(f"✗ Fehler beim Registrieren von {obj.__name__}: {reg_err}")
+                                logger.error(f"Fehler beim Registrieren von {obj.__name__}: {reg_err}")
                                 traceback.print_exc()
                 
                 except Exception as e:
                     import traceback
-                    print(f"✗ Fehler beim Laden von {module_path}: {e}")
+                    logger.error(f"Fehler beim Laden von {module_path}: {e}")
                     traceback.print_exc()
     
     def register_plugin(self, plugin_class: Type[PluginBase]):
@@ -103,10 +106,10 @@ class PluginManager:
         
         # Prüfe auf Duplikate
         if plugin_id in self.registry:
-            print(f"⚠️ Plugin mit ID '{plugin_id}' existiert bereits - überschreibe mit {plugin_class.__name__}")
+            logger.warning(f"Plugin mit ID '{plugin_id}' existiert bereits - überschreibe mit {plugin_class.__name__}")
         
         self.registry[plugin_id] = plugin_class
-        print(f"   ➡️ Registered '{plugin_id}' in registry (total: {len(self.registry)})")
+        logger.debug(f"Registered '{plugin_id}' in registry (total: {len(self.registry)})")
     
     def load_plugin(self, plugin_id: str, config: Optional[Dict] = None) -> Optional[PluginBase]:
         """
@@ -123,18 +126,18 @@ class PluginManager:
             Plugin-Instanz oder None wenn nicht gefunden
         """
         if plugin_id not in self.registry:
-            print(f"✗ Plugin '{plugin_id}' nicht gefunden in Registry")
+            logger.warning(f"Plugin '{plugin_id}' nicht gefunden in Registry")
             return None
         
         try:
             plugin_class = self.registry[plugin_id]
             # Erstelle NEUE Instanz (nicht cachen, da Effekte mehrfach verwendbar)
             instance = plugin_class(config=config)
-            print(f"✓ Plugin '{plugin_id}' erfolgreich geladen")
+            logger.debug(f"Plugin '{plugin_id}' erfolgreich geladen")
             return instance
         except Exception as e:
             import traceback
-            print(f"✗ Fehler beim Laden von Plugin '{plugin_id}': {e}")
+            logger.error(f"Fehler beim Laden von Plugin '{plugin_id}': {e}")
             traceback.print_exc()
             return None
     
@@ -160,7 +163,7 @@ class PluginManager:
         Returns:
             Liste von Plugin-Metadaten
         """
-        print(f"🔍 list_plugins called. Registry has {len(self.registry)} plugins: {list(self.registry.keys())}")
+        logger.debug(f"list_plugins called. Registry has {len(self.registry)} plugins")
         
         result = []
         for plugin_id, plugin_class in self.registry.items():
@@ -177,11 +180,11 @@ class PluginManager:
                 
                 result.append(metadata)
             except Exception as e:
-                print(f"✗ Error processing plugin {plugin_id}: {e}")
+                logger.error(f"Error processing plugin {plugin_id}: {e}")
                 import traceback
                 traceback.print_exc()
         
-        print(f"✅ Returning {len(result)} plugins from list_plugins")
+        logger.debug(f"Returning {len(result)} plugins from list_plugins")
         return result
     
     def get_plugin_metadata(self, plugin_id: str) -> Optional[Dict]:
@@ -306,7 +309,7 @@ class PluginManager:
             instance = self.instances[plugin_id]
             instance.cleanup()
             del self.instances[plugin_id]
-            print(f"✓ Plugin '{plugin_id}' entladen")
+            logger.info(f"Plugin '{plugin_id}' entladen")
     
     def reload_plugins(self):
         """
@@ -321,7 +324,7 @@ class PluginManager:
         
         # Discover neu
         self.discover_plugins()
-        print("✓ Alle Plugins neu geladen")
+        logger.info("Alle Plugins neu geladen")
     
     def get_stats(self) -> Dict:
         """

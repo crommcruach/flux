@@ -1,8 +1,175 @@
 # API Documentation
 
-## REST API Endpoints
+## 🆕 Unified Player API (v2.0)
+
+### Architecture Overview
+
+Das neue Unified API System verwendet:
+- **Player IDs:** `video` (Preview-Player) und `artnet` (Art-Net Output-Player)
+- **Clip UUIDs:** Jeder geladene Clip erhält eine eindeutige UUID
+- **Unified Endpoints:** Konsistente URL-Struktur für beide Player
+
+### Clip Management
+
+#### POST /api/player/{player_id}/clip/load
+Lädt ein Video in den spezifizierten Player.
+
+**Parameters:**
+- `player_id`: `video` oder `artnet`
+
+**Request:**
+```json
+{
+  "video_path": "myvideo.mp4"  // Relativer oder absoluter Pfad
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "clip_id": "da6eebb1-e2f0-4c0e-bbf5-25727e579bbb",
+  "player_id": "video",
+  "relative_path": "myvideo.mp4",
+  "was_playing": false
+}
+```
+
+#### GET /api/player/{player_id}/clip/current
+Gibt Informationen zum aktuell geladenen Clip zurück.
+
+**Response:**
+```json
+{
+  "success": true,
+  "clip_id": "da6eebb1-e2f0-4c0e-bbf5-25727e579bbb",
+  "clip_data": {
+    "player_id": "video",
+    "absolute_path": "C:/Videos/myvideo.mp4",
+    "relative_path": "myvideo.mp4",
+    "metadata": {},
+    "effects": [...]
+  }
+}
+```
+
+### Clip Effects
+
+#### GET /api/player/{player_id}/clip/{clip_id}/effects
+Gibt alle Effekte eines Clips zurück.
+
+**Response:**
+```json
+{
+  "success": true,
+  "clip_id": "da6eebb1-e2f0-4c0e-bbf5-25727e579bbb",
+  "effects": [
+    {
+      "plugin_id": "blur",
+      "metadata": {...},
+      "parameters": {"radius": 5}
+    }
+  ]
+}
+```
+
+#### POST /api/player/{player_id}/clip/{clip_id}/effects/add
+Fügt einen Effekt zu einem Clip hinzu.
+
+**Request:**
+```json
+{
+  "plugin_id": "blur"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "clip_id": "da6eebb1-e2f0-4c0e-bbf5-25727e579bbb"
+}
+```
+
+#### PUT /api/player/{player_id}/clip/{clip_id}/effects/{index}/parameter
+Aktualisiert einen Effect-Parameter.
+
+**Request:**
+```json
+{
+  "name": "radius",
+  "value": 10
+}
+```
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
+#### DELETE /api/player/{player_id}/clip/{clip_id}/effects/{index}
+Entfernt einen Effekt von einem Clip.
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
+#### POST /api/player/{player_id}/clip/{clip_id}/effects/clear
+Entfernt alle Effekte von einem Clip.
+
+**Response:**
+```json
+{
+  "success": true,
+  "removed_count": 3
+}
+```
 
 ### Playback Control
+
+#### POST /api/player/{player_id}/play
+Startet Wiedergabe für den spezifizierten Player.
+
+**Response:**
+```json
+{
+  "success": true,
+  "player_id": "video"
+}
+```
+
+#### POST /api/player/{player_id}/pause
+Pausiert Wiedergabe.
+
+**Response:**
+```json
+{
+  "success": true,
+  "player_id": "video"
+}
+```
+
+#### POST /api/player/{player_id}/stop
+Stoppt Wiedergabe.
+
+**Response:**
+```json
+{
+  "success": true,
+  "player_id": "video"
+}
+```
+
+---
+
+## Legacy API Endpoints
+
+### Playback Control (Legacy)
 
 #### POST /api/play
 Startet Video-Wiedergabe.

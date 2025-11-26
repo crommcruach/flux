@@ -146,8 +146,7 @@ class VideoSource(FrameSource):
     
     def initialize(self):
         """Initialisiert Video-Capture."""
-        # TODO: points_json_path wird für Cache benötigt - später über get_cache_key() lösen
-        # Für jetzt: Cache-Loading wird in Player behandelt
+        # NOTE: Cache-Loading wird im Player behandelt (benötigt points_json_path für Cache-Key)
         
         # Schließe alte Capture falls vorhanden
         if self.cap and self.cap.isOpened():

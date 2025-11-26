@@ -40,12 +40,15 @@ Video-to-Art-Net DMX Control System mit Web-Interface und Multi-Kanal Unterstüt
 - 🔒 **Lock-Free Stats** - Atomic Counters (2-5% CPU-Reduktion)
 - 🏛️ **Gradient Cache** - Pattern-Caching spart 1-3ms pro Generation
 
-### Architektur (v2.0 - Unified Player)
-- 🔄 **Unified Player** - Single Player-Instanz für alle Media-Typen
-- 🎯 **Frame Source Pattern** - Austauschbare Frame-Quellen (Video, Script, Stream)
+### Architektur (v2.3 - Unified API & Dual-Player)
+- 🏗️ **Unified API** - Konsistente REST-Endpoints mit UUID-basierten Clips
+- 👥 **Dual-Player System** - Video Player (Preview) + Art-Net Player (Output) unabhängig
+- 🎯 **ClipRegistry** - Zentrale UUID-basierte Clip-Verwaltung mit Effekt-Speicherung
+- 🔄 **Frame Source Pattern** - Austauschbare Frame-Quellen (Video, Script, Stream)
 - 🔌 **Hot Source Switching** - Wechsel zwischen Videos/Scripts ohne Player-Neustart
 - 🧩 **Extensible** - Einfaches Hinzufügen neuer Source-Typen (ImageSequence, LiveStream, etc.)
-- ♻️ **Code Reduction** - 90% weniger Duplikation (alte VideoPlayer/ScriptPlayer eliminiert)
+- ♻️ **Code Reduction** - 90% weniger Duplikation, deprecated Code entfernt
+- ⚡ **Lazy Initialization** - VideoSource erst beim Play laden (verhindert FFmpeg-Konflikte)
 
 ## Installation
 

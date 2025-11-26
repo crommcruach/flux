@@ -19,7 +19,7 @@ def register_effects_api(app, player_manager):
             200: {effects: [...], count: int}
             404: {error: "No active player"}
         """
-        player = player_manager.player
+        player = player_manager.get_video_player()
         
         if not player:
             return jsonify({'error': 'No active player'}), 404
@@ -47,7 +47,7 @@ def register_effects_api(app, player_manager):
             400: {success: false, message: "..."}
             404: {error: "No active player"}
         """
-        player = player_manager.player
+        player = player_manager.get_video_player()
         
         if not player:
             return jsonify({'error': 'No active player'}), 404
@@ -91,7 +91,7 @@ def register_effects_api(app, player_manager):
             400: {success: false, message: "..."}
             404: {error: "No active player"}
         """
-        player = player_manager.player
+        player = player_manager.get_video_player()
         
         if not player:
             return jsonify({'error': 'No active player'}), 404
@@ -118,7 +118,7 @@ def register_effects_api(app, player_manager):
             200: {success: true, message: "..."}
             404: {error: "No active player"}
         """
-        player = player_manager.player
+        player = player_manager.get_video_player()
         
         if not player:
             return jsonify({'error': 'No active player'}), 404
@@ -147,7 +147,7 @@ def register_effects_api(app, player_manager):
             400: {success: false, message: "..."}
             404: {error: "No active player"}
         """
-        player = player_manager.player
+        player = player_manager.get_video_player()
         
         if not player:
             return jsonify({'error': 'No active player'}), 404

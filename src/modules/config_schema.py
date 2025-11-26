@@ -154,7 +154,7 @@ CONFIG_SCHEMA = {
                 },
                 "points_json": {
                     "type": "string",
-                    "description": "Standard Points-JSON Dateiname (deprecated, use default_points_json)"
+                    "description": "Fallback Points-JSON Dateiname (use default_points_json instead)"
                 },
                 "default_points_json": {
                     "type": ["string", "null"],

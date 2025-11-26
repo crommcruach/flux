@@ -7,6 +7,82 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ---
 
+## [2.3.0] - 2025-11-26
+
+### 🏗️ Unified API Architecture v2.0 - Breaking Changes
+
+#### Hinzugefügt
+- **ClipRegistry System** - UUID-basiertes Clip-Management (`clip_registry.py`)
+  - Eindeutige Clip-IDs unabhängig von Dateipfaden
+  - Zentrale Verwaltung von Clip-Metadaten und Effekten
+  - Singleton Pattern für globalen Zugriff
+  
+- **Unified Player API** - Konsistente REST-Endpoints (`api_player_unified.py`)
+  - `/api/player/{player_id}/clip/load` - Video laden, UUID zurück
+  - `/api/player/{player_id}/clip/current` - Aktueller Clip Info
+  - `/api/player/{player_id}/clip/{clip_id}/effects/*` - Effekt-Management
+  - `/api/player/{player_id}/play|pause|stop` - Playback Control
+  
+- **Dual-Player Architecture** - Zwei unabhängige Player-Instanzen
+  - Video Player (`player_id="video"`) - Preview ohne Art-Net
+  - Art-Net Player (`player_id="artnet"`) - Output zu LEDs
+  - Keine gegenseitige Beeinflussung mehr
+  - Beide Player können unterschiedliche Videos mit verschiedenen Effekten abspielen
+
+- **PlayerManager Erweiterung** - Unified Player Access
+  - `get_player(player_id)` - Einheitliche Zugriffsmethode
+  - `get_all_player_ids()` - Liste aller verfügbaren Player
+  - Backward Compatibility mit `get_video_player()`, `get_artnet_player()`
+
+#### Geändert
+- **Player.py** - ClipRegistry Integration
+  - Constructor erhält `clip_registry` Parameter
+  - Effekte werden aus Registry geladen: `clip_registry.get_clip_effects(current_clip_id)`
+  - `current_clip_id` wird beim Laden eines Videos gesetzt
+  - Lazy VideoSource-Initialisierung (erst beim ersten `play()`)
+  
+- **Frontend Migration** - UUID-basierte Clip-Verwaltung
+  - `controls.js`: `selectedClipId` (UUID) statt `selectedClip` (path)
+  - Alle API-Calls verwenden neue Unified Endpoints
+  - Clip-ID wird von Server bei Video-Load zurückgegeben
+
+#### Entfernt (Breaking Changes)
+- **Deprecated Code Cleanup**
+  - `self.effect_chain` aus Player entfernt (ersetzt durch `video_effect_chain`/`artnet_effect_chain`)
+  - `self.clip_effects` aus Player entfernt (ersetzt durch ClipRegistry)
+  - Legacy-Funktionen: `add_effect()`, `remove_effect()`, `clear_effects()`
+  - Backward-Compatibility-Code aus `api_player_unified.py`
+
+#### Behoben
+- **Clip-Effekte funktionieren nicht** - Root Cause: API speicherte in ClipRegistry, Player las aus `self.clip_effects`
+- **FFmpeg async_lock Fehler** - Lazy VideoSource-Initialisierung verhindert doppeltes Öffnen derselben Datei
+- **Path-basierte Clip-Kollisionen** - UUID-System löst Probleme mit gleichnamigen Dateien
+
+#### Dokumentation
+- **API.md** - Vollständig überarbeitet mit Unified API v2.0 Dokumentation
+- **ARCHITECTURE.md** - Neue Dual-Player Architektur und ClipRegistry dokumentiert
+- **TODO.md** - Abgeschlossene Features dokumentiert
+
+#### Maintenance
+- **Test-Dateien organisiert** - Alle `test_*.py` und `test_*.ps1` nach `tests/` verschoben
+- **Code bereinigt** - Deprecated Code und Kommentare entfernt
+- **Legacy Player entfernt** - `video_player.py` (868 Zeilen) und `script_player.py` (~620 Zeilen) gelöscht
+  - Nur noch unified `Player` mit `VideoSource`/`ScriptSource`
+  - Spart ~1500 Zeilen toten Code
+  - `__init__.py` aktualisiert (deprecated exports entfernt)
+- **Backward Compatibility Kommentare entfernt** - Code-Kommentare bereinigt
+  - `player_manager.py` - Docstrings aktualisiert
+  - `player.py` - Properties ohne "backward compatibility" Hinweise
+  - `rest_api.py`, `dmx_controller.py` - Docstrings vereinfacht
+  - Funktionaler Code bleibt (nur Kommentare geändert)
+- **Static Content bereinigt** - Backup-Dateien entfernt
+  - `controls_backup.html` gelöscht
+  - `cli.js.backup` gelöscht
+  - `controls_backup.js` gelöscht
+  - Projekt enthält nur noch aktive Dateien
+
+---
+
 ## [2.2.0] - 2025-11-23
 
 ### 🚀 Performance-Optimierungen (55-75% CPU-Reduktion)

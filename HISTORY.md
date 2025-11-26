@@ -1,5 +1,55 @@
 # Py_artnet - Version History
 
+## v2.3 - Unified API & Plugin System (2025-11-26)
+
+### Unified API Architecture mit UUID-basiertem Clip-Management
+- ✓ **ClipRegistry System** - UUID-basierte Clip-Identifikation (Singleton-Pattern)
+- ✓ **Vereinheitlichte API** - `/api/player/{player_id}/clip/{clip_id}/...` Endpoints
+- ✓ **Dual-Player-Architektur** - Video Player (Preview) + Art-Net Player (Output)
+- ✓ **Unabhängige Clip-Effekte** - Jeder Player verwaltet eigene Effekt-Chains
+- ✓ **PlayerManager** - `get_player(player_id)` für einheitlichen Zugriff
+- ✓ **Frontend Migration** - controls.js nutzt UUID-basierte Endpoints
+- ✓ **Lazy VideoSource-Initialisierung** - Verhindert FFmpeg-Konflikte beim Multi-Instance-Zugriff
+- ✓ **Clip-basierte Effekte** - Player lädt Effekte aus ClipRegistry statt lokaler Liste
+
+### Plugin-System (vollständig implementiert)
+- ✓ **PluginBase** - Standardisiertes Interface mit METADATA + PARAMETERS
+- ✓ **PluginManager** - Auto-Discovery, Lazy Loading, Error-Isolation
+- ✓ **Parameter-System** - 5 Typen (float, int, bool, select, color) mit Validation
+- ✓ **Runtime-Updates** - Parameter während Playback änderbar
+- ✓ **Plugin-API** - `/api/plugins/*` Endpoints für CRUD-Operationen
+- ✓ **17 Effect-Plugins implementiert:**
+  - **Farb-Manipulation (11):** add_subtract, brightness_contrast, colorize, tint, hue_rotate, invert, saturation, exposure, levels, posterize, threshold
+  - **Time & Motion (5):** trails, stop_motion, delay_rgb, freeze, strobe
+  - **Blur (1):** blur (Gaussian/Box)
+
+### Code Cleanup & Deprecation
+- ✓ **Legacy Player gelöscht** - video_player.py (868 Zeilen) und script_player.py (~620 Zeilen)
+- ✓ **~1500 Zeilen toter Code eliminiert**
+- ✓ **Unified Player** - Nur noch eine Player-Klasse mit austauschbaren FrameSource Implementierungen
+- ✓ **Deprecated Properties entfernt** - `self.effect_chain`, `self.clip_effects`
+- ✓ **Backward-Compatibility-Code entfernt** - Alle Legacy-Funktionen gelöscht
+- ✓ **Test-Dateien organisiert** - Verschoben nach `tests/` Ordner
+- ✓ **__init__.py bereinigt** - Deprecated exports entfernt, ClipRegistry hinzugefügt
+- ✓ **Static Content bereinigt** - Backup-Dateien gelöscht (~36 KB)
+
+### Dokumentation
+- ✓ **CHANGELOG.md** - v2.3.0 Release Notes
+- ✓ **TODO.md aktualisiert** - Erledigtes markiert, neue Struktur
+- ✓ **ARCHITECTURE.md** - Unified API Dokumentation
+- ✓ **docs/UNIFIED_API.md** - API-Referenz mit allen Endpoints
+- ✓ **docs/MIGRATION.md** - Migration Guide von alten APIs
+
+### Vorteile
+- **Keine Pfad-basierten Kollisionen** - UUID-basierte Identifikation
+- **Saubere Trennung** - Video-Preview vs. Art-Net-Output
+- **Einfachere API** - Konsistente RESTful Endpoints
+- **Unabhängige Player** - Verschiedene Videos mit verschiedenen Effekten gleichzeitig
+- **Erweiterbar** - Plugin-System für neue Effekte ohne Core-Changes
+- **Testbar** - Jedes Plugin isoliert testbar
+
+---
+
 ## v2.2 - Performance-Optimierungen (2025-11-23)
 
 ### Performance-Features

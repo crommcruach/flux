@@ -1,6 +1,115 @@
 # Flux - Architektur & Verbesserungsvorschläge
 
-## Aktuelle Architektur (Nach Refactoring)
+## ✨ Aktuelle Architektur v2.0 (November 2025)
+
+### 🏗️ Unified Player Architecture mit UUID-basiertem Clip-Management
+
+**Implementiert:** 2025-11-26
+
+#### Kernsystem
+
+```
+src/modules/
+├── Core Player System
+│   ├── player.py              # Unified Player (beide Instanzen: Video + Art-Net)
+│   ├── player_manager.py      # Container für beide Player-Instanzen
+│   ├── clip_registry.py       # UUID-basiertes Clip-Management (NEU)
+│   ├── frame_source.py        # VideoSource + ScriptSource Interfaces
+│   └── artnet_manager.py      # Art-Net Output
+│
+├── Unified API (NEU v2.0)
+│   ├── api_player_unified.py  # /api/player/{player_id}/... Endpoints
+│   │   ├── Clip Management: load, current
+│   │   ├── Effect Management: add, remove, update, clear
+│   │   └── Playback Control: play, pause, stop
+│   └── Legacy APIs (für Backward Compatibility)
+│       ├── api_videos.py      # Video Player spezifische Endpoints
+│       └── api_artnet_playback.py  # Art-Net Player spezifische Endpoints
+│
+├── Effect System
+│   ├── plugin_manager.py      # Plugin-Loading & Registry
+│   └── plugins/effects/       # Effect-Plugins (blur, pixelate, etc.)
+│
+└── REST API
+    ├── rest_api.py            # Main Flask Server
+    ├── api_routes.py          # General Routes
+    ├── api_config.py          # Config Management
+    └── ...
+```
+
+#### Dual-Player Architektur
+
+**Video Player (Preview):**
+- `player_id = "video"`
+- `enable_artnet = False`
+- Nur für Browser-Preview
+- Keine Art-Net Ausgabe
+
+**Art-Net Player (Output):**
+- `player_id = "artnet"`
+- `enable_artnet = True`
+- Art-Net Output zu LEDs
+- Separates Video-Processing
+
+**Vorteile:**
+- ✅ Beide Player können unterschiedliche Videos abspielen
+- ✅ Unabhängige Clip-Effekte pro Player
+- ✅ Keine gegenseitige Beeinflussung
+- ✅ Preview ohne Art-Net Output möglich
+
+#### ClipRegistry System
+
+**Konzept:**
+```python
+ClipRegistry = {
+    "clip_id": {
+        "player_id": "video",  # Welcher Player hat den Clip geladen
+        "absolute_path": "/full/path/video.mp4",
+        "relative_path": "video.mp4",
+        "metadata": {},
+        "effects": [  # Clip-spezifische Effekte
+            {
+                "plugin_id": "blur",
+                "metadata": {...},
+                "parameters": {"radius": 5}
+            }
+        ]
+    }
+}
+```
+
+**Features:**
+- UUID-basierte Clip-Identifikation (keine Pfad-Kollisionen)
+- Clip → Player Mapping (ein Clip pro Player)
+- Effekt-Speicherung pro Clip (persistent während Clip geladen ist)
+- Singleton Pattern für globalen Zugriff
+
+**API-Flow:**
+1. Frontend: `POST /api/player/video/clip/load` → Backend registriert Clip, gibt UUID zurück
+2. Frontend: `POST /api/player/video/clip/{uuid}/effects/add` → Effekt wird im Registry gespeichert
+3. Player: Lädt Effekte aus `clip_registry.get_clip_effects(current_clip_id)` bei jedem Frame
+4. Parameter-Updates werden live in Registry aktualisiert → Player liest bei jedem Frame neu
+
+#### Lazy Initialization
+
+**Problem:** Beide Player öffnen dieselbe Video-Datei → FFmpeg `async_lock assertion failed`
+
+**Lösung:** VideoSource wird erst beim ersten `play()` initialisiert
+```python
+class Player:
+    def __init__(self, frame_source, ...):
+        self.source = frame_source
+        self.source_initialized = False  # NICHT sofort initialisieren
+    
+    def start(self):
+        if not self.source_initialized:
+            self.source.initialize()  # Erst jetzt FFmpeg öffnen
+            self.source_initialized = True
+```
+
+---
+
+## Architektur (Nach Refactoring 2024)
 
 ### Module-Struktur
 

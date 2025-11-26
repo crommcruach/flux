@@ -85,10 +85,14 @@ class AddSubtractEffect(PluginBase):
         """Update parameter zur Laufzeit."""
         if name == 'red':
             self.red = float(value)
+            return True
         elif name == 'green':
             self.green = float(value)
+            return True
         elif name == 'blue':
             self.blue = float(value)
+            return True
+        return False
     
     def get_parameters(self):
         """Gibt aktuelle Parameter zurück."""

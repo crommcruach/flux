@@ -14,6 +14,7 @@ logger = get_logger(__name__)
 
 def register_artnet_video_routes(app, player_manager, video_dir, config):
     """Registriert Video-Management Endpunkte für Art-Net Player."""
+    logger.info("🔧 Registering Art-Net Video routes...")
     
     @app.route('/api/artnet/video/load', methods=['POST'])
     def load_artnet_video():
@@ -34,7 +35,7 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
         try:
             player = player_manager.get_artnet_player()
             if not player:
-                return jsonify({"status": "error", "message": "No Art-Net player available"}), 404
+                return jsonify({"status": "error", "message": "No Art-Net player available"}), 500  # Should never happen - Art-Net player always exists
             
             was_playing = player.is_playing
             
@@ -86,7 +87,7 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
         try:
             player = player_manager.get_artnet_player()
             if not player:
-                return jsonify({"status": "error", "message": "No Art-Net player available"}), 404
+                return jsonify({"status": "error", "message": "No Art-Net player available"}), 500  # Should never happen - Art-Net player always exists
             
             current_video = None
             if hasattr(player, 'source') and player.source and hasattr(player.source, 'video_path'):
@@ -124,11 +125,11 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
         try:
             player = player_manager.get_artnet_player()
             if not player:
-                return jsonify({"status": "error", "message": "No Art-Net player available"}), 404
+                return jsonify({"status": "error", "message": "No Art-Net player available"}), 500  # Should never happen - Art-Net player always exists
         
             # Check if player has playlist
             if not hasattr(player, 'playlist') or not player.playlist:
-                return jsonify({"status": "error", "message": "No playlist configured"}), 404
+                return jsonify({"status": "error", "message": "No playlist configured"}), 400
         
             # Calculate next index
             next_index = player.playlist_index + 1
@@ -173,11 +174,11 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
         try:
             player = player_manager.get_artnet_player()
             if not player:
-                return jsonify({"status": "error", "message": "No Art-Net player available"}), 404
+                return jsonify({"status": "error", "message": "No Art-Net player available"}), 500  # Should never happen - Art-Net player always exists
         
             # Check if player has playlist
             if not hasattr(player, 'playlist') or not player.playlist:
-                return jsonify({"status": "error", "message": "No playlist configured"}), 404
+                return jsonify({"status": "error", "message": "No playlist configured"}), 400
         
             # Calculate previous index
             prev_index = player.playlist_index - 1
@@ -227,7 +228,7 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
             
             player = player_manager.get_artnet_player()
             if not player:
-                return jsonify({"status": "error", "message": "No Art-Net player available"}), 404
+                return jsonify({"status": "error", "message": "No Art-Net player available"}), 500  # Should never happen - Art-Net player always exists
             
             # Convert relative paths to absolute
             absolute_playlist = []
@@ -270,3 +271,246 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
         except Exception as e:
             logger.error(f"Error setting Art-Net playlist: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
+    
+    # ========================================
+    # CLIP-LEVEL EFFECTS
+    # ========================================
+    
+    @app.route('/api/artnet/clip/effects/add_v2', methods=['POST'])
+    def add_clip_effect_artnet_v2():
+        """Fügt einen Effekt zu einem Art-Net-Clip hinzu (v2 workaround for Flask caching)."""
+        try:
+            data = request.get_json()
+            plugin_id = data.get('plugin_id')
+            clip_path = data.get('clip_path')
+            
+            if not plugin_id:
+                return jsonify({"success": False, "error": "Missing plugin_id"}), 400
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            player = player_manager.get_artnet_player()
+            if not player:
+                return jsonify({"success": False, "error": "Art-Net player not found"}), 500  # Should never happen - Art-Net player always exists
+            
+            # Get plugin class from registry (not instance!)
+            pm = player.plugin_manager
+            if plugin_id not in pm.registry:
+                return jsonify({"success": False, "error": f"Plugin '{plugin_id}' not found"}), 404
+            
+            plugin_class = pm.registry[plugin_id]
+            
+            # Merge METADATA and PARAMETERS
+            metadata = plugin_class.METADATA.copy()
+            if hasattr(plugin_class, 'PARAMETERS'):
+                # PARAMETERS are already dicts, just need to convert ParameterType enum to string
+                parameters = []
+                for param in plugin_class.PARAMETERS:
+                    # Check if param is dict or object
+                    if isinstance(param, dict):
+                        param_dict = param.copy()
+                        # Convert ParameterType enum to string if present
+                        if 'type' in param_dict and hasattr(param_dict['type'], 'value'):
+                            param_dict['type'] = param_dict['type'].value
+                    else:
+                        # Handle Parameter objects (fallback)
+                        param_dict = {
+                            'name': param.name,
+                            'type': param.type.value if hasattr(param.type, 'value') else str(param.type),
+                            'default': param.default,
+                            'min': getattr(param, 'min', None),
+                            'max': getattr(param, 'max', None),
+                            'description': getattr(param, 'description', '')
+                        }
+                    parameters.append(param_dict)
+                metadata['parameters'] = parameters
+            
+            # Convert plugin type enum to string
+            if 'type' in metadata and hasattr(metadata['type'], 'value'):
+                metadata['type'] = metadata['type'].value
+            
+            # Initialize effect with default parameters
+            effect_data = {
+                'plugin_id': plugin_id,
+                'metadata': metadata,
+                'parameters': {}
+            }
+            
+            # Set default parameter values
+            if 'parameters' in metadata:
+                for param in metadata['parameters']:
+                    effect_data['parameters'][param['name']] = param['default']
+            
+            # Convert clip_path to absolute path
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            logger.info(f"➕ Adding Art-Net clip effect '{plugin_id}' to: {clip_path}")
+            logger.info(f"   Relative path: {clip_path}")
+            logger.info(f"   Absolute path: {abs_clip_path}")
+            logger.info(f"   Current source: {player.source.video_path if hasattr(player.source, 'video_path') else 'N/A'}")
+            
+            # Initialize clip_effects dict if not exists
+            if not hasattr(player, 'clip_effects'):
+                player.clip_effects = {}
+            
+            # Add effect to clip
+            if abs_clip_path not in player.clip_effects:
+                player.clip_effects[abs_clip_path] = []
+            
+            player.clip_effects[abs_clip_path].append(effect_data)
+            
+            logger.info(f"✅ Art-Net clip effect '{plugin_id}' added successfully")
+            logger.info(f"   Total effects for this clip: {len(player.clip_effects[abs_clip_path])}")
+            
+            return jsonify({"success": True})
+        
+        except Exception as e:
+            logger.error(f"Error adding Art-Net clip effect: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/artnet/clip/effects', methods=['POST'])
+    def get_clip_effects_artnet():
+        """Gibt die Effekte eines Art-Net-Clips zurück."""
+        try:
+            data = request.get_json()
+            clip_path = data.get('clip_path')
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            player = player_manager.get_artnet_player()
+            if not player:
+                return jsonify({"success": False, "error": "Art-Net player not found"}), 500  # Should never happen - Art-Net player always exists
+            
+            # Convert to absolute path
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            # Get effects for this clip
+            clip_effects = []
+            if hasattr(player, 'clip_effects') and abs_clip_path in player.clip_effects:
+                clip_effects = player.clip_effects[abs_clip_path]
+            
+            # Filter out plugin instances (not JSON serializable)
+            serializable_effects = []
+            for effect in clip_effects:
+                effect_copy = effect.copy()
+                if 'instance' in effect_copy:
+                    del effect_copy['instance']
+                serializable_effects.append(effect_copy)
+            
+            return jsonify({"success": True, "effects": serializable_effects})
+        
+        except Exception as e:
+            logger.error(f"Error getting Art-Net clip effects: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/artnet/clip/effects/<int:index>', methods=['DELETE'])
+    def remove_clip_effect_artnet(index):
+        """Entfernt einen Effekt von einem Art-Net-Clip."""
+        try:
+            data = request.get_json()
+            clip_path = data.get('clip_path')
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            player = player_manager.get_artnet_player()
+            if not player:
+                return jsonify({"success": False, "error": "Art-Net player not found"}), 500  # Should never happen - Art-Net player always exists
+            
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            if not hasattr(player, 'clip_effects') or abs_clip_path not in player.clip_effects:
+                return jsonify({"success": False, "error": "No effects for this clip"}), 400
+            
+            if index < 0 or index >= len(player.clip_effects[abs_clip_path]):
+                return jsonify({"success": False, "error": "Invalid effect index"}), 400
+            
+            removed = player.clip_effects[abs_clip_path].pop(index)
+            
+            logger.info(f"Removed Art-Net clip effect at index {index} from clip: {clip_path}")
+            
+            return jsonify({"success": True})
+        
+        except Exception as e:
+            logger.error(f"Error removing Art-Net clip effect: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/artnet/clip/effects/clear', methods=['POST'])
+    def clear_clip_effects_artnet():
+        """Löscht alle Effekte eines Art-Net-Clips."""
+        try:
+            data = request.get_json()
+            clip_path = data.get('clip_path')
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            player = player_manager.get_artnet_player()
+            if not player:
+                return jsonify({"success": False, "error": "Art-Net player not found"}), 500  # Should never happen - Art-Net player always exists
+            
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            if hasattr(player, 'clip_effects') and abs_clip_path in player.clip_effects:
+                player.clip_effects[abs_clip_path] = []
+            
+            logger.info(f"Cleared all Art-Net clip effects from clip: {clip_path}")
+            
+            return jsonify({"success": True})
+        
+        except Exception as e:
+            logger.error(f"Error clearing Art-Net clip effects: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/artnet/clip/effects/<int:index>/parameter', methods=['PUT'])
+    def update_clip_effect_parameter_artnet(index):
+        """Aktualisiert einen Parameter eines Art-Net Clip-Effekts."""
+        try:
+            data = request.get_json()
+            clip_path = data.get('clip_path')
+            param_name = data.get('name')
+            param_value = data.get('value')
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            if not param_name:
+                return jsonify({"success": False, "error": "Missing parameter name"}), 400
+            
+            player = player_manager.get_artnet_player()
+            if not player:
+                return jsonify({"success": False, "error": "Art-Net player not found"}), 500  # Should never happen - Art-Net player always exists
+            
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            logger.info(f"🔧 Updating Art-Net clip effect #{index}: {param_name}={param_value}")
+            logger.info(f"   clip_path: {clip_path} → abs: {abs_clip_path}")
+            if hasattr(player, 'clip_effects'):
+                logger.info(f"   Available clips: {list(player.clip_effects.keys())}")
+            
+            if not hasattr(player, 'clip_effects') or abs_clip_path not in player.clip_effects:
+                return jsonify({"success": False, "error": "No effects for this clip"}), 400
+            
+            if index < 0 or index >= len(player.clip_effects[abs_clip_path]):
+                return jsonify({"success": False, "error": "Invalid effect index"}), 400
+            
+            effect = player.clip_effects[abs_clip_path][index]
+            
+            # Update parameter value
+            effect['parameters'][param_name] = param_value
+            
+            # If plugin instance exists, update it too
+            if 'instance' in effect:
+                setattr(effect['instance'], param_name, param_value)
+            
+            logger.debug(f"Updated Art-Net clip effect parameter {param_name}={param_value} for clip: {clip_path}")
+            
+            return jsonify({"success": True})
+        
+        except Exception as e:
+            logger.error(f"Error updating Art-Net clip effect parameter: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    logger.info("✅ Art-Net Video routes registered successfully")

@@ -506,3 +506,238 @@ def register_video_routes(app, player_manager, video_dir, config):
         except Exception as e:
             logger.error(f"Error deleting playlist: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
+    
+    # ========================================
+    # CLIP-LEVEL EFFECTS
+    # ========================================
+    
+    @app.route('/api/video/clip/effects/add', methods=['POST'])
+    def add_clip_effect_video():
+        """Fügt einen Effekt zu einem Video-Clip hinzu."""
+        try:
+            data = request.get_json()
+            plugin_id = data.get('plugin_id')
+            clip_path = data.get('clip_path')
+            
+            if not plugin_id:
+                return jsonify({"success": False, "error": "Missing plugin_id"}), 400
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"success": False, "error": "Video player not found"}), 404
+            
+            # Get plugin class from registry (not instance!)
+            pm = player.plugin_manager
+            if plugin_id not in pm.registry:
+                return jsonify({"success": False, "error": f"Plugin '{plugin_id}' not found"}), 404
+            
+            plugin_class = pm.registry[plugin_id]
+            
+            # Merge METADATA and PARAMETERS
+            metadata = plugin_class.METADATA.copy()
+            if hasattr(plugin_class, 'PARAMETERS'):
+                # PARAMETERS are already dicts, just need to convert ParameterType enum to string
+                parameters = []
+                for param in plugin_class.PARAMETERS:
+                    # Check if param is dict or object
+                    if isinstance(param, dict):
+                        param_dict = param.copy()
+                        # Convert ParameterType enum to string if present
+                        if 'type' in param_dict and hasattr(param_dict['type'], 'value'):
+                            param_dict['type'] = param_dict['type'].value
+                    else:
+                        # Handle Parameter objects (fallback)
+                        param_dict = {
+                            'name': param.name,
+                            'type': param.type.value if hasattr(param.type, 'value') else str(param.type),
+                            'default': param.default,
+                            'min': getattr(param, 'min', None),
+                            'max': getattr(param, 'max', None),
+                            'description': getattr(param, 'description', '')
+                        }
+                    parameters.append(param_dict)
+                metadata['parameters'] = parameters
+            
+            # Convert plugin type enum to string
+            if 'type' in metadata and hasattr(metadata['type'], 'value'):
+                metadata['type'] = metadata['type'].value
+            
+            # Initialize effect with default parameters
+            effect_data = {
+                'plugin_id': plugin_id,
+                'metadata': metadata,
+                'parameters': {}
+            }
+            
+            # Set default parameter values
+            if 'parameters' in metadata:
+                for param in metadata['parameters']:
+                    effect_data['parameters'][param['name']] = param['default']
+            
+            # Convert clip_path to absolute path
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            # Initialize clip_effects dict if not exists
+            if not hasattr(player, 'clip_effects'):
+                player.clip_effects = {}
+            
+            # Add effect to clip
+            if abs_clip_path not in player.clip_effects:
+                player.clip_effects[abs_clip_path] = []
+            
+            player.clip_effects[abs_clip_path].append(effect_data)
+            
+            logger.info(f"Added clip effect '{plugin_id}' to clip: {clip_path}")
+            
+            return jsonify({"success": True})
+        
+        except Exception as e:
+            logger.error(f"Error adding clip effect: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/video/clip/effects', methods=['POST'])
+    def get_clip_effects_video():
+        """Gibt die Effekte eines Video-Clips zurück."""
+        try:
+            data = request.get_json()
+            clip_path = data.get('clip_path')
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"success": False, "error": "Video player not found"}), 404
+            
+            # Convert to absolute path
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            # Get effects for this clip
+            clip_effects = []
+            if hasattr(player, 'clip_effects') and abs_clip_path in player.clip_effects:
+                clip_effects = player.clip_effects[abs_clip_path]
+            
+            # Filter out plugin instances (not JSON serializable)
+            serializable_effects = []
+            for effect in clip_effects:
+                effect_copy = effect.copy()
+                if 'instance' in effect_copy:
+                    del effect_copy['instance']
+                serializable_effects.append(effect_copy)
+            
+            return jsonify({"success": True, "effects": serializable_effects})
+        
+        except Exception as e:
+            logger.error(f"Error getting clip effects: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/video/clip/effects/<int:index>', methods=['DELETE'])
+    def remove_clip_effect_video(index):
+        """Entfernt einen Effekt von einem Video-Clip."""
+        try:
+            data = request.get_json()
+            clip_path = data.get('clip_path')
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"success": False, "error": "Video player not found"}), 404
+            
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            if not hasattr(player, 'clip_effects') or abs_clip_path not in player.clip_effects:
+                return jsonify({"success": False, "error": "No effects for this clip"}), 404
+            
+            if index < 0 or index >= len(player.clip_effects[abs_clip_path]):
+                return jsonify({"success": False, "error": "Invalid effect index"}), 400
+            
+            removed = player.clip_effects[abs_clip_path].pop(index)
+            
+            logger.info(f"Removed clip effect at index {index} from clip: {clip_path}")
+            
+            return jsonify({"success": True})
+        
+        except Exception as e:
+            logger.error(f"Error removing clip effect: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/video/clip/effects/clear', methods=['POST'])
+    def clear_clip_effects_video():
+        """Löscht alle Effekte eines Video-Clips."""
+        try:
+            data = request.get_json()
+            clip_path = data.get('clip_path')
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"success": False, "error": "Video player not found"}), 404
+            
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            if hasattr(player, 'clip_effects') and abs_clip_path in player.clip_effects:
+                player.clip_effects[abs_clip_path] = []
+            
+            logger.info(f"Cleared all clip effects from clip: {clip_path}")
+            
+            return jsonify({"success": True})
+        
+        except Exception as e:
+            logger.error(f"Error clearing clip effects: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/video/clip/effects/<int:index>/parameter', methods=['PUT'])
+    def update_clip_effect_parameter_video(index):
+        """Aktualisiert einen Parameter eines Clip-Effekts."""
+        try:
+            data = request.get_json()
+            clip_path = data.get('clip_path')
+            param_name = data.get('name')
+            param_value = data.get('value')
+            
+            if not clip_path:
+                return jsonify({"success": False, "error": "Missing clip_path"}), 400
+            
+            if not param_name:
+                return jsonify({"success": False, "error": "Missing parameter name"}), 400
+            
+            player = player_manager.get_video_player()
+            if not player:
+                return jsonify({"success": False, "error": "Video player not found"}), 404
+            
+            abs_clip_path = os.path.abspath(os.path.join(video_dir, clip_path))
+            
+            logger.info(f"🔧 Updating Video clip effect #{index}: {param_name}={param_value}")
+            logger.info(f"   clip_path: {clip_path} → abs: {abs_clip_path}")
+            if hasattr(player, 'clip_effects'):
+                logger.info(f"   Available clips: {list(player.clip_effects.keys())}")
+            
+            if not hasattr(player, 'clip_effects') or abs_clip_path not in player.clip_effects:
+                return jsonify({"success": False, "error": "No effects for this clip"}), 404
+            
+            if index < 0 or index >= len(player.clip_effects[abs_clip_path]):
+                return jsonify({"success": False, "error": "Invalid effect index"}), 400
+            
+            effect = player.clip_effects[abs_clip_path][index]
+            
+            # Update parameter value
+            effect['parameters'][param_name] = param_value
+            
+            # If plugin instance exists, update it too
+            if 'instance' in effect:
+                setattr(effect['instance'], param_name, param_value)
+            
+            logger.debug(f"Updated clip effect parameter {param_name}={param_value} for clip: {clip_path}")
+            
+            return jsonify({"success": True})
+        
+        except Exception as e:
+            logger.error(f"Error updating clip effect parameter: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500

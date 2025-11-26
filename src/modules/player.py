@@ -31,7 +31,7 @@ class Player:
     Unterstützt Videos, Scripts und zukünftige Medien-Typen.
     """
     
-    def __init__(self, frame_source, points_json_path, target_ip='127.0.0.1', start_universe=0, fps_limit=None, config=None, enable_artnet=True, player_name="Player"):
+    def __init__(self, frame_source, points_json_path, target_ip='127.0.0.1', start_universe=0, fps_limit=None, config=None, enable_artnet=True, player_name="Player", clip_registry=None):
         """
         Initialisiert Player mit Frame-Quelle.
         
@@ -44,9 +44,11 @@ class Player:
             config: Konfigurations-Dict
             enable_artnet: Aktiviert Art-Net Ausgabe (False für Preview-Only Player)
             player_name: Name des Players für Logging
+            clip_registry: ClipRegistry Instanz für UUID-basierte Clip-Verwaltung
         """
         self.player_name = player_name
         self.enable_artnet = enable_artnet
+        self.clip_registry = clip_registry
         self.source = frame_source
         self.points_json_path = points_json_path
         self.target_ip = target_ip
@@ -81,7 +83,7 @@ class Player:
         # Effect Chains für Plugins (getrennt für Video-Preview und Art-Net)
         self.video_effect_chain = []  # Video-Preview FX (nicht zu Art-Net)
         self.artnet_effect_chain = []  # Art-Net Output FX (nicht zu Video-Preview)
-        self.effect_chain = []  # DEPRECATED: Legacy compatibility (maps to video_effect_chain)
+        self.current_clip_id = None  # UUID of currently loaded clip (for clip effects from registry)
         self.plugin_manager = get_plugin_manager()
         
         # Recording (deque mit maxlen verhindert Memory-Leak)
@@ -108,9 +110,9 @@ class Player:
         self.required_universes = points_data['required_universes']
         self.channels_per_universe = points_data['channels_per_universe']
         
-        # Initialisiere Frame-Source
-        if not self.source.initialize():
-            raise ValueError(f"Frame-Source konnte nicht initialisiert werden: {self.source.get_source_name()}")
+        # NICHT initialisieren im Konstruktor - wird lazy beim ersten play() gemacht
+        # Grund: Verhindert dass mehrere Player dieselbe Video-Datei parallel öffnen (FFmpeg-Konflikt)
+        self.source_initialized = False
         
         logger.debug(f"{self.player_name} initialisiert:")
         logger.debug(f"  Source: {self.source.get_source_name()} ({type(self.source).__name__})")
@@ -122,7 +124,7 @@ class Player:
         # Art-Net Manager wird extern gesetzt
         self.artnet_manager = None
     
-    # Properties that delegate to source for backward compatibility
+    # Properties that delegate to source
     @property
     def current_frame(self):
         """Aktueller Frame der Quelle."""
@@ -607,80 +609,7 @@ class Player:
         except ValueError:
             logger.debug("Ungültiger Hue Shift-Wert!")
     
-    # ========== Effect Chain Management ==========
-    
-    def add_effect(self, plugin_id, config=None):
-        """
-        Fügt einen Effect-Plugin zur Effect Chain hinzu.
-        
-        Args:
-            plugin_id: ID des Plugins (z.B. 'blur')
-            config: Optional - Konfigurations-Dict mit Parametern
-        
-        Returns:
-            tuple: (success: bool, message: str)
-        """
-        try:
-            # Lade Plugin-Instanz
-            logger.debug(f"Loading plugin '{plugin_id}' with config: {config}")
-            plugin_instance = self.plugin_manager.load_plugin(plugin_id, config)
-            if not plugin_instance:
-                return False, f"Plugin '{plugin_id}' konnte nicht geladen werden"
-            
-            # Prüfe ob es ein EFFECT-Plugin ist
-            from plugins import PluginType
-            plugin_type = plugin_instance.METADATA.get('type')
-            logger.debug(f"Plugin '{plugin_id}' type: {plugin_type} (expected: {PluginType.EFFECT})")
-            
-            if plugin_type != PluginType.EFFECT:
-                return False, f"Plugin '{plugin_id}' ist kein EFFECT-Plugin (type={plugin_type})"
-            
-            # Füge zur Effect Chain hinzu
-            self.effect_chain.append({
-                'id': plugin_id,
-                'instance': plugin_instance,
-                'config': config or {}
-            })
-            
-            logger.info(f"✅ Effect '{plugin_id}' zur Chain hinzugefügt (Position {len(self.effect_chain)})")
-            return True, f"Effect '{plugin_id}' added to chain"
-            
-        except Exception as e:
-            import traceback
-            logger.error(f"❌ Fehler beim Hinzufügen von Effect '{plugin_id}': {e}")
-            logger.error(traceback.format_exc())
-            return False, str(e)
-    
-    def remove_effect(self, index):
-        """
-        Entfernt einen Effect aus der Chain.
-        
-        Args:
-            index: Index des Effects in der Chain (0-basiert)
-        
-        Returns:
-            tuple: (success: bool, message: str)
-        """
-        try:
-            if index < 0 or index >= len(self.effect_chain):
-                return False, f"Invalid index {index} (chain length: {len(self.effect_chain)})"
-            
-            effect = self.effect_chain.pop(index)
-            logger.info(f"✅ Effect '{effect['id']}' von Position {index} entfernt")
-            return True, f"Effect '{effect['id']}' removed from chain"
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Entfernen von Effect {index}: {e}")
-            return False, str(e)
-    
-    def clear_effects(self):
-        """Entfernt alle Effects aus der Chain."""
-        count = len(self.effect_chain)
-        self.effect_chain.clear()
-        logger.info(f"✅ {count} Effects aus Chain entfernt")
-        return True, f"{count} effects cleared"
-    
-    # NEW: Separate chain management for Video and Art-Net
+    # ========== Player-Level Effect Chain Management ==========
     def add_effect_to_chain(self, plugin_id, config=None, chain_type='video'):
         """
         Fügt einen Effect zur gewählten Chain hinzu.
@@ -772,7 +701,7 @@ class Player:
         if chain_type == 'artnet':
             chain = self.artnet_effect_chain
         else:
-            chain = self.video_effect_chain or self.effect_chain  # Fallback to legacy
+            chain = self.video_effect_chain
         
         chain_info = []
         for i, effect in enumerate(chain):
@@ -826,7 +755,7 @@ class Player:
             if chain_type == 'artnet':
                 chain = self.artnet_effect_chain
             else:
-                chain = self.video_effect_chain or self.effect_chain  # Fallback
+                chain = self.video_effect_chain
             
             if index < 0 or index >= len(chain):
                 return False, f"Invalid index {index}"
@@ -866,32 +795,72 @@ class Player:
         Returns:
             numpy array: Prozessiertes Frame
         """
-        # Select chain based on type
+        processed_frame = frame
+        
+        # 1. Apply clip-level effects first (if current clip has effects)
+        # NEU: Effekte aus ClipRegistry laden (UUID-basiert) statt aus self.clip_effects (path-basiert)
+        if self.clip_registry and hasattr(self, 'current_clip_id') and self.current_clip_id:
+            clip_effects = self.clip_registry.get_clip_effects(self.current_clip_id)
+            
+            if clip_effects:
+                logger.debug(f"[{self.player_name}] Applying {len(clip_effects)} clip effects for clip_id={self.current_clip_id}")
+                
+                for effect_data in clip_effects:
+                    try:
+                        # Lazy instance creation
+                        if 'instance' not in effect_data:
+                            plugin_id = effect_data['plugin_id']
+                            if plugin_id in self.plugin_manager.registry:
+                                plugin_class = self.plugin_manager.registry[plugin_id]
+                                effect_data['instance'] = plugin_class()
+                                logger.info(f"✅ [{self.player_name}] Created clip effect instance: {plugin_id} for clip {self.current_clip_id}")
+                            else:
+                                logger.warning(f"Plugin '{plugin_id}' not found in registry")
+                                continue
+                        
+                        # Update parameters from effect_data EVERY frame (parameters may have changed via API)
+                        plugin_instance = effect_data['instance']
+                        for param_name, param_value in effect_data['parameters'].items():
+                            setattr(plugin_instance, param_name, param_value)
+                        
+                        # Process frame
+                        processed_frame = plugin_instance.process_frame(processed_frame)
+                        
+                        if processed_frame is None:
+                            logger.error(f"❌ [{self.player_name}] Clip effect '{effect_data['plugin_id']}' returned None")
+                            processed_frame = frame
+                            continue
+                            
+                    except Exception as e:
+                        logger.error(f"❌ [{self.player_name}] Error in clip effect '{effect_data.get('plugin_id', 'unknown')}': {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        continue
+            else:
+                logger.debug(f"[{self.player_name}] No clip effects for clip_id={self.current_clip_id}")
+        
+        # 2. Apply player-level effects
         if chain_type == 'artnet':
             effect_chain = self.artnet_effect_chain
         else:
-            effect_chain = self.video_effect_chain or self.effect_chain  # Fallback to legacy
+            effect_chain = self.video_effect_chain
         
-        if not effect_chain:
-            return frame
-        
-        processed_frame = frame
-        
-        for effect in effect_chain:
-            try:
-                plugin_instance = effect['instance']
-                processed_frame = plugin_instance.process_frame(processed_frame)
-                
-                # Ensure frame is valid
-                if processed_frame is None:
-                    logger.error(f"Effect '{effect['id']}' returned None, skipping")
-                    processed_frame = frame
-                    continue
+        if effect_chain:
+            for effect in effect_chain:
+                try:
+                    plugin_instance = effect['instance']
+                    processed_frame = plugin_instance.process_frame(processed_frame)
                     
-            except Exception as e:
-                logger.error(f"❌ Fehler in Effect '{effect['id']}': {e}")
-                # Continue with unprocessed frame on error
-                continue
+                    # Ensure frame is valid
+                    if processed_frame is None:
+                        logger.error(f"Effect '{effect['id']}' returned None, skipping")
+                        processed_frame = frame
+                        continue
+                        
+                except Exception as e:
+                    logger.error(f"❌ Fehler in Effect '{effect['id']}': {e}")
+                    # Continue with unprocessed frame on error
+                    continue
         
         return processed_frame
     

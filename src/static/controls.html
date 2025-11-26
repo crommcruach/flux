@@ -43,6 +43,58 @@
                 </div>
             </div>
             
+            <!-- Transition Menu -->
+            <div class="transition-menu">
+                <button class="transition-toggle" onclick="toggleTransitionMenu('video')" title="Transition Settings">
+                    <span class="transition-icon">⚡</span>
+                </button>
+                <div class="transition-panel" id="videoTransitionPanel">
+                    <div class="transition-header">
+                        <span>⚡ Transitions</span>
+                        <button class="btn-close-transition" onclick="closeTransitionMenu('video')">×</button>
+                    </div>
+                    <div class="transition-body">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="videoTransitionEnabled" onchange="toggleTransitions('video', this.checked)">
+                            <label class="form-check-label" for="videoTransitionEnabled">Enable Transitions</label>
+                        </div>
+                        
+                        <div class="transition-settings" id="videoTransitionSettings">
+                            <div class="form-group mb-3">
+                                <label class="form-label">Effect:</label>
+                                <select class="form-select form-select-sm" id="videoTransitionEffect" onchange="updateTransition('video')">
+                                    <option value="fade">Fade</option>
+                                    <option value="wipe_left">Wipe Left</option>
+                                    <option value="wipe_right">Wipe Right</option>
+                                    <option value="wipe_top">Wipe Top</option>
+                                    <option value="wipe_bottom">Wipe Bottom</option>
+                                    <option value="dissolve">Dissolve</option>
+                                    <option value="push">Push</option>
+                                    <option value="zoom">Zoom</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group mb-3">
+                                <label class="form-label">Duration: <span id="videoDurationValue">1.0s</span></label>
+                                <input type="range" class="form-range" id="videoTransitionDuration" 
+                                       min="0.1" max="5.0" step="0.1" value="1.0"
+                                       oninput="updateTransition('video')">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Easing:</label>
+                                <select class="form-select form-select-sm" id="videoTransitionEasing" onchange="updateTransition('video')">
+                                    <option value="linear">Linear</option>
+                                    <option value="ease_in_out" selected>Ease In-Out</option>
+                                    <option value="ease_out">Ease Out</option>
+                                    <option value="ease_in">Ease In</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Playlist -->
             <div class="playlist-area">
                 <div class="playlist-header">
@@ -73,6 +125,58 @@
                     <button class="btn btn-secondary btn-sm" onclick="nextArtnet()" title="Next Video">⏭️</button>
                     <button class="btn btn-outline-primary btn-sm" id="artnetAutoplayBtn" onclick="toggleArtnetAutoplay()" title="Autoplay">🔁</button>
                     <button class="btn btn-outline-primary btn-sm" id="artnetLoopBtn" onclick="toggleArtnetLoop()" title="Loop Playlist">🔂</button>
+                </div>
+            </div>
+            
+            <!-- Transition Menu -->
+            <div class="transition-menu">
+                <button class="transition-toggle" onclick="toggleTransitionMenu('artnet')" title="Transition Settings">
+                    <span class="transition-icon">⚡</span>
+                </button>
+                <div class="transition-panel" id="artnetTransitionPanel">
+                    <div class="transition-header">
+                        <span>⚡ Transitions</span>
+                        <button class="btn-close-transition" onclick="closeTransitionMenu('artnet')">×</button>
+                    </div>
+                    <div class="transition-body">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="artnetTransitionEnabled" onchange="toggleTransitions('artnet', this.checked)">
+                            <label class="form-check-label" for="artnetTransitionEnabled">Enable Transitions</label>
+                        </div>
+                        
+                        <div class="transition-settings" id="artnetTransitionSettings">
+                            <div class="form-group mb-3">
+                                <label class="form-label">Effect:</label>
+                                <select class="form-select form-select-sm" id="artnetTransitionEffect" onchange="updateTransition('artnet')">
+                                    <option value="fade">Fade</option>
+                                    <option value="wipe_left">Wipe Left</option>
+                                    <option value="wipe_right">Wipe Right</option>
+                                    <option value="wipe_top">Wipe Top</option>
+                                    <option value="wipe_bottom">Wipe Bottom</option>
+                                    <option value="dissolve">Dissolve</option>
+                                    <option value="push">Push</option>
+                                    <option value="zoom">Zoom</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group mb-3">
+                                <label class="form-label">Duration: <span id="artnetDurationValue">1.0s</span></label>
+                                <input type="range" class="form-range" id="artnetTransitionDuration" 
+                                       min="0.1" max="5.0" step="0.1" value="1.0"
+                                       oninput="updateTransition('artnet')">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Easing:</label>
+                                <select class="form-select form-select-sm" id="artnetTransitionEasing" onchange="updateTransition('artnet')">
+                                    <option value="linear">Linear</option>
+                                    <option value="ease_in_out" selected>Ease In-Out</option>
+                                    <option value="ease_out">Ease Out</option>
+                                    <option value="ease_in">Ease In</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -159,6 +263,21 @@
                         <div class="empty-state-icon">✨</div>
                         <h6>No Effects</h6>
                         <p>Add effects from the left panel</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Clip FX Control (Unified for both players) -->
+            <div class="fx-panel">
+                <div class="fx-panel-header">
+                    <span id="clipFxTitle">🎬 Clip FX</span>
+                    <button class="btn btn-sm btn-danger btn-icon" onclick="clearClipEffects()">🗑️</button>
+                </div>
+                <div class="fx-panel-body" id="clipFxList">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">✨</div>
+                        <h6>No Clip Effects</h6>
+                        <p>Select a clip to manage effects</p>
                     </div>
                 </div>
             </div>
