@@ -308,26 +308,7 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
   - Routing-Config: `{"object": "strip_1", "video_player_id": "video_1"}`
   
 - [ ] **Kartendeck-UI:**
-  ```
-  PLAYLIST (Horizontal Scroll)
-  ┌─────────────┬─────────────┬─────────────┬─────────────┐
-  │   DECK 1    │   DECK 2    │   DECK 3    │   DECK 4    │
-  │ ┌─────────┐ │ ┌─────────┐ │ ┌─────────┐ │    [+]    │ │
-  │ │ Clip 1  │ │ │ Clip 5  │ │ │ Clip 8  │ │ Neu       │ │
-  │ │fire.mp4 │ │ │water.mp4│ │ │plasma   │ │           │ │
-  │ │▶ 00:15  │ │ │▶ 00:30  │ │ │▶ 01:00  │ │           │ │
-  │ │→strip_1 │ │ │→panel_1 │ │ │→ring_1  │ │           │ │
-  │ └─────────┘ │ └─────────┘ │ └─────────┘ │           │ │
-  │   ┌───────┐ │   ┌───────┐ │             │           │ │
-  │   │Clip 2 │ │   │Clip 6 │ │             │           │ │
-  │   │glow   │ │   │spark  │ │             │           │ │
-  │   └───────┘ │   └───────┘ │             │           │ │
-  │     ┌─────┐ │     ┌─────┐ │             │           │ │
-  │     │Clip3│ │     │Clip7│ │             │           │ │
-  │     └─────┘ │     └─────┘ │             │           │ │
-  └─────────────┴─────────────┴─────────────┴─────────────┘
-       ↑ Clips gestapelt wie Karten - Platzsparend!
-  ```
+  - Skizze hinzufügen
 
 - [ ] **Features:**
   - Deck = Spalte (enthält gestapelte Clips)
@@ -367,10 +348,6 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
   - ModernGL/PyOpenGL Integration
   - GLSL Shader Support (Shadertoy-kompatibel)
   - Uniform Variables (iTime, iResolution, iMouse)
-
-- [ ] **ImageSequence Source (2-3h):**
-  - PNG/JPG Sequenz-Support
-  - Automatische Frame-Nummerierung
 
 - [ ] **LiveStream Source (2-5h):**
   - RTSP/HTTP Stream Support

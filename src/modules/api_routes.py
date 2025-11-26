@@ -14,6 +14,8 @@ def register_playback_routes(app, player_manager):
     def play():
         """Startet oder setzt Video-Wiedergabe fort."""
         player = player_manager.get_video_player()
+        if not player.source:
+            return jsonify({"status": "error", "message": "Kein Video geladen"}), 400
         player.play()
         return jsonify({"status": "success", "message": "Video play"})
     

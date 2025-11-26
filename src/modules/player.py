@@ -225,6 +225,11 @@ class Player:
         else:
             logger.info(f"{self.player_name}: Starte Preview-Only (kein Art-Net)")
         
+        # Prüfe ob Source vorhanden ist
+        if not self.source:
+            logger.warning(f"{self.player_name}: Keine Source geladen - kann nicht starten")
+            return
+        
         # Re-initialisiere Source falls nötig (nach stop)
         if not self.source.initialize():
             logger.error(f"Fehler beim Re-Initialisieren der Source: {self.source.get_source_name()}")

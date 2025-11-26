@@ -20,8 +20,8 @@ def register_files_api(app, video_dir):
         try:
             if not os.path.exists(video_dir):
                 return jsonify({
-                    "status": "error",
-                    "message": "Video directory not found"
+                    "success": False,
+                    "error": "Video directory not found"
                 }), 404
             
             def build_tree(path, relative_path=""):
@@ -66,7 +66,7 @@ def register_files_api(app, video_dir):
             tree = build_tree(video_dir)
             
             return jsonify({
-                "status": "success",
+                "success": True,
                 "tree": tree,
                 "root": video_dir
             })
@@ -74,8 +74,8 @@ def register_files_api(app, video_dir):
         except Exception as e:
             logger.error(f"Error building file tree: {e}")
             return jsonify({
-                "status": "error",
-                "message": str(e)
+                "success": False,
+                "error": str(e)
             }), 500
     
     @app.route('/api/files/videos', methods=['GET'])
@@ -104,7 +104,7 @@ def register_files_api(app, video_dir):
                             })
             
             return jsonify({
-                "status": "success",
+                "success": True,
                 "videos": sorted(videos, key=lambda x: x['path']),
                 "total": len(videos)
             })
@@ -112,8 +112,8 @@ def register_files_api(app, video_dir):
         except Exception as e:
             logger.error(f"Error listing videos: {e}")
             return jsonify({
-                "status": "error",
-                "message": str(e)
+                "success": False,
+                "error": str(e)
             }), 500
 
 

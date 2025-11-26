@@ -535,7 +535,7 @@ window.refreshVideoPlaylist = async function() {
     await loadVideoPlaylist();
 };
 
-window.removeFromVideoPlaylist = function(index) {
+window.removeFromVideoPlaylist = async function(index) {
     const video = videoFiles[index];
     videoFiles.splice(index, 1);
     
@@ -545,6 +545,9 @@ window.removeFromVideoPlaylist = function(index) {
     }
     
     renderVideoPlaylist();
+    
+    // Update server with new playlist
+    await updateVideoPlaylist();
 };
 
 // ========================================
@@ -561,10 +564,6 @@ window.pauseVideo = async function() {
 
 window.stopVideo = async function() {
     await fetch(`${API_BASE}/api/stop`, { method: 'POST' });
-};
-
-window.restartVideo = async function() {
-    await fetch(`${API_BASE}/api/restart`, { method: 'POST' });
 };
 
 window.nextVideo = async function() {
@@ -951,7 +950,7 @@ window.refreshArtnetPlaylist = async function() {
     await loadArtnetPlaylist();
 };
 
-window.removeFromArtnetPlaylist = function(index) {
+window.removeFromArtnetPlaylist = async function(index) {
     const video = artnetFiles[index];
     artnetFiles.splice(index, 1);
     
@@ -961,6 +960,9 @@ window.removeFromArtnetPlaylist = function(index) {
     }
     
     renderArtnetPlaylist();
+    
+    // Update server with new playlist
+    await updateArtnetPlaylist();
 };
 
 function startArtnetPreviewStream() {
@@ -990,10 +992,6 @@ window.pauseArtnet = async function() {
 };
 
 window.stopArtnet = async function() {
-    await fetch(`${API_BASE}/api/player/artnet/stop`, { method: 'POST' });
-};
-
-window.restartArtnet = async function() {
     await fetch(`${API_BASE}/api/player/artnet/stop`, { method: 'POST' });
 };
 

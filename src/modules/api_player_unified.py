@@ -325,6 +325,12 @@ def register_unified_routes(app, player_manager, config):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
+            # Prüfe ob echtes Video geladen ist (nicht DummySource)
+            from .frame_source import DummySource
+            if not player.source or isinstance(player.source, DummySource):
+                logger.info(f"⚠️ [{player_id}] Kein Video geladen - Play abgebrochen")
+                return jsonify({"success": False, "error": "Kein Video geladen"}), 400
+            
             player.play()
             logger.info(f"▶️ Player '{player_id}' playing")
             
@@ -564,8 +570,20 @@ def register_unified_routes(app, player_manager, config):
             else:
                 # Aktuelles Video wurde aus Playlist entfernt
                 if hasattr(player.source, 'video_path') and player.source.video_path:
-                    logger.info(f"🗑️ [{player_id}] Video aus Playlist entfernt - stoppe Player: {os.path.basename(player.source.video_path)}")
+                    logger.info(f"🗑️ [{player_id}] Video aus Playlist entfernt - lade leere Source: {os.path.basename(player.source.video_path)}")
                     player.stop()
+                    # Entlade das Video vollständig
+                    if hasattr(player, 'source') and player.source:
+                        player.source.cleanup()
+                    
+                    # Lade DummySource (schwarzes Frame)
+                    from .frame_source import DummySource
+                    player.source = DummySource(player.canvas_width, player.canvas_height)
+                    player.source.initialize()
+                    player.playlist_index = -1
+                    # Lösche Preview-Frames (leert die Anzeige)
+                    player.last_frame = None
+                    player.last_video_frame = None
                 
                 player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
             

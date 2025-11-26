@@ -206,10 +206,12 @@ def main():
     logger.info("ClipRegistry initialisiert")
     
     # Video Player initialisieren (nur für Preview, KEIN Art-Net Output!)
-    video_source = VideoSource(video_path, canvas_width, canvas_height, config)
+    # Starte mit leerer DummySource - User muss Video explizit laden
+    from modules.frame_source import DummySource
+    video_source = DummySource(canvas_width, canvas_height)
     player = Player(video_source, points_json_path, target_ip, start_universe, fps_limit, config, 
                    enable_artnet=False, player_name="Video Player (Preview)", clip_registry=clip_registry)
-    logger.info(f"Video Player initialisiert (Preview only): Source={os.path.basename(video_path)}, Points={os.path.basename(points_json_path)}")
+    logger.info(f"Video Player initialisiert (Preview only, kein Video geladen)")
     
     # Replay Manager global initialisieren (mit Player-Referenz)
     from modules.replay_manager import ReplayManager
@@ -224,12 +226,12 @@ def main():
     player.set_speed(config['video']['default_speed'])
     
     # Art-Net Player initialisieren (separat vom Video Player)
-    # Verwende das gleiche Video wie der Video Player als Ausgangspunkt
-    artnet_video_source = VideoSource(video_path, canvas_width, canvas_height, config)
+    # Starte mit leerer DummySource - User muss Video explizit laden
+    artnet_video_source = DummySource(canvas_width, canvas_height)
     artnet_player = Player(artnet_video_source, points_json_path, target_ip, start_universe, fps_limit, config,
                           enable_artnet=True, player_name="Art-Net Player", clip_registry=clip_registry)
     artnet_player.set_artnet_manager(artnet_manager)
-    logger.info(f"Art-Net Player initialisiert: Source={os.path.basename(video_path)}")
+    logger.info(f"Art-Net Player initialisiert (kein Video geladen)")
     
     # PlayerManager initialisieren (Single Source of Truth)
     player_manager = PlayerManager(player, artnet_player)
