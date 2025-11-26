@@ -123,8 +123,9 @@ class RestAPI:
             register_script_routes
         )
         from .api_points import register_points_routes
-        from .api_videos import register_video_routes
-        from .api_artnet_videos import register_artnet_video_routes
+        # DEPRECATED: Old separate APIs - replaced by api_player_unified
+        # from .api_videos import register_video_routes
+        # from .api_artnet_videos import register_artnet_video_routes
         from .api_console import register_console_routes
         from .api_projects import register_project_routes
         from .api_config import register_config_routes
@@ -142,8 +143,9 @@ class RestAPI:
         register_cache_routes(self.app)
         register_script_routes(self.app, self.player_manager, self.config)
         register_points_routes(self.app, self.player_manager, self.data_dir)
-        register_video_routes(self.app, self.player_manager, self.video_dir, self.config)
-        register_artnet_video_routes(self.app, self.player_manager, self.video_dir, self.config)
+        # DEPRECATED: Old separate APIs - replaced by api_player_unified
+        # register_video_routes(self.app, self.player_manager, self.video_dir, self.config)
+        # register_artnet_video_routes(self.app, self.player_manager, self.video_dir, self.config)
         register_console_routes(self.app, self)
         register_project_routes(self.app, self.logger)
         register_config_routes(self.app)

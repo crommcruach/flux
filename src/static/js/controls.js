@@ -73,10 +73,10 @@ async function init() {
 // Update current video from player status
 async function updateCurrentVideoFromPlayer() {
     try {
-        const response = await fetch(`${API_BASE}/api/video/status`);
+        const response = await fetch(`${API_BASE}/api/player/video/status`);
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             // Normalisiere Pfad (entferne führende Slashes/Backslashes)
             const newVideo = data.current_video ? data.current_video.replace(/^[\\\/]+/, '') : null;
             const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
@@ -94,10 +94,10 @@ async function updateCurrentVideoFromPlayer() {
 // Update current Art-Net video from player status
 async function updateCurrentArtnetFromPlayer() {
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/video/status`);
+        const response = await fetch(`${API_BASE}/api/player/artnet/status`);
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             // Normalisiere Pfad (entferne führende Slashes/Backslashes)
             const newVideo = data.current_video ? data.current_video.replace(/^[\\\/]+/, '') : null;
             const normalizedCurrent = currentArtnet ? currentArtnet.replace(/^[\\\/]+/, '') : null;
@@ -264,10 +264,10 @@ let currentVideo = null;
 async function loadVideoPlaylist() {
     try {
         // Load player configuration from server
-        const response = await fetch(`${API_BASE}/api/video/status`);
+        const response = await fetch(`${API_BASE}/api/player/video/status`);
         const data = await response.json();
         
-        if (data.status === 'success' && data.playlist) {
+        if (data.success && data.playlist) {
             // Restore playlist
             videoFiles = data.playlist.map(path => ({
                 name: path.split('/').pop().split('\\').pop(),
@@ -498,7 +498,7 @@ window.loadVideoFile = async function(videoPath) {
 // Load video and ADD to playlist (used for file browser drops)
 window.loadVideo = async function(videoPath) {
     try {
-        const response = await fetch(`${API_BASE}/api/video/load`, {
+        const response = await fetch(`${API_BASE}/api/player/video/clip/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: videoPath })
@@ -506,7 +506,7 @@ window.loadVideo = async function(videoPath) {
         
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             currentVideo = videoPath.replace(/^[\\\/]+/, '');
             
             // Always add to playlist (allow duplicates)
@@ -569,10 +569,10 @@ window.restartVideo = async function() {
 
 window.nextVideo = async function() {
     try {
-        const response = await fetch(`${API_BASE}/api/video/next`, { method: 'POST' });
+        const response = await fetch(`${API_BASE}/api/player/video/next`, { method: 'POST' });
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             currentVideo = data.video;
             renderVideoPlaylist();
             console.log('⏭️ Next video:', data.video);
@@ -586,10 +586,10 @@ window.nextVideo = async function() {
 
 window.previousVideo = async function() {
     try {
-        const response = await fetch(`${API_BASE}/api/video/previous`, { method: 'POST' });
+        const response = await fetch(`${API_BASE}/api/player/video/previous`, { method: 'POST' });
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             currentVideo = data.video;
             renderVideoPlaylist();
             console.log('⏮️ Previous video:', data.video);
@@ -620,9 +620,9 @@ window.toggleVideoAutoplay = async function() {
     
     // Dann starte Wiedergabe wenn autoplay aktiviert und Playlist vorhanden
     if (videoAutoplay && videoFiles.length > 0) {
-        const statusResponse = await fetch(`${API_BASE}/api/video/status`);
+        const statusResponse = await fetch(`${API_BASE}/api/player/video/status`);
         const statusData = await statusResponse.json();
-        if (statusData.status === 'success' && !statusData.is_playing) {
+        if (statusdata.success && !statusData.is_playing) {
             // Lade und starte erstes Video wenn keins läuft
             await loadVideoFile(videoFiles[0].path);
             await playVideo();
@@ -650,7 +650,7 @@ window.toggleVideoLoop = async function() {
 // Sendet aktuelle Playlist an Video Player
 async function updateVideoPlaylist() {
     try {
-        const response = await fetch(`${API_BASE}/api/video/playlist/set`, {
+        const response = await fetch(`${API_BASE}/api/player/video/playlist/set`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -677,10 +677,10 @@ let currentArtnet = null;
 async function loadArtnetPlaylist() {
     try {
         // Load player configuration from server
-        const response = await fetch(`${API_BASE}/api/artnet/video/status`);
+        const response = await fetch(`${API_BASE}/api/player/artnet/status`);
         const data = await response.json();
         
-        if (data.status === 'success' && data.playlist) {
+        if (data.success && data.playlist) {
             // Restore playlist
             artnetFiles = data.playlist.map(path => ({
                 name: path.split('/').pop().split('\\').pop(),
@@ -915,7 +915,7 @@ window.loadArtnetFile = async function(videoPath) {
 // Load Art-Net video and ADD to playlist (used for file browser drops)
 window.loadArtnetVideo = async function(videoPath) {
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/video/load`, {
+        const response = await fetch(`${API_BASE}/api/player/artnet/clip/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: videoPath })
@@ -923,7 +923,7 @@ window.loadArtnetVideo = async function(videoPath) {
         
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             currentArtnet = videoPath.replace(/^[\\\/]+/, '');
             
             // Always add to playlist (allow duplicates)
@@ -982,27 +982,27 @@ window.openArtnetFullscreen = function() {
 // ========================================
 
 window.playArtnet = async function() {
-    await fetch(`${API_BASE}/api/artnet/play`, { method: 'POST' });
+    await fetch(`${API_BASE}/api/player/artnet/play`, { method: 'POST' });
 };
 
 window.pauseArtnet = async function() {
-    await fetch(`${API_BASE}/api/artnet/pause`, { method: 'POST' });
+    await fetch(`${API_BASE}/api/player/artnet/pause`, { method: 'POST' });
 };
 
 window.stopArtnet = async function() {
-    await fetch(`${API_BASE}/api/artnet/stop`, { method: 'POST' });
+    await fetch(`${API_BASE}/api/player/artnet/stop`, { method: 'POST' });
 };
 
 window.restartArtnet = async function() {
-    await fetch(`${API_BASE}/api/artnet/restart`, { method: 'POST' });
+    await fetch(`${API_BASE}/api/player/artnet/stop`, { method: 'POST' });
 };
 
 window.nextArtnet = async function() {
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/video/next`, { method: 'POST' });
+        const response = await fetch(`${API_BASE}/api/player/artnet/next`, { method: 'POST' });
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             currentArtnet = data.video;
             renderArtnetPlaylist();
             console.log('⏭️ Next Art-Net video:', data.video);
@@ -1016,10 +1016,10 @@ window.nextArtnet = async function() {
 
 window.previousArtnet = async function() {
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/video/previous`, { method: 'POST' });
+        const response = await fetch(`${API_BASE}/api/player/artnet/previous`, { method: 'POST' });
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             currentArtnet = data.video;
             renderArtnetPlaylist();
             console.log('⏮️ Previous Art-Net video:', data.video);
@@ -1050,9 +1050,9 @@ window.toggleArtnetAutoplay = async function() {
     
     // Dann starte Wiedergabe wenn autoplay aktiviert und Playlist vorhanden
     if (artnetAutoplay && artnetFiles.length > 0) {
-        const statusResponse = await fetch(`${API_BASE}/api/artnet/video/status`);
+        const statusResponse = await fetch(`${API_BASE}/api/player/artnet/status`);
         const statusData = await statusResponse.json();
-        if (statusData.status === 'success' && !statusData.is_playing) {
+        if (statusdata.success && !statusData.is_playing) {
             // Lade und starte erstes Video wenn keins läuft
             await loadArtnetFile(artnetFiles[0].path);
             await playArtnet();
@@ -1080,7 +1080,7 @@ window.toggleArtnetLoop = async function() {
 // Sendet aktuelle Playlist an Art-Net Player
 async function updateArtnetPlaylist() {
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/video/playlist/set`, {
+        const response = await fetch(`${API_BASE}/api/player/artnet/playlist/set`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1698,7 +1698,7 @@ async function loadFileBrowser() {
         const response = await fetch(`${API_BASE}/api/files/tree`);
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (data.success) {
             renderFileTree(data.tree);
         }
     } catch (error) {
@@ -1842,7 +1842,7 @@ window.savePlaylists = async function() {
         });
         
         const data = await response.json();
-        if (data.status === 'success') {
+        if (data.success) {
             showToast(`Playlists "${name}" saved (Video: ${data.video_count}, Art-Net: ${data.artnet_count})`, 'success');
         } else {
             showToast(`Failed to save playlists: ${data.message}`, 'error');
@@ -1949,7 +1949,7 @@ window.selectPlaylist = async function(playlistName) {
         
         console.log('🎯 Playlist data received:', loadData);
         
-        if (loadData.status === 'success') {
+        if (loaddata.success) {
             // Load both playlists
             videoFiles = loadData.playlist.video_playlist || loadData.playlist.videos || [];
             artnetFiles = loadData.playlist.artnet_playlist || [];
@@ -2004,7 +2004,7 @@ window.deletePlaylist = async function(playlistName, event) {
             });
             const data = await response.json();
             
-            if (data.status === 'success') {
+            if (data.success) {
                 showToast(`Playlist "${playlistName}" gelöscht`, 'success');
                 // Refresh the playlist list without closing modal
                 await refreshPlaylistModal();

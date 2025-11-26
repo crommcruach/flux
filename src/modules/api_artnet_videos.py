@@ -54,13 +54,23 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
                 return jsonify({"status": "error", "message": "Fehler beim Laden des Videos"}), 500
             
             # Try to find index in playlist
+            video_in_playlist = False
             if hasattr(player, 'playlist') and player.playlist:
                 try:
                     player.playlist_index = player.playlist.index(video_path)
+                    video_in_playlist = True
                     logger.debug(f"📋 Art-Net Video in Playlist gefunden: Index {player.playlist_index}/{len(player.playlist)}")
                 except ValueError:
                     player.playlist_index = -1
                     logger.warning(f"⚠️ Art-Net Video nicht in Playlist: {video_path}")
+            
+            # Setze Loop-Verhalten basierend auf Playlist-Status
+            if video_in_playlist:
+                player.max_loops = 0  # Endlosschleife wenn in Playlist
+                logger.debug(f"🔁 Art-Net Video in Endlosschleife (in Playlist)")
+            else:
+                player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
+                logger.debug(f"▶️ Art-Net Video einmal abspielen (nicht in Playlist)")
             
             # Play if was playing before
             if was_playing:
@@ -243,13 +253,14 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
             player.playlist = absolute_playlist
             player.autoplay = autoplay
             player.loop_playlist = loop
-            player.max_loops = 1  # Important: Stop after one playthrough for autoplay to work
             
             # Try to find current video in playlist
+            current_video_in_playlist = False
             if hasattr(player, 'source') and player.source and hasattr(player.source, 'video_path'):
                 current_path = player.source.video_path
                 try:
                     player.playlist_index = absolute_playlist.index(current_path)
+                    current_video_in_playlist = True
                     logger.debug(f"📋 Art-Net Current video in playlist: Index {player.playlist_index}")
                 except ValueError:
                     player.playlist_index = -1
@@ -258,7 +269,24 @@ def register_artnet_video_routes(app, player_manager, video_dir, config):
                 player.playlist_index = -1
                 logger.debug(f"📋 Art-Net No current video loaded")
             
-            logger.info(f"Art-Net playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}, playlist_index={player.playlist_index}")
+            # Wenn aktuelles Video in Playlist ist: setze Endlosschleife
+            if current_video_in_playlist:
+                player.max_loops = 0  # 0 = Endlosschleife
+                logger.debug(f"🔁 Art-Net Video in Endlosschleife gesetzt (max_loops=0)")
+                
+                # Starte automatisch wenn nicht schon läuft
+                if not player.is_playing:
+                    player.play()
+                    logger.info(f"▶️ Art-Net Video automatisch gestartet (in Playlist)")
+            else:
+                # Aktuelles Video wurde aus Playlist entfernt
+                if hasattr(player.source, 'video_path') and player.source.video_path:
+                    logger.info(f"🗑️ Art-Net Video aus Playlist entfernt - stoppe Player: {os.path.basename(player.source.video_path)}")
+                    player.stop()
+                
+                player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
+            
+            logger.info(f"Art-Net playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}, playlist_index={player.playlist_index}, max_loops={player.max_loops}")
             
             return jsonify({
                 "status": "success",

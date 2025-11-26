@@ -114,13 +114,23 @@ def register_video_routes(app, player_manager, video_dir, config):
                 return jsonify({"status": "error", "message": "Fehler beim Laden des Videos"}), 500
             
             # Try to find index in playlist
+            video_in_playlist = False
             if hasattr(player, 'playlist') and player.playlist:
                 try:
                     player.playlist_index = player.playlist.index(video_path)
+                    video_in_playlist = True
                     logger.debug(f"📋 Video in Playlist gefunden: Index {player.playlist_index}/{len(player.playlist)}")
                 except ValueError:
                     player.playlist_index = -1
                     logger.warning(f"⚠️ Video nicht in Playlist: {video_path}")
+            
+            # Setze Loop-Verhalten basierend auf Playlist-Status
+            if video_in_playlist:
+                player.max_loops = 0  # Endlosschleife wenn in Playlist
+                logger.debug(f"🔁 Video in Endlosschleife (in Playlist)")
+            else:
+                player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
+                logger.debug(f"▶️ Video einmal abspielen (nicht in Playlist)")
             
             # Play if was playing before
             if was_playing:
@@ -352,18 +362,38 @@ def register_video_routes(app, player_manager, video_dir, config):
             player.playlist = absolute_playlist
             player.autoplay = autoplay
             player.loop_playlist = loop
-            player.max_loops = 1  # Immer nur 1x abspielen, Playlist übernimmt Loop
             
             # Setze Index auf aktuelles Video wenn vorhanden
+            current_video_in_playlist = False
             if hasattr(player.source, 'video_path') and player.source.video_path:
                 try:
                     player.playlist_index = absolute_playlist.index(player.source.video_path)
+                    current_video_in_playlist = True
                     logger.debug(f"📋 Current video in playlist: Index {player.playlist_index}")
                 except ValueError:
                     player.playlist_index = -1
                     logger.debug(f"📋 Current video not in playlist")
             
-            logger.info(f"Video playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}, playlist_index={player.playlist_index}")
+            # Wenn aktuelles Video in Playlist ist: setze Endlosschleife
+            if current_video_in_playlist:
+                player.max_loops = 0  # 0 = Endlosschleife
+                logger.debug(f"🔁 Video in Endlosschleife gesetzt (max_loops=0)")
+                
+                # Starte automatisch wenn nicht schon läuft
+                if not player.is_playing:
+                    player.play()
+                    logger.info(f"▶️ Video automatisch gestartet (in Playlist)")
+            else:
+                # Aktuelles Video wurde aus Playlist entfernt
+                if hasattr(player.source, 'video_path') and player.source.video_path:
+                    logger.info(f"🗑️ Video aus Playlist entfernt - stoppe Player: {os.path.basename(player.source.video_path)}")
+                    player.stop()
+                    # Optional: Source zurücksetzen auf leeres Dummy
+                    # player.source = None
+                
+                player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
+            
+            logger.info(f"Video playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}, playlist_index={player.playlist_index}, max_loops={player.max_loops}")
             return jsonify({
                 "status": "success",
                 "playlist_length": len(absolute_playlist),

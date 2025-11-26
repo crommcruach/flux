@@ -368,4 +368,221 @@ def register_unified_routes(app, player_manager, config):
             logger.error(f"Error stopping: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
     
+    # ========================================
+    # PLAYER STATUS & INFO
+    # ========================================
+    
+    @app.route('/api/player/<player_id>/status', methods=['GET'])
+    def get_player_status(player_id):
+        """Gibt den Status eines Players zurück."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            current_video = None
+            if hasattr(player, 'source') and player.source and hasattr(player.source, 'video_path'):
+                current_video = os.path.relpath(player.source.video_path, video_dir)
+            
+            # Get playlist as relative paths
+            playlist = []
+            if hasattr(player, 'playlist'):
+                for path in player.playlist:
+                    try:
+                        rel_path = os.path.relpath(path, video_dir)
+                        playlist.append(rel_path)
+                    except:
+                        playlist.append(path)
+            
+            return jsonify({
+                "success": True,
+                "player_id": player_id,
+                "is_playing": player.is_playing,
+                "is_paused": player.is_paused,
+                "current_frame": player.current_frame,
+                "total_frames": getattr(player.source, 'total_frames', 0) if player.source else 0,
+                "current_video": current_video,
+                "playlist": playlist,
+                "playlist_index": getattr(player, 'playlist_index', -1),
+                "autoplay": getattr(player, 'autoplay', False),
+                "loop": getattr(player, 'loop_playlist', False),
+                "max_loops": getattr(player, 'max_loops', 1)
+            })
+        except Exception as e:
+            logger.error(f"Error getting player status: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    # ========================================
+    # PLAYLIST NAVIGATION
+    # ========================================
+    
+    @app.route('/api/player/<player_id>/next', methods=['POST'])
+    def next_video(player_id):
+        """Lädt das nächste Video aus der Playlist."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+        
+            # Check if player has playlist
+            if not hasattr(player, 'playlist') or not player.playlist:
+                return jsonify({"success": False, "error": "No playlist configured"}), 404
+        
+            # Calculate next index
+            next_index = player.playlist_index + 1
+            if next_index >= len(player.playlist):
+                if player.loop_playlist:
+                    next_index = 0
+                else:
+                    return jsonify({"success": False, "error": "End of playlist"}), 400
+            
+            # Get next video path
+            next_video_path = player.playlist[next_index]
+            
+            was_playing = player.is_playing
+        
+            video_source = VideoSource(next_video_path, player.canvas_width, player.canvas_height, config)
+            success = player.switch_source(video_source)
+        
+            if not success:
+                return jsonify({"success": False, "error": "Failed to load video"}), 500
+        
+            # Update playlist index
+            player.playlist_index = next_index
+            
+            if was_playing:
+                player.play()
+        
+            # Return relative path for frontend
+            rel_path = os.path.relpath(next_video_path, video_dir)
+            return jsonify({
+                "success": True,
+                "message": "Next video loaded",
+                "video": rel_path,
+                "playlist_index": next_index
+            })
+        
+        except Exception as e:
+            logger.error(f"Error loading next video: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route('/api/player/<player_id>/previous', methods=['POST'])
+    def previous_video(player_id):
+        """Lädt das vorherige Video aus der Playlist."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+        
+            # Check if player has playlist
+            if not hasattr(player, 'playlist') or not player.playlist:
+                return jsonify({"success": False, "error": "No playlist configured"}), 404
+        
+            # Calculate previous index
+            prev_index = player.playlist_index - 1
+            if prev_index < 0:
+                if player.loop_playlist:
+                    prev_index = len(player.playlist) - 1
+                else:
+                    return jsonify({"success": False, "error": "Start of playlist"}), 400
+            
+            # Get previous video path
+            prev_video_path = player.playlist[prev_index]
+        
+            was_playing = player.is_playing
+        
+            video_source = VideoSource(prev_video_path, player.canvas_width, player.canvas_height, config)
+            success = player.switch_source(video_source)
+        
+            if not success:
+                return jsonify({"success": False, "error": "Failed to load video"}), 500
+        
+            # Update playlist index
+            player.playlist_index = prev_index
+            
+            if was_playing:
+                player.play()
+        
+            # Return relative path for frontend
+            rel_path = os.path.relpath(prev_video_path, video_dir)
+            return jsonify({
+                "success": True,
+                "message": "Previous video loaded",
+                "video": rel_path,
+                "playlist_index": prev_index
+            })
+        
+        except Exception as e:
+            logger.error(f"Error loading previous video: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/player/<player_id>/playlist/set', methods=['POST'])
+    def set_playlist(player_id):
+        """Setzt die Playlist für einen Player."""
+        try:
+            data = request.get_json()
+            playlist = data.get('playlist', [])
+            autoplay = data.get('autoplay', False)
+            loop = data.get('loop', False)
+            
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            # Konvertiere relative Pfade zu absoluten
+            absolute_playlist = []
+            for item in playlist:
+                path = item if isinstance(item, str) else item.get('path', '')
+                if not os.path.isabs(path):
+                    path = os.path.join(video_dir, path)
+                absolute_playlist.append(path)
+            
+            player.playlist = absolute_playlist
+            player.autoplay = autoplay
+            player.loop_playlist = loop
+            
+            # Setze Index auf aktuelles Video wenn vorhanden
+            current_video_in_playlist = False
+            if hasattr(player.source, 'video_path') and player.source.video_path:
+                try:
+                    player.playlist_index = absolute_playlist.index(player.source.video_path)
+                    current_video_in_playlist = True
+                    logger.debug(f"📋 [{player_id}] Current video in playlist: Index {player.playlist_index}")
+                except ValueError:
+                    player.playlist_index = -1
+                    logger.debug(f"📋 [{player_id}] Current video not in playlist")
+            
+            # Wenn aktuelles Video in Playlist ist: setze Endlosschleife
+            if current_video_in_playlist:
+                player.max_loops = 0  # 0 = Endlosschleife
+                logger.debug(f"🔁 [{player_id}] Video in Endlosschleife gesetzt (max_loops=0)")
+                
+                # Starte automatisch wenn nicht schon läuft
+                if not player.is_playing:
+                    player.play()
+                    logger.info(f"▶️ [{player_id}] Video automatisch gestartet (in Playlist)")
+            else:
+                # Aktuelles Video wurde aus Playlist entfernt
+                if hasattr(player.source, 'video_path') and player.source.video_path:
+                    logger.info(f"🗑️ [{player_id}] Video aus Playlist entfernt - stoppe Player: {os.path.basename(player.source.video_path)}")
+                    player.stop()
+                
+                player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
+            
+            logger.info(f"✅ [{player_id}] Playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}")
+            return jsonify({
+                "success": True,
+                "player_id": player_id,
+                "playlist_length": len(absolute_playlist),
+                "autoplay": autoplay,
+                "loop": loop,
+                "playlist_index": player.playlist_index
+            })
+            
+        except Exception as e:
+            logger.error(f"Error setting playlist: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({"success": False, "error": str(e)}), 500
+    
     logger.info("✅ Unified Player API routes registered")
