@@ -221,12 +221,17 @@ class PluginManager:
         if plugin_id not in self.registry:
             return None
         
-        parameters = self.registry[plugin_id].PARAMETERS.copy()
+        # Deep copy to avoid modifying the original class PARAMETERS
+        import copy
+        parameters = copy.deepcopy(self.registry[plugin_id].PARAMETERS)
         
-        # Konvertiere ParameterType Enum zu String
+        # Konvertiere ParameterType Enum zu String (falls noch nicht)
         for param in parameters:
             if 'type' in param:
-                param['type'] = param['type'].value
+                # Check if it's already a string or an enum
+                if isinstance(param['type'], ParameterType):
+                    param['type'] = param['type'].value
+                # If it's already a string, leave it as is
         
         return parameters
     

@@ -96,6 +96,15 @@ export function initWebSocket(handlers = {}) {
  * @param {number} duration - Duration in ms (default: 3000)
  */
 export function showToast(message, type = 'success', duration = 3000) {
+    // Log all toast messages to console
+    const emoji = {
+        success: '✅',
+        error: '❌',
+        info: 'ℹ️',
+        warning: '⚠️'
+    };
+    console.log(`${emoji[type] || '📢'} [TOAST ${type.toUpperCase()}] ${message}`);
+    
     // Try different toast container variants
     let container = document.getElementById('toastContainer');
     

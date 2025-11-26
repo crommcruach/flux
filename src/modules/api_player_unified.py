@@ -34,76 +34,133 @@ def register_unified_routes(app, player_manager, config):
     
     @app.route('/api/player/<player_id>/clip/load', methods=['POST'])
     def load_clip(player_id):
-        """Lädt einen Clip in einen Player und registriert ihn."""
+        """Lädt einen Clip (Video oder Generator) in einen Player und registriert ihn."""
         try:
             data = request.get_json()
-            video_path = data.get('path')
-            
-            if not video_path:
-                return jsonify({"success": False, "error": "No path provided"}), 400
+            clip_type = data.get('type', 'video')  # 'video' or 'generator'
             
             # Get player
             player = player_manager.get_player(player_id)
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
-            # Build absolute path
-            if not os.path.isabs(video_path):
-                absolute_path = os.path.join(video_dir, video_path)
-                relative_path = video_path
-            else:
-                absolute_path = video_path
-                relative_path = os.path.relpath(video_path, video_dir)
-            
-            if not os.path.exists(absolute_path):
-                return jsonify({"success": False, "error": f"Video not found: {video_path}"}), 404
-            
-            # Register clip (get existing or create new)
-            clip_id = clip_registry.register_clip(
-                player_id=player_id,
-                absolute_path=absolute_path,
-                relative_path=relative_path,
-                metadata={}
-            )
-            
-            # Load video into player
             was_playing = player.is_playing
             
-            video_source = VideoSource(
-                absolute_path,
-                player.canvas_width,
-                player.canvas_height,
-                config
-            )
-            
-            success = player.switch_source(video_source)
-            
-            if not success:
-                return jsonify({"success": False, "error": "Failed to load video"}), 500
-            
-            # Set current clip ID for effect management
-            player.current_clip_id = clip_id
-            logger.info(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
-            
-            # Update playlist index if applicable
-            if hasattr(player, 'playlist') and player.playlist:
-                try:
-                    player.playlist_index = player.playlist.index(absolute_path)
-                except ValueError:
-                    player.playlist_index = -1
-            
-            # Resume playback if was playing
-            if was_playing:
-                player.play()
-            
-            return jsonify({
-                "success": True,
-                "message": f"Clip loaded: {os.path.basename(absolute_path)}",
-                "clip_id": clip_id,
-                "player_id": player_id,
-                "relative_path": relative_path,
-                "was_playing": was_playing
-            })
+            if clip_type == 'generator':
+                # Load generator clip
+                generator_id = data.get('generator_id')
+                parameters = data.get('parameters', {})
+                
+                if not generator_id:
+                    return jsonify({"success": False, "error": "No generator_id provided"}), 400
+                
+                # Import here to avoid circular dependency
+                from .frame_source import GeneratorSource
+                
+                # Create generator source
+                logger.info(f"Loading generator '{generator_id}' with parameters: {parameters}")
+                generator_source = GeneratorSource(
+                    generator_id=generator_id,
+                    parameters=parameters,
+                    canvas_width=player.canvas_width,
+                    canvas_height=player.canvas_height,
+                    config=config
+                )
+                
+                # Register clip with generator path
+                clip_id = clip_registry.register_clip(
+                    player_id=player_id,
+                    absolute_path=f"generator:{generator_id}",
+                    relative_path=f"generator:{generator_id}",
+                    metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
+                )
+                
+                # Load generator into player
+                success = player.switch_source(generator_source)
+                
+                if not success:
+                    return jsonify({"success": False, "error": "Failed to load generator"}), 500
+                
+                # Set current clip ID for effect management
+                player.current_clip_id = clip_id
+                logger.info(f"✅ [{player_id}] Loaded generator: {generator_id} (clip_id={clip_id})")
+                
+                # Resume playback if was playing
+                if was_playing:
+                    player.play()
+                
+                return jsonify({
+                    "success": True,
+                    "message": f"Generator loaded: {generator_id}",
+                    "clip_id": clip_id,
+                    "player_id": player_id,
+                    "type": "generator",
+                    "generator_id": generator_id,
+                    "was_playing": was_playing
+                })
+                
+            else:
+                # Load video clip (original code)
+                video_path = data.get('path')
+                
+                if not video_path:
+                    return jsonify({"success": False, "error": "No path provided"}), 400
+                
+                # Build absolute path
+                if not os.path.isabs(video_path):
+                    absolute_path = os.path.join(video_dir, video_path)
+                    relative_path = video_path
+                else:
+                    absolute_path = video_path
+                    relative_path = os.path.relpath(video_path, video_dir)
+                
+                if not os.path.exists(absolute_path):
+                    return jsonify({"success": False, "error": f"Video not found: {video_path}"}), 404
+                
+                # Register clip (get existing or create new)
+                clip_id = clip_registry.register_clip(
+                    player_id=player_id,
+                    absolute_path=absolute_path,
+                    relative_path=relative_path,
+                    metadata={}
+                )
+                
+                # Load video into player
+                video_source = VideoSource(
+                    absolute_path,
+                    player.canvas_width,
+                    player.canvas_height,
+                    config
+                )
+                
+                success = player.switch_source(video_source)
+                
+                if not success:
+                    return jsonify({"success": False, "error": "Failed to load video"}), 500
+                
+                # Set current clip ID for effect management
+                player.current_clip_id = clip_id
+                logger.info(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
+                
+                # Update playlist index if applicable
+                if hasattr(player, 'playlist') and player.playlist:
+                    try:
+                        player.playlist_index = player.playlist.index(absolute_path)
+                    except ValueError:
+                        player.playlist_index = -1
+                
+                # Resume playback if was playing
+                if was_playing:
+                    player.play()
+                
+                return jsonify({
+                    "success": True,
+                    "message": f"Clip loaded: {os.path.basename(absolute_path)}",
+                    "clip_id": clip_id,
+                    "player_id": player_id,
+                    "relative_path": relative_path,
+                    "was_playing": was_playing
+                })
             
         except Exception as e:
             logger.error(f"Error loading clip: {e}")
@@ -387,8 +444,18 @@ def register_unified_routes(app, player_manager, config):
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
             current_video = None
-            if hasattr(player, 'source') and player.source and hasattr(player.source, 'video_path'):
-                current_video = os.path.relpath(player.source.video_path, video_dir)
+            clip_id = None
+            if hasattr(player, 'source') and player.source:
+                if hasattr(player.source, 'video_path'):
+                    # Regular video source
+                    current_video = os.path.relpath(player.source.video_path, video_dir)
+                elif hasattr(player.source, 'generator_id'):
+                    # Generator source
+                    current_video = f"generator:{player.source.generator_id}"
+            
+            # Get clip_id from player (stored in player.current_clip_id)
+            if hasattr(player, 'current_clip_id'):
+                clip_id = player.current_clip_id
             
             # Get playlist as relative paths
             playlist = []
@@ -400,7 +467,7 @@ def register_unified_routes(app, player_manager, config):
                     except:
                         playlist.append(path)
             
-            return jsonify({
+            response_data = {
                 "success": True,
                 "player_id": player_id,
                 "is_playing": player.is_playing,
@@ -413,7 +480,13 @@ def register_unified_routes(app, player_manager, config):
                 "autoplay": getattr(player, 'autoplay', False),
                 "loop": getattr(player, 'loop_playlist', False),
                 "max_loops": getattr(player, 'max_loops', 1)
-            })
+            }
+            
+            # Only include clip_id if it exists
+            if clip_id:
+                response_data["clip_id"] = clip_id
+            
+            return jsonify(response_data)
         except Exception as e:
             logger.error(f"Error getting player status: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
@@ -447,11 +520,39 @@ def register_unified_routes(app, player_manager, config):
             
             was_playing = player.is_playing
         
-            video_source = VideoSource(next_video_path, player.canvas_width, player.canvas_height, config)
-            success = player.switch_source(video_source)
+            # Check if it's a generator or video
+            if next_video_path.startswith('generator:'):
+                # It's a generator
+                generator_id = next_video_path.split(':', 1)[1]
+                
+                # Get default parameters from plugin registry
+                from .plugin_manager import get_plugin_manager
+                pm = get_plugin_manager()
+                
+                params_dict = {}
+                if generator_id in pm.registry:
+                    plugin_class = pm.registry[generator_id]
+                    if hasattr(plugin_class, 'PARAMETERS'):
+                        for param in plugin_class.PARAMETERS:
+                            params_dict[param['name']] = param['default']
+                
+                # Create generator source
+                from .frame_source import GeneratorSource
+                generator_source = GeneratorSource(
+                    generator_id=generator_id,
+                    parameters=params_dict,
+                    canvas_width=player.canvas_width,
+                    canvas_height=player.canvas_height,
+                    config=config
+                )
+                success = player.switch_source(generator_source)
+            else:
+                # It's a video file
+                video_source = VideoSource(next_video_path, player.canvas_width, player.canvas_height, config)
+                success = player.switch_source(video_source)
         
             if not success:
-                return jsonify({"success": False, "error": "Failed to load video"}), 500
+                return jsonify({"success": False, "error": "Failed to load next clip"}), 500
         
             # Update playlist index
             player.playlist_index = next_index
@@ -460,7 +561,7 @@ def register_unified_routes(app, player_manager, config):
                 player.play()
         
             # Return relative path for frontend
-            rel_path = os.path.relpath(next_video_path, video_dir)
+            rel_path = next_video_path if next_video_path.startswith('generator:') else os.path.relpath(next_video_path, video_dir)
             return jsonify({
                 "success": True,
                 "message": "Next video loaded",
@@ -497,11 +598,39 @@ def register_unified_routes(app, player_manager, config):
         
             was_playing = player.is_playing
         
-            video_source = VideoSource(prev_video_path, player.canvas_width, player.canvas_height, config)
-            success = player.switch_source(video_source)
+            # Check if it's a generator or video
+            if prev_video_path.startswith('generator:'):
+                # It's a generator
+                generator_id = prev_video_path.split(':', 1)[1]
+                
+                # Get default parameters from plugin registry
+                from .plugin_manager import get_plugin_manager
+                pm = get_plugin_manager()
+                
+                params_dict = {}
+                if generator_id in pm.registry:
+                    plugin_class = pm.registry[generator_id]
+                    if hasattr(plugin_class, 'PARAMETERS'):
+                        for param in plugin_class.PARAMETERS:
+                            params_dict[param['name']] = param['default']
+                
+                # Create generator source
+                from .frame_source import GeneratorSource
+                generator_source = GeneratorSource(
+                    generator_id=generator_id,
+                    parameters=params_dict,
+                    canvas_width=player.canvas_width,
+                    canvas_height=player.canvas_height,
+                    config=config
+                )
+                success = player.switch_source(generator_source)
+            else:
+                # It's a video file
+                video_source = VideoSource(prev_video_path, player.canvas_width, player.canvas_height, config)
+                success = player.switch_source(video_source)
         
             if not success:
-                return jsonify({"success": False, "error": "Failed to load video"}), 500
+                return jsonify({"success": False, "error": "Failed to load previous clip"}), 500
         
             # Update playlist index
             player.playlist_index = prev_index
@@ -510,7 +639,7 @@ def register_unified_routes(app, player_manager, config):
                 player.play()
         
             # Return relative path for frontend
-            rel_path = os.path.relpath(prev_video_path, video_dir)
+            rel_path = prev_video_path if prev_video_path.startswith('generator:') else os.path.relpath(prev_video_path, video_dir)
             return jsonify({
                 "success": True,
                 "message": "Previous video loaded",
@@ -520,6 +649,55 @@ def register_unified_routes(app, player_manager, config):
         
         except Exception as e:
             logger.error(f"Error loading previous video: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/player/<player_id>/clip/<clip_id>/generator/parameter', methods=['POST'])
+    def update_generator_parameter(player_id, clip_id):
+        """Update parameter of a running generator clip."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            data = request.get_json()
+            
+            if not data or 'parameter' not in data or 'value' not in data:
+                return jsonify({"success": False, "error": "Missing parameter or value"}), 400
+            
+            param_name = data['parameter']
+            param_value = data['value']
+            
+            # Get current source
+            if not player.source:
+                return jsonify({"success": False, "error": "No active source"}), 400
+            
+            # Check if it's a generator source
+            from .frame_source import GeneratorSource
+            if not isinstance(player.source, GeneratorSource):
+                return jsonify({"success": False, "error": "Current source is not a generator"}), 400
+            
+            # Update parameter
+            success = player.source.update_parameter(param_name, param_value)
+            
+            if success:
+                # Also store in player's playlist_params for persistence across loops
+                generator_id = player.source.generator_id
+                if generator_id not in player.playlist_params:
+                    player.playlist_params[generator_id] = {}
+                player.playlist_params[generator_id][param_name] = param_value
+                
+                logger.info(f"✅ [{player_id}] Generator parameter updated and stored: {param_name} = {param_value}")
+                return jsonify({
+                    "success": True,
+                    "message": f"Parameter {param_name} updated",
+                    "parameter": param_name,
+                    "value": param_value
+                })
+            else:
+                return jsonify({"success": False, "error": f"Failed to update parameter {param_name}"}), 400
+            
+        except Exception as e:
+            logger.error(f"❌ Error updating generator parameter: {str(e)}")
             return jsonify({"success": False, "error": str(e)}), 500
     
     @app.route('/api/player/<player_id>/playlist/set', methods=['POST'])
@@ -535,13 +713,18 @@ def register_unified_routes(app, player_manager, config):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
-            # Konvertiere relative Pfade zu absoluten
+            # Konvertiere relative Pfade zu absoluten (aber lasse generator: Pfade unverändert)
             absolute_playlist = []
             for item in playlist:
                 path = item if isinstance(item, str) else item.get('path', '')
-                if not os.path.isabs(path):
+                # Don't modify generator paths
+                if path.startswith('generator:'):
+                    absolute_playlist.append(path)
+                elif not os.path.isabs(path):
                     path = os.path.join(video_dir, path)
-                absolute_playlist.append(path)
+                    absolute_playlist.append(path)
+                else:
+                    absolute_playlist.append(path)
             
             player.playlist = absolute_playlist
             player.autoplay = autoplay

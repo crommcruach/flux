@@ -503,7 +503,71 @@ GET /api/plugins/stats
 
 Siehe:
 - `src/plugins/effects/blur.py` - Blur Effect (EFFECT)
+- `src/plugins/effects/opacity.py` - Opacity Effect (EFFECT)
+- `src/plugins/effects/transform.py` - Transform Effect (EFFECT)
 - `src/scripts/rainbow_wave.py` - Generator-ähnlich (GENERATOR Vorlage)
+
+## Built-in Effect Plugins
+
+### Opacity Effect
+**ID:** `opacity`  
+**Kategorie:** Farb-Manipulation
+
+Steuert die Video-Opazität (Transparenz):
+- **opacity** (0-100%) - Video-Transparenz
+  - 100% = vollständig sichtbar (normal)
+  - 50% = halb-transparent
+  - 0% = vollständig transparent (schwarz)
+
+**Beispiel:**
+```python
+# Via REST API
+POST /api/effects/video/add
+{
+  "plugin_id": "opacity",
+  "config": {
+    "opacity": 50.0
+  }
+}
+```
+
+### Transform Effect
+**ID:** `transform`  
+**Kategorie:** Transformation
+
+2D/3D Transformationen (Position, Skalierung, Rotation):
+- **position_x** (-2000 bis +2000 px) - Horizontale Position
+- **position_y** (-2000 bis +2000 px) - Vertikale Position
+- **scale_xy** (0-500%) - Symmetrische Skalierung
+- **scale_x** (0-500%) - Horizontale Skalierung
+- **scale_y** (0-500%) - Vertikale Skalierung
+- **rotation_x** (0-360°) - 3D Rotation um X-Achse (Perspektive)
+- **rotation_y** (0-360°) - 3D Rotation um Y-Achse (Perspektive)
+- **rotation_z** (0-360°) - 2D Rotation (im Uhrzeigersinn)
+
+**Beispiel:**
+```python
+# Via REST API - Kombinierte Transformation
+POST /api/effects/video/add
+{
+  "plugin_id": "transform",
+  "config": {
+    "position_x": 100.0,
+    "position_y": 50.0,
+    "scale_xy": 150.0,
+    "rotation_y": 30.0
+  }
+}
+```
+
+**Hinweise:**
+- Transformationen werden in folgender Reihenfolge angewendet:
+  1. Skalierung (symmetrisch + individuell kombiniert)
+  2. 2D Rotation (Z-Achse)
+  3. 3D Rotation (X und Y Achsen mit Perspektive)
+  4. Translation (Position)
+- Frame-Größe bleibt konstant (Cropping/Padding bei Skalierung)
+- Bereiche außerhalb des Frames werden schwarz dargestellt
 
 ## Support
 

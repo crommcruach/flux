@@ -77,6 +77,7 @@ class Player:
         # Playlist Management
         self.playlist = []  # Liste von Video-Pfaden
         self.playlist_index = -1  # Aktueller Index in der Playlist
+        self.playlist_params = {}  # Dict: generator_id -> parameters (for autoplay)
         self.autoplay = False  # Automatisch nächstes Video abspielen
         self.loop_playlist = False  # Playlist wiederholen
         
@@ -379,17 +380,47 @@ class Player:
                             logger.debug("📋 Ende der Playlist erreicht, stoppe...")
                             break
                     
-                    # Lade nächstes Video
-                    next_video_path = self.playlist[next_index]
-                    logger.debug(f"⏭️ [{self.player_name}] Autoplay: Lade nächstes Video ({next_index + 1}/{len(self.playlist)}): {next_video_path}")
+                    # Lade nächstes Video oder Generator
+                    next_item_path = self.playlist[next_index]
+                    logger.debug(f"⏭️ [{self.player_name}] Autoplay: Lade nächstes Item ({next_index + 1}/{len(self.playlist)}): {next_item_path}")
                     
                     try:
-                        from .frame_source import VideoSource
-                        new_source = VideoSource(next_video_path, self.canvas_width, self.canvas_height, self.config)
+                        from .frame_source import VideoSource, GeneratorSource
+                        
+                        # Check if it's a generator
+                        if next_item_path.startswith('generator:'):
+                            generator_id = next_item_path.replace('generator:', '')
+                            
+                            # Try to get parameters from playlist_params first (user modifications)
+                            parameters = None
+                            if generator_id in self.playlist_params:
+                                # Use stored parameters from playlist
+                                parameters = self.playlist_params[generator_id].copy()
+                                logger.debug(f"🌟 [{self.player_name}] Using playlist parameters: {parameters}")
+                            elif (isinstance(self.source, GeneratorSource) and 
+                                  self.source.generator_id == generator_id):
+                                # Reuse current parameters (including user modifications)
+                                parameters = self.source.parameters.copy()
+                                # Store for future use
+                                self.playlist_params[generator_id] = parameters.copy()
+                                logger.debug(f"🌟 [{self.player_name}] Reusing and storing modified parameters: {parameters}")
+                            else:
+                                # Get default parameters
+                                from .plugin_manager import get_plugin_manager
+                                pm = get_plugin_manager()
+                                param_list = pm.get_plugin_parameters(generator_id)
+                                parameters = {p['name']: p['default'] for p in param_list}
+                                logger.debug(f"🌟 [{self.player_name}] Using default parameters: {parameters}")
+                            
+                            new_source = GeneratorSource(generator_id, parameters, self.canvas_width, self.canvas_height, self.config)
+                            logger.debug(f"🌟 [{self.player_name}] Loading generator: {generator_id}")
+                        else:
+                            new_source = VideoSource(next_item_path, self.canvas_width, self.canvas_height, self.config)
+                            logger.debug(f"🎬 [{self.player_name}] Loading video: {next_item_path}")
                         
                         # Initialisiere neue Source
                         if not new_source.initialize():
-                            logger.error(f"❌ [{self.player_name}] Fehler beim Initialisieren des nächsten Videos: {next_video_path}")
+                            logger.error(f"❌ [{self.player_name}] Fehler beim Initialisieren des nächsten Items: {next_item_path}")
                             break
                         
                         # Cleanup alte Source
@@ -399,10 +430,35 @@ class Player:
                         self.source = new_source
                         self.playlist_index = next_index
                         self.current_loop = 0
-                        logger.info(f"✅ [{self.player_name}] Nächstes Video geladen: {os.path.basename(next_video_path)}")
+                        
+                        # Register clip for effect management
+                        from .clip_registry import get_clip_registry
+                        clip_registry = get_clip_registry()
+                        
+                        if next_item_path.startswith('generator:'):
+                            clip_id = clip_registry.register_clip(
+                                player_id=self.player_name.lower().replace(' ', '_'),
+                                absolute_path=next_item_path,
+                                relative_path=next_item_path,
+                                metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
+                            )
+                        else:
+                            import os
+                            relative_path = os.path.relpath(next_item_path, self.config.get('paths', {}).get('video_dir', 'video'))
+                            clip_id = clip_registry.register_clip(
+                                player_id=self.player_name.lower().replace(' ', '_'),
+                                absolute_path=next_item_path,
+                                relative_path=relative_path,
+                                metadata={}
+                            )
+                        
+                        self.current_clip_id = clip_id
+                        
+                        item_name = generator_id if next_item_path.startswith('generator:') else os.path.basename(next_item_path)
+                        logger.info(f"✅ [{self.player_name}] Nächstes Item geladen: {item_name} (clip_id={clip_id})")
                         continue
                     except Exception as e:
-                        logger.error(f"❌ [{self.player_name}] Fehler beim Laden des nächsten Videos: {e}")
+                        logger.error(f"❌ [{self.player_name}] Fehler beim Laden des nächsten Items: {e}")
                         break
                 
                 # Kein Autoplay - normales Loop-Verhalten

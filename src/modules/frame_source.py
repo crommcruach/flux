@@ -316,6 +316,143 @@ class ScriptSource(FrameSource):
         return info
 
 
+class GeneratorSource(FrameSource):
+    """Plugin-basierter Generator als Frame-Quelle (prozedural generiert)."""
+    
+    def __init__(self, generator_id, parameters, canvas_width, canvas_height, config=None):
+        super().__init__(canvas_width, canvas_height, config)
+        self.generator_id = generator_id
+        self.parameters = parameters or {}
+        self.source_path = f"generator:{generator_id}"  # Generischer Pfad für load_points()
+        self.plugin_instance = None
+        self.start_time = 0
+        self.duration = parameters.get('duration', 30) if parameters else 30  # Duration in seconds
+        self.is_infinite = False  # Generators have duration for playlist auto-advance
+        
+    def initialize(self):
+        """Initialisiert Generator-Plugin."""
+        from .plugin_manager import get_plugin_manager
+        
+        pm = get_plugin_manager()
+        
+        # Erstelle Plugin-Instanz (load_plugin erstellt neue Instanz mit config)
+        logger.info(f"GeneratorSource initializing: {self.generator_id} with parameters: {self.parameters}")
+        self.plugin_instance = pm.load_plugin(self.generator_id, config=self.parameters)
+        if not self.plugin_instance:
+            logger.error(f"Generator konnte nicht geladen werden: {self.generator_id}")
+            return False
+        
+        self.start_time = time.time()
+        
+        logger.info(f"GeneratorSource initialisiert:")
+        logger.info(f"  Generator: {self.generator_id}")
+        logger.info(f"  Canvas: {self.canvas_width}x{self.canvas_height}")
+        logger.info(f"  Parameters: {self.parameters}")
+        
+        return True
+    
+    def get_next_frame(self):
+        """Generiert nächstes Frame."""
+        if not self.plugin_instance:
+            return None, 0
+        
+        current_time = time.time() - self.start_time
+        
+        # Check if duration has elapsed (for playlist auto-advance)
+        if current_time >= self.duration:
+            logger.info(f"Generator {self.generator_id} duration elapsed ({self.duration}s), triggering auto-advance")
+            return None, 0  # Return None to trigger playlist advance
+        
+        # Generators erzeugen Frames ohne Input (None)
+        # Pass time and frame info via kwargs
+        frame = self.plugin_instance.process_frame(
+            None,
+            width=self.canvas_width,
+            height=self.canvas_height,
+            fps=self.fps,
+            frame_number=self.current_frame,
+            time=current_time
+        )
+        
+        if frame is None:
+            logger.warning(f"Generator {self.generator_id} returned None frame")
+            # Return black frame as fallback
+            frame = np.zeros((self.canvas_height, self.canvas_width, 3), dtype=np.uint8)
+        
+        # Ensure correct size
+        if frame.shape[:2] != (self.canvas_height, self.canvas_width):
+            frame = cv2.resize(frame, (self.canvas_width, self.canvas_height))
+        
+        delay = 1.0 / self.fps
+        self.current_frame += 1
+        
+        return frame, delay
+    
+    def update_parameter(self, param_name, value):
+        """Aktualisiert Generator-Parameter zur Laufzeit."""
+        # Convert value to correct type if needed
+        try:
+            value = float(value) if isinstance(value, (str, int, float)) else value
+        except (ValueError, TypeError):
+            pass
+        
+        # Always update parameters dict
+        self.parameters[param_name] = value
+        
+        # Special handling for duration parameter
+        if param_name == 'duration':
+            self.duration = int(value)  # Ensure it's an integer
+            logger.info(f"Generator duration updated to {self.duration}s (time elapsed: {time.time() - self.start_time:.1f}s)")
+            return True
+        
+        # Update plugin instance if it has the parameter
+        if self.plugin_instance and hasattr(self.plugin_instance, param_name):
+            setattr(self.plugin_instance, param_name, value)
+            logger.info(f"Generator parameter updated: {param_name} = {value}")
+            return True
+        
+        logger.warning(f"Unknown generator parameter: {param_name}")
+        return False
+    
+    def reset(self):
+        """Setzt Generator zurück."""
+        self.current_frame = 0
+        self.start_time = time.time()
+        
+        # Re-initialize plugin if needed
+        if self.plugin_instance:
+            # Most generators don't need explicit reset
+            pass
+    
+    def cleanup(self):
+        """Cleanup für Generator."""
+        if self.plugin_instance:
+            if hasattr(self.plugin_instance, 'cleanup'):
+                self.plugin_instance.cleanup()
+            self.plugin_instance = None
+    
+    def get_source_name(self):
+        """Gibt Generator-Namen zurück."""
+        if self.plugin_instance and hasattr(self.plugin_instance, 'METADATA'):
+            return self.plugin_instance.METADATA.get('name', self.generator_id)
+        return self.generator_id
+    
+    def get_info(self):
+        """Erweiterte Info mit Generator-Details."""
+        info = super().get_info()
+        info['type'] = 'generator'
+        info['generator_id'] = self.generator_id
+        info['parameters'] = self.parameters
+        
+        if self.plugin_instance and hasattr(self.plugin_instance, 'METADATA'):
+            metadata = self.plugin_instance.METADATA
+            info['generator_name'] = metadata.get('name', self.generator_id)
+            info['description'] = metadata.get('description', '')
+            info['version'] = metadata.get('version', '1.0.0')
+        
+        return info
+
+
 class DummySource(FrameSource):
     """Dummy Source für leere Playlists - zeigt schwarzes Bild."""
     

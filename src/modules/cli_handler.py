@@ -81,6 +81,9 @@ class CLIHandler:
         elif command == "artnet":
             self._handle_artnet(args)
             return (True, None)
+        elif command == "plugin":
+            self._handle_plugin(args)
+            return (True, None)
         elif command == "browser":
             self._handle_open()
             return (True, None)
@@ -945,5 +948,63 @@ class CLIHandler:
         if self.rest_api:
             self.rest_api.clear_console()
             logger.info("✓ Console geleert")
+    
+    def _handle_plugin(self, args):
+        """Verwaltet Plugins (list, reload)."""
+        from .plugin_manager import get_plugin_manager
+        
+        if not args:
+            logger.info("Verwendung: plugin list | plugin reload")
+            return
+        
+        pm = get_plugin_manager()
+        
+        if args == "list":
+            plugins = pm.list_plugins()
+            if not plugins:
+                print("\n❌ Keine Plugins gefunden.")
+                return
+            
+            print(f"\n📦 Verfügbare Plugins ({len(plugins)}):")
+            print("=" * 80)
+            
+            # Group by type
+            by_type = {}
+            for plugin in plugins:
+                ptype = plugin.get('type', 'unknown')
+                if ptype not in by_type:
+                    by_type[ptype] = []
+                by_type[ptype].append(plugin)
+            
+            for ptype, plugin_list in by_type.items():
+                print(f"\n🔸 {ptype.upper()}:")
+                for plugin in plugin_list:
+                    name = plugin.get('name', 'Unknown')
+                    plugin_id = plugin.get('id', 'unknown')
+                    version = plugin.get('version', '1.0.0')
+                    description = plugin.get('description', 'No description')
+                    category = plugin.get('category', 'General')
+                    print(f"  • {name} (ID: {plugin_id}, v{version})")
+                    print(f"    {description}")
+                    print(f"    Category: {category}")
+            
+            print("\n" + "=" * 80)
+        
+        elif args == "reload":
+            print("\n🔄 Lade alle Plugins neu...")
+            try:
+                pm.reload_plugins()
+                stats = pm.get_stats()
+                print(f"✅ Plugins neu geladen: {stats['total_plugins']} Plugins registriert")
+                
+                # Show summary by type
+                print("\n📊 Plugin-Übersicht:")
+                for ptype, count in stats['by_type'].items():
+                    print(f"  • {ptype}: {count}")
+            except Exception as e:
+                logger.error(f"❌ Fehler beim Reload: {e}")
+                import traceback
+                traceback.print_exc()
+        
         else:
-            logger.warning("⚠️  REST API nicht verfügbar")
+            logger.info("Verwendung: plugin list | plugin reload")

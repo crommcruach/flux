@@ -7,6 +7,7 @@ import { showToast } from './common.js';
 
 const API_BASE = '';
 let availableEffects = [];
+let availableGenerators = [];
 let videoEffects = [];
 let artnetEffects = [];
 let clipEffects = [];
@@ -47,6 +48,7 @@ document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
     await loadAvailableEffects();
+    await loadAvailableGenerators();
     await loadVideoPlaylist();
     await loadArtnetPlaylist();
     await refreshVideoEffects();
@@ -54,6 +56,7 @@ async function init() {
     startPreviewStream();
     startArtnetPreviewStream();
     setupEffectDropZones();
+    setupGeneratorDropZones();
     
     // Start auto-refresh
     updateInterval = setInterval(async () => {
@@ -174,10 +177,86 @@ function renderAvailableEffects() {
     `).join('');
 }
 
+// ========================================
+// GENERATOR LOADING
+// ========================================
+
+async function loadAvailableGenerators() {
+    try {
+        console.log('📥 Loading available generators from API...');
+        const response = await fetch(`${API_BASE}/api/plugins/list?type=generator`);
+        const data = await response.json();
+        
+        console.log('📦 Generators API Response:', data);
+        
+        if (data.success) {
+            availableGenerators = data.plugins;
+            console.log(`✅ Loaded ${availableGenerators.length} generators:`, availableGenerators.map(g => g.id));
+            renderAvailableGenerators();
+        } else {
+            console.error('❌ Failed to load generators:', data.message);
+        }
+    } catch (error) {
+        console.error('❌ Error loading generators:', error);
+    }
+}
+
+function renderAvailableGenerators() {
+    const container = document.getElementById('availableSources');
+    
+    if (availableGenerators.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>No generator plugins found</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = availableGenerators.map(generator => `
+        <div class="generator-card" 
+             draggable="true" 
+             data-generator-id="${generator.id}"
+             ondragstart="startGeneratorDrag(event, '${generator.id}')"
+             ondragend="endGeneratorDrag(event)">
+            <div class="generator-card-title">🌟 ${generator.name}</div>
+            <div class="generator-card-description">${generator.description || 'No description'}</div>
+            <small class="text-muted">v${generator.version} • Drag to playlist</small>
+        </div>
+    `).join('');
+}
+
 // Drag & Drop for Effects
 window.startEffectDrag = function(event, effectId) {
     event.dataTransfer.effectAllowed = 'copy';
     event.dataTransfer.setData('effectId', effectId);
+};
+
+// Drag & Drop for Generators
+window.startGeneratorDrag = function(event, generatorId) {
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData('generatorId', generatorId);
+    event.dataTransfer.setData('text/plain', `generator:${generatorId}`);
+    
+    const generator = availableGenerators.find(g => g.id === generatorId);
+    if (generator) {
+        event.dataTransfer.setData('generatorName', generator.name);
+    }
+    
+    // Make dragged element semi-transparent
+    event.target.style.opacity = '0.5';
+    
+    // Store in global var as backup (dataTransfer might not be accessible during dragover)
+    window.currentDragGenerator = {
+        id: generatorId,
+        name: generator?.name
+    };
+};
+
+// Handle drag end for generators
+window.endGeneratorDrag = function(event) {
+    event.target.style.opacity = '1';
+    window.currentDragGenerator = null;
 };
 
 // Setup drop zones for FX panels
@@ -236,6 +315,252 @@ function setupEffectDropZones() {
     });
 }
 
+// Setup drop zones for Generators (to playlists)
+function setupGeneratorDropZones() {
+    // This function is called once on init
+    // The actual drop handling is done in renderVideoPlaylist() and renderArtnetPlaylist()
+    // because they rebuild the DOM on each render
+    console.log('✅ Generator drop zones will be handled in playlist rendering');
+}
+
+// Load generator as clip into player
+window.loadGeneratorClip = async function(generatorId, playerType = 'video') {
+    try {
+        const generator = availableGenerators.find(g => g.id === generatorId);
+        if (!generator) {
+            showToast(`Generator not found: ${generatorId}`, 'error');
+            return;
+        }
+        
+        // Get default parameters for this generator
+        const paramsResponse = await fetch(`${API_BASE}/api/plugins/${generatorId}/parameters`);
+        const paramsData = await paramsResponse.json();
+        
+        const defaultParams = {};
+        // API returns {parameters: [...]} without success field
+        if (paramsData.parameters) {
+            paramsData.parameters.forEach(param => {
+                defaultParams[param.name] = param.default;
+            });
+        }
+        
+        console.log('🔧 Loading generator with parameters:', defaultParams);
+        
+        // Load generator as clip
+        const response = await fetch(`${API_BASE}/api/player/${playerType}/clip/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: 'generator',
+                generator_id: generatorId,
+                parameters: defaultParams
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            // Store clip info
+            selectedClipId = data.clip_id;
+            selectedClipPath = `generator:${generatorId}`;
+            selectedClipPlayerType = playerType;
+            
+            // Store generator metadata for parameter display
+            window.currentGeneratorId = generatorId;
+            window.currentGeneratorParams = defaultParams;
+            window.currentGeneratorMeta = generator;
+            
+            // Set currentVideo for playlist highlighting (normalize path like loadVideoFile does)
+            currentVideo = `generator:${generatorId}`.replace(/^[\\\/]+/, '');
+            renderVideoPlaylist();
+            
+            showToast(`✅ Generator loaded: ${generator.name}`, 'success');
+            console.log('✅ Generator clip loaded:', data);
+            
+            // Start playback automatically
+            try {
+                await fetch(`${API_BASE}/api/player/${playerType}/play`, { method: 'POST' });
+                console.log('▶️ Auto-started generator playback');
+            } catch (error) {
+                console.error('Error starting playback:', error);
+            }
+            
+            // Refresh effects and show generator parameters
+            await refreshClipEffects();
+            await displayGeneratorParameters(generatorId, paramsData.parameters);
+        } else {
+            showToast(`❌ Failed to load generator: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error loading generator clip:', error);
+        showToast(`❌ Error: ${error.message}`, 'error');
+    }
+};
+
+// Display generator parameters in clip section
+async function displayGeneratorParameters(generatorId, parameters) {
+    const generator = availableGenerators.find(g => g.id === generatorId);
+    if (!generator) return;
+    
+    // Store parameters for later rendering
+    window.currentGeneratorParameters = parameters;
+    
+    // Re-render to include parameters
+    renderClipEffects();
+}
+
+function renderGeneratorParametersSection() {
+    if (!window.currentGeneratorId || !window.currentGeneratorParameters) {
+        return '';
+    }
+    
+    const parameters = window.currentGeneratorParameters;
+    const generator = availableGenerators.find(g => g.id === window.currentGeneratorId);
+    if (!generator || !parameters || parameters.length === 0) {
+        return '';
+    }
+    
+    // Build collapsible parameter section
+    let html = `
+        <div class="generator-params-section expanded" style="border-bottom: 1px solid var(--border-color); margin-bottom: 1rem;">
+            <div class="effect-header" onclick="this.parentElement.classList.toggle('expanded')" style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 1.2rem;">🌟</span>
+                    <strong>Generator Parameters</strong>
+                </div>
+                <span class="expand-icon">▼</span>
+            </div>
+            <div class="effect-params" style="padding: 0.5rem;">
+    `;
+    
+    parameters.forEach(param => {
+        const currentValue = window.currentGeneratorParams?.[param.name] ?? param.default;
+        
+        html += `
+            <div class="param-control" style="margin-bottom: 1rem; padding: 0.5rem;">
+                <label style="display: block; margin-bottom: 0.25rem; font-weight: 500;">
+                    ${param.label || param.name}
+                </label>
+                <small style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">
+                    ${param.description || ''}
+                </small>
+        `;
+        
+        // Render control based on parameter type
+        if (param.type === 'float' || param.type === 'int') {
+            const step = param.step || (param.type === 'int' ? 1 : 0.01);
+            html += `
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="range" 
+                           id="gen-param-${param.name}"
+                           min="${param.min}"
+                           max="${param.max}"
+                           step="${step}"
+                           value="${currentValue}"
+                           onchange="updateGeneratorParameter('${param.name}', this.value)"
+                           style="flex: 1;">
+                    <span id="gen-param-${param.name}-value" style="min-width: 50px; text-align: right;">
+                        ${currentValue}
+                    </span>
+                </div>
+            `;
+        } else if (param.type === 'bool') {
+            html += `
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="checkbox" 
+                           id="gen-param-${param.name}"
+                           ${currentValue ? 'checked' : ''}
+                           onchange="updateGeneratorParameter('${param.name}', this.checked)">
+                    <span>Enable</span>
+                </label>
+            `;
+        } else if (param.type === 'string') {
+            html += `
+                <input type="text" 
+                       id="gen-param-${param.name}"
+                       value="${currentValue}"
+                       onchange="updateGeneratorParameter('${param.name}', this.value)"
+                       class="form-control form-control-sm">
+            `;
+        }
+        
+        html += `</div>`;
+    });
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+// Update generator parameter
+window.updateGeneratorParameter = async function(paramName, value) {
+    if (!window.currentGeneratorId || !selectedClipId || !selectedClipPlayerType) {
+        console.error('No generator clip selected');
+        return;
+    }
+    
+    try {
+        // Convert value to correct type
+        const numValue = parseFloat(value);
+        const finalValue = isNaN(numValue) ? value : numValue;
+        
+        // Update local state
+        if (!window.currentGeneratorParams) {
+            window.currentGeneratorParams = {};
+        }
+        window.currentGeneratorParams[paramName] = finalValue;
+        
+        // Update value display
+        const valueDisplay = document.getElementById(`gen-param-${paramName}-value`);
+        if (valueDisplay) {
+            valueDisplay.textContent = finalValue;
+        }
+        
+        // Send update to backend
+        const response = await fetch(`/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/generator/parameter`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                parameter: paramName,
+                value: finalValue
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log(`✅ Generator parameter updated: ${paramName} = ${finalValue}`);
+            
+            // Update the generator in the playlist with new parameters
+            if (window.currentGeneratorId && selectedClipPath) {
+                const playerType = selectedClipPlayerType;
+                const playlistArray = playerType === 'video' ? videoFiles : artnetFiles;
+                
+                // Find all instances of this generator in playlist and update their parameters
+                playlistArray.forEach(item => {
+                    if (item.type === 'generator' && item.generator_id === window.currentGeneratorId) {
+                        if (!item.parameters) {
+                            item.parameters = {};
+                        }
+                        item.parameters[paramName] = finalValue;
+                    }
+                });
+                
+                console.log(`📋 Updated generator parameters in playlist`);
+            }
+        } else {
+            console.error(`Failed to update parameter: ${result.error}`);
+            showToast(`Error: ${result.error}`, 'error');
+        }
+        
+    } catch (error) {
+        console.error('Error updating generator parameter:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+};
+
 // ========================================
 // VIDEO PREVIEW STREAM
 // ========================================
@@ -268,11 +593,38 @@ async function loadVideoPlaylist() {
         const data = await response.json();
         
         if (data.success && data.playlist) {
-            // Restore playlist
-            videoFiles = data.playlist.map(path => ({
-                name: path.split('/').pop().split('\\').pop(),
-                path: path
-            }));
+            // Restore playlist (detect generators)
+            videoFiles = data.playlist.map((path, idx) => {
+                // Handle both string paths and object entries
+                let actualPath = typeof path === 'string' ? path : path.path;
+                
+                if (!actualPath) {
+                    console.warn('Empty path in playlist at index', idx);
+                    return null;
+                }
+                
+                if (actualPath.startsWith('generator:')) {
+                    // Generator item
+                    const generatorId = actualPath.replace('generator:', '');
+                    const generator = availableGenerators.find(g => g.id === generatorId);
+                    const generatorName = generator ? generator.name : generatorId;
+                    return {
+                        path: actualPath,
+                        name: `🌟 ${generatorName}`,
+                        id: Date.now() + Math.random() + idx,
+                        type: 'generator',
+                        generator_id: generatorId,
+                        parameters: (typeof path === 'object' && path.parameters) ? path.parameters : {}
+                    };
+                } else {
+                    // Regular video item
+                    return {
+                        name: actualPath.split('/').pop().split('\\').pop(),
+                        path: actualPath,
+                        id: Date.now() + Math.random() + idx
+                    };
+                }
+            }).filter(item => item !== null);
             
             // Restore autoplay/loop state
             videoAutoplay = data.autoplay || false;
@@ -323,12 +675,73 @@ function renderVideoPlaylist() {
     
     if (videoFiles.length === 0) {
         container.innerHTML = `
-            <div class="empty-state" style="width: 100%; padding: 2rem; text-align: center;">
+            <div class="empty-state drop-zone" data-drop-index="0" data-playlist="video" style="width: 100%; padding: 2rem; text-align: center; min-height: 150px;">
                 <div style="font-size: 2rem; margin-bottom: 0.5rem;">📂</div>
                 <p style="margin: 0.5rem 0;">Playlist leer</p>
-                <small style="color: var(--text-secondary, #999);">Drag & Drop aus Files Tab</small>
+                <small style="color: var(--text-secondary, #999);">Drag & Drop aus Files Tab oder Sources</small>
             </div>
         `;
+        
+        // Add drop handler to empty state
+        const emptyZone = container.querySelector('.empty-state.drop-zone');
+        if (emptyZone) {
+            emptyZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.dataTransfer) {
+                    e.dataTransfer.dropEffect = 'copy';
+                }
+                emptyZone.style.background = 'var(--bg-tertiary)';
+            });
+            
+            emptyZone.addEventListener('dragleave', (e) => {
+                emptyZone.style.background = '';
+            });
+            
+            emptyZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                emptyZone.style.background = '';
+                
+                // Check if dropping a generator
+                const generatorId = e.dataTransfer.getData('generatorId');
+                if (generatorId) {
+                    console.log('🌟 DROP GENERATOR to empty playlist, id:', generatorId);
+                    const generatorName = e.dataTransfer.getData('generatorName') || generatorId;
+                    const newGenerator = {
+                        path: `generator:${generatorId}`,
+                        name: `🌟 ${generatorName}`,
+                        id: Date.now() + Math.random(),
+                        type: 'generator',
+                        generator_id: generatorId
+                    };
+                    videoFiles.push(newGenerator);
+                    renderVideoPlaylist();
+                    
+                    // Autoload since playlist was empty
+                    loadGeneratorClip(generatorId, 'video');
+                    console.log(`📋 Added and loaded generator ${generatorName} to empty playlist`);
+                    return false;
+                }
+                
+                // Check if dropping a file
+                const videoPath = e.dataTransfer.getData('video-path');
+                if (videoPath) {
+                    console.log('🎯 DROP FILE to empty playlist, path:', videoPath);
+                    const fileName = videoPath.split(/[/\\]/).pop();
+                    const newVideo = {
+                        path: videoPath,
+                        name: fileName,
+                        id: Date.now() + Math.random()
+                    };
+                    videoFiles.push(newVideo);
+                    renderVideoPlaylist();
+                    console.log(`📋 Added file ${fileName} to empty playlist`);
+                    return false;
+                }
+            });
+        }
+        
         return;
     }
     
@@ -362,15 +775,154 @@ function renderVideoPlaylist() {
     
     // Add event handlers after rendering
     let isDragging = false;
+    let hoverTimer = null;
     
-    // Playlist item handlers (click and dragstart)
+    // Playlist item handlers (click, hover and dragstart)
     container.querySelectorAll('.playlist-item').forEach((item) => {
         const index = parseInt(item.dataset.videoIndex);
         
-        // Click handler - nur abspielen, NICHT zur Playlist hinzufügen
+        // Hover handler - zeige Effekte/Parameter nach 1 Sekunde
+        item.addEventListener('mouseenter', (e) => {
+            if (isDragging) return;
+            
+            // Clear any existing timer
+            if (hoverTimer) {
+                clearTimeout(hoverTimer);
+            }
+            
+            // Start new timer (1 second)
+            hoverTimer = setTimeout(async () => {
+                const videoItem = videoFiles[index];
+                
+                // Check if item still exists (might have been removed)
+                if (!videoItem) {
+                    return;
+                }
+                
+                // Load effects/parameters without switching video
+                if (videoItem.type === 'generator' && videoItem.generator_id) {
+                    // Load generator parameters
+                    console.log(`👁️ Hovering generator: ${videoItem.generator_id}`);
+                    
+                    // Check if this generator is currently playing to get clip ID
+                    const normalizedGenPath = videoItem.path.replace(/^[\\\/]+/, '');
+                    const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
+                    const isCurrentlyPlaying = (normalizedCurrent === normalizedGenPath);
+                    
+                    // Get clip ID from backend if currently playing
+                    if (isCurrentlyPlaying) {
+                        try {
+                            const statusResponse = await fetch(`${API_BASE}/api/player/video/status`);
+                            const statusData = await statusResponse.json();
+                            
+                            if (statusData.success && statusData.clip_id) {
+                                selectedClipId = statusData.clip_id;
+                                console.log(`🎯 Got generator clip ID from backend: ${selectedClipId}`);
+                            }
+                        } catch (error) {
+                            console.error(`❌ Error getting generator clip ID:`, error);
+                        }
+                    } else {
+                        // Not currently playing - clear clip ID so parameters can't be changed
+                        selectedClipId = null;
+                        console.log(`👀 Generator not playing - showing parameters read-only`);
+                    }
+                    
+                    selectedClipPath = videoItem.path;
+                    selectedClipPlayerType = 'video';
+                    
+                    // Get generator metadata and show parameters
+                    const generator = availableGenerators.find(g => g.id === videoItem.generator_id);
+                    if (generator) {
+                        window.currentGeneratorId = videoItem.generator_id;
+                        window.currentGeneratorMeta = generator;
+                        
+                        // Get parameter metadata from API
+                        const paramsResponse = await fetch(`${API_BASE}/api/plugins/${videoItem.generator_id}/parameters`);
+                        const paramsData = await paramsResponse.json();
+                        
+                        // Store parameter definitions (array) for rendering
+                        window.currentGeneratorParameters = paramsData.parameters || [];
+                        
+                        // Store current values (object) for display
+                        const params = {};
+                        if (paramsData.parameters) {
+                            paramsData.parameters.forEach(param => {
+                                params[param.name] = videoItem.parameters?.[param.name] ?? param.default;
+                            });
+                        }
+                        window.currentGeneratorParams = params;
+                        
+                        // Show parameters (pass metadata array)
+                        displayGeneratorParameters(videoItem.generator_id, paramsData.parameters || []);
+                    }
+                } else {
+                    // Regular video - show effects
+                    console.log(`👁️ Hovering video: ${videoItem.path}`);
+                    
+                    // Check if this video is currently playing to get clip ID
+                    const normalizedVideoPath = videoItem.path.replace(/^[\\\/]+/, '');
+                    const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
+                    const isCurrentlyPlaying = (normalizedCurrent === normalizedVideoPath);
+                    
+                    // Get clip ID from backend if currently playing
+                    if (isCurrentlyPlaying) {
+                        try {
+                            const statusResponse = await fetch(`${API_BASE}/api/player/video/status`);
+                            const statusData = await statusResponse.json();
+                            
+                            if (statusData.success && statusData.clip_id) {
+                                selectedClipId = statusData.clip_id;
+                                console.log(`🎯 Got clip ID from backend: ${selectedClipId}`);
+                            }
+                        } catch (error) {
+                            console.error(`❌ Error getting clip ID:`, error);
+                        }
+                    } else {
+                        // Not currently playing - clear clip ID so effects can't be changed
+                        selectedClipId = null;
+                        console.log(`👀 Video not playing - showing effects read-only`);
+                    }
+                    
+                    selectedClipPath = videoItem.path;
+                    selectedClipPlayerType = 'video';
+                    
+                    // Clear generator state
+                    window.currentGeneratorId = null;
+                    window.currentGeneratorParams = null;
+                    window.currentGeneratorMeta = null;
+                    
+                    // Refresh effects panel
+                    await refreshClipEffects();
+                }
+                
+                // Already called refreshClipEffects for videos, generators call displayGeneratorParameters
+            }, 1000); // 1 second delay
+        });
+        
+        item.addEventListener('mouseleave', (e) => {
+            // Clear hover timer when leaving
+            if (hoverTimer) {
+                clearTimeout(hoverTimer);
+                hoverTimer = null;
+            }
+        });
+        
+        // Click handler - abspielen UND Effekte anzeigen
         item.addEventListener('click', async (e) => {
             if (!isDragging && !e.target.classList.contains('playlist-item-remove')) {
-                await loadVideoFile(videoFiles[index].path);
+                // Clear hover timer
+                if (hoverTimer) {
+                    clearTimeout(hoverTimer);
+                    hoverTimer = null;
+                }
+                
+                const videoItem = videoFiles[index];
+                if (videoItem.type === 'generator' && videoItem.generator_id) {
+                    await loadGeneratorClip(videoItem.generator_id, 'video');
+                } else {
+                    await loadVideoFile(videoItem.path);
+                }
             }
         });
         
@@ -405,7 +957,8 @@ function renderVideoPlaylist() {
             e.preventDefault();
             e.stopPropagation();
             if (e.dataTransfer) {
-                e.dataTransfer.dropEffect = 'move';
+                // Always allow copy for external drops (generators/files)
+                e.dataTransfer.dropEffect = 'copy';
             }
             zone.classList.add('drag-over');
         });
@@ -421,6 +974,35 @@ function renderVideoPlaylist() {
             
             const dropIndex = parseInt(zone.dataset.dropIndex);
             
+            // Get generator ID from dataTransfer or backup
+            let generatorId = e.dataTransfer.getData('generatorId');
+            if (!generatorId && window.currentDragGenerator) {
+                generatorId = window.currentDragGenerator.id;
+            }
+            
+            // Check if dropping a generator from sources
+            if (generatorId) {
+                const generatorName = e.dataTransfer.getData('generatorName') || window.currentDragGenerator?.name || generatorId;
+                const newGenerator = {
+                    path: `generator:${generatorId}`,
+                    name: `🌟 ${generatorName}`,
+                    id: Date.now() + Math.random(),
+                    type: 'generator',
+                    generator_id: generatorId
+                };
+                videoFiles.splice(dropIndex, 0, newGenerator);
+                renderVideoPlaylist();
+                
+                // Only autoload if dropped at position 0 and playlist is empty or nothing is playing
+                if (dropIndex === 0 && !currentVideo) {
+                    loadGeneratorClip(generatorId, 'video');
+                }
+                
+                // Update backend playlist
+                updateVideoPlaylist();
+                return false;
+            }
+            
             // Check if dropping a file from file browser
             const videoPath = e.dataTransfer.getData('video-path');
             if (videoPath) {
@@ -433,6 +1015,7 @@ function renderVideoPlaylist() {
                 };
                 videoFiles.splice(dropIndex, 0, newVideo);
                 renderVideoPlaylist();
+                updateVideoPlaylist();
                 console.log(`📋 Added file ${fileName} at position ${dropIndex}`);
                 return false;
             }
@@ -454,14 +1037,78 @@ function renderVideoPlaylist() {
                 const [movedItem] = videoFiles.splice(draggedIndex, 1);
                 videoFiles.splice(adjustedDropIndex, 0, movedItem);
                 renderVideoPlaylist();
+                updateVideoPlaylist();
             }
             
             return false;
         });
     });
     
-    // Sync playlist to player after rendering
-    updateVideoPlaylist().catch(err => console.error('Failed to sync video playlist:', err));
+    // Add drop handler to the playlist container itself (for drops on empty space)
+    container.addEventListener('dragover', (e) => {
+        // Only handle if not over a drop-zone or playlist-item
+        if (!e.target.classList.contains('drop-zone') && !e.target.classList.contains('playlist-item')) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer) {
+                e.dataTransfer.dropEffect = 'copy';
+            }
+        }
+    });
+    
+    // Container-level drop handler (register only once)
+    if (!container.dataset.dropHandlerRegistered) {
+        container.dataset.dropHandlerRegistered = 'true';
+        container.addEventListener('drop', (e) => {
+            // Only handle if not over a drop-zone or playlist-item (and not a child of these)
+            if (!e.target.classList.contains('drop-zone') && !e.target.classList.contains('playlist-item') &&
+                !e.target.closest('.drop-zone') && !e.target.closest('.playlist-item')) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            console.log('📦 CONTAINER DROP triggered on empty space');
+            
+            // Check if dropping a generator
+            let generatorId = e.dataTransfer.getData('generatorId');
+            if (!generatorId && window.currentDragGenerator) {
+                generatorId = window.currentDragGenerator.id;
+            }
+            
+            if (generatorId) {
+                const generatorName = e.dataTransfer.getData('generatorName') || window.currentDragGenerator?.name || generatorId;
+                const newGenerator = {
+                    path: `generator:${generatorId}`,
+                    name: `🌟 ${generatorName}`,
+                    id: Date.now() + Math.random(),
+                    type: 'generator',
+                    generator_id: generatorId
+                };
+                videoFiles.push(newGenerator);
+                renderVideoPlaylist();
+                updateVideoPlaylist();
+                return false;
+            }
+            
+            // Check if dropping a file
+            const videoPath = e.dataTransfer.getData('video-path');
+            if (videoPath) {
+                const fileName = videoPath.split(/[/\\]/).pop();
+                const newVideo = {
+                    path: videoPath,
+                    name: fileName,
+                    id: Date.now() + Math.random()
+                };
+                videoFiles.push(newVideo);
+                renderVideoPlaylist();
+                updateVideoPlaylist();
+                return false;
+            }
+            }
+        });
+    }
+    
+    // Note: updateVideoPlaylist() is called explicitly by drop handlers and other playlist modifications
+    // Don't call it here automatically to avoid race conditions
 }
 
 // Load video file WITHOUT adding to playlist (used for playlist clicks)
@@ -484,6 +1131,12 @@ window.loadVideoFile = async function(videoPath) {
             selectedClipId = data.clip_id;
             selectedClipPath = videoPath;
             selectedClipPlayerType = 'video';
+            
+            // Clear generator state (this is a regular video)
+            window.currentGeneratorId = null;
+            window.currentGeneratorParams = null;
+            window.currentGeneratorMeta = null;
+            
             console.log('✅ Video loaded with Clip-ID:', selectedClipId);
             await refreshClipEffects();
         } else {
@@ -537,11 +1190,44 @@ window.refreshVideoPlaylist = async function() {
 
 window.removeFromVideoPlaylist = async function(index) {
     const video = videoFiles[index];
+    const wasCurrentlyPlaying = (currentVideo === video.path);
+    
     videoFiles.splice(index, 1);
     
-    // If removed video was current, clear current
-    if (currentVideo === video.path) {
+    // If removed video was current, load next or stop
+    if (wasCurrentlyPlaying) {
         currentVideo = null;
+        selectedClipId = null;
+        selectedClipPath = null;
+        window.currentGeneratorId = null;
+        window.currentGeneratorParams = null;
+        window.currentGeneratorMeta = null;
+        
+        // Check if there are more clips in playlist
+        if (videoFiles.length > 0) {
+            // Load next clip (stay at same index, or go to previous if was last)
+            const nextIndex = Math.min(index, videoFiles.length - 1);
+            const nextItem = videoFiles[nextIndex];
+            
+            console.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
+            
+            if (nextItem.type === 'generator' && nextItem.generator_id) {
+                await loadGeneratorClip(nextItem.generator_id, 'video');
+            } else {
+                await loadVideoFile(nextItem.path);
+            }
+        } else {
+            // No more clips - stop player and show black screen
+            console.log('⏹️ No more clips in playlist - stopping player');
+            try {
+                await fetch(`${API_BASE}/api/player/video/stop`, { method: 'POST' });
+            } catch (error) {
+                console.error('Error stopping player:', error);
+            }
+            
+            // Clear effects panel
+            await refreshClipEffects();
+        }
     }
     
     renderVideoPlaylist();
@@ -680,11 +1366,38 @@ async function loadArtnetPlaylist() {
         const data = await response.json();
         
         if (data.success && data.playlist) {
-            // Restore playlist
-            artnetFiles = data.playlist.map(path => ({
-                name: path.split('/').pop().split('\\').pop(),
-                path: path
-            }));
+            // Restore playlist (detect generators)
+            artnetFiles = data.playlist.map((path, idx) => {
+                // Handle both string paths and object entries
+                let actualPath = typeof path === 'string' ? path : path.path;
+                
+                if (!actualPath) {
+                    console.warn('Empty path in artnet playlist at index', idx);
+                    return null;
+                }
+                
+                if (actualPath.startsWith('generator:')) {
+                    // Generator item
+                    const generatorId = actualPath.replace('generator:', '');
+                    const generator = availableGenerators.find(g => g.id === generatorId);
+                    const generatorName = generator ? generator.name : generatorId;
+                    return {
+                        path: actualPath,
+                        name: `🌟 ${generatorName}`,
+                        id: Date.now() + Math.random() + idx,
+                        type: 'generator',
+                        generator_id: generatorId,
+                        parameters: (typeof path === 'object' && path.parameters) ? path.parameters : {}
+                    };
+                } else {
+                    // Regular video item
+                    return {
+                        name: actualPath.split('/').pop().split('\\').pop(),
+                        path: actualPath,
+                        id: Date.now() + Math.random() + idx
+                    };
+                }
+            }).filter(item => item !== null);
             
             // Restore autoplay/loop state
             artnetAutoplay = data.autoplay || false;
@@ -733,12 +1446,70 @@ function renderArtnetPlaylist() {
     
     if (artnetFiles.length === 0) {
         container.innerHTML = `
-            <div class="empty-state" style="width: 100%; padding: 2rem; text-align: center;">
+            <div class="empty-state drop-zone" data-drop-index="0" data-playlist="artnet" style="width: 100%; padding: 2rem; text-align: center; min-height: 150px;">
                 <div style="font-size: 2rem; margin-bottom: 0.5rem;">📂</div>
                 <p style="margin: 0.5rem 0;">Playlist leer</p>
-                <small style="color: var(--text-secondary, #999);">Drag & Drop aus Files Tab</small>
+                <small style="color: var(--text-secondary, #999);">Drag & Drop aus Files Tab oder Sources</small>
             </div>
         `;
+        
+        // Add drop handler to empty state
+        const emptyZone = container.querySelector('.empty-state.drop-zone');
+        if (emptyZone) {
+            emptyZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.dataTransfer) {
+                    e.dataTransfer.dropEffect = 'copy';
+                }
+                emptyZone.style.background = 'var(--bg-tertiary)';
+            });
+            
+            emptyZone.addEventListener('dragleave', (e) => {
+                emptyZone.style.background = '';
+            });
+            
+            emptyZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                emptyZone.style.background = '';
+                
+                // Check if dropping a generator
+                const generatorId = e.dataTransfer.getData('generatorId');
+                if (generatorId) {
+                    console.log('🌟 DROP GENERATOR to empty artnet playlist, id:', generatorId);
+                    const generatorName = e.dataTransfer.getData('generatorName') || generatorId;
+                    const newGenerator = {
+                        path: `generator:${generatorId}`,
+                        name: `🌟 ${generatorName}`,
+                        id: Date.now() + Math.random(),
+                        type: 'generator',
+                        generator_id: generatorId
+                    };
+                    artnetFiles.push(newGenerator);
+                    renderArtnetPlaylist();
+                    console.log(`📋 Added generator ${generatorName} to empty artnet playlist`);
+                    return false;
+                }
+                
+                // Check if dropping a file
+                const videoPath = e.dataTransfer.getData('video-path');
+                if (videoPath) {
+                    console.log('🎯 DROP FILE to empty artnet playlist, path:', videoPath);
+                    const fileName = videoPath.split(/[/\\]/).pop();
+                    const newVideo = {
+                        path: videoPath,
+                        name: fileName,
+                        id: Date.now() + Math.random()
+                    };
+                    artnetFiles.push(newVideo);
+                    renderArtnetPlaylist();
+                    console.log(`📋 Added file ${fileName} to empty artnet playlist`);
+                    return false;
+                }
+            });
+        }
+        
         return;
     }
     
@@ -773,14 +1544,116 @@ function renderArtnetPlaylist() {
     // Add event handlers after rendering
     let isDragging = false;
     
-    // Playlist item handlers (click and dragstart)
+    // Playlist item handlers (hover, click and dragstart)
     container.querySelectorAll('.playlist-item').forEach((item) => {
         const index = parseInt(item.dataset.artnetIndex);
+        let hoverTimer = null;
         
-        // Click handler - nur abspielen, NICHT zur Playlist hinzufügen
+        // Hover handler - show effects/params after 1s without switching
+        item.addEventListener('mouseenter', () => {
+            // Clear any existing timer
+            if (hoverTimer) {
+                clearTimeout(hoverTimer);
+            }
+            
+            // Start new timer (1 second)
+            hoverTimer = setTimeout(async () => {
+                const artnetItem = artnetFiles[index];
+                
+                // Check if item still exists (might have been removed)
+                if (!artnetItem) {
+                    return;
+                }
+                
+                // Load effects/parameters without switching video
+                if (artnetItem.type === 'generator' && artnetItem.generator_id) {
+                    // Load generator parameters
+                    console.log(`👁️ Hovering generator: ${artnetItem.generator_id}`);
+                    
+                    // Check if this generator is currently playing to get clip ID
+                    const normalizedGenPath = artnetItem.path.replace(/^[\\\\\\\\//]+/, '');
+                    const normalizedCurrent = currentArtnet ? currentArtnet.replace(/^[\\\\\\\\//]+/, '') : null;
+                    const isCurrentlyPlaying = (normalizedCurrent === normalizedGenPath);
+                    
+                    // Get clip ID from backend if currently playing
+                    if (isCurrentlyPlaying) {
+                        try {
+                            const response = await fetch(`${API_BASE}/api/player/artnet/status`);
+                            const data = await response.json();
+                            if (data.clip_id) {
+                                selectedClipId = data.clip_id;
+                            }
+                        } catch (error) {
+                            console.error('Error getting artnet clip ID:', error);
+                        }
+                    } else {
+                        selectedClipId = null;
+                    }
+                    
+                    selectedClipPath = artnetItem.path;
+                    window.currentGeneratorId = artnetItem.generator_id;
+                    window.currentGeneratorParams = artnetItem.parameters || {};
+                    window.currentGeneratorMeta = artnetItem;
+                    
+                    await refreshClipEffects();
+                    
+                    // Get generator metadata and show parameters
+                    const generator = availableGenerators.find(g => g.id === artnetItem.generator_id);
+                    if (generator) {
+                        // Get parameter metadata from API
+                        const paramsResponse = await fetch(`${API_BASE}/api/plugins/${artnetItem.generator_id}/parameters`);
+                        const paramsData = await paramsResponse.json();
+                        
+                        // Store parameter definitions (array) for rendering
+                        window.currentGeneratorParameters = paramsData.parameters || [];
+                        
+                        // Store current values (object) for display
+                        const params = {};
+                        if (paramsData.parameters) {
+                            paramsData.parameters.forEach(param => {
+                                params[param.name] = artnetItem.parameters?.[param.name] ?? param.default;
+                            });
+                        }
+                        window.currentGeneratorParams = params;
+                        
+                        // Show parameters (pass metadata array)
+                        displayGeneratorParameters(artnetItem.generator_id, paramsData.parameters || []);
+                    }
+                } else {
+                    // Regular video - load effects
+                    selectedClipPath = artnetItem.path;
+                    selectedClipId = null;
+                    window.currentGeneratorId = null;
+                    window.currentGeneratorParams = null;
+                    window.currentGeneratorMeta = null;
+                    await refreshClipEffects();
+                }
+            }, 1000);
+        });
+        
+        item.addEventListener('mouseleave', () => {
+            // Clear hover timer when leaving
+            if (hoverTimer) {
+                clearTimeout(hoverTimer);
+                hoverTimer = null;
+            }
+        });
+        
+        // Click handler - abspielen UND Effekte anzeigen
         item.addEventListener('click', async (e) => {
             if (!isDragging && !e.target.classList.contains('playlist-item-remove')) {
-                await loadArtnetFile(artnetFiles[index].path);
+                // Clear hover timer
+                if (hoverTimer) {
+                    clearTimeout(hoverTimer);
+                    hoverTimer = null;
+                }
+                
+                const artnetItem = artnetFiles[index];
+                if (artnetItem.type === 'generator' && artnetItem.generator_id) {
+                    await loadGeneratorClip(artnetItem.generator_id, 'artnet');
+                } else {
+                    await loadArtnetFile(artnetItem.path);
+                }
             }
         });
         
@@ -817,7 +1690,8 @@ function renderArtnetPlaylist() {
             e.preventDefault();
             e.stopPropagation();
             if (e.dataTransfer) {
-                e.dataTransfer.dropEffect = 'move';
+                // Always allow copy for external drops (generators/files)
+                e.dataTransfer.dropEffect = 'copy';
             }
             zone.classList.add('drag-over');
         });
@@ -832,6 +1706,24 @@ function renderArtnetPlaylist() {
             zone.classList.remove('drag-over');
             
             const dropIndex = parseInt(zone.dataset.dropIndex);
+            
+            // Check if dropping a generator from sources
+            const generatorId = e.dataTransfer.getData('generatorId');
+            if (generatorId) {
+                console.log('🌟 ARTNET DROP GENERATOR at index:', dropIndex, 'id:', generatorId);
+                const generatorName = e.dataTransfer.getData('generatorName') || generatorId;
+                const newGenerator = {
+                    path: `generator:${generatorId}`,
+                    name: `🌟 ${generatorName}`,
+                    id: Date.now() + Math.random(),
+                    type: 'generator',
+                    generator_id: generatorId
+                };
+                artnetFiles.splice(dropIndex, 0, newGenerator);
+                renderArtnetPlaylist();
+                console.log(`📋 Added generator ${generatorName} at position ${dropIndex}`);
+                return false;
+            }
             
             // Check if dropping a file from file browser
             const videoPath = e.dataTransfer.getData('video-path');
@@ -876,6 +1768,57 @@ function renderArtnetPlaylist() {
         });
     });
     
+    // Container-level drop handler (register only once)
+    if (!container.dataset.dropHandlerRegistered) {
+        container.dataset.dropHandlerRegistered = 'true';
+        container.addEventListener('drop', (e) => {
+            // Only handle if not over a drop-zone or playlist-item (and not a child of these)
+            if (!e.target.classList.contains('drop-zone') && !e.target.classList.contains('playlist-item') &&
+                !e.target.closest('.drop-zone') && !e.target.closest('.playlist-item')) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            console.log('📦 ARTNET CONTAINER DROP triggered on empty space');
+            
+            // Check if dropping a generator
+            let generatorId = e.dataTransfer.getData('generatorId');
+            if (!generatorId && window.currentDragGenerator) {
+                generatorId = window.currentDragGenerator.id;
+            }
+            
+            if (generatorId) {
+                const generatorName = e.dataTransfer.getData('generatorName') || window.currentDragGenerator?.name || generatorId;
+                const newGenerator = {
+                    path: `generator:${generatorId}`,
+                    name: `🌟 ${generatorName}`,
+                    id: Date.now() + Math.random(),
+                    type: 'generator',
+                    generator_id: generatorId
+                };
+                artnetFiles.push(newGenerator);
+                renderArtnetPlaylist();
+                updateArtnetPlaylist();
+                return false;
+            }
+            
+            // Check if dropping a file
+            const videoPath = e.dataTransfer.getData('video-path');
+            if (videoPath) {
+                const fileName = videoPath.split(/[/\\]/).pop();
+                const newVideo = {
+                    path: videoPath,
+                    name: fileName,
+                    id: Date.now() + Math.random()
+                };
+                artnetFiles.push(newVideo);
+                renderArtnetPlaylist();
+                updateArtnetPlaylist();
+                return false;
+            }
+            }
+        });
+    }
+    
     // Sync playlist to player after rendering
     updateArtnetPlaylist().catch(err => console.error('Failed to sync artnet playlist:', err));
 }
@@ -900,6 +1843,12 @@ window.loadArtnetFile = async function(videoPath) {
             selectedClipId = data.clip_id;
             selectedClipPath = videoPath;
             selectedClipPlayerType = 'artnet';
+            
+            // Clear generator state (this is a regular video)
+            window.currentGeneratorId = null;
+            window.currentGeneratorParams = null;
+            window.currentGeneratorMeta = null;
+            
             console.log('✅ Art-Net video loaded with Clip-ID:', selectedClipId);
             await refreshClipEffects();
         } else {
@@ -952,11 +1901,44 @@ window.refreshArtnetPlaylist = async function() {
 
 window.removeFromArtnetPlaylist = async function(index) {
     const video = artnetFiles[index];
+    const wasCurrentlyPlaying = (currentArtnet === video.path);
+    
     artnetFiles.splice(index, 1);
     
-    // If removed video was current, clear current
-    if (currentArtnet === video.path) {
+    // If removed video was current, load next or stop
+    if (wasCurrentlyPlaying) {
         currentArtnet = null;
+        selectedClipId = null;
+        selectedClipPath = null;
+        window.currentGeneratorId = null;
+        window.currentGeneratorParams = null;
+        window.currentGeneratorMeta = null;
+        
+        // Check if there are more clips in playlist
+        if (artnetFiles.length > 0) {
+            // Load next clip (stay at same index, or go to previous if was last)
+            const nextIndex = Math.min(index, artnetFiles.length - 1);
+            const nextItem = artnetFiles[nextIndex];
+            
+            console.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
+            
+            if (nextItem.type === 'generator' && nextItem.generator_id) {
+                await loadGeneratorClip(nextItem.generator_id, 'artnet');
+            } else {
+                await loadArtnetFile(nextItem.path);
+            }
+        } else {
+            // No more clips - stop player and show black screen
+            console.log('⏹️ No more clips in artnet playlist - stopping player');
+            try {
+                await fetch(`${API_BASE}/api/player/artnet/stop`, { method: 'POST' });
+            } catch (error) {
+                console.error('Error stopping artnet player:', error);
+            }
+            
+            // Clear effects panel
+            await refreshClipEffects();
+        }
     }
     
     renderArtnetPlaylist();
@@ -1050,7 +2032,7 @@ window.toggleArtnetAutoplay = async function() {
     if (artnetAutoplay && artnetFiles.length > 0) {
         const statusResponse = await fetch(`${API_BASE}/api/player/artnet/status`);
         const statusData = await statusResponse.json();
-        if (statusdata.success && !statusData.is_playing) {
+        if (statusData.success && !statusData.is_playing) {
             // Lade und starte erstes Video wenn keins läuft
             await loadArtnetFile(artnetFiles[0].path);
             await playArtnet();
@@ -1390,32 +2372,54 @@ function renderClipEffects() {
     const title = document.getElementById('clipFxTitle');
     
     // Update title with player icon and clip name
-    const icon = selectedClipPlayerType === 'video' ? '🎬' : '🎨';
-    const clipName = selectedClipPath ? selectedClipPath.split('/').pop() : 'No Clip';
+    let icon = selectedClipPlayerType === 'video' ? '🎬' : '🎨';
+    let clipName = selectedClipPath ? selectedClipPath.split('/').pop() : 'No Clip';
+    
+    // If it's a generator, use generator icon and name
+    if (window.currentGeneratorId && window.currentGeneratorMeta) {
+        icon = '🌟';
+        clipName = window.currentGeneratorMeta.name;
+    }
+    
     title.innerHTML = `<span class="player-icon">${icon}</span> ${clipName}`;
     
-    // Save expanded states
+    // Save expanded states (including generator params)
     const expandedStates = new Set();
+    const generatorParamsExpanded = container.querySelector('.generator-params-section.expanded') !== null;
     container.querySelectorAll('.effect-item.expanded').forEach(item => {
         expandedStates.add(item.id);
     });
     
+    // Build HTML: Generator Parameters (if any) + Effects
+    let html = '';
+    
+    // Add generator parameters section first
+    html += renderGeneratorParametersSection();
+    
+    // Add effects section
     if (clipEffects.length === 0) {
-        container.innerHTML = `
+        html += `
             <div class="empty-state">
                 <div class="empty-state-icon">✨</div>
                 <h6>No Clip Effects</h6>
                 <p>Add effects from the left panel</p>
             </div>
         `;
-        return;
+    } else {
+        html += clipEffects.map((effect, index) => 
+            renderEffectItem(effect, index, 'clip')
+        ).join('');
     }
     
-    container.innerHTML = clipEffects.map((effect, index) => 
-        renderEffectItem(effect, index, 'clip')
-    ).join('');
+    container.innerHTML = html;
     
     // Restore expanded states after rerender
+    if (generatorParamsExpanded) {
+        const paramsSection = container.querySelector('.generator-params-section');
+        if (paramsSection) {
+            paramsSection.classList.add('expanded');
+        }
+    }
     expandedStates.forEach(id => {
         const element = document.getElementById(id);
         if (element) {

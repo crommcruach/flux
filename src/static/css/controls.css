@@ -522,6 +522,40 @@ body {
     margin: 0;
 }
 
+/* Generator Cards (similar to effect cards) */
+.generator-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    cursor: grab;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.generator-card:hover {
+    border-color: #ffd700; /* Gold color for generators */
+    transform: translateX(4px);
+}
+
+.generator-card:active {
+    cursor: grabbing;
+    opacity: 0.7;
+}
+
+.generator-card-title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    color: var(--text-primary);
+}
+
+.generator-card-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
 /* File Browser */
 .file-tree {
     user-select: none;
@@ -694,6 +728,23 @@ body {
     font-weight: 500;
     margin-bottom: 0.25rem;
     color: var(--text-secondary);
+}
+
+/* Generator Parameters Section */
+.generator-params-section .effect-params {
+    display: none;
+}
+
+.generator-params-section.expanded .effect-params {
+    display: block;
+}
+
+.generator-params-section .expand-icon {
+    transition: transform 0.2s;
+}
+
+.generator-params-section.expanded .expand-icon {
+    transform: rotate(180deg);
 }
 
 /* Modal Overrides */

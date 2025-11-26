@@ -19,10 +19,22 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ### 1.1 🔌 Plugin-System erweitern (~8-12h)
 
-- [ ] **Generator-Plugins (3-4h):**
-  - Scripts nach `plugins/generators/` migrieren
-  - plasma, rainbow_wave, pulse, matrix_rain, fire, etc.
-  - METADATA + PARAMETERS für alle Generatoren
+- [ ] **Default Effect Chains via config.json (3-4h):**
+  - `default_video_effects`: Effect chain automatisch beim Start laden
+  - `default_clip_effects`: Per-Clip Default-Effekte (UUID-basiert oder global)
+  - config.json Schema: `{"effects": {"video": [...], "artnet": [...], "clips": {...}}}`
+  - Auto-Apply beim Player/Clip-Init
+
+- [ ] **Blend Mode Effect Plugin (4-6h):**
+  - Blend-Modes: Normal, Multiply, Screen, Overlay, Darken, Lighten, etc.
+  - Blending mit Farbe oder zweitem Layer
+  - Opacity-Parameter pro Blend-Mode
+  - Mix-Parameter für Blend-Stärke
+
+- [x] **Generator-Plugins (3-4h):** ✅ COMPLETED
+  - Scripts nach `plugins/generators/` migriert
+  - plasma, rainbow_wave, pulse, matrix_rain, fire implementiert
+  - METADATA + PARAMETERS für alle Generatoren hinzugefügt
   
 - [ ] **Preset-System (2-3h):**
   - Parameter-Sets speichern/laden
