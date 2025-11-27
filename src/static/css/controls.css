@@ -623,16 +623,7 @@ body {
     transition: all 0.2s;
 }
 
-/* Toast Container */
-.toast-container {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
+/* Toast styles now in /static/components/toast.html */
 
 /* Transition Menu */
 .transition-menu {

@@ -351,15 +351,48 @@ def register_video_routes(app, player_manager, video_dir, config):
             if not player:
                 return jsonify({"status": "error", "message": "No video player available"}), 404
             
-            # Konvertiere relative Pfade zu absoluten
+            # Konvertiere relative Pfade zu absoluten UND speichere UUIDs
             absolute_playlist = []
+            playlist_ids = {}  # Map: path -> uuid
+            
             for item in playlist:
                 path = item if isinstance(item, str) else item.get('path', '')
                 if not os.path.isabs(path):
                     path = os.path.join(video_dir, path)
                 absolute_playlist.append(path)
+                
+                # Extrahiere UUID und registriere Clip proaktiv
+                if isinstance(item, dict):
+                    item_id = item.get('id')
+                    item_type = item.get('type', 'video')
+                    generator_id = item.get('generator_id')
+                    parameters = item.get('parameters')
+                    
+                    if item_id:
+                        playlist_ids[path] = item_id
+                        logger.debug(f"🔍 [VIDEO] Processing playlist item: {item_id} → {path}")
+                        
+                        # Registriere in clip_registry
+                        if item_id not in clip_registry.clips:
+                            logger.info(f"📌 [VIDEO] Registering NEW clip: {item_id} → {os.path.basename(path)}")
+                            clip_registry.clips[item_id] = {
+                                'clip_id': item_id,
+                                'player_id': 'video',
+                                'absolute_path': path,
+                                'relative_path': os.path.relpath(path, video_dir) if not path.startswith('generator:') else path,
+                                'filename': os.path.basename(path),
+                                'metadata': {'type': item_type, 'generator_id': generator_id, 'parameters': parameters} if item_type == 'generator' else {},
+                                'created_at': datetime.now().isoformat(),
+                                'effects': []
+                            }
+                        else:
+                            logger.debug(f"✅ [VIDEO] Clip already registered: {item_id}")
+                    else:
+                        logger.warning(f"⚠️ [VIDEO] Playlist item has no UUID: {path}")
             
             player.playlist = absolute_playlist
+            player.playlist_ids = playlist_ids
+            logger.info(f"📋 [VIDEO] Playlist set with {len(playlist_ids)} UUIDs, {len([id for id in playlist_ids.values() if id in clip_registry.clips])} registered")
             player.autoplay = autoplay
             player.loop_playlist = loop
             

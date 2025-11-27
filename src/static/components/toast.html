@@ -1,0 +1,110 @@
+<!-- Toast Notification Container -->
+<!-- Include this in any page that needs toast notifications -->
+<!-- Usage: Add <div id="toast-placeholder"></div> where you want the toast container -->
+<!-- Or manually add: <div id="toastContainer" class="toast-container"></div> -->
+
+<div id="toastContainer" class="toast-container"></div>
+
+<style>
+/* Toast Container - Fixed positioning */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 350px;
+}
+
+/* Toast Message Base Styles */
+.toast-message {
+    background: var(--bg-secondary, #2a2a2a);
+    border: 1px solid var(--border-color, #444);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: slideIn 0.3s ease-out;
+    min-width: 300px;
+}
+
+/* Toast Types - Color-coded borders */
+.toast-message.success {
+    border-left: 4px solid #28a745;
+}
+
+.toast-message.error {
+    border-left: 4px solid #dc3545;
+}
+
+.toast-message.info {
+    border-left: 4px solid #17a2b8;
+}
+
+.toast-message.warning {
+    border-left: 4px solid #ffc107;
+}
+
+/* Toast Elements */
+.toast-icon {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.toast-content {
+    flex-grow: 1;
+    font-size: 0.9rem;
+    color: var(--text-primary, #e0e0e0);
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #999);
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: color 0.2s;
+}
+
+.toast-close:hover {
+    color: var(--text-primary, #e0e0e0);
+}
+
+/* Animations */
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+}
+
+.toast-message.removing {
+    animation: slideOut 0.3s ease-in;
+}
+</style>

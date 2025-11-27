@@ -12,6 +12,7 @@ from flask import request, jsonify
 from .logger import get_logger
 from .clip_registry import get_clip_registry
 from .frame_source import VideoSource
+from .session_state import get_session_state
 
 logger = get_logger(__name__)
 
@@ -67,13 +68,42 @@ def register_unified_routes(app, player_manager, config):
                     config=config
                 )
                 
-                # Register clip with generator path
-                clip_id = clip_registry.register_clip(
-                    player_id=player_id,
-                    absolute_path=f"generator:{generator_id}",
-                    relative_path=f"generator:{generator_id}",
-                    metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
-                )
+                # Register clip with provided or generated ID
+                clip_id = data.get('clip_id')  # Frontend can provide UUID
+                if clip_id:
+                    # Use frontend-provided clip_id - only register if not already exists!
+                    gen_path = f"generator:{generator_id}"
+                    if clip_id not in clip_registry.clips:
+                        from datetime import datetime
+                        clip_registry.clips[clip_id] = {
+                            'clip_id': clip_id,
+                            'player_id': player_id,
+                            'absolute_path': gen_path,
+                            'relative_path': gen_path,
+                            'metadata': {'type': 'generator', 'generator_id': generator_id, 'parameters': parameters},
+                            'created_at': datetime.now().isoformat(),
+                            'effects': []
+                        }
+                    
+                    # Always update playlist_ids mapping
+                    if hasattr(player, 'playlist_ids'):
+                        player.playlist_ids[gen_path] = clip_id
+                    else:
+                        player.playlist_ids = {gen_path: clip_id}
+                else:
+                    # Fallback: Generate new clip_id
+                    gen_path = f"generator:{generator_id}"
+                    clip_id = clip_registry.register_clip(
+                        player_id=player_id,
+                        absolute_path=gen_path,
+                        relative_path=gen_path,
+                        metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
+                    )
+                    # Store in playlist_ids for future loops
+                    if hasattr(player, 'playlist_ids'):
+                        player.playlist_ids[gen_path] = clip_id
+                    else:
+                        player.playlist_ids = {gen_path: clip_id}
                 
                 # Load generator into player
                 success = player.switch_source(generator_source)
@@ -88,6 +118,11 @@ def register_unified_routes(app, player_manager, config):
                 # Resume playback if was playing
                 if was_playing:
                     player.play()
+                
+                # Auto-save session state (force=True für kritische Clip-Änderung)
+                session_state = get_session_state()
+                if session_state:
+                    session_state.save(player_manager, clip_registry, force=True)
                 
                 return jsonify({
                     "success": True,
@@ -117,13 +152,36 @@ def register_unified_routes(app, player_manager, config):
                 if not os.path.exists(absolute_path):
                     return jsonify({"success": False, "error": f"Video not found: {video_path}"}), 404
                 
-                # Register clip (get existing or create new)
-                clip_id = clip_registry.register_clip(
-                    player_id=player_id,
-                    absolute_path=absolute_path,
-                    relative_path=relative_path,
-                    metadata={}
-                )
+                # Register clip with provided or generated ID
+                clip_id = data.get('clip_id')  # Frontend can provide UUID
+                if clip_id:
+                    # Use frontend-provided clip_id - only register if not already exists!
+                    if clip_id not in clip_registry.clips:
+                        from datetime import datetime
+                        clip_registry.clips[clip_id] = {
+                            'clip_id': clip_id,
+                            'player_id': player_id,
+                            'absolute_path': absolute_path,
+                            'relative_path': relative_path,
+                            'filename': os.path.basename(absolute_path),
+                            'metadata': {},
+                            'created_at': datetime.now().isoformat(),
+                            'effects': []
+                        }
+                    
+                    # Always update playlist_ids mapping
+                    if hasattr(player, 'playlist_ids'):
+                        player.playlist_ids[absolute_path] = clip_id
+                    else:
+                        player.playlist_ids = {absolute_path: clip_id}
+                else:
+                    # Fallback: Generate new clip_id
+                    clip_id = clip_registry.register_clip(
+                        player_id=player_id,
+                        absolute_path=absolute_path,
+                        relative_path=relative_path,
+                        metadata={}
+                    )
                 
                 # Load video into player
                 video_source = VideoSource(
@@ -138,8 +196,9 @@ def register_unified_routes(app, player_manager, config):
                 if not success:
                     return jsonify({"success": False, "error": "Failed to load video"}), 500
                 
-                # Set current clip ID for effect management
+                # Set current clip ID for effect management AND save to playlist_ids
                 player.current_clip_id = clip_id
+                player.playlist_ids[absolute_path] = clip_id  # Store UUID for future loops
                 logger.info(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
                 
                 # Update playlist index if applicable
@@ -152,6 +211,11 @@ def register_unified_routes(app, player_manager, config):
                 # Resume playback if was playing
                 if was_playing:
                     player.play()
+                
+                # Auto-save session state (force=True für kritische Clip-Änderung)
+                session_state = get_session_state()
+                if session_state:
+                    session_state.save(player_manager, clip_registry, force=True)
                 
                 return jsonify({
                     "success": True,
@@ -176,16 +240,19 @@ def register_unified_routes(app, player_manager, config):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
-            if not hasattr(player.source, 'video_path'):
-                return jsonify({"success": False, "error": "No clip loaded"}), 404
-            
-            absolute_path = player.source.video_path
-            clip_id = clip_registry.find_clip_by_path(player_id, absolute_path)
+            # Use current_clip_id from player (set during load_clip)
+            clip_id = player.current_clip_id
             
             if not clip_id:
-                # Auto-register if not found
+                # Fallback: No clip loaded or old session without clip_id
+                if not hasattr(player.source, 'video_path'):
+                    return jsonify({"success": False, "error": "No clip loaded"}), 404
+                
+                # Auto-register a new clip instance
+                absolute_path = player.source.video_path
                 relative_path = os.path.relpath(absolute_path, video_dir)
                 clip_id = clip_registry.register_clip(player_id, absolute_path, relative_path)
+                player.current_clip_id = clip_id
             
             clip_data = clip_registry.get_clip(clip_id)
             
@@ -242,6 +309,39 @@ def register_unified_routes(app, player_manager, config):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
+            # LAZY REGISTRATION: If clip doesn't exist, try to register it from playlist
+            if clip_id not in clip_registry.clips:
+                logger.warning(f"⚠️ Clip {clip_id} not found in registry, attempting lazy registration from playlist")
+                
+                # Find path in player.playlist_ids
+                if hasattr(player, 'playlist_ids'):
+                    # Reverse lookup: Find path by clip_id
+                    found_path = None
+                    for path, pid in player.playlist_ids.items():
+                        if pid == clip_id:
+                            found_path = path
+                            break
+                    
+                    if found_path:
+                        from datetime import datetime
+                        logger.info(f"✅ Lazy registering clip {clip_id} for path: {found_path}")
+                        
+                        # Register the clip
+                        clip_registry.clips[clip_id] = {
+                            'clip_id': clip_id,
+                            'player_id': player_id,
+                            'absolute_path': found_path,
+                            'relative_path': os.path.relpath(found_path, video_dir) if not found_path.startswith('generator:') else found_path,
+                            'filename': os.path.basename(found_path),
+                            'metadata': {},
+                            'created_at': datetime.now().isoformat(),
+                            'effects': []
+                        }
+                    else:
+                        return jsonify({"success": False, "error": f"Clip '{clip_id}' not found in playlist"}), 404
+                else:
+                    return jsonify({"success": False, "error": f"Clip '{clip_id}' not found"}), 404
+            
             pm = player.plugin_manager
             if plugin_id not in pm.registry:
                 return jsonify({"success": False, "error": f"Plugin '{plugin_id}' not found"}), 404
@@ -292,6 +392,11 @@ def register_unified_routes(app, player_manager, config):
             
             logger.info(f"✅ Effect '{plugin_id}' added to clip {clip_id} ({player_id})")
             
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                session_state.save(player_manager, clip_registry)
+            
             return jsonify({"success": True, "clip_id": clip_id})
             
         except Exception as e:
@@ -310,6 +415,11 @@ def register_unified_routes(app, player_manager, config):
                 return jsonify({"success": False, "error": "Failed to remove effect"}), 500
             
             logger.info(f"🗑️ Effect removed from clip {clip_id} at index {index}")
+            
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                session_state.save(player_manager, clip_registry)
             
             return jsonify({"success": True})
             
@@ -338,6 +448,11 @@ def register_unified_routes(app, player_manager, config):
             
             logger.debug(f"🔧 Clip effect parameter updated: {clip_id}[{index}].{param_name} = {param_value}")
             
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                session_state.save(player_manager, clip_registry)
+            
             return jsonify({"success": True})
             
         except Exception as e:
@@ -363,6 +478,11 @@ def register_unified_routes(app, player_manager, config):
                         player.clip_effects[abs_path] = []
             
             logger.info(f"🗑️ All effects cleared from clip {clip_id}")
+            
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                session_state.save(player_manager, clip_registry)
             
             return jsonify({"success": True})
             
@@ -457,15 +577,39 @@ def register_unified_routes(app, player_manager, config):
             if hasattr(player, 'current_clip_id'):
                 clip_id = player.current_clip_id
             
-            # Get playlist as relative paths
+            # Get playlist with full metadata (for GUI reconstruction)
             playlist = []
             if hasattr(player, 'playlist'):
                 for path in player.playlist:
                     try:
                         rel_path = os.path.relpath(path, video_dir)
-                        playlist.append(rel_path)
                     except:
-                        playlist.append(path)
+                        rel_path = path
+                    
+                    # Build playlist item object
+                    if path.startswith('generator:'):
+                        # Generator item
+                        generator_id = path.replace('generator:', '')
+                        playlist_item = {
+                            'path': rel_path,
+                            'type': 'generator',
+                            'generator_id': generator_id
+                        }
+                        # Include parameters if stored
+                        if hasattr(player, 'playlist_params') and generator_id in player.playlist_params:
+                            playlist_item['parameters'] = player.playlist_params[generator_id]
+                    else:
+                        # Regular video item
+                        playlist_item = {
+                            'path': rel_path,
+                            'type': 'video'
+                        }
+                    
+                    # Add UUID if available in player.playlist_ids
+                    if hasattr(player, 'playlist_ids') and path in player.playlist_ids:
+                        playlist_item['id'] = player.playlist_ids[path]
+                    
+                    playlist.append(playlist_item)
             
             response_data = {
                 "success": True,
@@ -557,6 +701,29 @@ def register_unified_routes(app, player_manager, config):
             # Update playlist index
             player.playlist_index = next_index
             
+            # Set current_clip_id from playlist_ids (or register if missing)
+            clip_id = player.playlist_ids.get(next_video_path)
+            if not clip_id:
+                # Register new clip
+                if next_video_path.startswith('generator:'):
+                    generator_id = next_video_path.split(':', 1)[1]
+                    clip_id = clip_registry.register_clip(
+                        player_id=player_id,
+                        absolute_path=next_video_path,
+                        relative_path=next_video_path,
+                        metadata={'type': 'generator', 'generator_id': generator_id}
+                    )
+                else:
+                    clip_id = clip_registry.register_clip(
+                        player_id=player_id,
+                        absolute_path=next_video_path,
+                        relative_path=os.path.relpath(next_video_path, video_dir),
+                        metadata={}
+                    )
+                player.playlist_ids[next_video_path] = clip_id
+            
+            player.current_clip_id = clip_id
+            
             if was_playing:
                 player.play()
         
@@ -566,7 +733,8 @@ def register_unified_routes(app, player_manager, config):
                 "success": True,
                 "message": "Next video loaded",
                 "video": rel_path,
-                "playlist_index": next_index
+                "playlist_index": next_index,
+                "clip_id": clip_id
             })
         
         except Exception as e:
@@ -635,6 +803,29 @@ def register_unified_routes(app, player_manager, config):
             # Update playlist index
             player.playlist_index = prev_index
             
+            # Set current_clip_id from playlist_ids (or register if missing)
+            clip_id = player.playlist_ids.get(prev_video_path)
+            if not clip_id:
+                # Register new clip
+                if prev_video_path.startswith('generator:'):
+                    generator_id = prev_video_path.split(':', 1)[1]
+                    clip_id = clip_registry.register_clip(
+                        player_id=player_id,
+                        absolute_path=prev_video_path,
+                        relative_path=prev_video_path,
+                        metadata={'type': 'generator', 'generator_id': generator_id}
+                    )
+                else:
+                    clip_id = clip_registry.register_clip(
+                        player_id=player_id,
+                        absolute_path=prev_video_path,
+                        relative_path=os.path.relpath(prev_video_path, video_dir),
+                        metadata={}
+                    )
+                player.playlist_ids[prev_video_path] = clip_id
+            
+            player.current_clip_id = clip_id
+            
             if was_playing:
                 player.play()
         
@@ -644,7 +835,8 @@ def register_unified_routes(app, player_manager, config):
                 "success": True,
                 "message": "Previous video loaded",
                 "video": rel_path,
-                "playlist_index": prev_index
+                "playlist_index": prev_index,
+                "clip_id": clip_id
             })
         
         except Exception as e:
@@ -687,6 +879,12 @@ def register_unified_routes(app, player_manager, config):
                 player.playlist_params[generator_id][param_name] = param_value
                 
                 logger.info(f"✅ [{player_id}] Generator parameter updated and stored: {param_name} = {param_value}")
+                
+                # Auto-save session state
+                session_state = get_session_state()
+                if session_state:
+                    session_state.save(player_manager, clip_registry)
+                
                 return jsonify({
                     "success": True,
                     "message": f"Parameter {param_name} updated",
@@ -713,20 +911,59 @@ def register_unified_routes(app, player_manager, config):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
-            # Konvertiere relative Pfade zu absoluten (aber lasse generator: Pfade unverändert)
+            # Konvertiere relative Pfade zu absoluten und speichere UUIDs separat
             absolute_playlist = []
+            playlist_ids = {}  # Map: path -> uuid
+            
+            from datetime import datetime
+            
             for item in playlist:
-                path = item if isinstance(item, str) else item.get('path', '')
+                if isinstance(item, str):
+                    # Legacy: nur Pfad (backwards compatibility)
+                    path = item
+                    item_id = None
+                    item_type = 'video'
+                    generator_id = None
+                    parameters = {}
+                else:
+                    # New: vollständiges Objekt mit UUID
+                    path = item.get('path', '')
+                    item_id = item.get('id')  # Extract UUID
+                    item_type = item.get('type', 'video')
+                    generator_id = item.get('generator_id')
+                    parameters = item.get('parameters', {})
+                
                 # Don't modify generator paths
                 if path.startswith('generator:'):
-                    absolute_playlist.append(path)
+                    absolute_path = path
                 elif not os.path.isabs(path):
-                    path = os.path.join(video_dir, path)
-                    absolute_playlist.append(path)
+                    absolute_path = os.path.join(video_dir, path)
                 else:
-                    absolute_playlist.append(path)
+                    absolute_path = path
+                
+                absolute_playlist.append(absolute_path)
+                
+                # Speichere UUID-Mapping UND registriere Clip sofort
+                if item_id:
+                    playlist_ids[absolute_path] = item_id
+                    
+                    # Registriere Clip in Registry wenn noch nicht vorhanden
+                    if item_id not in clip_registry.clips:
+                        logger.debug(f"📌 Registering clip from playlist: {item_id} → {os.path.basename(absolute_path)}")
+                        
+                        clip_registry.clips[item_id] = {
+                            'clip_id': item_id,
+                            'player_id': player_id,
+                            'absolute_path': absolute_path,
+                            'relative_path': os.path.relpath(absolute_path, video_dir) if not absolute_path.startswith('generator:') else absolute_path,
+                            'filename': os.path.basename(absolute_path),
+                            'metadata': {'type': item_type, 'generator_id': generator_id, 'parameters': parameters} if item_type == 'generator' else {},
+                            'created_at': datetime.now().isoformat(),
+                            'effects': []
+                        }
             
             player.playlist = absolute_playlist
+            player.playlist_ids = playlist_ids  # Neue Property für UUID-Mapping
             player.autoplay = autoplay
             player.loop_playlist = loop
             
@@ -771,6 +1008,12 @@ def register_unified_routes(app, player_manager, config):
                 player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
             
             logger.info(f"✅ [{player_id}] Playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}")
+            
+            # Auto-save session state (force=True für kritische Playlist-Änderung)
+            session_state = get_session_state()
+            if session_state:
+                session_state.save(player_manager, clip_registry, force=True)
+            
             return jsonify({
                 "success": True,
                 "player_id": player_id,

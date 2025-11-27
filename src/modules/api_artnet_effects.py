@@ -3,6 +3,8 @@ API Art-Net Effects - Separate Effect Chain für Art-Net Ausgabe
 """
 from flask import jsonify, request
 from .logger import get_logger
+from .session_state import get_session_state
+from .clip_registry import get_clip_registry
 
 logger = get_logger(__name__)
 
@@ -52,6 +54,12 @@ def register_artnet_effects_api(app, player_manager):
             success, message = player.add_effect_to_chain(plugin_id, config, chain_type=chain_type)
             
             if success:
+                # Auto-save session state
+                session_state = get_session_state()
+                if session_state:
+                    clip_registry = get_clip_registry()
+                    session_state.save(player_manager, clip_registry)
+                
                 return jsonify({"success": True, "message": message})
             else:
                 return jsonify({"success": False, "error": message}), 400
@@ -72,6 +80,12 @@ def register_artnet_effects_api(app, player_manager):
             success, message = player.remove_effect_from_chain(index, chain_type=chain_type)
             
             if success:
+                # Auto-save session state
+                session_state = get_session_state()
+                if session_state:
+                    clip_registry = get_clip_registry()
+                    session_state.save(player_manager, clip_registry)
+                
                 return jsonify({"success": True, "message": message})
             else:
                 return jsonify({"success": False, "error": message}), 400
@@ -90,6 +104,12 @@ def register_artnet_effects_api(app, player_manager):
             
             chain_type = 'video' if player == player_manager.get_artnet_player() else 'artnet'
             success, message = player.clear_effects_chain(chain_type=chain_type)
+            
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                clip_registry = get_clip_registry()
+                session_state.save(player_manager, clip_registry)
             
             return jsonify({"success": True, "message": message})
         except Exception as e:
@@ -125,6 +145,13 @@ def register_artnet_effects_api(app, player_manager):
             
             if success:
                 effect['config'][param_name] = value
+                
+                # Auto-save session state
+                session_state = get_session_state()
+                if session_state:
+                    clip_registry = get_clip_registry()
+                    session_state.save(player_manager, clip_registry)
+                
                 return jsonify({"success": True, "message": f"Parameter '{param_name}' updated"})
             else:
                 return jsonify({"success": False, "error": f"Failed to update parameter '{param_name}'"}), 400

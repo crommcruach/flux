@@ -70,12 +70,25 @@ function renderAvailableEffects() {
     }
     
     container.innerHTML = availablePlugins.map(plugin => `
-        <div class="effect-card" onclick="addEffect('${plugin.id}')">
+        <div class="effect-card" 
+             draggable="true"
+             data-plugin-id="${plugin.id}"
+             onclick="addEffect('${plugin.id}')">
             <div class="effect-card-title">${plugin.name}</div>
             <div class="effect-card-description">${plugin.description || 'No description'}</div>
             <small class="text-muted">v${plugin.version} • ${plugin.author}</small>
         </div>
     `).join('');
+    
+    // Add drag handlers to effect cards
+    container.querySelectorAll('.effect-card').forEach(card => {
+        card.addEventListener('dragstart', (e) => {
+            const pluginId = e.target.closest('.effect-card').dataset.pluginId;
+            e.dataTransfer.setData('text/plain', pluginId);
+            e.dataTransfer.setData('application/x-effect-plugin', pluginId);
+            e.dataTransfer.effectAllowed = 'copy';
+        });
+    });
 }
 
 /**

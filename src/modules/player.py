@@ -49,6 +49,13 @@ class Player:
         self.player_name = player_name
         self.enable_artnet = enable_artnet
         self.clip_registry = clip_registry
+        
+        # Player ID für Clip Registry (normalisiert)
+        if 'art-net' in player_name.lower() or 'artnet' in player_name.lower():
+            self.player_id = 'artnet'
+        else:
+            self.player_id = 'video'
+        
         self.source = frame_source
         self.points_json_path = points_json_path
         self.target_ip = target_ip
@@ -78,6 +85,7 @@ class Player:
         self.playlist = []  # Liste von Video-Pfaden
         self.playlist_index = -1  # Aktueller Index in der Playlist
         self.playlist_params = {}  # Dict: generator_id -> parameters (for autoplay)
+        self.playlist_ids = {}  # Map: path → UUID (für Clip-Effekt-Binding)
         self.autoplay = False  # Automatisch nächstes Video abspielen
         self.loop_playlist = False  # Playlist wiederholen
         
@@ -162,9 +170,14 @@ class Player:
         # Stoppe aktuelle Wiedergabe
         if was_playing:
             self.stop()
-            time.sleep(0.3)
         
-        # Cleanup alte Source
+        # Warte bis Thread wirklich beendet ist (max 3 Sekunden)
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=3.0)
+            if self.thread.is_alive():
+                logger.warning(f"[{self.player_name}] Thread konnte nicht gestoppt werden beim Source-Wechsel!")
+        
+        # Cleanup alte Source (erst wenn Thread sicher beendet ist)
         if self.source:
             self.source.cleanup()
         
@@ -266,7 +279,7 @@ class Player:
             self.artnet_manager.is_active = False
         
         # Warte auf Thread-Ende
-        if self.thread:
+        if self.thread and self.thread.is_alive():
             self.thread.join(timeout=3.0)
             if self.thread.is_alive():
                 logger.warning("Thread konnte nicht gestoppt werden!")
@@ -431,26 +444,31 @@ class Player:
                         self.playlist_index = next_index
                         self.current_loop = 0
                         
-                        # Register clip for effect management
+                        # Register clip for effect management - USE EXISTING UUID FROM PLAYLIST!
                         from .clip_registry import get_clip_registry
                         clip_registry = get_clip_registry()
                         
-                        if next_item_path.startswith('generator:'):
-                            clip_id = clip_registry.register_clip(
-                                player_id=self.player_name.lower().replace(' ', '_'),
-                                absolute_path=next_item_path,
-                                relative_path=next_item_path,
-                                metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
-                            )
-                        else:
-                            import os
-                            relative_path = os.path.relpath(next_item_path, self.config.get('paths', {}).get('video_dir', 'video'))
-                            clip_id = clip_registry.register_clip(
-                                player_id=self.player_name.lower().replace(' ', '_'),
-                                absolute_path=next_item_path,
-                                relative_path=relative_path,
-                                metadata={}
-                            )
+                        # First, check if we already have a UUID for this path
+                        clip_id = self.playlist_ids.get(next_item_path)
+                        
+                        if not clip_id:
+                            # No UUID yet - register new clip
+                            if next_item_path.startswith('generator:'):
+                                clip_id = clip_registry.register_clip(
+                                    player_id=self.player_id,
+                                    absolute_path=next_item_path,
+                                    relative_path=next_item_path,
+                                    metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
+                                )
+                            else:
+                                relative_path = os.path.relpath(next_item_path, self.config.get('paths', {}).get('video_dir', 'video'))
+                                clip_id = clip_registry.register_clip(
+                                    player_id=self.player_id,
+                                    absolute_path=next_item_path,
+                                    relative_path=relative_path,
+                                    metadata={}
+                                )
+                            self.playlist_ids[next_item_path] = clip_id
                         
                         self.current_clip_id = clip_id
                         
@@ -864,7 +882,10 @@ class Player:
             clip_effects = self.clip_registry.get_clip_effects(self.current_clip_id)
             
             if clip_effects:
-                logger.debug(f"[{self.player_name}] Applying {len(clip_effects)} clip effects for clip_id={self.current_clip_id}")
+                # Log once per second to avoid spam
+                if not hasattr(self, '_last_effect_log') or (hasattr(self, 'current_frame') and self.current_frame % 30 == 0):
+                    logger.debug(f"[{self.player_name}] Applying {len(clip_effects)} clip effects for clip_id={self.current_clip_id}")
+                    self._last_effect_log = True
                 
                 for effect_data in clip_effects:
                     try:

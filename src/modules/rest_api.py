@@ -123,15 +123,12 @@ class RestAPI:
             register_script_routes
         )
         from .api_points import register_points_routes
-        # DEPRECATED: Old separate APIs - replaced by api_player_unified
-        # from .api_videos import register_video_routes
-        # from .api_artnet_videos import register_artnet_video_routes
         from .api_console import register_console_routes
         from .api_projects import register_project_routes
         from .api_config import register_config_routes
         from .api_logs import register_log_routes
         from .api_plugins import register_plugins_api
-        from .api_effects import register_effects_api
+        from .api_effects import register_effect_routes
         from .api_benchmark import register_benchmark_routes
         
         # Registriere alle Routen
@@ -143,32 +140,31 @@ class RestAPI:
         register_cache_routes(self.app)
         register_script_routes(self.app, self.player_manager, self.config)
         register_points_routes(self.app, self.player_manager, self.data_dir)
-        # DEPRECATED: Old separate APIs - replaced by api_player_unified
-        # register_video_routes(self.app, self.player_manager, self.video_dir, self.config)
-        # register_artnet_video_routes(self.app, self.player_manager, self.video_dir, self.config)
         register_console_routes(self.app, self)
         register_project_routes(self.app, self.logger)
         register_config_routes(self.app)
         register_log_routes(self.app)
         register_plugins_api(self.app)
-        register_effects_api(self.app, self.player_manager)
+        register_effect_routes(self.app, self.player_manager)
         register_benchmark_routes(self.app, self.player_manager)
         
         # Register Art-Net Effects API
         from .api_artnet_effects import register_artnet_effects_api
         register_artnet_effects_api(self.app, self.player_manager)
         
-        # Register Art-Net Playback API
-        from .api_artnet_playback import register_artnet_playback_api
-        register_artnet_playback_api(self.app, self.player_manager, self.video_dir, self.config)
-        
         # Register Files API
         from .api_files import register_files_api
         register_files_api(self.app, self.video_dir)
         
-        # Register Unified Player API (NEW)
+        # Register Unified Player API
         from .api_player_unified import register_unified_routes
         register_unified_routes(self.app, self.player_manager, self.config)
+        
+        # Register Session Snapshot API
+        from .api_session import register_session_routes
+        from .session_state import get_session_state
+        session_state = get_session_state()
+        register_session_routes(self.app, session_state)
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""

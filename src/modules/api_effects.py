@@ -3,11 +3,13 @@ REST API Endpoints für Effect Chain Management
 """
 from flask import request, jsonify
 from .logger import get_logger
+from .session_state import get_session_state
+from .clip_registry import get_clip_registry
 
 logger = get_logger(__name__)
 
 
-def register_effects_api(app, player_manager):
+def register_effect_routes(app, player_manager):
     """Registriert Effect Chain API Endpoints."""
     
     @app.route('/api/player/effects', methods=['GET'])
@@ -67,6 +69,13 @@ def register_effects_api(app, player_manager):
         if success:
             # Get new chain length for index
             effects = player.get_effect_chain(chain_type='video')
+            
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                clip_registry = get_clip_registry()
+                session_state.save(player_manager, clip_registry)
+            
             return jsonify({
                 'success': True,
                 'message': message,
@@ -96,9 +105,15 @@ def register_effects_api(app, player_manager):
         if not player:
             return jsonify({'error': 'No active player'}), 404
         
-        success, message = player.remove_effect_from_chain(index, chain_type='video')
+        success, message = player.clear_effects_chain(chain_type='video')
         
         if success:
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                clip_registry = get_clip_registry()
+                session_state.save(player_manager, clip_registry)
+            
             return jsonify({
                 'success': True,
                 'message': message
@@ -163,6 +178,12 @@ def register_effects_api(app, player_manager):
         success, message = player.update_effect_parameter(index, param_name, value, chain_type='video')
         
         if success:
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                clip_registry = get_clip_registry()
+                session_state.save(player_manager, clip_registry)
+            
             return jsonify({
                 'success': True,
                 'message': message

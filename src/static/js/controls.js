@@ -14,7 +14,55 @@ let clipEffects = [];
 let updateInterval = null;
 let playlistUpdateInterval = null;
 
-// Autoplay & Loop State
+// ========================================
+// GENERIC PLAYER CONFIGURATION
+// ========================================
+
+const playerConfigs = {
+    video: {
+        id: 'video',
+        name: 'Video',
+        apiBase: '/api/player/video',
+        legacyApi: {
+            play: '/api/play',
+            pause: '/api/pause',
+            stop: '/api/stop'
+        },
+        playlistContainerId: 'videoPlaylist',
+        autoplayBtnId: 'videoAutoplayBtn',
+        loopBtnId: 'videoLoopBtn',
+        files: [],
+        currentFile: null,
+        autoplay: false,
+        loop: false,
+        transitionConfig: {
+            enabled: false,
+            effect: 'fade',
+            duration: 1.0,
+            easing: 'ease_in_out'
+        }
+    },
+    artnet: {
+        id: 'artnet',
+        name: 'Art-Net',
+        apiBase: '/api/player/artnet',
+        playlistContainerId: 'artnetPlaylist',
+        autoplayBtnId: 'artnetAutoplayBtn',
+        loopBtnId: 'artnetLoopBtn',
+        files: [],
+        currentFile: null,
+        autoplay: false,
+        loop: false,
+        transitionConfig: {
+            enabled: false,
+            effect: 'fade',
+            duration: 1.0,
+            easing: 'ease_in_out'
+        }
+    }
+};
+
+// Legacy global variables for backwards compatibility
 let videoAutoplay = false;
 let videoLoop = false;
 let artnetAutoplay = false;
@@ -25,38 +73,77 @@ let selectedClipId = null;  // UUID from clip registry
 let selectedClipPath = null;  // Original path (for display)
 let selectedClipPlayerType = null;  // 'video' or 'artnet'
 
-// Transition State
-let videoTransitionConfig = {
-    enabled: false,
-    effect: 'fade',
-    duration: 1.0,
-    easing: 'ease_in_out'
-};
+// Active Item Tracking (for "active" border)
+let currentVideoItemId = null;  // UUID of currently playing video item
+let currentArtnetItemId = null;  // UUID of currently playing artnet item
 
-let artnetTransitionConfig = {
-    enabled: false,
-    effect: 'fade',
-    duration: 1.0,
-    easing: 'ease_in_out'
-};
+// Transition State (legacy - now in playerConfigs)
+let videoTransitionConfig = playerConfigs.video.transitionConfig;
+let artnetTransitionConfig = playerConfigs.artnet.transitionConfig;
 
 // ========================================
 // INITIALIZATION
 // ========================================
 
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+    init().catch(error => {
+        console.error('❌ Initialization error:', error);
+    });
+});
 
 async function init() {
-    await loadAvailableEffects();
-    await loadAvailableGenerators();
-    await loadVideoPlaylist();
-    await loadArtnetPlaylist();
-    await refreshVideoEffects();
-    await refreshArtnetEffects();
-    startPreviewStream();
-    startArtnetPreviewStream();
-    setupEffectDropZones();
-    setupGeneratorDropZones();
+    try {
+        await loadAvailableEffects();
+        await loadAvailableGenerators();
+        await loadVideoPlaylist();
+        await loadArtnetPlaylist();
+        
+        // MIGRATION: Check and fix any Float IDs in loaded playlists
+        let needsUpdate = false;
+        
+        for (const playerId of ['video', 'artnet']) {
+            const files = playerId === 'video' ? videoFiles : artnetFiles;
+            for (let i = 0; i < files.length; i++) {
+                const id = files[i].id;
+                const isFloatId = (typeof id === 'number') || 
+                                  (typeof id === 'string' && /^\d+\.\d+$/.test(id));
+                
+                if (isFloatId) {
+                    console.warn(`⚠️ Migrating ${playerId} playlist item ${i} (${files[i].name}) from float ID (${id}) to UUID`);
+                    const newId = crypto.randomUUID();
+                    files[i].id = newId;
+                    console.log(`   └─ New UUID: ${newId}`);
+                    needsUpdate = true;
+                } else if (!id) {
+                    console.warn(`⚠️ ${playerId} playlist item ${i} (${files[i].name}) has no ID, generating UUID`);
+                    files[i].id = crypto.randomUUID();
+                    needsUpdate = true;
+                } else {
+                    console.log(`✅ ${playerId} playlist item ${i} (${files[i].name}) has valid UUID: ${id}`);
+                }
+            }
+        }
+        
+        // If any IDs were migrated, update backend playlists
+        if (needsUpdate) {
+            console.log('🔄 Updating backend playlists with new UUIDs...');
+            await updateVideoPlaylist();
+            await updateArtnetPlaylist();
+        } else {
+            console.log('✅ All playlist items have valid UUIDs, no migration needed');
+        }
+        
+        await refreshVideoEffects();
+        await refreshArtnetEffects();
+        startPreviewStream();
+        startArtnetPreviewStream();
+        setupEffectDropZones();
+        setupGeneratorDropZones();
+        setupPlaylistContainerDropHandlers(); // Register container handlers once
+    } catch (error) {
+        console.error('❌ Init failed:', error);
+        throw error;
+    }
     
     // Start auto-refresh
     updateInterval = setInterval(async () => {
@@ -84,8 +171,13 @@ async function updateCurrentVideoFromPlayer() {
             const newVideo = data.current_video ? data.current_video.replace(/^[\\\/]+/, '') : null;
             const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
             
-            if (normalizedCurrent !== newVideo) {
+            // Update currentVideoItemId from backend (important for active border)
+            const newClipId = data.clip_id || null;
+            const clipIdChanged = currentVideoItemId !== newClipId;
+            
+            if (normalizedCurrent !== newVideo || clipIdChanged) {
                 currentVideo = newVideo;
+                currentVideoItemId = newClipId;  // Update active item ID
                 renderVideoPlaylist();
             }
         }
@@ -105,8 +197,13 @@ async function updateCurrentArtnetFromPlayer() {
             const newVideo = data.current_video ? data.current_video.replace(/^[\\\/]+/, '') : null;
             const normalizedCurrent = currentArtnet ? currentArtnet.replace(/^[\\\/]+/, '') : null;
             
-            if (normalizedCurrent !== newVideo) {
+            // Update currentArtnetItemId from backend (important for active border)
+            const newClipId = data.clip_id || null;
+            const clipIdChanged = currentArtnetItemId !== newClipId;
+            
+            if (normalizedCurrent !== newVideo || clipIdChanged) {
                 currentArtnet = newVideo;
+                currentArtnetItemId = newClipId;  // Update active item ID
                 renderArtnetPlaylist();
             }
         }
@@ -323,8 +420,134 @@ function setupGeneratorDropZones() {
     console.log('✅ Generator drop zones will be handled in playlist rendering');
 }
 
+// Setup container-level drop handlers (ONCE on init, not on every render!)
+function setupPlaylistContainerDropHandlers() {
+    const videoContainer = document.getElementById('videoPlaylist');
+    const artnetContainer = document.getElementById('artnetPlaylist');
+    
+    // Video container drop handler  
+    videoContainer.addEventListener('drop', (e) => {
+        // Delay execution to allow child handlers to set flag first
+        setTimeout(() => {
+            // Skip if already handled by drop-zone or empty-state
+            if (e._handledByDropZone) {
+                return;
+            }
+        
+            
+            // Skip if drop is on playlist item or drop-zone
+            if (e.target.classList.contains('playlist-item') || 
+                e.target.closest('.playlist-item') ||
+                e.target.classList.contains('drop-zone') || 
+                e.target.classList.contains('empty-state')) {
+                return;
+            }
+            
+            // Handle drop on empty container space
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Check if dropping a generator
+            let generatorId = e.dataTransfer.getData('generatorId');
+            if (!generatorId && window.currentDragGenerator) {
+                generatorId = window.currentDragGenerator.id;
+            }
+            
+            if (generatorId) {
+                const generatorName = e.dataTransfer.getData('generatorName') || window.currentDragGenerator?.name || generatorId;
+                const newGenerator = {
+                    path: `generator:${generatorId}`,
+                    name: `🌟 ${generatorName}`,
+                    id: crypto.randomUUID(), // Unique ID that becomes clip_id
+                    type: 'generator',
+                    generator_id: generatorId
+                };
+                videoFiles.push(newGenerator);
+                renderVideoPlaylist();
+                updateVideoPlaylist();
+                return;
+            }
+            
+            // Check if dropping a file
+            const videoPath = e.dataTransfer.getData('video-path');
+            if (videoPath) {
+                const fileName = videoPath.split(/[/\\]/).pop();
+                const newVideo = {
+                    path: videoPath,
+                    name: fileName,
+                    id: crypto.randomUUID() // Unique ID that becomes clip_id
+                };
+                videoFiles.push(newVideo);
+                renderVideoPlaylist();
+                updateVideoPlaylist();
+            }
+        }, 0); // Delayed to let child handlers set flag first
+    });
+    
+    // Art-Net container drop handler
+    artnetContainer.addEventListener('drop', (e) => {
+        // Delay execution to allow child handlers to set flag first
+        setTimeout(() => {
+            // Skip if already handled by drop-zone or empty-state
+            if (e._handledByDropZone) {
+                return;
+            }
+        
+            
+            // Skip if drop is on playlist item or drop-zone
+            if (e.target.classList.contains('playlist-item') || 
+                e.target.closest('.playlist-item') ||
+                e.target.classList.contains('drop-zone') || 
+                e.target.classList.contains('empty-state')) {
+                return;
+            }
+            
+            // Handle drop on empty container space
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Check if dropping a generator
+            let generatorId = e.dataTransfer.getData('generatorId');
+            if (!generatorId && window.currentDragGenerator) {
+                generatorId = window.currentDragGenerator.id;
+            }
+            
+            if (generatorId) {
+                const generatorName = e.dataTransfer.getData('generatorName') || window.currentDragGenerator?.name || generatorId;
+                const newGenerator = {
+                    path: `generator:${generatorId}`,
+                    name: `🌟 ${generatorName}`,
+                    id: crypto.randomUUID(), // Unique ID that becomes clip_id
+                    type: 'generator',
+                    generator_id: generatorId
+                };
+                artnetFiles.push(newGenerator);
+                renderArtnetPlaylist();
+                updateArtnetPlaylist();
+                return;
+            }
+            
+            // Check if dropping a file
+            const videoPath = e.dataTransfer.getData('video-path');
+            if (videoPath) {
+                const fileName = videoPath.split(/[/\\]/).pop();
+                const newVideo = {
+                    path: videoPath,
+                    name: fileName,
+                    id: crypto.randomUUID() // Unique ID that becomes clip_id
+                };
+                artnetFiles.push(newVideo);
+                renderArtnetPlaylist();
+                updateArtnetPlaylist();
+            }
+        }, 0); // Delayed to let child handlers set flag first
+    });
+    
+    console.log('✅ Container drop handlers registered (once)');
+}
+
 // Load generator as clip into player
-window.loadGeneratorClip = async function(generatorId, playerType = 'video') {
+window.loadGeneratorClip = async function(generatorId, playerType = 'video', clipId = null) {
     try {
         const generator = availableGenerators.find(g => g.id === generatorId);
         if (!generator) {
@@ -353,16 +576,25 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video') {
             body: JSON.stringify({
                 type: 'generator',
                 generator_id: generatorId,
-                parameters: defaultParams
+                parameters: defaultParams,
+                clip_id: clipId  // Frontend-provided UUID
             })
         });
         
         const data = await response.json();
         if (data.success) {
-            // Store clip info
-            selectedClipId = data.clip_id;
+            // Store clip info - use frontend clipId (UUID) instead of backend response
+            selectedClipId = clipId || data.clip_id;
+            console.log(`🆔 Generator clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
             selectedClipPath = `generator:${generatorId}`;
             selectedClipPlayerType = playerType;
+            
+            // Update active item ID based on player type
+            if (playerType === 'video') {
+                currentVideoItemId = clipId || data.clip_id;
+            } else if (playerType === 'artnet') {
+                currentArtnetItemId = clipId || data.clip_id;
+            }
             
             // Store generator metadata for parameter display
             window.currentGeneratorId = generatorId;
@@ -580,26 +812,42 @@ window.openVideoFullscreen = function() {
 };
 
 // ========================================
-// VIDEO PLAYLIST
+// GENERIC PLAYLIST MANAGEMENT
 // ========================================
 
+// Legacy global variables (for backwards compatibility)
 let videoFiles = [];
 let currentVideo = null;
+let artnetFiles = [];
+let currentArtnet = null;
 
-async function loadVideoPlaylist() {
+async function loadPlaylist(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) {
+        console.error(`Unknown player: ${playerId}`);
+        return;
+    }
+    
     try {
         // Load player configuration from server
-        const response = await fetch(`${API_BASE}/api/player/video/status`);
+        const response = await fetch(`${API_BASE}${config.apiBase}/status`);
         const data = await response.json();
         
         if (data.success && data.playlist) {
             // Restore playlist (detect generators)
-            videoFiles = data.playlist.map((path, idx) => {
-                // Handle both string paths and object entries
+            config.files = data.playlist.map((path, idx) => {
+                // Handle both string paths (legacy) and object entries (new)
                 let actualPath = typeof path === 'string' ? path : path.path;
+                let savedId = (typeof path === 'object' && path.id) ? path.id : null;
+                
+                // MIGRATION: Convert old float IDs to new UUIDs
+                if (savedId && typeof savedId === 'number') {
+                    console.warn(`⚠️ Converting old float ID (${savedId}) to UUID`);
+                    savedId = null; // Force generation of new UUID
+                }
                 
                 if (!actualPath) {
-                    console.warn('Empty path in playlist at index', idx);
+                    console.warn(`Empty path in ${playerId} playlist at index`, idx);
                     return null;
                 }
                 
@@ -611,7 +859,7 @@ async function loadVideoPlaylist() {
                     return {
                         path: actualPath,
                         name: `🌟 ${generatorName}`,
-                        id: Date.now() + Math.random() + idx,
+                        id: savedId || crypto.randomUUID(), // Use saved UUID or generate new
                         type: 'generator',
                         generator_id: generatorId,
                         parameters: (typeof path === 'object' && path.parameters) ? path.parameters : {}
@@ -621,25 +869,25 @@ async function loadVideoPlaylist() {
                     return {
                         name: actualPath.split('/').pop().split('\\').pop(),
                         path: actualPath,
-                        id: Date.now() + Math.random() + idx
+                        id: savedId || crypto.randomUUID() // Use saved UUID or generate new
                     };
                 }
             }).filter(item => item !== null);
             
             // Restore autoplay/loop state
-            videoAutoplay = data.autoplay || false;
-            videoLoop = data.loop || false;
+            config.autoplay = data.autoplay || false;
+            config.loop = data.loop || false;
             
-            // Restore current video
+            // Restore current file
             if (data.current_video) {
-                currentVideo = data.current_video.replace(/^[\\\/]+/, '');
+                config.currentFile = data.current_video.replace(/^[\\\/]+/, '');
             }
             
             // Update UI buttons
-            const autoplayBtn = document.getElementById('videoAutoplayBtn');
-            const loopBtn = document.getElementById('videoLoopBtn');
+            const autoplayBtn = document.getElementById(config.autoplayBtnId);
+            const loopBtn = document.getElementById(config.loopBtnId);
             if (autoplayBtn) {
-                if (videoAutoplay) {
+                if (config.autoplay) {
                     autoplayBtn.classList.remove('btn-outline-primary');
                     autoplayBtn.classList.add('btn-primary');
                 } else {
@@ -648,7 +896,7 @@ async function loadVideoPlaylist() {
                 }
             }
             if (loopBtn) {
-                if (videoLoop) {
+                if (config.loop) {
                     loopBtn.classList.remove('btn-outline-primary');
                     loopBtn.classList.add('btn-primary');
                 } else {
@@ -657,17 +905,50 @@ async function loadVideoPlaylist() {
                 }
             }
             
-            // Video playlist loaded successfully
+            // Sync legacy variables
+            if (playerId === 'video') {
+                videoFiles = config.files;
+                currentVideo = config.currentFile;
+                videoAutoplay = config.autoplay;
+                videoLoop = config.loop;
+            } else if (playerId === 'artnet') {
+                artnetFiles = config.files;
+                currentArtnet = config.currentFile;
+                artnetAutoplay = config.autoplay;
+                artnetLoop = config.loop;
+            }
         } else {
             // Start with empty playlist
-            videoFiles = [];
+            config.files = [];
+            if (playerId === 'video') videoFiles = [];
+            if (playerId === 'artnet') artnetFiles = [];
         }
     } catch (error) {
-        console.error('❌ Failed to load video playlist:', error);
-        videoFiles = [];
+        console.error(`❌ Failed to load ${playerId} playlist:`, error);
+        config.files = [];
+        if (playerId === 'video') videoFiles = [];
+        if (playerId === 'artnet') artnetFiles = [];
     }
     
-    renderVideoPlaylist();
+    renderPlaylist(playerId);
+}
+
+// Generic render function (delegates to specific implementations for now)
+function renderPlaylist(playerId) {
+    if (playerId === 'video') {
+        renderVideoPlaylist();
+    } else if (playerId === 'artnet') {
+        renderArtnetPlaylist();
+    }
+}
+
+// Legacy wrapper functions
+async function loadVideoPlaylist() {
+    await loadPlaylist('video');
+}
+
+async function loadArtnetPlaylist() {
+    await loadPlaylist('artnet');
 }
 
 function renderVideoPlaylist() {
@@ -699,44 +980,62 @@ function renderVideoPlaylist() {
             });
             
             emptyZone.addEventListener('drop', (e) => {
+                e._handledByDropZone = true; // Set flag FIRST before anything else!
                 e.preventDefault();
-                e.stopPropagation();
+                e.stopPropagation(); // WICHTIG: Verhindere Bubbling zum Container!
+                e.stopImmediatePropagation();
                 emptyZone.style.background = '';
+                
+                // Get playlist type from data attribute
+                const playlistType = emptyZone.dataset.playlist || 'video';
+                const files = playlistType === 'video' ? videoFiles : artnetFiles;
                 
                 // Check if dropping a generator
                 const generatorId = e.dataTransfer.getData('generatorId');
                 if (generatorId) {
-                    console.log('🌟 DROP GENERATOR to empty playlist, id:', generatorId);
+                    console.log(`🌟 DROP GENERATOR to empty ${playlistType} playlist, id:`, generatorId);
                     const generatorName = e.dataTransfer.getData('generatorName') || generatorId;
                     const newGenerator = {
                         path: `generator:${generatorId}`,
                         name: `🌟 ${generatorName}`,
-                        id: Date.now() + Math.random(),
+                        id: crypto.randomUUID(),
                         type: 'generator',
                         generator_id: generatorId
                     };
-                    videoFiles.push(newGenerator);
-                    renderVideoPlaylist();
+                    files.push(newGenerator);
                     
-                    // Autoload since playlist was empty
-                    loadGeneratorClip(generatorId, 'video');
-                    console.log(`📋 Added and loaded generator ${generatorName} to empty playlist`);
+                    // Autoload since playlist was empty (nur bei video)
+                    if (playlistType === 'video') {
+                        loadGeneratorClip(generatorId, 'video', newGenerator.id);
+                    }
+                    console.log(`📋 Added and loaded generator ${generatorName} to empty ${playlistType} playlist`);
+                    
+                    // Delay render to allow event to finish propagating
+                    setTimeout(() => {
+                        renderPlaylist(playlistType);
+                        updatePlaylist(playlistType);  // Sync to backend!
+                    }, 0);
                     return false;
                 }
                 
                 // Check if dropping a file
                 const videoPath = e.dataTransfer.getData('video-path');
                 if (videoPath) {
-                    console.log('🎯 DROP FILE to empty playlist, path:', videoPath);
+                    console.log(`🎯 DROP FILE to empty ${playlistType} playlist, path:`, videoPath);
                     const fileName = videoPath.split(/[/\\]/).pop();
                     const newVideo = {
                         path: videoPath,
                         name: fileName,
-                        id: Date.now() + Math.random()
+                        id: crypto.randomUUID()
                     };
-                    videoFiles.push(newVideo);
-                    renderVideoPlaylist();
-                    console.log(`📋 Added file ${fileName} to empty playlist`);
+                    files.push(newVideo);
+                    console.log(`📋 Added file ${fileName} to empty ${playlistType} playlist`);
+                    
+                    // Delay render to allow event to finish propagating
+                    setTimeout(() => {
+                        renderPlaylist(playlistType);
+                        updatePlaylist(playlistType);  // Sync to backend!
+                    }, 0);
                     return false;
                 }
             });
@@ -748,18 +1047,17 @@ function renderVideoPlaylist() {
     // Build HTML with drop zones between items
     let html = '';
     videoFiles.forEach((video, index) => {
-        // Normalisiere Pfade für Vergleich (entferne führende Slashes)
-        const normalizedVideoPath = video.path.replace(/^[\\\/]+/, '');
-        const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
-        const isActive = normalizedCurrent === normalizedVideoPath;
+        // Check if this is the currently playing clip (use UUID instead of path)
+        const isActive = currentVideoItemId && video.id === currentVideoItemId;
         
         // Drop zone before item
         html += `<div class="drop-zone" data-drop-index="${index}" data-playlist="video"></div>`;
         
-        // Playlist item
+        // Playlist item (store path for identification)
         html += `
             <div class="playlist-item ${isActive ? 'active' : ''}" 
                  data-video-index="${index}"
+                 data-video-path="${video.path}"
                  data-playlist="video"
                  draggable="true">
                 <div class="playlist-item-name">${video.name}</div>
@@ -804,29 +1102,9 @@ function renderVideoPlaylist() {
                     // Load generator parameters
                     console.log(`👁️ Hovering generator: ${videoItem.generator_id}`);
                     
-                    // Check if this generator is currently playing to get clip ID
-                    const normalizedGenPath = videoItem.path.replace(/^[\\\/]+/, '');
-                    const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
-                    const isCurrentlyPlaying = (normalizedCurrent === normalizedGenPath);
-                    
-                    // Get clip ID from backend if currently playing
-                    if (isCurrentlyPlaying) {
-                        try {
-                            const statusResponse = await fetch(`${API_BASE}/api/player/video/status`);
-                            const statusData = await statusResponse.json();
-                            
-                            if (statusData.success && statusData.clip_id) {
-                                selectedClipId = statusData.clip_id;
-                                console.log(`🎯 Got generator clip ID from backend: ${selectedClipId}`);
-                            }
-                        } catch (error) {
-                            console.error(`❌ Error getting generator clip ID:`, error);
-                        }
-                    } else {
-                        // Not currently playing - clear clip ID so parameters can't be changed
-                        selectedClipId = null;
-                        console.log(`👀 Generator not playing - showing parameters read-only`);
-                    }
+                    // Use the item's UUID directly from the playlist
+                    selectedClipId = videoItem.id;
+                    console.log(`🎯 Using generator clip UUID from playlist: ${selectedClipId}`);
                     
                     selectedClipPath = videoItem.path;
                     selectedClipPlayerType = 'video';
@@ -860,29 +1138,9 @@ function renderVideoPlaylist() {
                     // Regular video - show effects
                     console.log(`👁️ Hovering video: ${videoItem.path}`);
                     
-                    // Check if this video is currently playing to get clip ID
-                    const normalizedVideoPath = videoItem.path.replace(/^[\\\/]+/, '');
-                    const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
-                    const isCurrentlyPlaying = (normalizedCurrent === normalizedVideoPath);
-                    
-                    // Get clip ID from backend if currently playing
-                    if (isCurrentlyPlaying) {
-                        try {
-                            const statusResponse = await fetch(`${API_BASE}/api/player/video/status`);
-                            const statusData = await statusResponse.json();
-                            
-                            if (statusData.success && statusData.clip_id) {
-                                selectedClipId = statusData.clip_id;
-                                console.log(`🎯 Got clip ID from backend: ${selectedClipId}`);
-                            }
-                        } catch (error) {
-                            console.error(`❌ Error getting clip ID:`, error);
-                        }
-                    } else {
-                        // Not currently playing - clear clip ID so effects can't be changed
-                        selectedClipId = null;
-                        console.log(`👀 Video not playing - showing effects read-only`);
-                    }
+                    // Use the item's UUID directly from the playlist
+                    selectedClipId = videoItem.id;
+                    console.log(`🎯 Using clip UUID from playlist: ${selectedClipId}`);
                     
                     selectedClipPath = videoItem.path;
                     selectedClipPlayerType = 'video';
@@ -918,10 +1176,12 @@ function renderVideoPlaylist() {
                 }
                 
                 const videoItem = videoFiles[index];
+                currentVideoItemId = videoItem.id; // Store which item is playing
+                
                 if (videoItem.type === 'generator' && videoItem.generator_id) {
-                    await loadGeneratorClip(videoItem.generator_id, 'video');
+                    await loadGeneratorClip(videoItem.generator_id, 'video', videoItem.id);
                 } else {
-                    await loadVideoFile(videoItem.path);
+                    await loadVideoFile(videoItem.path, videoItem.id);
                 }
             }
         });
@@ -970,6 +1230,7 @@ function renderVideoPlaylist() {
         zone.addEventListener('drop', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            e._handledByDropZone = true; // Flag for container handler
             zone.classList.remove('drag-over');
             
             const dropIndex = parseInt(zone.dataset.dropIndex);
@@ -986,20 +1247,22 @@ function renderVideoPlaylist() {
                 const newGenerator = {
                     path: `generator:${generatorId}`,
                     name: `🌟 ${generatorName}`,
-                    id: Date.now() + Math.random(),
+                    id: crypto.randomUUID(), // Unique ID that becomes clip_id
                     type: 'generator',
                     generator_id: generatorId
                 };
                 videoFiles.splice(dropIndex, 0, newGenerator);
-                renderVideoPlaylist();
                 
                 // Only autoload if dropped at position 0 and playlist is empty or nothing is playing
                 if (dropIndex === 0 && !currentVideo) {
-                    loadGeneratorClip(generatorId, 'video');
+                    loadGeneratorClip(generatorId, 'video', newGenerator.id);
                 }
                 
                 // Update backend playlist
                 updateVideoPlaylist();
+                
+                // Delay render to allow event to finish propagating
+                setTimeout(() => renderVideoPlaylist(), 0);
                 return false;
             }
             
@@ -1011,12 +1274,19 @@ function renderVideoPlaylist() {
                 const newVideo = {
                     path: videoPath,
                     name: fileName,
-                    id: Date.now() + Math.random()
+                    id: crypto.randomUUID() // Unique ID that becomes clip_id
                 };
                 videoFiles.splice(dropIndex, 0, newVideo);
-                renderVideoPlaylist();
                 updateVideoPlaylist();
                 console.log(`📋 Added file ${fileName} at position ${dropIndex}`);
+                
+                // Only autoload if dropped at position 0 and playlist was empty
+                if (dropIndex === 0 && !currentVideo) {
+                    loadVideoFile(newVideo.path);
+                }
+                
+                // Delay render to allow event to finish propagating
+                setTimeout(() => renderVideoPlaylist(), 0);
                 return false;
             }
             
@@ -1056,81 +1326,36 @@ function renderVideoPlaylist() {
         }
     });
     
-    // Container-level drop handler (register only once)
-    if (!container.dataset.dropHandlerRegistered) {
-        container.dataset.dropHandlerRegistered = 'true';
-        container.addEventListener('drop', (e) => {
-            // Only handle if not over a drop-zone or playlist-item (and not a child of these)
-            if (!e.target.classList.contains('drop-zone') && !e.target.classList.contains('playlist-item') &&
-                !e.target.closest('.drop-zone') && !e.target.closest('.playlist-item')) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            console.log('📦 CONTAINER DROP triggered on empty space');
-            
-            // Check if dropping a generator
-            let generatorId = e.dataTransfer.getData('generatorId');
-            if (!generatorId && window.currentDragGenerator) {
-                generatorId = window.currentDragGenerator.id;
-            }
-            
-            if (generatorId) {
-                const generatorName = e.dataTransfer.getData('generatorName') || window.currentDragGenerator?.name || generatorId;
-                const newGenerator = {
-                    path: `generator:${generatorId}`,
-                    name: `🌟 ${generatorName}`,
-                    id: Date.now() + Math.random(),
-                    type: 'generator',
-                    generator_id: generatorId
-                };
-                videoFiles.push(newGenerator);
-                renderVideoPlaylist();
-                updateVideoPlaylist();
-                return false;
-            }
-            
-            // Check if dropping a file
-            const videoPath = e.dataTransfer.getData('video-path');
-            if (videoPath) {
-                const fileName = videoPath.split(/[/\\]/).pop();
-                const newVideo = {
-                    path: videoPath,
-                    name: fileName,
-                    id: Date.now() + Math.random()
-                };
-                videoFiles.push(newVideo);
-                renderVideoPlaylist();
-                updateVideoPlaylist();
-                return false;
-            }
-            }
-        });
-    }
-    
-    // Note: updateVideoPlaylist() is called explicitly by drop handlers and other playlist modifications
-    // Don't call it here automatically to avoid race conditions
+    // Note: Container-level drop handler is now registered in setupPlaylistContainerDropHandlers()
+    // called once during init to prevent multiple handler registrations
 }
 
 // Load video file WITHOUT adding to playlist (used for playlist clicks)
-window.loadVideoFile = async function(videoPath) {
+window.loadVideoFile = async function(videoPath, clipId = null) {
     try {
         // NEW: Use unified API
         const response = await fetch(`${API_BASE}/api/player/video/clip/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: videoPath })
+            body: JSON.stringify({ 
+                path: videoPath,
+                clip_id: clipId  // Frontend-provided UUID
+            })
         });
         
         const data = await response.json();
         
         if (data.success) {
             currentVideo = videoPath.replace(/^[\\\/]+/, '');
-            renderVideoPlaylist();
             
-            // NEW: Store clip ID and path
-            selectedClipId = data.clip_id;
+            // NEW: Store clip ID and path - use frontend clipId (UUID) instead of backend response
+            selectedClipId = clipId || data.clip_id;
+            currentVideoItemId = clipId || data.clip_id;  // Update active item ID
+            console.log(`🆔 Video clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
             selectedClipPath = videoPath;
             selectedClipPlayerType = 'video';
+            
+            renderVideoPlaylist();
             
             // Clear generator state (this is a regular video)
             window.currentGeneratorId = null;
@@ -1170,7 +1395,7 @@ window.loadVideo = async function(videoPath) {
                 path: videoPath,
                 folder: folder,
                 name: filename,
-                id: Date.now() + Math.random() // Unique ID for each entry
+                id: crypto.randomUUID() // Unique ID for each entry
             });
             
             renderVideoPlaylist();
@@ -1212,9 +1437,9 @@ window.removeFromVideoPlaylist = async function(index) {
             console.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
             
             if (nextItem.type === 'generator' && nextItem.generator_id) {
-                await loadGeneratorClip(nextItem.generator_id, 'video');
+                await loadGeneratorClip(nextItem.generator_id, 'video', nextItem.id);
             } else {
-                await loadVideoFile(nextItem.path);
+                await loadVideoFile(nextItem.path, nextItem.id);
             }
         } else {
             // No more clips - stop player and show black screen
@@ -1237,209 +1462,204 @@ window.removeFromVideoPlaylist = async function(index) {
 };
 
 // ========================================
-// VIDEO PLAYER CONTROLS
+// GENERIC PLAYER CONTROLS
 // ========================================
 
-window.playVideo = async function() {
-    await fetch(`${API_BASE}/api/play`, { method: 'POST' });
-};
+async function play(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
+    const endpoint = config.legacyApi?.play || `${config.apiBase}/play`;
+    await fetch(`${API_BASE}${endpoint}`, { method: 'POST' });
+}
 
-window.pauseVideo = async function() {
-    await fetch(`${API_BASE}/api/pause`, { method: 'POST' });
-};
+async function pause(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
+    const endpoint = config.legacyApi?.pause || `${config.apiBase}/pause`;
+    await fetch(`${API_BASE}${endpoint}`, { method: 'POST' });
+}
 
-window.stopVideo = async function() {
-    await fetch(`${API_BASE}/api/stop`, { method: 'POST' });
-};
+async function stop(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
+    const endpoint = config.legacyApi?.stop || `${config.apiBase}/stop`;
+    await fetch(`${API_BASE}${endpoint}`, { method: 'POST' });
+}
 
-window.nextVideo = async function() {
+async function next(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
     try {
-        const response = await fetch(`${API_BASE}/api/player/video/next`, { method: 'POST' });
+        const response = await fetch(`${API_BASE}${config.apiBase}/next`, { method: 'POST' });
         const data = await response.json();
         
         if (data.success) {
-            currentVideo = data.video;
-            renderVideoPlaylist();
-            console.log('⏭️ Next video:', data.video);
+            config.currentFile = data.video;
+            if (playerId === 'video') {
+                currentVideo = data.video;
+                currentVideoItemId = data.clip_id || null;
+            }
+            if (playerId === 'artnet') {
+                currentArtnet = data.video;
+                currentArtnetItemId = data.clip_id || null;
+            }
+            renderPlaylist(playerId);
+            console.log(`⏭️ Next ${config.name}:`, data.video);
         } else {
-            console.error('Failed to load next video:', data.message);
+            console.error(`Failed to load next ${config.name}:`, data.message);
         }
     } catch (error) {
-        console.error('❌ Error loading next video:', error);
+        console.error(`❌ Error loading next ${config.name}:`, error);
     }
-};
+}
 
-window.previousVideo = async function() {
+async function previous(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
     try {
-        const response = await fetch(`${API_BASE}/api/player/video/previous`, { method: 'POST' });
+        const response = await fetch(`${API_BASE}${config.apiBase}/previous`, { method: 'POST' });
         const data = await response.json();
         
         if (data.success) {
-            currentVideo = data.video;
-            renderVideoPlaylist();
-            console.log('⏮️ Previous video:', data.video);
+            config.currentFile = data.video;
+            if (playerId === 'video') {
+                currentVideo = data.video;
+                currentVideoItemId = data.clip_id || null;
+            }
+            if (playerId === 'artnet') {
+                currentArtnet = data.video;
+                currentArtnetItemId = data.clip_id || null;
+            }
+            renderPlaylist(playerId);
+            console.log(`⏮️ Previous ${config.name}:`, data.video);
         } else {
-            console.error('Failed to load previous video:', data.message);
+            console.error(`Failed to load previous ${config.name}:`, data.message);
         }
     } catch (error) {
-        console.error('❌ Error loading previous video:', error);
+        console.error(`❌ Error loading previous ${config.name}:`, error);
     }
-};
+}
 
-// Autoplay & Loop Toggle für Video Player
-window.toggleVideoAutoplay = async function() {
-    videoAutoplay = !videoAutoplay;
-    const btn = document.getElementById('videoAutoplayBtn');
-    if (videoAutoplay) {
+// Legacy wrapper functions for HTML onclick handlers
+window.playVideo = async function() { await play('video'); };
+window.pauseVideo = async function() { await pause('video'); };
+window.stopVideo = async function() { await stop('video'); };
+window.nextVideo = async function() { await next('video'); };
+window.previousVideo = async function() { await previous('video'); };
+
+async function toggleAutoplay(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
+    config.autoplay = !config.autoplay;
+    const btn = document.getElementById(config.autoplayBtnId);
+    
+    if (config.autoplay) {
         btn.classList.remove('btn-outline-primary');
         btn.classList.add('btn-primary');
-        showToast('Video Autoplay aktiviert', 'success');
+        showToast(`${config.name} Autoplay aktiviert`, 'success');
     } else {
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-outline-primary');
-        showToast('Video Autoplay deaktiviert', 'info');
+        showToast(`${config.name} Autoplay deaktiviert`, 'info');
     }
+    
+    // Sync legacy variables
+    if (playerId === 'video') videoAutoplay = config.autoplay;
+    if (playerId === 'artnet') artnetAutoplay = config.autoplay;
     
     // Update Player ZUERST - damit autoplay flag gesetzt ist
-    await updateVideoPlaylist();
+    await updatePlaylist(playerId);
     
     // Dann starte Wiedergabe wenn autoplay aktiviert und Playlist vorhanden
-    if (videoAutoplay && videoFiles.length > 0) {
-        const statusResponse = await fetch(`${API_BASE}/api/player/video/status`);
+    if (config.autoplay && config.files.length > 0) {
+        const statusResponse = await fetch(`${API_BASE}${config.apiBase}/status`);
         const statusData = await statusResponse.json();
-        if (statusdata.success && !statusData.is_playing) {
+        if (statusData.success && !statusData.is_playing) {
             // Lade und starte erstes Video wenn keins läuft
-            await loadVideoFile(videoFiles[0].path);
-            await playVideo();
-            console.log('🎬 Autoplay: Starte erstes Video');
+            const firstFile = config.files[0];
+            if (firstFile.type === 'generator' && firstFile.generator_id) {
+                await loadGeneratorClip(firstFile.generator_id, playerId, firstFile.id);
+            } else {
+                if (playerId === 'video') await loadVideoFile(firstFile.path, firstFile.id);
+                if (playerId === 'artnet') await loadArtnetFile(firstFile.path, firstFile.id);
+            }
+            await play(playerId);
+            console.log(`🎬 ${config.name} Autoplay: Starte erstes Video`);
         }
     }
-};
+}
 
-window.toggleVideoLoop = async function() {
-    videoLoop = !videoLoop;
-    const btn = document.getElementById('videoLoopBtn');
-    if (videoLoop) {
+async function toggleLoop(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
+    config.loop = !config.loop;
+    const btn = document.getElementById(config.loopBtnId);
+    
+    if (config.loop) {
         btn.classList.remove('btn-outline-primary');
         btn.classList.add('btn-primary');
-        showToast('Video Loop aktiviert', 'success');
+        showToast(`${config.name} Loop aktiviert`, 'success');
     } else {
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-outline-primary');
-        showToast('Video Loop deaktiviert', 'info');
+        showToast(`${config.name} Loop deaktiviert`, 'info');
     }
+    
+    // Sync legacy variables
+    if (playerId === 'video') videoLoop = config.loop;
+    if (playerId === 'artnet') artnetLoop = config.loop;
+    
     // Update Player
-    await updateVideoPlaylist();
-};
+    await updatePlaylist(playerId);
+}
 
-// Sendet aktuelle Playlist an Video Player
-async function updateVideoPlaylist() {
+async function updatePlaylist(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
+    // Get files array (use legacy for backwards compat)
+    const files = playerId === 'video' ? videoFiles : artnetFiles;
+    
     try {
-        const response = await fetch(`${API_BASE}/api/player/video/playlist/set`, {
+        const response = await fetch(`${API_BASE}${config.apiBase}/playlist/set`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                playlist: videoFiles.map(v => v.path),
-                autoplay: videoAutoplay,
-                loop: videoLoop
+                playlist: files.map(v => ({
+                    path: v.path,
+                    id: v.id,  // Save UUID
+                    type: v.type,
+                    generator_id: v.generator_id,
+                    parameters: v.parameters
+                })),
+                autoplay: config.autoplay,
+                loop: config.loop
             })
         });
         const data = await response.json();
         // Playlist updated successfully
     } catch (error) {
-        console.error('❌ Error updating video playlist:', error);
+        console.error(`❌ Error updating ${config.name} playlist:`, error);
     }
 }
 
+// Legacy wrapper functions
+window.toggleVideoAutoplay = async function() { await toggleAutoplay('video'); };
+window.toggleVideoLoop = async function() { await toggleLoop('video'); };
+async function updateVideoPlaylist() { await updatePlaylist('video'); }
+async function updateArtnetPlaylist() { await updatePlaylist('artnet'); }
+
 
 // ========================================
-// ART-NET PLAYLIST
+// ART-NET PLAYLIST RENDERING (LEGACY - uses generic load functions)
 // ========================================
-
-let artnetFiles = [];
-let currentArtnet = null;
-
-async function loadArtnetPlaylist() {
-    try {
-        // Load player configuration from server
-        const response = await fetch(`${API_BASE}/api/player/artnet/status`);
-        const data = await response.json();
-        
-        if (data.success && data.playlist) {
-            // Restore playlist (detect generators)
-            artnetFiles = data.playlist.map((path, idx) => {
-                // Handle both string paths and object entries
-                let actualPath = typeof path === 'string' ? path : path.path;
-                
-                if (!actualPath) {
-                    console.warn('Empty path in artnet playlist at index', idx);
-                    return null;
-                }
-                
-                if (actualPath.startsWith('generator:')) {
-                    // Generator item
-                    const generatorId = actualPath.replace('generator:', '');
-                    const generator = availableGenerators.find(g => g.id === generatorId);
-                    const generatorName = generator ? generator.name : generatorId;
-                    return {
-                        path: actualPath,
-                        name: `🌟 ${generatorName}`,
-                        id: Date.now() + Math.random() + idx,
-                        type: 'generator',
-                        generator_id: generatorId,
-                        parameters: (typeof path === 'object' && path.parameters) ? path.parameters : {}
-                    };
-                } else {
-                    // Regular video item
-                    return {
-                        name: actualPath.split('/').pop().split('\\').pop(),
-                        path: actualPath,
-                        id: Date.now() + Math.random() + idx
-                    };
-                }
-            }).filter(item => item !== null);
-            
-            // Restore autoplay/loop state
-            artnetAutoplay = data.autoplay || false;
-            artnetLoop = data.loop || false;
-            
-            // Restore current Art-Net video
-            if (data.current_video) {
-                currentArtnet = data.current_video.replace(/^[\\\/]+/, '');
-            }
-            
-            // Update UI buttons
-            const autoplayBtn = document.getElementById('artnetAutoplayBtn');
-            const loopBtn = document.getElementById('artnetLoopBtn');
-            if (autoplayBtn) {
-                if (artnetAutoplay) {
-                    autoplayBtn.classList.remove('btn-outline-primary');
-                    autoplayBtn.classList.add('btn-primary');
-                } else {
-                    autoplayBtn.classList.remove('btn-primary');
-                    autoplayBtn.classList.add('btn-outline-primary');
-                }
-            }
-            if (loopBtn) {
-                if (artnetLoop) {
-                    loopBtn.classList.remove('btn-outline-primary');
-                    loopBtn.classList.add('btn-primary');
-                } else {
-                    loopBtn.classList.remove('btn-primary');
-                    loopBtn.classList.add('btn-outline-primary');
-                }
-            }
-        } else {
-            // Start with empty playlist
-            artnetFiles = [];
-        }
-    } catch (error) {
-        console.error('❌ Failed to load Art-Net playlist:', error);
-        artnetFiles = [];
-    }
-    
-    renderArtnetPlaylist();
-}
 
 function renderArtnetPlaylist() {
     const container = document.getElementById('artnetPlaylist');
@@ -1471,40 +1691,48 @@ function renderArtnetPlaylist() {
             
             emptyZone.addEventListener('drop', (e) => {
                 e.preventDefault();
-                e.stopPropagation();
+                e.stopPropagation(); // WICHTIG: Verhindere Bubbling zum Container!
+                e.stopImmediatePropagation();
+                e._handledByDropZone = true; // Flag for container handler
                 emptyZone.style.background = '';
+                
+                // Get playlist type from data attribute
+                const playlistType = emptyZone.dataset.playlist || 'artnet';
+                const files = playlistType === 'video' ? videoFiles : artnetFiles;
                 
                 // Check if dropping a generator
                 const generatorId = e.dataTransfer.getData('generatorId');
                 if (generatorId) {
-                    console.log('🌟 DROP GENERATOR to empty artnet playlist, id:', generatorId);
+                    console.log(`🌟 DROP GENERATOR to empty ${playlistType} playlist, id:`, generatorId);
                     const generatorName = e.dataTransfer.getData('generatorName') || generatorId;
                     const newGenerator = {
                         path: `generator:${generatorId}`,
                         name: `🌟 ${generatorName}`,
-                        id: Date.now() + Math.random(),
+                        id: crypto.randomUUID(),
                         type: 'generator',
                         generator_id: generatorId
                     };
-                    artnetFiles.push(newGenerator);
-                    renderArtnetPlaylist();
-                    console.log(`📋 Added generator ${generatorName} to empty artnet playlist`);
+                    files.push(newGenerator);
+                    renderPlaylist(playlistType);
+                    updatePlaylist(playlistType);  // Sync to backend!
+                    console.log(`📋 Added generator ${generatorName} to empty ${playlistType} playlist`);
                     return false;
                 }
                 
                 // Check if dropping a file
                 const videoPath = e.dataTransfer.getData('video-path');
                 if (videoPath) {
-                    console.log('🎯 DROP FILE to empty artnet playlist, path:', videoPath);
+                    console.log(`🎯 DROP FILE to empty ${playlistType} playlist, path:`, videoPath);
                     const fileName = videoPath.split(/[/\\]/).pop();
                     const newVideo = {
                         path: videoPath,
                         name: fileName,
-                        id: Date.now() + Math.random()
+                        id: crypto.randomUUID()
                     };
-                    artnetFiles.push(newVideo);
-                    renderArtnetPlaylist();
-                    console.log(`📋 Added file ${fileName} to empty artnet playlist`);
+                    files.push(newVideo);
+                    renderPlaylist(playlistType);
+                    updatePlaylist(playlistType);  // Sync to backend!
+                    console.log(`📋 Added file ${fileName} to empty ${playlistType} playlist`);
                     return false;
                 }
             });
@@ -1516,10 +1744,8 @@ function renderArtnetPlaylist() {
     // Build HTML with drop zones between items
     let html = '';
     artnetFiles.forEach((video, index) => {
-        // Normalisiere Pfade für Vergleich (entferne führende Slashes)
-        const normalizedVideoPath = video.path.replace(/^[\\\/]+/, '');
-        const normalizedCurrent = currentArtnet ? currentArtnet.replace(/^[\\\/]+/, '') : null;
-        const isActive = normalizedCurrent === normalizedVideoPath;
+        // Check if this specific playlist item is currently playing (by unique frontend ID)
+        const isActive = (currentArtnetItemId === video.id);
         
         // Drop zone before item
         html += `<div class="drop-zone" data-drop-index="${index}" data-playlist="artnet"></div>`;
@@ -1570,25 +1796,9 @@ function renderArtnetPlaylist() {
                     // Load generator parameters
                     console.log(`👁️ Hovering generator: ${artnetItem.generator_id}`);
                     
-                    // Check if this generator is currently playing to get clip ID
-                    const normalizedGenPath = artnetItem.path.replace(/^[\\\\\\\\//]+/, '');
-                    const normalizedCurrent = currentArtnet ? currentArtnet.replace(/^[\\\\\\\\//]+/, '') : null;
-                    const isCurrentlyPlaying = (normalizedCurrent === normalizedGenPath);
-                    
-                    // Get clip ID from backend if currently playing
-                    if (isCurrentlyPlaying) {
-                        try {
-                            const response = await fetch(`${API_BASE}/api/player/artnet/status`);
-                            const data = await response.json();
-                            if (data.clip_id) {
-                                selectedClipId = data.clip_id;
-                            }
-                        } catch (error) {
-                            console.error('Error getting artnet clip ID:', error);
-                        }
-                    } else {
-                        selectedClipId = null;
-                    }
+                    // Use the item's UUID directly from the playlist
+                    selectedClipId = artnetItem.id;
+                    console.log(`🎯 Using artnet generator clip UUID from playlist: ${selectedClipId}`);
                     
                     selectedClipPath = artnetItem.path;
                     window.currentGeneratorId = artnetItem.generator_id;
@@ -1622,10 +1832,11 @@ function renderArtnetPlaylist() {
                 } else {
                     // Regular video - load effects
                     selectedClipPath = artnetItem.path;
-                    selectedClipId = null;
+                    selectedClipId = artnetItem.id; // Use UUID from playlist
                     window.currentGeneratorId = null;
                     window.currentGeneratorParams = null;
                     window.currentGeneratorMeta = null;
+                    console.log(`🎯 Using artnet video clip UUID from playlist: ${selectedClipId}`);
                     await refreshClipEffects();
                 }
             }, 1000);
@@ -1649,10 +1860,12 @@ function renderArtnetPlaylist() {
                 }
                 
                 const artnetItem = artnetFiles[index];
+                currentArtnetItemId = artnetItem.id; // Store which item is playing
+                
                 if (artnetItem.type === 'generator' && artnetItem.generator_id) {
-                    await loadGeneratorClip(artnetItem.generator_id, 'artnet');
+                    await loadGeneratorClip(artnetItem.generator_id, 'artnet', artnetItem.id);
                 } else {
-                    await loadArtnetFile(artnetItem.path);
+                    await loadArtnetFile(artnetItem.path, artnetItem.id);
                 }
             }
         });
@@ -1703,6 +1916,7 @@ function renderArtnetPlaylist() {
         zone.addEventListener('drop', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            e._handledByDropZone = true; // Flag for container handler
             zone.classList.remove('drag-over');
             
             const dropIndex = parseInt(zone.dataset.dropIndex);
@@ -1715,13 +1929,15 @@ function renderArtnetPlaylist() {
                 const newGenerator = {
                     path: `generator:${generatorId}`,
                     name: `🌟 ${generatorName}`,
-                    id: Date.now() + Math.random(),
+                    id: crypto.randomUUID(), // Unique ID that becomes clip_id
                     type: 'generator',
                     generator_id: generatorId
                 };
                 artnetFiles.splice(dropIndex, 0, newGenerator);
-                renderArtnetPlaylist();
                 console.log(`📋 Added generator ${generatorName} at position ${dropIndex}`);
+                
+                // Delay render to allow event to finish propagating
+                setTimeout(() => renderArtnetPlaylist(), 0);
                 return false;
             }
             
@@ -1733,11 +1949,13 @@ function renderArtnetPlaylist() {
                 const newVideo = {
                     path: videoPath,
                     name: fileName,
-                    id: Date.now() + Math.random()
+                    id: crypto.randomUUID() // Unique ID that becomes clip_id
                 };
                 artnetFiles.splice(dropIndex, 0, newVideo);
-                renderArtnetPlaylist();
                 console.log(`📋 Added file ${fileName} at position ${dropIndex}`);
+                
+                // Delay render to allow event to finish propagating
+                setTimeout(() => renderArtnetPlaylist(), 0);
                 return false;
             }
             
@@ -1768,69 +1986,24 @@ function renderArtnetPlaylist() {
         });
     });
     
-    // Container-level drop handler (register only once)
-    if (!container.dataset.dropHandlerRegistered) {
-        container.dataset.dropHandlerRegistered = 'true';
-        container.addEventListener('drop', (e) => {
-            // Only handle if not over a drop-zone or playlist-item (and not a child of these)
-            if (!e.target.classList.contains('drop-zone') && !e.target.classList.contains('playlist-item') &&
-                !e.target.closest('.drop-zone') && !e.target.closest('.playlist-item')) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            console.log('📦 ARTNET CONTAINER DROP triggered on empty space');
-            
-            // Check if dropping a generator
-            let generatorId = e.dataTransfer.getData('generatorId');
-            if (!generatorId && window.currentDragGenerator) {
-                generatorId = window.currentDragGenerator.id;
-            }
-            
-            if (generatorId) {
-                const generatorName = e.dataTransfer.getData('generatorName') || window.currentDragGenerator?.name || generatorId;
-                const newGenerator = {
-                    path: `generator:${generatorId}`,
-                    name: `🌟 ${generatorName}`,
-                    id: Date.now() + Math.random(),
-                    type: 'generator',
-                    generator_id: generatorId
-                };
-                artnetFiles.push(newGenerator);
-                renderArtnetPlaylist();
-                updateArtnetPlaylist();
-                return false;
-            }
-            
-            // Check if dropping a file
-            const videoPath = e.dataTransfer.getData('video-path');
-            if (videoPath) {
-                const fileName = videoPath.split(/[/\\]/).pop();
-                const newVideo = {
-                    path: videoPath,
-                    name: fileName,
-                    id: Date.now() + Math.random()
-                };
-                artnetFiles.push(newVideo);
-                renderArtnetPlaylist();
-                updateArtnetPlaylist();
-                return false;
-            }
-            }
-        });
-    }
+    // Note: Container-level drop handler is now registered in setupPlaylistContainerDropHandlers()
+    // called once during init to prevent multiple handler registrations
     
     // Sync playlist to player after rendering
     updateArtnetPlaylist().catch(err => console.error('Failed to sync artnet playlist:', err));
 }
 
 // Load Art-Net video file WITHOUT adding to playlist (used for playlist clicks)
-window.loadArtnetFile = async function(videoPath) {
+window.loadArtnetFile = async function(videoPath, clipId = null) {
     try {
         // NEW: Use unified API
         const response = await fetch(`${API_BASE}/api/player/artnet/clip/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: videoPath })
+            body: JSON.stringify({ 
+                path: videoPath,
+                clip_id: clipId  // Frontend-provided UUID
+            })
         });
         
         const data = await response.json();
@@ -1839,8 +2012,9 @@ window.loadArtnetFile = async function(videoPath) {
             currentArtnet = videoPath.replace(/^[\\\/]+/, '');
             renderArtnetPlaylist();
             
-            // NEW: Store clip ID and path
-            selectedClipId = data.clip_id;
+            // NEW: Store clip ID and path - use frontend clipId (UUID) instead of backend response
+            selectedClipId = clipId || data.clip_id;
+            console.log(`🆔 Artnet clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
             selectedClipPath = videoPath;
             selectedClipPlayerType = 'artnet';
             
@@ -1882,7 +2056,7 @@ window.loadArtnetVideo = async function(videoPath) {
                 path: videoPath,
                 folder: folder,
                 name: filename,
-                id: Date.now() + Math.random() // Unique ID for each entry
+                id: crypto.randomUUID() // Unique ID for each entry
             });
             
             renderArtnetPlaylist();
@@ -1923,9 +2097,9 @@ window.removeFromArtnetPlaylist = async function(index) {
             console.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
             
             if (nextItem.type === 'generator' && nextItem.generator_id) {
-                await loadGeneratorClip(nextItem.generator_id, 'artnet');
+                await loadGeneratorClip(nextItem.generator_id, 'artnet', nextItem.id);
             } else {
-                await loadArtnetFile(nextItem.path);
+                await loadArtnetFile(nextItem.path, nextItem.id);
             }
         } else {
             // No more clips - stop player and show black screen
@@ -1962,119 +2136,16 @@ window.openArtnetFullscreen = function() {
 };
 
 // ========================================
-// ART-NET PLAYER CONTROLS
+// ART-NET PLAYER CONTROLS (using generic functions)
 // ========================================
 
-window.playArtnet = async function() {
-    await fetch(`${API_BASE}/api/player/artnet/play`, { method: 'POST' });
-};
-
-window.pauseArtnet = async function() {
-    await fetch(`${API_BASE}/api/player/artnet/pause`, { method: 'POST' });
-};
-
-window.stopArtnet = async function() {
-    await fetch(`${API_BASE}/api/player/artnet/stop`, { method: 'POST' });
-};
-
-window.nextArtnet = async function() {
-    try {
-        const response = await fetch(`${API_BASE}/api/player/artnet/next`, { method: 'POST' });
-        const data = await response.json();
-        
-        if (data.success) {
-            currentArtnet = data.video;
-            renderArtnetPlaylist();
-            console.log('⏭️ Next Art-Net video:', data.video);
-        } else {
-            console.error('Failed to load next Art-Net video:', data.message);
-        }
-    } catch (error) {
-        console.error('❌ Error loading next Art-Net video:', error);
-    }
-};
-
-window.previousArtnet = async function() {
-    try {
-        const response = await fetch(`${API_BASE}/api/player/artnet/previous`, { method: 'POST' });
-        const data = await response.json();
-        
-        if (data.success) {
-            currentArtnet = data.video;
-            renderArtnetPlaylist();
-            console.log('⏮️ Previous Art-Net video:', data.video);
-        } else {
-            console.error('Failed to load previous Art-Net video:', data.message);
-        }
-    } catch (error) {
-        console.error('❌ Error loading previous Art-Net video:', error);
-    }
-};
-
-// Autoplay & Loop Toggle für Art-Net Player
-window.toggleArtnetAutoplay = async function() {
-    artnetAutoplay = !artnetAutoplay;
-    const btn = document.getElementById('artnetAutoplayBtn');
-    if (artnetAutoplay) {
-        btn.classList.remove('btn-outline-primary');
-        btn.classList.add('btn-primary');
-        showToast('Art-Net Autoplay aktiviert', 'success');
-    } else {
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-outline-primary');
-        showToast('Art-Net Autoplay deaktiviert', 'info');
-    }
-    
-    // Update Player ZUERST - damit autoplay flag gesetzt ist
-    await updateArtnetPlaylist();
-    
-    // Dann starte Wiedergabe wenn autoplay aktiviert und Playlist vorhanden
-    if (artnetAutoplay && artnetFiles.length > 0) {
-        const statusResponse = await fetch(`${API_BASE}/api/player/artnet/status`);
-        const statusData = await statusResponse.json();
-        if (statusData.success && !statusData.is_playing) {
-            // Lade und starte erstes Video wenn keins läuft
-            await loadArtnetFile(artnetFiles[0].path);
-            await playArtnet();
-            console.log('🎬 Art-Net Autoplay: Starte erstes Video');
-        }
-    }
-};
-
-window.toggleArtnetLoop = async function() {
-    artnetLoop = !artnetLoop;
-    const btn = document.getElementById('artnetLoopBtn');
-    if (artnetLoop) {
-        btn.classList.remove('btn-outline-primary');
-        btn.classList.add('btn-primary');
-        showToast('Art-Net Loop aktiviert', 'success');
-    } else {
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-outline-primary');
-        showToast('Art-Net Loop deaktiviert', 'info');
-    }
-    // Update Player
-    await updateArtnetPlaylist();
-};
-
-// Sendet aktuelle Playlist an Art-Net Player
-async function updateArtnetPlaylist() {
-    try {
-        const response = await fetch(`${API_BASE}/api/player/artnet/playlist/set`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                playlist: artnetFiles.map(v => v.path),
-                autoplay: artnetAutoplay,
-                loop: artnetLoop
-            })
-        });
-        const data = await response.json();
-        // Art-Net playlist updated successfully
-    } catch (error) {
-        console.error('❌ Error updating Art-Net playlist:', error);
-    }
-}
+window.playArtnet = async function() { await play('artnet'); };
+window.pauseArtnet = async function() { await pause('artnet'); };
+window.stopArtnet = async function() { await stop('artnet'); };
+window.nextArtnet = async function() { await next('artnet'); };
+window.previousArtnet = async function() { await previous('artnet'); };
+window.toggleArtnetAutoplay = async function() { await toggleAutoplay('artnet'); };
+window.toggleArtnetLoop = async function() { await toggleLoop('artnet'); };
 
 // ========================================
 // VIDEO FX MANAGEMENT
@@ -3102,6 +3173,217 @@ async function updateTransitionConfig(player) {
         console.error(`❌ Error updating ${player} transition config:`, error);
     }
 }
+
+// ========================================
+// SESSION SNAPSHOT MANAGEMENT
+// ========================================
+
+window.saveSnapshot = async function() {
+    try {
+        const response = await fetch(`${API_BASE}/api/session/snapshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast(`📸 Snapshot created: ${data.filename}`, 'success');
+        } else {
+            showToast(`Failed to create snapshot: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error creating snapshot:', error);
+        showToast('Error creating snapshot', 'error');
+    }
+};
+
+window.refreshSnapshotModal = async function() {
+    try {
+        // Get list of available snapshots
+        const response = await fetch(`${API_BASE}/api/session/snapshots`);
+        const data = await response.json();
+        
+        const modalBody = document.getElementById('snapshotModalBody');
+        
+        if (!data.success || !data.snapshots || data.snapshots.length === 0) {
+            modalBody.innerHTML = `
+                <div class="text-center">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">📸</div>
+                    <p>No snapshots found</p>
+                    <p class="text-muted small">Create a snapshot to save the current session state</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Build snapshot selection list
+        let html = '<div class="list-group">';
+        data.snapshots.forEach((snapshot, index) => {
+            const date = new Date(snapshot.created).toLocaleDateString('de-DE', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            
+            const videoCount = snapshot.video_count || 0;
+            const artnetCount = snapshot.artnet_count || 0;
+            const sizeKB = (snapshot.size / 1024).toFixed(1);
+            
+            html += `
+                <div class="list-group-item" 
+                     style="background: var(--bg-tertiary, #333); color: var(--text-primary, #e0e0e0); border: 1px solid var(--border-color, #444); margin-bottom: 0.5rem; border-radius: 4px; padding: 0;">
+                    <div class="d-flex">
+                        <button type="button" 
+                                class="flex-grow-1 btn text-start p-3" 
+                                style="background: none; border: none; color: inherit;"
+                                onclick="selectSnapshot('${snapshot.filename}')">
+                            <div class="d-flex w-100 justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="mb-1">📸 ${snapshot.filename}</h6>
+                                    <small class="text-muted">${date}</small>
+                                </div>
+                            </div>
+                            <p class="mb-0 mt-2">
+                                <span class="badge bg-primary">Video: ${videoCount}</span>
+                                <span class="badge bg-info">Art-Net: ${artnetCount}</span>
+                                <span class="badge bg-secondary">${sizeKB} KB</span>
+                            </p>
+                        </button>
+                        <button type="button" 
+                                class="btn btn-danger" 
+                                style="border-radius: 0 4px 4px 0; min-width: 60px;"
+                                onclick="deleteSnapshot('${snapshot.filename}', event)"
+                                title="Snapshot löschen">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+        
+        modalBody.innerHTML = html;
+        
+    } catch (error) {
+        console.error('❌ Error refreshing snapshots:', error);
+        showToast('Error loading snapshots', 'error');
+    }
+};
+
+window.loadSnapshotModal = async function() {
+    try {
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('snapshotModal'));
+        modal.show();
+        
+        // Load snapshot list
+        await refreshSnapshotModal();
+        
+    } catch (error) {
+        console.error('❌ Error loading snapshots:', error);
+        showToast('Error loading snapshots', 'error');
+        bootstrap.Modal.getInstance(document.getElementById('snapshotModal'))?.hide();
+    }
+};
+
+window.selectSnapshot = async function(filename) {
+    try {
+        console.log('🔄 Restoring snapshot:', filename);
+        
+        // Confirm restore
+        if (!confirm(`Restore snapshot "${filename}"?\n\nThis will replace the current session state and reload the page.`)) {
+            return;
+        }
+        
+        // Restore the snapshot
+        const restoreResponse = await fetch(`${API_BASE}/api/session/snapshot/restore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: filename })
+        });
+        const restoreData = await restoreResponse.json();
+        
+        if (restoreData.success) {
+            showToast('✅ Snapshot restored! Reloading...', 'success');
+            
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('snapshotModal'))?.hide();
+            
+            // Reload page after short delay
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            showToast(`Failed to restore: ${restoreData.error}`, 'error');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error restoring snapshot:', error);
+        showToast('Error restoring snapshot', 'error');
+    }
+};
+
+window.deleteSnapshot = async function(filename, e) {
+    e.stopPropagation();
+    
+    const button = e.currentTarget;
+    const originalText = button.innerHTML;
+    const originalOnclick = button.onclick;
+    
+    // First click: Confirm
+    button.innerHTML = '✓';
+    button.classList.remove('btn-danger');
+    button.classList.add('btn-warning');
+    button.onclick = null; // Disable further clicks
+    
+    // Set timeout to reset button
+    const resetTimer = setTimeout(() => {
+        button.innerHTML = originalText;
+        button.classList.remove('btn-warning');
+        button.classList.add('btn-danger');
+        button.onclick = originalOnclick;
+    }, 3000);
+    
+    // Wait for second click
+    button.onclick = async (e) => {
+        e.stopPropagation();
+        clearTimeout(resetTimer);
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/session/snapshot/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: filename })
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                showToast(`Snapshot "${filename}" deleted`, 'success');
+                // Refresh the snapshot list without closing modal
+                await refreshSnapshotModal();
+            } else {
+                showToast(`Error deleting: ${data.error}`, 'error');
+                // Reset button on error
+                button.innerHTML = originalText;
+                button.classList.remove('btn-warning');
+                button.classList.add('btn-danger');
+                button.onclick = originalOnclick;
+            }
+        } catch (error) {
+            console.error('❌ Error deleting snapshot:', error);
+            showToast('Error deleting snapshot', 'error');
+            // Reset button on error
+            button.innerHTML = originalText;
+            button.classList.remove('btn-warning');
+            button.classList.add('btn-danger');
+            button.onclick = originalOnclick;
+        }
+    };
+};
 
 // Cleanup
 window.addEventListener('beforeunload', () => {

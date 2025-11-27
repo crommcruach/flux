@@ -20,7 +20,9 @@
             </div>
             <div class="playlist-management-bar-actions">
                 <button class="btn btn-success btn-sm" onclick="savePlaylists()" title="Save Both Playlists">💾 Save Playlists</button>
+                <button class="btn btn-primary btn-sm" onclick="saveSnapshot()" title="Create Snapshot">📸 Snapshot</button>
                 <button class="btn btn-info btn-sm" onclick="loadPlaylists()" title="Load Both Playlists">📂 Load Playlists</button>
+                <button class="btn btn-warning btn-sm" onclick="loadSnapshotModal()" title="Load Snapshot">🔄 Restore</button>
             </div>
         </div>
         
@@ -282,8 +284,8 @@
         </div>
     </div>
 
-    <!-- Toast Container -->
-    <div id="toastContainer" class="toast-container"></div>
+    <!-- Toast Component -->
+    <script src="js/toast-loader.js"></script>
 
     <!-- Playlist Load Modal -->
     <div class="modal fade" id="playlistModal" tabindex="-1" aria-labelledby="playlistModalLabel" aria-hidden="true">
@@ -294,6 +296,25 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" id="playlistModalBody">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Snapshot Load Modal -->
+    <div class="modal fade" id="snapshotModal" tabindex="-1" aria-labelledby="snapshotModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="snapshotModalLabel">🔄 Restore Session Snapshot</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="snapshotModalBody">
                     <div class="text-center">
                         <div class="spinner-border text-primary" role="status">
                             <span class="visually-hidden">Loading...</span>

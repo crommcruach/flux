@@ -23,9 +23,6 @@ class ClipRegistry:
         """Initialisiert die Clip-Registry."""
         # Mapping: clip_id (UUID) -> clip_data
         self.clips: Dict[str, Dict] = {}
-        
-        # Reverse-Mapping für schnelle Suche: (player_id, absolute_path) -> clip_id
-        self._path_index: Dict[tuple, str] = {}
     
     def register_clip(
         self, 
@@ -35,7 +32,8 @@ class ClipRegistry:
         metadata: Optional[Dict] = None
     ) -> str:
         """
-        Registriert einen neuen Clip oder gibt existierende ID zurück.
+        Registriert einen neuen Clip mit eindeutiger UUID.
+        Jeder Call erzeugt eine NEUE Clip-Instanz, auch bei gleichem Pfad.
         
         Args:
             player_id: ID des Players ('video' oder 'artnet')
@@ -46,14 +44,7 @@ class ClipRegistry:
         Returns:
             clip_id: Eindeutige UUID für diesen Clip
         """
-        # Prüfe ob Clip bereits registriert
-        index_key = (player_id, absolute_path)
-        if index_key in self._path_index:
-            clip_id = self._path_index[index_key]
-            logger.debug(f"Clip bereits registriert: {clip_id} ({os.path.basename(absolute_path)})")
-            return clip_id
-        
-        # Erstelle neue Clip-ID
+        # Erstelle IMMER neue Clip-ID (jede Playlist-Instanz ist unabhängig)
         clip_id = str(uuid.uuid4())
         
         # Speichere Clip-Daten
@@ -67,9 +58,6 @@ class ClipRegistry:
             'created_at': datetime.now().isoformat(),
             'effects': []  # Clip-spezifische Effekte
         }
-        
-        # Index aktualisieren
-        self._path_index[index_key] = clip_id
         
         logger.info(f"✅ Clip registriert: {clip_id} → {player_id}/{os.path.basename(absolute_path)}")
         return clip_id
@@ -88,7 +76,9 @@ class ClipRegistry:
     
     def find_clip_by_path(self, player_id: str, absolute_path: str) -> Optional[str]:
         """
-        Findet Clip-ID anhand von Player-ID und Pfad.
+        Findet ERSTE Clip-ID anhand von Player-ID und Pfad.
+        HINWEIS: Mehrere Clips können denselben Pfad haben!
+        Gibt nur den ersten gefundenen Clip zurück.
         
         Args:
             player_id: ID des Players
@@ -97,8 +87,11 @@ class ClipRegistry:
         Returns:
             clip_id oder None wenn nicht gefunden
         """
-        index_key = (player_id, absolute_path)
-        return self._path_index.get(index_key)
+        # Suche in allen Clips (kann mehrere mit gleichem Pfad geben)
+        for clip_id, clip_data in self.clips.items():
+            if clip_data['player_id'] == player_id and clip_data['absolute_path'] == absolute_path:
+                return clip_id
+        return None
     
     def get_clips_for_player(self, player_id: str) -> List[Dict]:
         """

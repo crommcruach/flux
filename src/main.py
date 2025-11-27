@@ -205,6 +205,21 @@ def main():
     clip_registry = get_clip_registry()
     logger.info("ClipRegistry initialisiert")
     
+    # SessionStateManager initialisieren
+    from modules.session_state import init_session_state
+    session_state_path = os.path.join(base_path, 'session_state.json')
+    
+    # Lösche alte Session-Daten beim Neustart
+    if os.path.exists(session_state_path):
+        try:
+            os.remove(session_state_path)
+            logger.info("Alte Session-Daten gelöscht (Neustart)")
+        except Exception as e:
+            logger.warning(f"Konnte Session-Daten nicht löschen: {e}")
+    
+    session_state = init_session_state(session_state_path)
+    logger.info("SessionStateManager initialisiert")
+    
     # Video Player initialisieren (nur für Preview, KEIN Art-Net Output!)
     # Starte mit leerer DummySource - User muss Video explizit laden
     from modules.frame_source import DummySource
@@ -236,6 +251,19 @@ def main():
     # PlayerManager initialisieren (Single Source of Truth)
     player_manager = PlayerManager(player, artnet_player)
     logger.info("PlayerManager initialisiert mit Video Player und Art-Net Player")
+    
+    # Session State wird NICHT geladen beim Start (frischer Start)
+    # User kann über Snapshots wiederherstellen wenn gewünscht
+    logger.info("Start mit leeren Playlists (Session State gelöscht)")
+    
+    # Kommentiert: Alte Session State Loading Logik - nicht mehr beim Start geladen
+    # try:
+    #     saved_state = session_state.load()
+    #     # ... Restore Video Player state ...
+    #     # ... Restore Art-Net Player state ...
+    #     logger.info(f"✅ Session State geladen: {saved_state['last_updated']}")
+    # except Exception as e:
+    #     logger.warning(f"⚠️ Fehler beim Laden von Session State: {e}")
     
     # DMX-Controller initialisieren (nur für DMX-Input zuständig)
     dmx_controller = DMXController(
