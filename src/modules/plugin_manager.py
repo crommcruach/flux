@@ -73,7 +73,12 @@ class PluginManager:
                 # Import Module
                 module_path = f"plugins.{category_dir.name}.{plugin_file.stem}"
                 try:
-                    module = importlib.import_module(module_path)
+                    # Check if module is already imported and reload it
+                    import sys
+                    if module_path in sys.modules:
+                        module = importlib.reload(sys.modules[module_path])
+                    else:
+                        module = importlib.import_module(module_path)
                     
                     # Finde alle PluginBase-Subklassen im Modul
                     for name, obj in inspect.getmembers(module, inspect.isclass):

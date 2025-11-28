@@ -491,6 +491,151 @@ def register_unified_routes(app, player_manager, config):
             return jsonify({"success": False, "error": str(e)}), 500
     
     # ========================================
+    # PLAYER EFFECT CHAIN (Unified API for /api/player/effects and /api/artnet/effects)
+    # ========================================
+    
+    @app.route('/api/player/<player_id>/effects', methods=['GET'])
+    def get_player_effects(player_id):
+        """Gibt die Effect Chain eines Players zurück."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({'error': f'Player "{player_id}" not found'}), 404
+            
+            # Get effects from appropriate chain based on player_id
+            chain_type = 'artnet' if player_id == 'artnet' else 'video'
+            effects = player.get_effect_chain(chain_type=chain_type)
+            
+            return jsonify({
+                'success': True,
+                'player_id': player_id,
+                'effects': effects,
+                'count': len(effects)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting player effects: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/player/<player_id>/effects/add', methods=['POST'])
+    def add_player_effect(player_id):
+        """Fügt einen Effect zur Player Chain hinzu."""
+        try:
+            data = request.get_json()
+            plugin_id = data.get('plugin_id')
+            config = data.get('config', {})
+            
+            if not plugin_id:
+                return jsonify({"success": False, "error": "plugin_id required"}), 400
+            
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            # Use appropriate chain type
+            chain_type = 'artnet' if player_id == 'artnet' else 'video'
+            success, message = player.add_effect_to_chain(plugin_id, config, chain_type=chain_type)
+            
+            if success:
+                # Auto-save session state
+                session_state = get_session_state()
+                if session_state:
+                    session_state.save(player_manager, clip_registry)
+                
+                return jsonify({"success": True, "message": message, "player_id": player_id})
+            else:
+                return jsonify({"success": False, "error": message}), 400
+                
+        except Exception as e:
+            logger.error(f"Error adding player effect: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/player/<player_id>/effects/<int:index>', methods=['DELETE'])
+    def remove_player_effect(player_id, index):
+        """Entfernt einen Effect aus der Player Chain."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            chain_type = 'artnet' if player_id == 'artnet' else 'video'
+            success, message = player.remove_effect_from_chain(index, chain_type=chain_type)
+            
+            if success:
+                # Auto-save session state
+                session_state = get_session_state()
+                if session_state:
+                    session_state.save(player_manager, clip_registry)
+                
+                return jsonify({"success": True, "message": message, "player_id": player_id})
+            else:
+                return jsonify({"success": False, "error": message}), 400
+                
+        except Exception as e:
+            logger.error(f"Error removing player effect: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/player/<player_id>/effects/clear', methods=['POST'])
+    def clear_player_effects(player_id):
+        """Entfernt alle Effects aus der Player Chain."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            chain_type = 'artnet' if player_id == 'artnet' else 'video'
+            success, message = player.clear_effects_chain(chain_type=chain_type)
+            
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                session_state.save(player_manager, clip_registry)
+            
+            return jsonify({"success": True, "message": message, "player_id": player_id})
+            
+        except Exception as e:
+            logger.error(f"Error clearing player effects: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/player/<player_id>/effects/<int:index>/parameter', methods=['PUT'])
+    def update_player_effect_parameter(player_id, index):
+        """Aktualisiert einen Parameter eines Player Effects."""
+        try:
+            data = request.get_json()
+            param_name = data.get('name')
+            value = data.get('value')
+            
+            if param_name is None or value is None:
+                return jsonify({"success": False, "error": "name and value required"}), 400
+            
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            # Get appropriate chain
+            chain = player.artnet_effect_chain if player_id == 'artnet' else player.video_effect_chain
+            
+            if index < 0 or index >= len(chain):
+                return jsonify({"success": False, "error": "Invalid index"}), 400
+            
+            effect = chain[index]
+            effect['instance'].set_parameter(param_name, value)
+            effect['config'][param_name] = value
+            
+            logger.info(f"✅ Parameter '{param_name}' von Effect {index} auf {value} gesetzt ({player_id})")
+            
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                session_state.save(player_manager, clip_registry)
+            
+            return jsonify({"success": True, "player_id": player_id, "index": index, "parameter": param_name, "value": value})
+            
+        except Exception as e:
+            logger.error(f"Error updating player effect parameter: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    # ========================================
     # PLAYBACK CONTROL
     # ========================================
     
@@ -868,6 +1013,9 @@ def register_unified_routes(app, player_manager, config):
             if not isinstance(player.source, GeneratorSource):
                 return jsonify({"success": False, "error": "Current source is not a generator"}), 400
             
+            # Log the update attempt
+            logger.info(f"🔧 [{player_id}] Attempting to update generator parameter: {param_name} = {param_value} (generator: {player.source.generator_id})")
+            
             # Update parameter
             success = player.source.update_parameter(param_name, param_value)
             
@@ -892,6 +1040,7 @@ def register_unified_routes(app, player_manager, config):
                     "value": param_value
                 })
             else:
+                logger.error(f"❌ [{player_id}] Failed to update generator parameter: {param_name} = {param_value} (generator: {player.source.generator_id}, has plugin: {player.source.plugin_instance is not None})")
                 return jsonify({"success": False, "error": f"Failed to update parameter {param_name}"}), 400
             
         except Exception as e:
@@ -951,16 +1100,23 @@ def register_unified_routes(app, player_manager, config):
                     if item_id not in clip_registry.clips:
                         logger.debug(f"📌 Registering clip from playlist: {item_id} → {os.path.basename(absolute_path)}")
                         
-                        clip_registry.clips[item_id] = {
-                            'clip_id': item_id,
-                            'player_id': player_id,
-                            'absolute_path': absolute_path,
-                            'relative_path': os.path.relpath(absolute_path, video_dir) if not absolute_path.startswith('generator:') else absolute_path,
-                            'filename': os.path.basename(absolute_path),
-                            'metadata': {'type': item_type, 'generator_id': generator_id, 'parameters': parameters} if item_type == 'generator' else {},
-                            'created_at': datetime.now().isoformat(),
-                            'effects': []
-                        }
+                        # Use register_clip() to ensure default effects are applied
+                        relative_path = os.path.relpath(absolute_path, video_dir) if not absolute_path.startswith('generator:') else absolute_path
+                        metadata = {'type': item_type, 'generator_id': generator_id, 'parameters': parameters} if item_type == 'generator' else {}
+                        
+                        # Register with the provided UUID instead of generating new one
+                        registered_id = clip_registry.register_clip(
+                            player_id,
+                            absolute_path,
+                            relative_path,
+                            metadata
+                        )
+                        
+                        # Update the clip_id to use the provided one (overwrite generated UUID)
+                        if registered_id != item_id:
+                            clip_registry.clips[item_id] = clip_registry.clips[registered_id]
+                            clip_registry.clips[item_id]['clip_id'] = item_id
+                            del clip_registry.clips[registered_id]
             
             player.playlist = absolute_playlist
             player.playlist_ids = playlist_ids  # Neue Property für UUID-Mapping
@@ -1028,5 +1184,140 @@ def register_unified_routes(app, player_manager, config):
             import traceback
             logger.error(traceback.format_exc())
             return jsonify({"success": False, "error": str(e)}), 500
+    
+    # ========================================
+    # PLAYLIST SAVE/LOAD
+    # ========================================
+    
+    @app.route('/api/playlist/save', methods=['POST'])
+    def save_playlist():
+        """Speichert beide Playlists zusammen."""
+        try:
+            import json
+            from datetime import datetime
+            
+            data = request.get_json()
+            name = data.get('name', f'playlist_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+            video_playlist = data.get('video_playlist', [])
+            artnet_playlist = data.get('artnet_playlist', [])
+            
+            # Create playlists directory if it doesn't exist
+            playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
+            os.makedirs(playlists_dir, exist_ok=True)
+            
+            # Save combined playlist as JSON
+            playlist_path = os.path.join(playlists_dir, f'{name}.json')
+            playlist_data = {
+                'name': name,
+                'created': datetime.now().isoformat(),
+                'video_playlist': video_playlist,
+                'artnet_playlist': artnet_playlist,
+                'total_videos': len(video_playlist) + len(artnet_playlist)
+            }
+            
+            with open(playlist_path, 'w', encoding='utf-8') as f:
+                json.dump(playlist_data, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"💾 Playlists saved: {name} (Video: {len(video_playlist)}, Art-Net: {len(artnet_playlist)})")
+            return jsonify({
+                "success": True,
+                "status": "success",
+                "message": f"Playlists '{name}' saved",
+                "path": playlist_path,
+                "video_count": len(video_playlist),
+                "artnet_count": len(artnet_playlist)
+            })
+        
+        except Exception as e:
+            logger.error(f"Error saving playlists: {e}")
+            return jsonify({"success": False, "status": "error", "message": str(e)}), 500
+    
+    @app.route('/api/playlist/load/<name>', methods=['GET'])
+    def load_playlist(name):
+        """Lädt eine gespeicherte Playlist."""
+        try:
+            import json
+            
+            playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
+            playlist_path = os.path.join(playlists_dir, f'{name}.json')
+            
+            if not os.path.exists(playlist_path):
+                return jsonify({"success": False, "message": f"Playlist '{name}' not found"}), 404
+            
+            with open(playlist_path, 'r', encoding='utf-8') as f:
+                playlist_data = json.load(f)
+            
+            logger.info(f"📂 Playlist loaded: {name}")
+            return jsonify({
+                "success": True,
+                "name": name,
+                "video_playlist": playlist_data.get('video_playlist', []),
+                "artnet_playlist": playlist_data.get('artnet_playlist', []),
+                "created": playlist_data.get('created'),
+                "total_videos": playlist_data.get('total_videos', 0)
+            })
+        
+        except Exception as e:
+            logger.error(f"Error loading playlist: {e}")
+            return jsonify({"success": False, "message": str(e)}), 500
+    
+    @app.route('/api/playlists', methods=['GET'])
+    def get_playlists():
+        """Gibt Liste aller gespeicherten Playlists zurück."""
+        try:
+            import json
+            
+            playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
+            
+            if not os.path.exists(playlists_dir):
+                return jsonify({"status": "success", "playlists": []})
+            
+            playlists = []
+            for filename in os.listdir(playlists_dir):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(playlists_dir, filename)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        playlists.append({
+                            'name': data.get('name', filename[:-5]),
+                            'filename': filename[:-5],
+                            'created': data.get('created'),
+                            'video_count': len(data.get('video_playlist', [])),
+                            'artnet_count': len(data.get('artnet_playlist', [])),
+                            'total': data.get('total_videos', 0)
+                        })
+                    except Exception as e:
+                        logger.error(f"Error reading playlist {filename}: {e}")
+                        continue
+            
+            # Sort by creation date (newest first)
+            playlists.sort(key=lambda x: x.get('created', ''), reverse=True)
+            
+            return jsonify({"status": "success", "playlists": playlists})
+        
+        except Exception as e:
+            logger.error(f"Error getting playlists: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    @app.route('/api/playlist/delete/<name>', methods=['DELETE'])
+    def delete_playlist(name):
+        """Löscht eine gespeicherte Playlist."""
+        try:
+            playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
+            playlist_path = os.path.join(playlists_dir, f'{name}.json')
+            
+            if not os.path.exists(playlist_path):
+                return jsonify({"success": False, "message": f"Playlist '{name}' not found"}), 404
+            
+            os.remove(playlist_path)
+            logger.info(f"🗑️ Playlist deleted: {name}")
+            
+            return jsonify({"success": True, "message": f"Playlist '{name}' deleted"})
+        
+        except Exception as e:
+            logger.error(f"Error deleting playlist: {e}")
+            return jsonify({"success": False, "message": str(e)}), 500
     
     logger.info("✅ Unified Player API routes registered")

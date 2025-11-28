@@ -14,6 +14,10 @@ VIDEO_EXTENSIONS_LIST = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.gif']
 GIF_EXTENSIONS = ('.gif',)
 GIF_EXTENSIONS_LIST = ['.gif']
 
+# Bild Konstanten
+IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp', '.gif')
+IMAGE_EXTENSIONS_LIST = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp', '.gif']
+
 # Cache Konstanten
 CACHE_CHUNK_SIZE = 5 * 1024 * 1024  # 5MB für Hash-Berechnung
 CACHE_HASH_LENGTH = 16  # Anzahl Zeichen für Video-Hash

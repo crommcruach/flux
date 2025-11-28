@@ -65,7 +65,9 @@ body {
     background: var(--panel-bg);
     flex-shrink: 0;
     max-height: 190px;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
+    z-index: auto;
 }
 
 .preview-box {
@@ -116,6 +118,8 @@ body {
     gap: 0.5rem;
     overflow: hidden;
     min-height: 0;
+    position: relative;
+    z-index: auto;
 }
 
 .playlist-header {
@@ -631,6 +635,7 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
+    z-index: 10000;
 }
 
 .transition-toggle {
@@ -667,7 +672,7 @@ body {
     border: 2px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    z-index: 1000;
+    z-index: 99999;
     display: none;
 }
 
@@ -742,6 +747,82 @@ body {
 .modal-content {
     background: var(--panel-bg);
     color: var(--text-primary);
+}
+
+/* ========================================
+   FILE BROWSER COMPONENT
+   ======================================== */
+
+/* File Browser Tree */
+.file-browser-tree {
+    user-select: none;
+}
+
+.file-browser-item {
+    margin: 2px 0;
+}
+
+.file-browser-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.file-browser-content:hover {
+    background: var(--bg-secondary);
+}
+
+.file-browser-content.selected {
+    background: var(--primary-color);
+    color: #fff;
+}
+
+.file-browser-content.folder {
+    font-weight: 500;
+}
+
+.file-browser-content.file.video {
+    cursor: grab;
+}
+
+.file-browser-content.file.video:active {
+    cursor: grabbing;
+}
+
+.file-browser-content.file.image {
+    cursor: pointer;
+}
+
+/* FILE Parameter Input */
+.file-input-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.file-input-wrapper input {
+    flex: 1;
+}
+
+.file-input-wrapper .btn-browse {
+    flex-shrink: 0;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+}
+
+/* File Browser Modal */
+.file-browser-modal .modal-body {
+    padding: 0.5rem;
+}
+
+.file-browser-modal .file-browser-tree {
+    min-height: 200px;
+    max-height: 500px;
+    overflow-y: auto;
 }
 
 .modal-header {

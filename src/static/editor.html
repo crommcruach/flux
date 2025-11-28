@@ -7,11 +7,12 @@
   <title>Flux - Video Art-Net Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="styles.css" rel="stylesheet">
+    <link href="css/styles.css" rel="stylesheet">
 </head>
 
 <body>
   <script src="js/menu-loader.js"></script>
+  <script src="js/modal-loader.js"></script>
 
   <div class="app-container">
     <!-- Sub-Header für Canvas-Settings -->
@@ -239,35 +240,6 @@
           <span class="stats-value" id="statsUniverses">0</span>
         </div>
         <div class="stats-note" id="statsNote"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Project Manager Modal -->
-  <div class="modal fade" id="projectManagerModal" tabindex="-1" aria-labelledby="projectManagerModalLabel"
-    aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="projectManagerModalLabel">📂 Projektverwaltung</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h6>Gespeicherte Projekte</h6>
-            <button class="btn btn-primary btn-sm" onclick="refreshProjectList()" title="Aktualisieren">🔄</button>
-          </div>
-          <div id="projectListContainer">
-            <div class="text-center py-4">
-              <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Lädt...</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
-        </div>
       </div>
     </div>
   </div>

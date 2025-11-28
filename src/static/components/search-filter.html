@@ -1,0 +1,238 @@
+<!-- Universal Search/Filter Component Template -->
+<template id="search-filter-template">
+    <div class="search-filter-container">
+        <div class="search-filter-input-wrapper">
+            <span class="search-filter-icon">🔍</span>
+            <input type="text" class="search-filter-input" placeholder="Search...">
+            <button class="search-filter-clear" style="display: none;" title="Clear search">×</button>
+        </div>
+        <div class="search-filter-results" style="display: none;">
+            <span class="search-filter-count">0 results</span>
+        </div>
+    </div>
+</template>
+
+<style>
+.search-filter-container {
+    margin-bottom: 0.75rem;
+}
+
+.search-filter-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.search-filter-icon {
+    position: absolute;
+    left: 0.75rem;
+    font-size: 1rem;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.search-filter-input {
+    width: 100%;
+    padding: 0.5rem 2.5rem 0.5rem 2.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.search-filter-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    background: var(--bg-tertiary);
+}
+
+.search-filter-input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+.search-filter-clear {
+    position: absolute;
+    right: 0.5rem;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.2rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.search-filter-clear:hover {
+    background: var(--accent-color);
+    color: white;
+}
+
+.search-filter-results {
+    margin-top: 0.5rem;
+    text-align: center;
+}
+
+.search-filter-count {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+</style>
+
+<script>
+/**
+ * Universal Search/Filter Component
+ * Creates a reusable search filter that can be attached to any list
+ */
+window.SearchFilter = (function() {
+    
+    /**
+     * Create a search filter instance
+     * @param {Object} options - Configuration
+     * @param {HTMLElement} options.container - Container to insert the search filter
+     * @param {string} options.itemsSelector - CSS selector for items to filter
+     * @param {Function} options.getSearchText - Function to extract searchable text from item
+     * @param {string} options.placeholder - Placeholder text (default: "Search...")
+     * @param {Function} options.onFilter - Callback after filtering (receives visible count)
+     * @param {boolean} options.caseSensitive - Case sensitive search (default: false)
+     * @param {number} options.debounce - Debounce delay in ms (default: 200)
+     * @returns {Object} Search filter controller
+     */
+    function create(options) {
+        const {
+            container,
+            itemsSelector,
+            getSearchText,
+            placeholder = 'Search...',
+            onFilter = null,
+            caseSensitive = false,
+            debounce = 200
+        } = options;
+        
+        if (!container || !itemsSelector || !getSearchText) {
+            console.error('❌ SearchFilter requires container, itemsSelector, and getSearchText');
+            return null;
+        }
+        
+        // Clone template
+        const template = document.getElementById('search-filter-template');
+        if (!template) {
+            console.error('❌ Search filter template not found');
+            return null;
+        }
+        
+        const clone = template.content.cloneNode(true);
+        const searchContainer = clone.querySelector('.search-filter-container');
+        const input = clone.querySelector('.search-filter-input');
+        const clearBtn = clone.querySelector('.search-filter-clear');
+        const resultsDiv = clone.querySelector('.search-filter-results');
+        const countSpan = clone.querySelector('.search-filter-count');
+        
+        // Set placeholder
+        input.placeholder = placeholder;
+        
+        let debounceTimer = null;
+        let currentQuery = '';
+        
+        /**
+         * Perform the filter operation
+         */
+        function performFilter(query) {
+            currentQuery = query;
+            const searchTerm = caseSensitive ? query : query.toLowerCase();
+            const items = document.querySelectorAll(itemsSelector);
+            
+            let visibleCount = 0;
+            let totalCount = items.length;
+            
+            items.forEach(item => {
+                const text = getSearchText(item);
+                const searchableText = caseSensitive ? text : text.toLowerCase();
+                
+                if (searchableText.includes(searchTerm)) {
+                    item.style.display = '';
+                    visibleCount++;
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+            
+            // Update UI
+            if (query.trim() === '') {
+                clearBtn.style.display = 'none';
+                resultsDiv.style.display = 'none';
+            } else {
+                clearBtn.style.display = 'flex';
+                resultsDiv.style.display = 'block';
+                countSpan.textContent = `${visibleCount} of ${totalCount} results`;
+            }
+            
+            // Callback
+            if (onFilter) {
+                onFilter({
+                    query: query,
+                    visible: visibleCount,
+                    total: totalCount,
+                    hidden: totalCount - visibleCount
+                });
+            }
+        }
+        
+        /**
+         * Handle input event with debounce
+         */
+        function handleInput(event) {
+            const query = event.target.value;
+            
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                performFilter(query);
+            }, debounce);
+        }
+        
+        /**
+         * Clear search
+         */
+        function clear() {
+            input.value = '';
+            performFilter('');
+            input.focus();
+        }
+        
+        // Event listeners
+        input.addEventListener('input', handleInput);
+        clearBtn.addEventListener('click', clear);
+        
+        // Insert into container
+        container.insertBefore(clone, container.firstChild);
+        
+        // Return controller
+        return {
+            container: searchContainer,
+            input,
+            clear,
+            refresh: () => performFilter(currentQuery),
+            getQuery: () => currentQuery,
+            setQuery: (query) => {
+                input.value = query;
+                performFilter(query);
+            }
+        };
+    }
+    
+    return {
+        create
+    };
+})();
+
+console.log('✅ SearchFilter component loaded');
+</script>

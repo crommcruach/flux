@@ -11,6 +11,7 @@ from modules.player import Player
 from modules.frame_source import VideoSource
 from modules.cli_handler import CLIHandler
 from modules.logger import FluxLogger, get_logger
+from modules.default_effects import get_default_effects_manager
 
 logger = get_logger(__name__)
 
@@ -251,6 +252,27 @@ def main():
     # PlayerManager initialisieren (Single Source of Truth)
     player_manager = PlayerManager(player, artnet_player)
     logger.info("PlayerManager initialisiert mit Video Player und Art-Net Player")
+    
+    # Default Effects Manager initialisieren und anwenden
+    # WICHTIG: Nach Player-Initialisierung, damit PluginManager bereits geladen ist
+    try:
+        # Hole PluginManager vom Player (bereits initialisiert)
+        plugin_manager = player.plugin_manager
+        default_effects_manager = get_default_effects_manager(config, plugin_manager)
+        
+        # Configure ClipRegistry to auto-apply default effects
+        clip_registry.set_default_effects_manager(default_effects_manager)
+        
+        # Apply default effects to video player
+        video_applied = default_effects_manager.apply_to_player(player_manager, 'video')
+        
+        # Apply default effects to artnet player
+        artnet_applied = default_effects_manager.apply_to_player(player_manager, 'artnet')
+        
+        if video_applied > 0 or artnet_applied > 0:
+            logger.info(f"✨ Default effects applied: {video_applied} video, {artnet_applied} artnet")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to apply default effects: {e}")
     
     # Session State wird NICHT geladen beim Start (frischer Start)
     # User kann über Snapshots wiederherstellen wenn gewünscht

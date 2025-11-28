@@ -23,6 +23,9 @@ class ClipRegistry:
         """Initialisiert die Clip-Registry."""
         # Mapping: clip_id (UUID) -> clip_data
         self.clips: Dict[str, Dict] = {}
+        
+        # Optional: Default effects manager for auto-applying effects
+        self._default_effects_manager = None
     
     def register_clip(
         self, 
@@ -60,6 +63,23 @@ class ClipRegistry:
         }
         
         logger.info(f"✅ Clip registriert: {clip_id} → {player_id}/{os.path.basename(absolute_path)}")
+        
+        # Auto-apply default effects if manager is configured
+        if self._default_effects_manager:
+            try:
+                logger.debug(f"🔧 Attempting to apply default effects to clip {clip_id}")
+                applied = self._default_effects_manager.apply_to_clip(self, clip_id)
+                if applied > 0:
+                    logger.info(f"🎨 Auto-applied {applied} default effects to new clip {clip_id}")
+                else:
+                    logger.debug(f"ℹ️ No default effects configured for clips")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to auto-apply default effects: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+        else:
+            logger.debug(f"ℹ️ No default effects manager configured")
+        
         return clip_id
     
     def get_clip(self, clip_id: str) -> Optional[Dict]:
@@ -107,6 +127,16 @@ class ClipRegistry:
             clip for clip in self.clips.values()
             if clip['player_id'] == player_id
         ]
+    
+    def set_default_effects_manager(self, manager):
+        """
+        Setzt den Default Effects Manager für Auto-Apply bei Clip-Registrierung.
+        
+        Args:
+            manager: DefaultEffectsManager instance
+        """
+        self._default_effects_manager = manager
+        logger.info("🎨 Default Effects Manager configured for ClipRegistry")
     
     def unregister_clip(self, clip_id: str) -> bool:
         """

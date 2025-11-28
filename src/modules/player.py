@@ -86,8 +86,8 @@ class Player:
         self.playlist_index = -1  # Aktueller Index in der Playlist
         self.playlist_params = {}  # Dict: generator_id -> parameters (for autoplay)
         self.playlist_ids = {}  # Map: path → UUID (für Clip-Effekt-Binding)
-        self.autoplay = False  # Automatisch nächstes Video abspielen
-        self.loop_playlist = False  # Playlist wiederholen
+        self.autoplay = True  # Automatisch nächstes Video abspielen
+        self.loop_playlist = True  # Playlist wiederholen
         
         # Effect Chains für Plugins (getrennt für Video-Preview und Art-Net)
         self.video_effect_chain = []  # Video-Preview FX (nicht zu Art-Net)
@@ -172,7 +172,7 @@ class Player:
             self.stop()
         
         # Warte bis Thread wirklich beendet ist (max 3 Sekunden)
-        if self.thread and self.thread.is_alive():
+        if self.thread is not None and self.thread.is_alive():
             self.thread.join(timeout=3.0)
             if self.thread.is_alive():
                 logger.warning(f"[{self.player_name}] Thread konnte nicht gestoppt werden beim Source-Wechsel!")
@@ -404,21 +404,33 @@ class Player:
                         if next_item_path.startswith('generator:'):
                             generator_id = next_item_path.replace('generator:', '')
                             
-                            # Try to get parameters from playlist_params first (user modifications)
+                            # Try to get parameters from multiple sources (priority order):
                             parameters = None
-                            if generator_id in self.playlist_params:
-                                # Use stored parameters from playlist
+                            
+                            # 1. Check clip registry (stored parameters from playlist)
+                            from .clip_registry import get_clip_registry
+                            clip_registry = get_clip_registry()
+                            clip_id = self.playlist_ids.get(next_item_path)
+                            if clip_id and clip_id in clip_registry.clips:
+                                clip_meta = clip_registry.clips[clip_id].get('metadata', {})
+                                if clip_meta.get('parameters'):
+                                    parameters = clip_meta['parameters'].copy()
+                                    logger.debug(f"🌟 [{self.player_name}] Using ClipRegistry parameters: {parameters}")
+                            
+                            # 2. Check playlist_params (user runtime modifications)
+                            if not parameters and generator_id in self.playlist_params:
                                 parameters = self.playlist_params[generator_id].copy()
-                                logger.debug(f"🌟 [{self.player_name}] Using playlist parameters: {parameters}")
-                            elif (isinstance(self.source, GeneratorSource) and 
+                                logger.debug(f"🌟 [{self.player_name}] Using playlist_params: {parameters}")
+                            
+                            # 3. Reuse current generator parameters if same generator
+                            elif not parameters and (isinstance(self.source, GeneratorSource) and 
                                   self.source.generator_id == generator_id):
-                                # Reuse current parameters (including user modifications)
                                 parameters = self.source.parameters.copy()
-                                # Store for future use
                                 self.playlist_params[generator_id] = parameters.copy()
                                 logger.debug(f"🌟 [{self.player_name}] Reusing and storing modified parameters: {parameters}")
-                            else:
-                                # Get default parameters
+                            
+                            # 4. Fallback to defaults
+                            if not parameters:
                                 from .plugin_manager import get_plugin_manager
                                 pm = get_plugin_manager()
                                 param_list = pm.get_plugin_parameters(generator_id)

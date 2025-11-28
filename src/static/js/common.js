@@ -3,6 +3,45 @@
  * Vermeidet Code-Duplikation zwischen controls.js, cli.js und editor.js
  */
 
+
+
+// ========================================
+// DEBUG LOGGING SYSTEM
+// ========================================
+
+let DEBUG_LOGGING = true; // Default: enabled
+
+// Debug logger wrapper functions
+const debug = {
+    log: (...args) => { if (DEBUG_LOGGING) console.log(...args); },
+    info: (...args) => { if (DEBUG_LOGGING) console.info(...args); },
+    warn: (...args) => { if (DEBUG_LOGGING) console.warn(...args); },
+    error: (...args) => console.error(...args), // Errors always shown
+    group: (...args) => { if (DEBUG_LOGGING) console.group(...args); },
+    groupEnd: () => { if (DEBUG_LOGGING) console.groupEnd(); },
+    table: (...args) => { if (DEBUG_LOGGING) console.table(...args); }
+};
+
+// Load debug setting from config
+async function loadDebugConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
+        console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    } catch (error) {
+        console.error('❌ Failed to load debug config, using default (enabled):', error);
+        DEBUG_LOGGING = true;
+    }
+}
+
+// Runtime toggle function (accessible from browser console)
+window.toggleDebug = function(enable) {
+    DEBUG_LOGGING = enable ?? !DEBUG_LOGGING;
+    console.log(`🐛 Debug logging ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    return DEBUG_LOGGING;
+};
+
 // ========================================
 // CONFIGURATION
 // ========================================
@@ -25,9 +64,9 @@ export async function loadConfig() {
         WEBSOCKET_URL = `http://${host}:${port}`;
         POLLING_INTERVAL = config.status_broadcast_interval || 3000;
         
-        console.log('Config loaded:', { API_BASE, WEBSOCKET_URL, POLLING_INTERVAL });
+        debug.log('Config loaded:', { API_BASE, WEBSOCKET_URL, POLLING_INTERVAL });
     } catch (error) {
-        console.warn('Could not load config, using defaults:', error);
+        debug.warn('Could not load config, using defaults:', error);
     }
 }
 
@@ -55,14 +94,14 @@ export function initWebSocket(handlers = {}) {
     });
     
     socket.on('connect', () => {
-        console.log('WebSocket connected');
+        debug.log('WebSocket connected');
         socketConnected = true;
         if (handlers.onConnect) handlers.onConnect();
         showToast('WebSocket verbunden', 'success');
     });
     
     socket.on('disconnect', () => {
-        console.log('WebSocket disconnected');
+        debug.log('WebSocket disconnected');
         socketConnected = false;
         if (handlers.onDisconnect) handlers.onDisconnect();
         showToast('WebSocket getrennt', 'error');
@@ -103,7 +142,7 @@ export function showToast(message, type = 'success', duration = 3000) {
         info: 'ℹ️',
         warning: '⚠️'
     };
-    console.log(`${emoji[type] || '📢'} [TOAST ${type.toUpperCase()}] ${message}`);
+    debug.log(`${emoji[type] || '📢'} [TOAST ${type.toUpperCase()}] ${message}`);
     
     // Try different toast container variants
     let container = document.getElementById('toastContainer');
@@ -124,7 +163,7 @@ export function showToast(message, type = 'success', duration = 3000) {
             return;
         }
         
-        console.warn('Toast container not found');
+        debug.warn('Toast container not found');
         return;
     }
     
@@ -287,7 +326,7 @@ async function logErrorToBackend(error, source = 'unknown') {
             body: JSON.stringify(errorData)
         });
         
-        console.log('Error logged to backend:', response.ok ? 'Success' : 'Failed');
+        debug.log('Error logged to backend:', response.ok ? 'Success' : 'Failed');
     } catch (e) {
         console.error('Failed to log error to backend:', e);
     }
@@ -323,5 +362,5 @@ export function initErrorLogging() {
         logErrorToBackend(error, 'promise-rejection');
     });
     
-    console.log('Error logging initialized');
+    debug.log('Error logging initialized');
 }

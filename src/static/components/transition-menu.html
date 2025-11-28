@@ -1,0 +1,178 @@
+<!-- Transition Menu Component Template -->
+<template id="transition-menu-template">
+    <div class="transition-menu">
+        <button class="transition-toggle" title="Transition Settings">
+            <span class="transition-icon">⚡</span>
+        </button>
+        <div class="transition-panel">
+            <div class="transition-header">
+                <span>⚡ Transitions</span>
+                <button class="btn-close-transition">×</button>
+            </div>
+            <div class="transition-body">
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input transition-enabled-checkbox" type="checkbox">
+                    <label class="form-check-label transition-enabled-label">Enable Transitions</label>
+                </div>
+                
+                <div class="transition-settings">
+                    <div class="form-group mb-3">
+                        <label class="form-label">Effect:</label>
+                        <select class="form-select form-select-sm transition-effect-select">
+                            <option value="fade">Fade</option>
+                            <option value="wipe_left">Wipe Left</option>
+                            <option value="wipe_right">Wipe Right</option>
+                            <option value="wipe_top">Wipe Top</option>
+                            <option value="wipe_bottom">Wipe Bottom</option>
+                            <option value="dissolve">Dissolve</option>
+                            <option value="push">Push</option>
+                            <option value="zoom">Zoom</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group mb-3">
+                        <label class="form-label">Duration: <span class="transition-duration-value">1.0s</span></label>
+                        <input type="range" class="form-range transition-duration-slider" 
+                               min="0.1" max="5.0" step="0.1" value="1.0">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Easing:</label>
+                        <select class="form-select form-select-sm transition-easing-select">
+                            <option value="linear">Linear</option>
+                            <option value="ease_in_out" selected>Ease In-Out</option>
+                            <option value="ease_out">Ease Out</option>
+                            <option value="ease_in">Ease In</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+/**
+ * Create and initialize a transition menu for a specific player
+ * @param {string} playerId - The player identifier (e.g., 'video', 'artnet')
+ * @param {HTMLElement} container - The container element to append the menu to
+ * @returns {Object} - The transition menu controller
+ */
+window.createTransitionMenu = function(playerId, container) {
+    // Clone template
+    const template = document.getElementById('transition-menu-template');
+    const clone = template.content.cloneNode(true);
+    
+    // Get elements from clone
+    const menu = clone.querySelector('.transition-menu');
+    const toggleBtn = clone.querySelector('.transition-toggle');
+    const panel = clone.querySelector('.transition-panel');
+    const closeBtn = clone.querySelector('.btn-close-transition');
+    const enabledCheckbox = clone.querySelector('.transition-enabled-checkbox');
+    const enabledLabel = clone.querySelector('.transition-enabled-label');
+    const settings = clone.querySelector('.transition-settings');
+    const effectSelect = clone.querySelector('.transition-effect-select');
+    const durationSlider = clone.querySelector('.transition-duration-slider');
+    const durationValue = clone.querySelector('.transition-duration-value');
+    const easingSelect = clone.querySelector('.transition-easing-select');
+    
+    // Set IDs for accessibility and reference
+    panel.id = `${playerId}TransitionPanel`;
+    enabledCheckbox.id = `${playerId}TransitionEnabled`;
+    enabledLabel.setAttribute('for', enabledCheckbox.id);
+    settings.id = `${playerId}TransitionSettings`;
+    effectSelect.id = `${playerId}TransitionEffect`;
+    durationSlider.id = `${playerId}TransitionDuration`;
+    durationValue.id = `${playerId}DurationValue`;
+    easingSelect.id = `${playerId}TransitionEasing`;
+    
+    // Configuration object
+    const config = {
+        enabled: false,
+        effect: 'fade',
+        duration: 1.0,
+        easing: 'ease_in_out'
+    };
+    
+    // Event handlers
+    toggleBtn.onclick = () => {
+        panel.classList.toggle('active');
+    };
+    
+    closeBtn.onclick = () => {
+        panel.classList.remove('active');
+    };
+    
+    enabledCheckbox.onchange = (e) => {
+        config.enabled = e.target.checked;
+        
+        if (config.enabled) {
+            settings.classList.remove('disabled');
+            if (window.showToast) {
+                showToast(`${playerId} Transitions enabled`, 'success');
+            }
+        } else {
+            settings.classList.add('disabled');
+            if (window.showToast) {
+                showToast(`${playerId} Transitions disabled`, 'info');
+            }
+        }
+        
+        updateBackend();
+    };
+    
+    const updateConfig = () => {
+        config.effect = effectSelect.value;
+        config.duration = parseFloat(durationSlider.value);
+        config.easing = easingSelect.value;
+        durationValue.textContent = config.duration.toFixed(1) + 's';
+        updateBackend();
+    };
+    
+    effectSelect.onchange = updateConfig;
+    durationSlider.oninput = updateConfig;
+    easingSelect.onchange = updateConfig;
+    
+    const updateBackend = async () => {
+        const endpoint = `/api/player/${playerId}/transition/config`;
+        
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                console.log(`✅ ${playerId} transition config updated:`, config);
+            }
+        } catch (error) {
+            console.error(`❌ Error updating ${playerId} transition config:`, error);
+        }
+    };
+    
+    // Append to container
+    container.appendChild(clone);
+    
+    // Return controller object
+    return {
+        playerId,
+        config,
+        open: () => panel.classList.add('active'),
+        close: () => panel.classList.remove('active'),
+        toggle: () => panel.classList.toggle('active'),
+        setConfig: (newConfig) => {
+            Object.assign(config, newConfig);
+            enabledCheckbox.checked = config.enabled;
+            effectSelect.value = config.effect;
+            durationSlider.value = config.duration;
+            easingSelect.value = config.easing;
+            durationValue.textContent = config.duration.toFixed(1) + 's';
+            settings.classList.toggle('disabled', !config.enabled);
+        },
+        getConfig: () => ({ ...config })
+    };
+};
+</script>

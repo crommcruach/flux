@@ -4,6 +4,45 @@
 
 import { showToast, initErrorLogging } from './common.js';
 
+
+
+// ========================================
+// DEBUG LOGGING SYSTEM
+// ========================================
+
+let DEBUG_LOGGING = true; // Default: enabled
+
+// Debug logger wrapper functions
+const debug = {
+    log: (...args) => { if (DEBUG_LOGGING) console.log(...args); },
+    info: (...args) => { if (DEBUG_LOGGING) console.info(...args); },
+    warn: (...args) => { if (DEBUG_LOGGING) console.warn(...args); },
+    error: (...args) => console.error(...args), // Errors always shown
+    group: (...args) => { if (DEBUG_LOGGING) console.group(...args); },
+    groupEnd: () => { if (DEBUG_LOGGING) console.groupEnd(); },
+    table: (...args) => { if (DEBUG_LOGGING) console.table(...args); }
+};
+
+// Load debug setting from config
+async function loadDebugConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
+        console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    } catch (error) {
+        console.error('❌ Failed to load debug config, using default (enabled):', error);
+        DEBUG_LOGGING = true;
+    }
+}
+
+// Runtime toggle function (accessible from browser console)
+window.toggleDebug = function(enable) {
+    DEBUG_LOGGING = enable ?? !DEBUG_LOGGING;
+    console.log(`🐛 Debug logging ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    return DEBUG_LOGGING;
+};
+
 // ========================================
 // STATE
 // ========================================
@@ -241,7 +280,7 @@ async function saveConfig() {
         }
         
         const saveResult = await saveResponse.json();
-        console.log('Config saved:', saveResult);
+        debug.log('Config saved:', saveResult);
         
         showToast('Konfiguration gespeichert - Anwendung wird neu gestartet...', 'success', 2000);
         
@@ -254,7 +293,7 @@ async function saveConfig() {
                 });
                 
                 if (reloadResponse.ok) {
-                    console.log('Reload triggered successfully');
+                    debug.log('Reload triggered successfully');
                 } else {
                     console.error('Reload failed:', reloadResponse.status);
                     showToast('Neustart fehlgeschlagen - bitte manuell neustarten', 'error', 5000);
@@ -275,7 +314,8 @@ async function saveConfig() {
 // INITIALIZATION
 // ========================================
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadDebugConfig();
     initErrorLogging();
     
     // Event Listeners

@@ -125,13 +125,24 @@ default = validator.get_default_config()
   "data_dir": "data",                // Erforderlich, nicht leer
   "points_json": "punkte.json",      // Erforderlich
   "scripts_dir": "scripts",          // Optional
-  "projects_dir": "PROJECTS"         // Optional
+  "projects_dir": "PROJECTS",        // Optional
+  "video_sources": [                 // NEU: Zusätzliche Video-Quellen
+    "D:\\Videos",                    // Beispiel: anderes Laufwerk
+    "C:\\Users\\Name\\Videos"        // Beispiel: Benutzerordner
+  ]
 }
 ```
 
 **Validierte Eigenschaften:**
 - Erforderliche Felder vorhanden
 - Keine leeren Strings für Pflichtfelder
+- `video_sources` als Array (optional, default: `[]`)
+
+**Video Sources Details:**
+- Zusätzliche Ordner/Laufwerke für File Browser
+- Werden im File Tree als separate Root-Ordner angezeigt
+- Nicht existierende Pfade werden automatisch ignoriert
+- Haupt-`video_dir` ist immer dabei
 
 ### API Konfiguration
 

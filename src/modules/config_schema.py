@@ -171,6 +171,58 @@ CONFIG_SCHEMA = {
                 "projects_dir": {
                     "type": "string",
                     "description": "Verzeichnis für gespeicherte Projekte"
+                },
+                "video_sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Zusätzliche Video-Quellen (Ordner/Laufwerke) für File Browser",
+                    "default": []
+                }
+            }
+        },
+        "effects": {
+            "type": "object",
+            "properties": {
+                "video": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["plugin_id"],
+                        "properties": {
+                            "plugin_id": {"type": "string"},
+                            "params": {"type": "object"}
+                        }
+                    },
+                    "description": "Default effect chain für Video-Player",
+                    "default": []
+                },
+                "artnet": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["plugin_id"],
+                        "properties": {
+                            "plugin_id": {"type": "string"},
+                            "params": {"type": "object"}
+                        }
+                    },
+                    "description": "Default effect chain für Art-Net-Player",
+                    "default": []
+                },
+                "clips": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["plugin_id"],
+                        "properties": {
+                            "plugin_id": {"type": "string"},
+                            "params": {"type": "object"}
+                        }
+                    },
+                    "description": "Default effect chain for ALL clips",
+                    "default": []
                 }
             }
         },
@@ -448,11 +500,17 @@ class ConfigValidator:
                 "points_json": "punkte_export.json",
                 "scripts_dir": "scripts",
                 "cache_dir": "cache",
-                "projects_dir": "PROJECTS"
+                "projects_dir": "PROJECTS",
+                "video_sources": []
             },
             "channels": {
                 "max_per_universe": 510,
                 "channels_per_point": 3
+            },
+            "effects": {
+                "video": [],
+                "artnet": [],
+                "clips": []
             },
             "cache": {
                 "enabled": True,

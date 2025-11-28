@@ -1,0 +1,299 @@
+<!-- Universal Modal Component Template -->
+<template id="modal-template">
+    <div class="modal fade" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body"></div>
+                <div class="modal-footer" style="display: none;">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+/**
+ * Universal Modal Manager
+ * Creates and manages Bootstrap modals dynamically
+ */
+window.ModalManager = (function() {
+    const modals = {};
+    
+    /**
+     * Create a new modal
+     * @param {Object} options - Modal configuration
+     * @param {string} options.id - Unique modal identifier
+     * @param {string} options.title - Modal title (with optional emoji)
+     * @param {string|HTMLElement} options.content - Modal body content
+     * @param {string} options.size - Modal size: 'sm', 'lg', 'xl', or null for default
+     * @param {boolean} options.centered - Center modal vertically
+     * @param {boolean} options.closeButton - Show close button in header (default: true)
+     * @param {Array} options.buttons - Footer buttons [{label, class, callback}]
+     * @param {Function} options.onShow - Callback when modal shows
+     * @param {Function} options.onHide - Callback when modal hides
+     * @returns {Object} Modal controller
+     */
+    function createModal(options) {
+        const {
+            id,
+            title = '',
+            content = '',
+            size = null,
+            centered = false,
+            closeButton = true,
+            buttons = [],
+            onShow = null,
+            onHide = null
+        } = options;
+        
+        // Check if modal already exists
+        if (modals[id]) {
+            console.warn(`⚠️ Modal with id "${id}" already exists. Returning existing instance.`);
+            return modals[id];
+        }
+        
+        // Clone template
+        const template = document.getElementById('modal-template');
+        if (!template) {
+            console.error('❌ Modal template not found!');
+            return null;
+        }
+        
+        const clone = template.content.cloneNode(true);
+        const modalElement = clone.querySelector('.modal');
+        const modalDialog = clone.querySelector('.modal-dialog');
+        const modalTitle = clone.querySelector('.modal-title');
+        const modalBody = clone.querySelector('.modal-body');
+        const modalFooter = clone.querySelector('.modal-footer');
+        const closeBtn = clone.querySelector('.btn-close');
+        
+        // Set ID and aria attributes
+        modalElement.id = id;
+        modalElement.setAttribute('aria-labelledby', `${id}Label`);
+        modalTitle.id = `${id}Label`;
+        
+        // Set title
+        modalTitle.textContent = title;
+        
+        // Set size
+        if (size) {
+            modalDialog.classList.add(`modal-${size}`);
+        }
+        
+        // Center modal
+        if (centered) {
+            modalDialog.classList.add('modal-dialog-centered');
+        }
+        
+        // Hide close button if requested
+        if (!closeButton) {
+            closeBtn.style.display = 'none';
+        }
+        
+        // Set content
+        if (typeof content === 'string') {
+            modalBody.innerHTML = content;
+        } else if (content instanceof HTMLElement) {
+            modalBody.appendChild(content);
+        }
+        
+        // Setup footer buttons
+        if (buttons && buttons.length > 0) {
+            modalFooter.style.display = 'flex';
+            modalFooter.innerHTML = ''; // Clear default button
+            
+            buttons.forEach(btn => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = btn.class || 'btn btn-primary';
+                button.textContent = btn.label || 'OK';
+                
+                if (btn.callback) {
+                    button.onclick = () => btn.callback(controller);
+                }
+                
+                if (btn.dismiss !== false) {
+                    button.setAttribute('data-bs-dismiss', 'modal');
+                }
+                
+                modalFooter.appendChild(button);
+            });
+        }
+        
+        // Append to document
+        document.body.appendChild(clone);
+        
+        // Get actual DOM element (after appending)
+        const actualModal = document.getElementById(id);
+        
+        // Initialize Bootstrap modal
+        const bsModal = new bootstrap.Modal(actualModal, {
+            backdrop: 'static',
+            keyboard: true
+        });
+        
+        // Event listeners
+        if (onShow) {
+            actualModal.addEventListener('show.bs.modal', onShow);
+        }
+        if (onHide) {
+            actualModal.addEventListener('hide.bs.modal', onHide);
+        }
+        
+        // Create controller
+        const controller = {
+            id,
+            element: actualModal,
+            bsModal,
+            
+            show: function() {
+                bsModal.show();
+                return this;
+            },
+            
+            hide: function() {
+                bsModal.hide();
+                return this;
+            },
+            
+            toggle: function() {
+                bsModal.toggle();
+                return this;
+            },
+            
+            setTitle: function(newTitle) {
+                modalTitle.textContent = newTitle;
+                return this;
+            },
+            
+            setContent: function(newContent) {
+                if (typeof newContent === 'string') {
+                    modalBody.innerHTML = newContent;
+                } else if (newContent instanceof HTMLElement) {
+                    modalBody.innerHTML = '';
+                    modalBody.appendChild(newContent);
+                }
+                return this;
+            },
+            
+            showLoading: function(message = 'Loading...') {
+                modalBody.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">${message}</span>
+                        </div>
+                        <p class="mt-2">${message}</p>
+                    </div>
+                `;
+                return this;
+            },
+            
+            destroy: function() {
+                bsModal.dispose();
+                actualModal.remove();
+                delete modals[id];
+            }
+        };
+        
+        // Store modal
+        modals[id] = controller;
+        
+        return controller;
+    }
+    
+    /**
+     * Get existing modal by ID
+     */
+    function getModal(id) {
+        return modals[id] || null;
+    }
+    
+    /**
+     * Show a quick confirmation dialog
+     */
+    function confirm(options) {
+        const {
+            title = '⚠️ Confirm',
+            message = 'Are you sure?',
+            confirmLabel = 'Confirm',
+            cancelLabel = 'Cancel',
+            onConfirm = null,
+            onCancel = null
+        } = options;
+        
+        const modalId = `confirm-${Date.now()}`;
+        
+        const modal = createModal({
+            id: modalId,
+            title,
+            content: `<p>${message}</p>`,
+            centered: true,
+            buttons: [
+                {
+                    label: cancelLabel,
+                    class: 'btn btn-secondary',
+                    callback: () => {
+                        if (onCancel) onCancel();
+                        modal.destroy();
+                    }
+                },
+                {
+                    label: confirmLabel,
+                    class: 'btn btn-primary',
+                    callback: () => {
+                        if (onConfirm) onConfirm();
+                        modal.destroy();
+                    }
+                }
+            ]
+        });
+        
+        modal.show();
+        return modal;
+    }
+    
+    /**
+     * Show a quick alert dialog
+     */
+    function alert(options) {
+        const {
+            title = 'ℹ️ Info',
+            message = '',
+            buttonLabel = 'OK'
+        } = options;
+        
+        const modalId = `alert-${Date.now()}`;
+        
+        const modal = createModal({
+            id: modalId,
+            title,
+            content: `<p>${message}</p>`,
+            centered: true,
+            buttons: [
+                {
+                    label: buttonLabel,
+                    class: 'btn btn-primary',
+                    callback: () => modal.destroy()
+                }
+            ]
+        });
+        
+        modal.show();
+        return modal;
+    }
+    
+    return {
+        create: createModal,
+        get: getModal,
+        confirm,
+        alert
+    };
+})();
+
+console.log('✅ Modal Manager loaded');
+</script>

@@ -3,10 +3,53 @@
  * Automatically generates controls based on plugin parameter types
  */
 
+
+
+// ========================================
+// DEBUG LOGGING SYSTEM
+// ========================================
+
+let DEBUG_LOGGING = true; // Default: enabled
+
+// Debug logger wrapper functions
+const debug = {
+    log: (...args) => { if (DEBUG_LOGGING) console.log(...args); },
+    info: (...args) => { if (DEBUG_LOGGING) console.info(...args); },
+    warn: (...args) => { if (DEBUG_LOGGING) console.warn(...args); },
+    error: (...args) => console.error(...args), // Errors always shown
+    group: (...args) => { if (DEBUG_LOGGING) console.group(...args); },
+    groupEnd: () => { if (DEBUG_LOGGING) console.groupEnd(); },
+    table: (...args) => { if (DEBUG_LOGGING) console.table(...args); }
+};
+
+// Load debug setting from config
+async function loadDebugConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
+        console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    } catch (error) {
+        console.error('❌ Failed to load debug config, using default (enabled):', error);
+        DEBUG_LOGGING = true;
+    }
+}
+
+// Runtime toggle function (accessible from browser console)
+window.toggleDebug = function(enable) {
+    DEBUG_LOGGING = enable ?? !DEBUG_LOGGING;
+    console.log(`🐛 Debug logging ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    return DEBUG_LOGGING;
+};
+
 const API_BASE = '';
 let availablePlugins = [];
 let activeEffects = [];
 let updateInterval = null;
+
+// Current effect chain context
+let currentPlayerId = 'video';
+let currentChainType = 'video';
 
 // Parameter Type to UI Control Mapping
 const PARAMETER_TYPES = {
@@ -23,7 +66,8 @@ const PARAMETER_TYPES = {
  * Initialize the effects panel
  */
 async function init() {
-    console.log('🎨 Initializing Effects Panel...');
+    await loadDebugConfig();
+    debug.log('🎨 Initializing Effects Panel...');
     await loadAvailableEffects();
     await refreshEffectChain();
     
@@ -96,7 +140,7 @@ function renderAvailableEffects() {
  */
 async function addEffect(pluginId) {
     try {
-        const response = await fetch(`${API_BASE}/api/player/effects/add`, {
+        const response = await fetch(`${API_BASE}/api/player/video/effects/add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ plugin_id: pluginId })
@@ -105,7 +149,7 @@ async function addEffect(pluginId) {
         const data = await response.json();
         
         if (data.success) {
-            console.log('✅ Effect added:', pluginId);
+            debug.log('✅ Effect added:', pluginId);
             await refreshEffectChain();
         } else {
             alert(`Failed to add effect: ${data.message}`);
@@ -121,7 +165,7 @@ async function addEffect(pluginId) {
  */
 async function refreshEffectChain() {
     try {
-        const response = await fetch(`${API_BASE}/api/player/effects`);
+        const response = await fetch(`${API_BASE}/api/player/video/effects`);
         const data = await response.json();
         
         if (data.success) {
@@ -350,10 +394,10 @@ async function updateParameter(effectIndex, paramName, value, valueDisplayId = n
             document.getElementById(valueDisplayId).textContent = value;
         }
         
-        const response = await fetch(`${API_BASE}/api/player/effects/${effectIndex}/parameters/${paramName}`, {
-            method: 'POST',
+        const response = await fetch(`${API_BASE}/api/player/video/effects/${effectIndex}/parameter`, {
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ value: value })
+            body: JSON.stringify({ name: paramName, value: value })
         });
         
         const data = await response.json();
@@ -362,7 +406,7 @@ async function updateParameter(effectIndex, paramName, value, valueDisplayId = n
             console.error('❌ Failed to update parameter:', data.message);
             alert(`Failed to update parameter: ${data.message}`);
         } else {
-            console.log(`✅ Updated ${paramName} = ${value}`);
+            debug.log(`✅ Updated ${paramName} = ${value}`);
         }
     } catch (error) {
         console.error('❌ Error updating parameter:', error);
@@ -389,14 +433,14 @@ async function updateRangeParameter(effectIndex, paramName, valueIndex, newValue
  */
 async function removeEffect(index) {
     try {
-        const response = await fetch(`${API_BASE}/api/player/effects/${index}`, {
+        const response = await fetch(`${API_BASE}/api/player/video/effects/${index}`, {
             method: 'DELETE'
         });
         
         const data = await response.json();
         
         if (data.success) {
-            console.log('✅ Effect removed:', index);
+            debug.log('✅ Effect removed:', index);
             await refreshEffectChain();
         } else {
             alert(`Failed to remove effect: ${data.message}`);
@@ -416,14 +460,14 @@ async function clearAllEffects() {
     }
     
     try {
-        const response = await fetch(`${API_BASE}/api/player/effects/clear`, {
+        const response = await fetch(`${API_BASE}/api/player/video/effects/clear`, {
             method: 'POST'
         });
         
         const data = await response.json();
         
         if (data.success) {
-            console.log('✅ All effects cleared');
+            debug.log('✅ All effects cleared');
             await refreshEffectChain();
         } else {
             alert(`Failed to clear effects: ${data.message}`);

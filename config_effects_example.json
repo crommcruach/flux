@@ -1,0 +1,26 @@
+{
+  "effects": {
+    "video": [
+      {
+        "plugin_id": "brightness",
+        "params": {"brightness": 1.2}
+      }
+    ],
+    "artnet": [
+      {
+        "plugin_id": "hue_shift",
+        "params": {"shift": 30}
+      }
+    ],
+    "clips": [
+      {
+        "plugin_id": "fade_in",
+        "params": {"duration": 0.5}
+      },
+      {
+        "plugin_id": "brightness",
+        "params": {"brightness": 1.1}
+      }
+    ]
+  }
+}

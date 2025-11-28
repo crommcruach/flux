@@ -3,6 +3,45 @@
  * Console command interface and log viewer
  */
 
+
+
+// ========================================
+// DEBUG LOGGING SYSTEM
+// ========================================
+
+let DEBUG_LOGGING = true; // Default: enabled
+
+// Debug logger wrapper functions
+const debug = {
+    log: (...args) => { if (DEBUG_LOGGING) console.log(...args); },
+    info: (...args) => { if (DEBUG_LOGGING) console.info(...args); },
+    warn: (...args) => { if (DEBUG_LOGGING) console.warn(...args); },
+    error: (...args) => console.error(...args), // Errors always shown
+    group: (...args) => { if (DEBUG_LOGGING) console.group(...args); },
+    groupEnd: () => { if (DEBUG_LOGGING) console.groupEnd(); },
+    table: (...args) => { if (DEBUG_LOGGING) console.table(...args); }
+};
+
+// Load debug setting from config
+async function loadDebugConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
+        console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    } catch (error) {
+        console.error('❌ Failed to load debug config, using default (enabled):', error);
+        DEBUG_LOGGING = true;
+    }
+}
+
+// Runtime toggle function (accessible from browser console)
+window.toggleDebug = function(enable) {
+    DEBUG_LOGGING = enable ?? !DEBUG_LOGGING;
+    console.log(`🐛 Debug logging ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    return DEBUG_LOGGING;
+};
+
 import { 
     loadConfig, 
     initWebSocket, 
@@ -264,6 +303,7 @@ const throttledFetchConsole = throttle(fetchConsole, 1000);
 const throttledFetchLog = throttle(fetchLog, 1000);
 
 document.addEventListener('DOMContentLoaded', async () => {
+    await loadDebugConfig();
     initErrorLogging();
     await loadConfig();
     

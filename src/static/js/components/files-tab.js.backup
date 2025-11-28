@@ -1,0 +1,443 @@
+/**
+ * Files Tab Component
+ * Reusable component for file browser with video and image support
+ */
+
+export class FilesTab {
+    constructor(containerId, searchContainerId, viewMode = 'list') {
+        this.containerId = containerId;
+        this.searchContainerId = searchContainerId;
+        this.files = [];
+        this.filteredFiles = [];
+        this.searchTerm = '';
+        this.viewMode = viewMode; // 'list', 'tree', or 'button' (button = user can toggle)
+        this.currentView = viewMode === 'button' ? 'list' : viewMode; // Actual view when in button mode
+        this.expandedFolders = new Set();
+    }
+    
+    /**
+     * Initialize the component
+     */
+    async init() {
+        this.setupSearch();
+        if (this.viewMode === 'button') {
+            this.setupViewToggle();
+        }
+        await this.loadFiles();
+    }
+    
+    /**
+     * Setup search functionality
+     */
+    setupSearch() {
+        const searchContainer = document.getElementById(this.searchContainerId);
+        if (!searchContainer) return;
+        
+        // Show toggle button only in 'button' mode
+        const showButton = this.viewMode === 'button';
+        
+        searchContainer.innerHTML = `
+            <div class="search-box ${showButton ? 'd-flex gap-2' : ''}">
+                <input type="text" 
+                       class="form-control form-control-sm ${showButton ? 'flex-grow-1' : ''}" 
+                       placeholder="🔍 Search files..." 
+                       id="${this.searchContainerId}-input">
+                ${showButton ? `
+                <button class="btn btn-sm btn-outline-secondary" 
+                        id="${this.searchContainerId}-viewToggle"
+                        title="Toggle view mode">
+                    📋
+                </button>
+                ` : ''}
+            </div>
+        `;
+        
+        const searchInput = document.getElementById(`${this.searchContainerId}-input`);
+        searchInput.addEventListener('input', (e) => {
+            this.searchTerm = e.target.value.toLowerCase();
+            this.filterFiles();
+        });
+    }
+    
+    /**
+     * Setup view toggle button (only in 'button' mode)
+     */
+    setupViewToggle() {
+        const toggleBtn = document.getElementById(`${this.searchContainerId}-viewToggle`);
+        if (!toggleBtn) return;
+        
+        // Set initial button state
+        this.updateViewToggleButton(toggleBtn);
+        
+        toggleBtn.addEventListener('click', async () => {
+            // Toggle between list and tree
+            this.currentView = this.currentView === 'list' ? 'tree' : 'list';
+            this.updateViewToggleButton(toggleBtn);
+            // Reload data for the new view
+            await this.loadFiles();
+        });
+    }
+    
+    /**
+     * Update view toggle button appearance
+     */
+    updateViewToggleButton(toggleBtn) {
+        if (this.currentView === 'list') {
+            toggleBtn.textContent = '📋';
+            toggleBtn.title = 'List view (click for tree view)';
+        } else {
+            toggleBtn.textContent = '🌳';
+            toggleBtn.title = 'Tree view (click for list view)';
+        }
+    }
+    
+    /**
+     * Load files from API
+     */
+    async loadFiles() {
+        const container = document.getElementById(this.containerId);
+        
+        // Determine actual view to use
+        const activeView = this.viewMode === 'button' ? this.currentView : this.viewMode;
+        console.log(`📂 FilesTab: Loading files in '${activeView}' mode`);
+        
+        try {
+            if (activeView === 'tree') {
+                console.log('📂 FilesTab: Loading tree view...');
+                // Clear list data when switching to tree
+                this.files = [];
+                this.filteredFiles = [];
+                await this.loadFileTree();
+            } else {
+                console.log('📂 FilesTab: Loading list view...');
+                // Clear tree data when switching to list
+                this.fileTree = [];
+                await this.loadFileList();
+            }
+        } catch (error) {
+            console.error('Error loading files:', error);
+            this.showError('Error loading files');
+        }
+    }
+    
+    /**
+     * Load file tree structure
+     */
+    async loadFileTree() {
+        console.log('🌳 Fetching tree from /api/files/tree...');
+        const response = await fetch('/api/files/tree');
+        const data = await response.json();
+        
+        console.log('🌳 Tree API response:', data);
+        
+        if (data.success) {
+            this.fileTree = data.tree || [];
+            console.log(`🌳 Loaded tree with ${this.fileTree.length} root nodes`);
+            this.render();
+        } else {
+            console.error('❌ Failed to load file tree:', data);
+            this.showError('Failed to load file tree');
+        }
+    }
+    
+    /**
+     * Load flat file list
+     */
+    async loadFileList() {
+        const response = await fetch('/api/files/videos');
+        const data = await response.json();
+        
+        console.log('📁 Files API response:', data);
+        
+        if (data.success) {
+            this.files = data.files || [];
+            this.filteredFiles = [...this.files];
+            console.log(`📁 Loaded ${this.files.length} files in list view`);
+            this.render();
+        } else {
+            console.error('❌ Failed to load files:', data);
+            this.showError('Failed to load files');
+        }
+    }
+    
+    /**
+     * Filter files based on search term
+     */
+    filterFiles() {
+        if (this.viewMode === 'list') {
+            if (!this.searchTerm) {
+                this.filteredFiles = [...this.files];
+            } else {
+                this.filteredFiles = this.files.filter(file => {
+                    const filename = file.filename?.toLowerCase() || '';
+                    const path = file.path?.toLowerCase() || '';
+                    
+                    return filename.includes(this.searchTerm) || 
+                           path.includes(this.searchTerm);
+                });
+            }
+        }
+        
+        this.render();
+    }
+    
+    /**
+     * Render files
+     */
+    render() {
+        const activeView = this.viewMode === 'button' ? this.currentView : this.viewMode;
+        console.log('🎨 RENDER called with viewMode:', this.viewMode, 'activeView:', activeView);
+        console.log('🎨 fileTree:', this.fileTree ? `${this.fileTree.length} nodes` : 'undefined');
+        console.log('🎨 files:', this.files ? `${this.files.length} files` : 'undefined');
+        console.log('🎨 filteredFiles:', this.filteredFiles ? `${this.filteredFiles.length} files` : 'undefined');
+        
+        if (activeView === 'tree') {
+            console.log('🎨 Rendering TREE view');
+            this.renderTree();
+        } else {
+            console.log('🎨 Rendering LIST view');
+            this.renderList();
+        }
+    }
+    
+    /**
+     * Render tree view
+     */
+    renderTree() {
+        const container = document.getElementById(this.containerId);
+        
+        if (!this.fileTree || this.fileTree.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📂</div>
+                    <p>No files found</p>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = '<div class="file-tree">';
+        this.fileTree.forEach(node => {
+            html += this.renderTreeNode(node, 0);
+        });
+        html += '</div>';
+        
+        container.innerHTML = html;
+        this.attachTreeEventListeners();
+    }
+    
+    /**
+     * Render tree node recursively
+     */
+    renderTreeNode(node, level) {
+        const indent = level * 20;
+        const isExpanded = this.expandedFolders.has(node.path);
+        
+        if (node.type === 'folder') {
+            const hasChildren = node.children && node.children.length > 0;
+            const expandIcon = hasChildren ? (isExpanded ? '📂' : '📁') : '📁';
+            
+            let html = `
+                <div class="tree-node folder" style="padding-left: ${indent}px" data-path="${node.path}">
+                    <span class="tree-node-icon">${expandIcon}</span>
+                    <span class="tree-node-name">${node.name}</span>
+                </div>
+            `;
+            
+            if (isExpanded && hasChildren) {
+                node.children.forEach(child => {
+                    html += this.renderTreeNode(child, level + 1);
+                });
+            }
+            
+            return html;
+        } else {
+            const icon = node.type === 'video' ? '🎬' : '🖼️';
+            
+            return `
+                <div class="tree-node file" 
+                     style="padding-left: ${indent}px" 
+                     data-path="${node.path}"
+                     data-type="${node.type}"
+                     draggable="true">
+                    <span class="tree-node-icon">${icon}</span>
+                    <span class="tree-node-name">${node.name}</span>
+                    <span class="tree-node-size">${node.size_human || ''}</span>
+                </div>
+            `;
+        }
+    }
+    
+    /**
+     * Render list view
+     */
+    renderList() {
+        const container = document.getElementById(this.containerId);
+        
+        if (this.filteredFiles.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔍</div>
+                    <p>${this.searchTerm ? 'No files found' : 'No files available'}</p>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = '<div class="file-list">';
+        
+        this.filteredFiles.forEach(file => {
+            const icon = file.type === 'video' ? '🎬' : '🖼️';
+            
+            html += `
+                <div class="file-item" 
+                     data-path="${file.path}"
+                     data-type="${file.type}"
+                     draggable="true">
+                    <span class="file-icon">${icon}</span>
+                    <div class="file-info">
+                        <div class="file-name">${file.filename}</div>
+                        <div class="file-path text-muted">${file.folder}</div>
+                    </div>
+                    <div class="file-size text-muted">${file.size_human}</div>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+        
+        container.innerHTML = html;
+        this.attachListEventListeners();
+    }
+    
+    /**
+     * Render all view (both tree and list)
+     */
+    renderAll() {
+        const container = document.getElementById(this.containerId);
+        
+        let html = '<div class="file-all-view">';
+        
+        // Render tree section
+        if (this.fileTree && this.fileTree.length > 0) {
+            html += '<div class="file-section"><h6>Tree View</h6><div class="file-tree">';
+            this.fileTree.forEach(node => {
+                html += this.renderTreeNode(node, 0);
+            });
+            html += '</div></div>';
+        }
+        
+        // Render list section
+        if (this.filteredFiles && this.filteredFiles.length > 0) {
+            html += '<div class="file-section"><h6>List View</h6><div class="file-list">';
+            this.filteredFiles.forEach(file => {
+                const icon = file.type === 'video' ? '🎬' : '🖼️';
+                
+                html += `
+                    <div class="file-item" 
+                         data-path="${file.path}"
+                         data-type="${file.type}"
+                         draggable="true">
+                        <span class="file-icon">${icon}</span>
+                        <div class="file-info">
+                            <div class="file-name">${file.filename}</div>
+                            <div class="file-path text-muted">${file.folder}</div>
+                        </div>
+                        <div class="file-size text-muted">${file.size_human}</div>
+                    </div>
+                `;
+            });
+            html += '</div></div>';
+        }
+        
+        html += '</div>';
+        
+        container.innerHTML = html;
+        this.attachTreeEventListeners();
+        this.attachListEventListeners();
+    }
+    
+    /**
+     * Attach tree view event listeners
+     */
+    attachTreeEventListeners() {
+        const container = document.getElementById(this.containerId);
+        
+        // Folder click to expand/collapse
+        container.querySelectorAll('.tree-node.folder').forEach(folder => {
+            folder.addEventListener('click', (e) => {
+                const path = folder.getAttribute('data-path');
+                
+                if (this.expandedFolders.has(path)) {
+                    this.expandedFolders.delete(path);
+                } else {
+                    this.expandedFolders.add(path);
+                }
+                
+                this.render();
+            });
+        });
+        
+        // File drag events
+        container.querySelectorAll('.tree-node.file').forEach(file => {
+            file.addEventListener('dragstart', (e) => {
+                const path = file.getAttribute('data-path');
+                const type = file.getAttribute('data-type');
+                console.log('🎬 DRAG START (tree):', path, 'type:', type);
+                e.dataTransfer.setData('text/plain', path); // Standard MIME type for compatibility
+                e.dataTransfer.setData('file-path', path);
+                e.dataTransfer.setData('file-type', type);
+                e.dataTransfer.effectAllowed = 'copy';
+                file.classList.add('dragging');
+            });
+            
+            file.addEventListener('dragend', (e) => {
+                file.classList.remove('dragging');
+            });
+        });
+    }
+    
+    /**
+     * Attach list view event listeners
+     */
+    attachListEventListeners() {
+        const fileItems = document.querySelectorAll(`#${this.containerId} .file-item`);
+        
+        fileItems.forEach(item => {
+            item.addEventListener('dragstart', (e) => {
+                const path = item.getAttribute('data-path');
+                const type = item.getAttribute('data-type');
+                console.log('🎬 DRAG START (list):', path, 'type:', type);
+                e.dataTransfer.setData('text/plain', path); // Standard MIME type for compatibility
+                e.dataTransfer.setData('file-path', path);
+                e.dataTransfer.setData('file-type', type);
+                e.dataTransfer.effectAllowed = 'copy';
+                item.classList.add('dragging');
+            });
+            
+            item.addEventListener('dragend', (e) => {
+                item.classList.remove('dragging');
+            });
+        });
+    }
+    
+    /**
+     * Show error message
+     */
+    showError(message) {
+        const container = document.getElementById(this.containerId);
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">⚠️</div>
+                <p>${message}</p>
+            </div>
+        `;
+    }
+    
+    /**
+     * Refresh files
+     */
+    async refresh() {
+        await this.loadFiles();
+    }
+}

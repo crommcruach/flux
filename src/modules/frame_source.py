@@ -336,18 +336,32 @@ class GeneratorSource(FrameSource):
         pm = get_plugin_manager()
         
         # Erstelle Plugin-Instanz (load_plugin erstellt neue Instanz mit config)
-        logger.info(f"GeneratorSource initializing: {self.generator_id} with parameters: {self.parameters}")
+        logger.info(f"🔧 GeneratorSource initializing: {self.generator_id} with parameters: {self.parameters}")
         self.plugin_instance = pm.load_plugin(self.generator_id, config=self.parameters)
         if not self.plugin_instance:
-            logger.error(f"Generator konnte nicht geladen werden: {self.generator_id}")
+            logger.error(f"❌ Generator konnte nicht geladen werden: {self.generator_id}")
             return False
         
         self.start_time = time.time()
         
-        logger.info(f"GeneratorSource initialisiert:")
+        logger.info(f"✅ GeneratorSource initialisiert:")
         logger.info(f"  Generator: {self.generator_id}")
         logger.info(f"  Canvas: {self.canvas_width}x{self.canvas_height}")
         logger.info(f"  Parameters: {self.parameters}")
+        logger.info(f"  Plugin instance: {type(self.plugin_instance).__name__}")
+        logger.info(f"  Has update_parameter: {hasattr(self.plugin_instance, 'update_parameter')}")
+        
+        # Apply any parameters that were set before initialization
+        # (This handles race condition where frontend sets params before plugin is ready)
+        if self.parameters and hasattr(self.plugin_instance, 'update_parameter'):
+            logger.info(f"📝 Applying pre-initialization parameters to plugin...")
+            for param_name, param_value in self.parameters.items():
+                if param_name != 'duration':  # duration is handled separately
+                    success = self.plugin_instance.update_parameter(param_name, param_value)
+                    if success:
+                        logger.debug(f"  ✓ {param_name} = {param_value}")
+                    else:
+                        logger.debug(f"  ✗ {param_name} = {param_value} (not accepted)")
         
         return True
     
@@ -390,6 +404,14 @@ class GeneratorSource(FrameSource):
     
     def update_parameter(self, param_name, value):
         """Aktualisiert Generator-Parameter zur Laufzeit."""
+        # Check if plugin is initialized
+        if not self.plugin_instance:
+            logger.info(f"📝 Parameter '{param_name}' stored for initialization (plugin not ready yet)")
+            # Store in parameters dict for when plugin initializes
+            self.parameters[param_name] = value
+            # Return True because we've stored it successfully
+            return True
+        
         # Convert value to correct type if needed
         try:
             value = float(value) if isinstance(value, (str, int, float)) else value
@@ -405,13 +427,22 @@ class GeneratorSource(FrameSource):
             logger.info(f"Generator duration updated to {self.duration}s (time elapsed: {time.time() - self.start_time:.1f}s)")
             return True
         
-        # Update plugin instance if it has the parameter
+        # Use plugin's update_parameter method if available (preferred)
+        if self.plugin_instance and hasattr(self.plugin_instance, 'update_parameter'):
+            success = self.plugin_instance.update_parameter(param_name, value)
+            if success:
+                logger.info(f"Generator parameter updated: {param_name} = {value}")
+                return True
+            else:
+                logger.debug(f"Plugin's update_parameter returned False for: {param_name}")
+        
+        # Fallback: Try to set as attribute directly
         if self.plugin_instance and hasattr(self.plugin_instance, param_name):
             setattr(self.plugin_instance, param_name, value)
-            logger.info(f"Generator parameter updated: {param_name} = {value}")
+            logger.info(f"Generator parameter updated (direct): {param_name} = {value}")
             return True
         
-        logger.warning(f"Unknown generator parameter: {param_name}")
+        logger.warning(f"Unknown generator parameter: {param_name} (plugin: {self.generator_id}, has update_parameter: {hasattr(self.plugin_instance, 'update_parameter') if self.plugin_instance else 'No instance'})")
         return False
     
     def reset(self):

@@ -128,7 +128,6 @@ class RestAPI:
         from .api_config import register_config_routes
         from .api_logs import register_log_routes
         from .api_plugins import register_plugins_api
-        from .api_effects import register_effect_routes
         from .api_benchmark import register_benchmark_routes
         
         # Registriere alle Routen
@@ -145,16 +144,14 @@ class RestAPI:
         register_config_routes(self.app)
         register_log_routes(self.app)
         register_plugins_api(self.app)
-        register_effect_routes(self.app, self.player_manager)
         register_benchmark_routes(self.app, self.player_manager)
         
-        # Register Art-Net Effects API
-        from .api_artnet_effects import register_artnet_effects_api
-        register_artnet_effects_api(self.app, self.player_manager)
+        # NOTE: Legacy effect APIs (api_effects.py, api_artnet_effects.py) are now deprecated
+        # Use Unified Player API instead: /api/player/<player_id>/effects/*
         
         # Register Files API
         from .api_files import register_files_api
-        register_files_api(self.app, self.video_dir)
+        register_files_api(self.app, self.video_dir, self.config)
         
         # Register Unified Player API
         from .api_player_unified import register_unified_routes
@@ -629,7 +626,7 @@ class RestAPI:
         self.server_thread.start()
         logger.info(f"REST API + WebSocket gestartet auf http://{host}:{port}")
         logger.info(f"Web-Interface: http://localhost:{port}")
-        logger.info(f"Control Panel: http://localhost:{port}/controls")
+        logger.info(f"Player Panel: http://localhost:{port}/player")
         logger.info(f"CLI Interface: http://localhost:{port}/cli")
     
     def stop(self):

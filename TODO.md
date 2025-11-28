@@ -17,13 +17,34 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 ## 🔥 PRIORITÄT 1 - Quick Wins (~30-42h)
 **Niedriger Aufwand, hoher Nutzen - sofort umsetzbar**
 
+### 1.0 🔍 UI/UX Verbesserungen (~6-8h)
+
+- [x] **Universal Search/Filter Komponente (3-4h):** ✅ COMPLETED (2025-11-28)
+  - Wiederverwendbare Suchfeld-Komponente für Listen
+  - Debounced Input (200ms) für Performance
+  - Live-Resultat-Zähler und Clear-Button
+  - Implementiert für: Effects, Sources, Files Tabs
+  - Komponenten: `search-filter.html`, `search-filter-loader.js`
+  - Dokumentation: `docs/SEARCH_FILTER.md`
+
+- [x] **Multi-Video-Source Support (2-3h):** ✅ COMPLETED (2025-11-28)
+  - `video_sources` Array in config.json
+  - Unterstützung für mehrere Laufwerke/Ordner
+  - Netzwerkfreigaben (UNC-Pfade) möglich
+  - File Browser zeigt alle Quellen als Root-Ordner
+  - API: `get_file_tree()` und `get_all_videos()` erweitert
+  - Dokumentation: `docs/VIDEO_SOURCES.md`, `docs/CONFIG_SCHEMA.md`
+
 ### 1.1 🔌 Plugin-System erweitern (~8-12h)
 
-- [ ] **Default Effect Chains via config.json (3-4h):**
-  - `default_video_effects`: Effect chain automatisch beim Start laden
-  - `default_clip_effects`: Per-Clip Default-Effekte (UUID-basiert oder global)
-  - config.json Schema: `{"effects": {"video": [...], "artnet": [...], "clips": {...}}}`
-  - Auto-Apply beim Player/Clip-Init
+- [x] **Default Effect Chains via config.json (3-4h):** ✅ COMPLETED (2025-11-28)
+  - `effects.video`: Effect chain automatisch beim Start auf Video-Player
+  - `effects.artnet`: Effect chain automatisch beim Start auf Art-Net-Player
+  - `effects.clips`: Per-Clip Default-Effekte (UUID oder Pfad-basiert)
+  - config.json Schema validiert und dokumentiert
+  - Auto-Apply beim Player-Init und Clip-Registrierung
+  - DefaultEffectsManager mit vollständiger Validierung
+  - Dokumentation: `docs/DEFAULT_EFFECTS.md`
 
 - [ ] **Blend Mode Effect Plugin (4-6h):**
   - Blend-Modes: Normal, Multiply, Screen, Overlay, Darken, Lighten, etc.
@@ -35,19 +56,27 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
   - Scripts nach `plugins/generators/` migriert
   - plasma, rainbow_wave, pulse, matrix_rain, fire implementiert
   - METADATA + PARAMETERS für alle Generatoren hinzugefügt
+
+- [x] **Source-Plugins (4-6h):** ✅ COMPLETED
+  - Webcam: Live-Video von lokalen USB-/integrierten Kameras
+  - LiveStream: HTTP/RTSP/HLS/RTMP/YouTube Streaming-Protokolle
+  - Screencapture: Screen/Monitor-Capture mit mss
+
+- [x] **UI-Generierung (3-4h):** ✅ COMPLETED
+  - Automatische Form-Generierung aus PARAMETERS-Array
+  - Parameter-Panel im Web-Interface (Generator + Effects)
+  - Live-Preview beim Parameter-Ändern
+  - Unterstützt: FLOAT, INT, BOOL, STRING, SELECT, COLOR, RANGE
   
 - [ ] **Preset-System (2-3h):**
   - Parameter-Sets speichern/laden
   - Preset-Manager API (CRUD)
   - UI: Preset-Selector & Editor
 
-- [ ] **UI-Generierung (3-4h):**
-  - Automatische Form-Generierung aus PARAMETERS-Array
-  - Parameter-Panel im Web-Interface
-  - Live-Preview beim Parameter-Ändern
-
-- [ ] **Source-Plugins (optional, 4-6h):**
-  - Webcam, LiveStream, Screencapture
+- [ ] **Milkdrop via Screencapture testen:**
+  - Screencapture-Generator mit Milkdrop/projectM-Fenster
+  - Region-Capture für optimale Performance
+  - Alternative: Window-Capture API
 
 ---
 
@@ -361,9 +390,10 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
   - GLSL Shader Support (Shadertoy-kompatibel)
   - Uniform Variables (iTime, iResolution, iMouse)
 
-- [ ] **LiveStream Source (2-5h):**
-  - RTSP/HTTP Stream Support
-  - FFmpeg/GStreamer Integration
+- [x] **LiveStream Source (2-5h):** ✅ COMPLETED
+  - RTSP/HTTP/HLS/RTMP Stream Support
+  - FFmpeg Integration via OpenCV
+  - YouTube URL Support (yt-dlp)
 
 ---
 
@@ -381,6 +411,33 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 ---
 
 ### 5.2 🛠️ Weitere Verbesserungen
+
+- [ ] **Playlist Playback Refactoring (~4-6h):**
+  - Überarbeitung Loop/Autoplay/Play-Funktionen
+  - Clip-Add-Handling vereinheitlichen
+  - Auto-Start beim ersten Clip konsistent implementieren
+  - State-Management zwischen Frontend/Backend synchronisieren
+  - **Hinweis:** Aktuell inkonsistentes Verhalten - tiefergehende Überarbeitung nötig
+
+- [ ] **player.js Performance-Optimierung (~8-12h):**
+  - **Event-Handler-Leak beheben (Kritisch):**
+    - Event-Delegation statt mehrfacher addEventListener
+    - Memory-Leak bei jedem Playlist-Render
+    - Geschätzte Einsparung: 40-60% Memory
+  - **Generator-Map für O(1) Lookups (Kritisch):**
+    - Map statt Array.find() in Hover-Events
+    - Reduziert CPU-Last bei Hover um 5-10%
+  - **Unified Update-Loop (Wichtig):**
+    - 2 separate setInterval zu einem kombinieren
+    - Halbiert Polling-Last (~10-15% CPU)
+  - **DOM-Query-Caching (Mittel):**
+    - Wiederholte querySelectorAll() cachen
+    - Einsparung: 3-8% CPU
+  - **setTimeout-Cleanup (Mittel):**
+    - Verschachtelte setTimeout durch requestAnimationFrame
+    - Besseres Timing, 2-5% CPU
+  - **Gesamt-Potenzial:** 35-68% CPU, 49-80% Memory
+  - **Dokumentation:** `PERFORMANCE_IMPROVEMENTS_PLAYER.md`
 
 - [ ] Unit Tests erweitern (Player, FrameSource, API)
 - [ ] API-Authentifizierung (Basic Auth/Token)
@@ -472,7 +529,7 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 
 ---
 
-## 📚 Status (Stand: 2025-11-26)
+## 📚 Status (Stand: 2025-11-28)
 
 ### ✅ Fertiggestellt (v2.3)
 - **Unified API Architecture** mit UUID-basiertem Clip-Management
@@ -481,6 +538,9 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 - **17 Effect-Plugins:** 11 Farb-Manipulation, 5 Time & Motion, 1 Blur
 - **ClipRegistry** mit UUID-basierter Clip-Identifikation
 - **Code-Cleanup** (~1500 Zeilen deprecated Code entfernt)
+- **Universal Search Filter** für Effects, Sources, Files (v2.3.1)
+- **Multi-Video-Source Support** via `video_sources` config (v2.3.1)
+- **Default Effect Chains** via config.json (Player & Clip-Level) (v2.3.1)
 
 ---
 

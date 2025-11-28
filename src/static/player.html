@@ -3,14 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controls - Flux</title>
+    <title>Player - Flux</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="styles.css" rel="stylesheet">
-    <link href="css/controls.css" rel="stylesheet">
+    <link href="css/styles.css" rel="stylesheet">
+    <link href="css/player.css" rel="stylesheet">
+    <link href="css/tab-components.css" rel="stylesheet">
 </head>
 <body>
     <script src="js/menu-loader.js"></script>
+    <script src="js/transition-menu-loader.js"></script>
+    <script src="js/modal-loader.js"></script>
+    <script src="js/search-filter-loader.js"></script>
     
     <div class="app-layout">
         <!-- Global Playlist Controls -->
@@ -44,57 +48,8 @@
                 </div>
             </div>
             
-            <!-- Transition Menu -->
-            <div class="transition-menu">
-                <button class="transition-toggle" onclick="toggleTransitionMenu('video')" title="Transition Settings">
-                    <span class="transition-icon">⚡</span>
-                </button>
-                <div class="transition-panel" id="videoTransitionPanel">
-                    <div class="transition-header">
-                        <span>⚡ Transitions</span>
-                        <button class="btn-close-transition" onclick="closeTransitionMenu('video')">×</button>
-                    </div>
-                    <div class="transition-body">
-                        <div class="form-check form-switch mb-3">
-                            <input class="form-check-input" type="checkbox" id="videoTransitionEnabled" onchange="toggleTransitions('video', this.checked)">
-                            <label class="form-check-label" for="videoTransitionEnabled">Enable Transitions</label>
-                        </div>
-                        
-                        <div class="transition-settings" id="videoTransitionSettings">
-                            <div class="form-group mb-3">
-                                <label class="form-label">Effect:</label>
-                                <select class="form-select form-select-sm" id="videoTransitionEffect" onchange="updateTransition('video')">
-                                    <option value="fade">Fade</option>
-                                    <option value="wipe_left">Wipe Left</option>
-                                    <option value="wipe_right">Wipe Right</option>
-                                    <option value="wipe_top">Wipe Top</option>
-                                    <option value="wipe_bottom">Wipe Bottom</option>
-                                    <option value="dissolve">Dissolve</option>
-                                    <option value="push">Push</option>
-                                    <option value="zoom">Zoom</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group mb-3">
-                                <label class="form-label">Duration: <span id="videoDurationValue">1.0s</span></label>
-                                <input type="range" class="form-range" id="videoTransitionDuration" 
-                                       min="0.1" max="5.0" step="0.1" value="1.0"
-                                       oninput="updateTransition('video')">
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Easing:</label>
-                                <select class="form-select form-select-sm" id="videoTransitionEasing" onchange="updateTransition('video')">
-                                    <option value="linear">Linear</option>
-                                    <option value="ease_in_out" selected>Ease In-Out</option>
-                                    <option value="ease_out">Ease Out</option>
-                                    <option value="ease_in">Ease In</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Transition Menu (dynamically loaded) -->
+            <div id="videoTransitionMenuContainer"></div>
             
             <!-- Playlist -->
             <div class="playlist-area">
@@ -128,57 +83,8 @@
                 </div>
             </div>
             
-            <!-- Transition Menu -->
-            <div class="transition-menu">
-                <button class="transition-toggle" onclick="toggleTransitionMenu('artnet')" title="Transition Settings">
-                    <span class="transition-icon">⚡</span>
-                </button>
-                <div class="transition-panel" id="artnetTransitionPanel">
-                    <div class="transition-header">
-                        <span>⚡ Transitions</span>
-                        <button class="btn-close-transition" onclick="closeTransitionMenu('artnet')">×</button>
-                    </div>
-                    <div class="transition-body">
-                        <div class="form-check form-switch mb-3">
-                            <input class="form-check-input" type="checkbox" id="artnetTransitionEnabled" onchange="toggleTransitions('artnet', this.checked)">
-                            <label class="form-check-label" for="artnetTransitionEnabled">Enable Transitions</label>
-                        </div>
-                        
-                        <div class="transition-settings" id="artnetTransitionSettings">
-                            <div class="form-group mb-3">
-                                <label class="form-label">Effect:</label>
-                                <select class="form-select form-select-sm" id="artnetTransitionEffect" onchange="updateTransition('artnet')">
-                                    <option value="fade">Fade</option>
-                                    <option value="wipe_left">Wipe Left</option>
-                                    <option value="wipe_right">Wipe Right</option>
-                                    <option value="wipe_top">Wipe Top</option>
-                                    <option value="wipe_bottom">Wipe Bottom</option>
-                                    <option value="dissolve">Dissolve</option>
-                                    <option value="push">Push</option>
-                                    <option value="zoom">Zoom</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group mb-3">
-                                <label class="form-label">Duration: <span id="artnetDurationValue">1.0s</span></label>
-                                <input type="range" class="form-range" id="artnetTransitionDuration" 
-                                       min="0.1" max="5.0" step="0.1" value="1.0"
-                                       oninput="updateTransition('artnet')">
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Easing:</label>
-                                <select class="form-select form-select-sm" id="artnetTransitionEasing" onchange="updateTransition('artnet')">
-                                    <option value="linear">Linear</option>
-                                    <option value="ease_in_out" selected>Ease In-Out</option>
-                                    <option value="ease_out">Ease Out</option>
-                                    <option value="ease_in">Ease In</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Transition Menu (dynamically loaded) -->
+            <div id="artnetTransitionMenuContainer"></div>
             
             <!-- Playlist -->
             <div class="playlist-area">
@@ -207,6 +113,7 @@
                     <!-- Effects Tab -->
                     <div class="tab-pane active" id="tab-effects">
                         <h6>Available Effects</h6>
+                        <div id="effectsSearchContainer"></div>
                         <div id="availableEffects">
                             <div class="empty-state">
                                 <div class="spinner-border text-primary" role="status"></div>
@@ -218,6 +125,7 @@
                     <!-- Sources Tab -->
                     <div class="tab-pane" id="tab-sources">
                         <h6>Available Sources</h6>
+                        <div id="sourcesSearchContainer"></div>
                         <div id="availableSources">
                             <div class="empty-state">
                                 <p>Coming soon...</p>
@@ -228,6 +136,7 @@
                     <!-- Files Tab -->
                     <div class="tab-pane" id="tab-files">
                         <h6>File Browser</h6>
+                        <div id="filesSearchContainer"></div>
                         <div id="fileBrowser">
                             <div class="empty-state">
                                 <p>Coming soon...</p>
@@ -287,45 +196,7 @@
     <!-- Toast Component -->
     <script src="js/toast-loader.js"></script>
 
-    <!-- Playlist Load Modal -->
-    <div class="modal fade" id="playlistModal" tabindex="-1" aria-labelledby="playlistModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="playlistModalLabel">📂 Load Playlists</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body" id="playlistModalBody">
-                    <div class="text-center">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Snapshot Load Modal -->
-    <div class="modal fade" id="snapshotModal" tabindex="-1" aria-labelledby="snapshotModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="snapshotModalLabel">🔄 Restore Session Snapshot</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body" id="snapshotModalBody">
-                    <div class="text-center">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="js/controls.js" type="module"></script>
+    <script src="js/player.js" type="module"></script>
 </body>
 </html>

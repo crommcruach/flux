@@ -3,6 +3,45 @@
 // ========================================
 import { showToast, initErrorLogging } from './common.js';
 
+
+
+// ========================================
+// DEBUG LOGGING SYSTEM
+// ========================================
+
+let DEBUG_LOGGING = true; // Default: enabled
+
+// Debug logger wrapper functions
+const debug = {
+    log: (...args) => { if (DEBUG_LOGGING) console.log(...args); },
+    info: (...args) => { if (DEBUG_LOGGING) console.info(...args); },
+    warn: (...args) => { if (DEBUG_LOGGING) console.warn(...args); },
+    error: (...args) => console.error(...args), // Errors always shown
+    group: (...args) => { if (DEBUG_LOGGING) console.group(...args); },
+    groupEnd: () => { if (DEBUG_LOGGING) console.groupEnd(); },
+    table: (...args) => { if (DEBUG_LOGGING) console.table(...args); }
+};
+
+// Load debug setting from config
+async function loadDebugConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
+        console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    } catch (error) {
+        console.error('❌ Failed to load debug config, using default (enabled):', error);
+        DEBUG_LOGGING = true;
+    }
+}
+
+// Runtime toggle function (accessible from browser console)
+window.toggleDebug = function(enable) {
+    DEBUG_LOGGING = enable ?? !DEBUG_LOGGING;
+    console.log(`🐛 Debug logging ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    return DEBUG_LOGGING;
+};
+
 // ========================================
 // TASTATUR-SHORTCUTS
 // ========================================
@@ -868,24 +907,59 @@ async function saveProjectToServer() {
     }
 }
 
-// Show project manager modal
-function showProjectManager() {
-    const modalElement = document.getElementById('projectManagerModal');
-    const modal = new bootstrap.Modal(modalElement);
+// Initialize project manager modal
+let projectManagerModal = null;
+
+function initializeProjectModal() {
+    if (!window.ModalManager) {
+        debug.warn('⚠️ ModalManager not loaded yet, retrying...');
+        setTimeout(initializeProjectModal, 100);
+        return;
+    }
     
-    // Load project list after modal is fully shown
-    modalElement.addEventListener('shown.bs.modal', function onShown() {
-        refreshProjectList();
-        modalElement.removeEventListener('shown.bs.modal', onShown);
+    projectManagerModal = ModalManager.create({
+        id: 'projectManagerModal',
+        title: '📂 Projektverwaltung',
+        content: '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Lädt...</span></div></div>',
+        size: 'lg',
+        buttons: [
+            {
+                label: 'Schließen',
+                class: 'btn btn-secondary',
+                callback: (modal) => modal.hide()
+            }
+        ],
+        onShow: () => refreshProjectList()
     });
     
-    modal.show();
+    debug.log('✅ Project manager modal initialized');
+}
+
+// Call initialization when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeProjectModal);
+} else {
+    initializeProjectModal();
+}
+
+// Show project manager modal
+function showProjectManager() {
+    if (!projectManagerModal) {
+        console.error('❌ Project manager modal not initialized');
+        return;
+    }
+    
+    projectManagerModal.show();
 }
 
 // Refresh project list
 async function refreshProjectList() {
-    const container = document.getElementById('projectListContainer');
-    container.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Lädt...</span></div></div>';
+    if (!projectManagerModal) {
+        console.error('❌ Project manager modal not initialized');
+        return;
+    }
+    
+    projectManagerModal.showLoading('Lädt Projekte...');
 
     try {
         const response = await fetch('/api/projects');
@@ -924,13 +998,23 @@ async function refreshProjectList() {
             }
             
             html += '</div>';
-            container.innerHTML = html;
+            
+            // Add refresh button at the top
+            const contentHtml = `
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6>Gespeicherte Projekte</h6>
+                    <button class="btn btn-primary btn-sm" onclick="refreshProjectList()" title="Aktualisieren">🔄</button>
+                </div>
+                ${html}
+            `;
+            
+            projectManagerModal.setContent(contentHtml);
         } else {
-            container.innerHTML = '<div class="alert alert-info">Keine gespeicherten Projekte gefunden.</div>';
+            projectManagerModal.setContent('<div class="alert alert-info">Keine gespeicherten Projekte gefunden.</div>');
         }
     } catch (error) {
         console.error('Error loading projects:', error);
-        container.innerHTML = `<div class="alert alert-danger">Fehler beim Laden: ${error.message}</div>`;
+        projectManagerModal.setContent(`<div class="alert alert-danger">Fehler beim Laden: ${error.message}</div>`);
     }
 }
 
@@ -942,7 +1026,7 @@ async function loadProjectFromServer(filename) {
 
         if (result.success) {
             loadProject(result.data);
-            bootstrap.Modal.getInstance(document.getElementById('projectManagerModal')).hide();
+            projectManagerModal?.hide();
             showToast('Projekt geladen', 'success');
         } else {
             showToast(`Fehler beim Laden: ${result.error}`, 'error');
@@ -3277,7 +3361,7 @@ function addTextToCanvas() {
         const letterDef = STROKE_FONT[char];
         
         if (!letterDef) {
-            console.warn(`Character '${char}' not found in font`);
+            debug.warn(`Character '${char}' not found in font`);
             continue;
         }
 

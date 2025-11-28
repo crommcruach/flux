@@ -44,10 +44,48 @@
     "channels_per_point": 3,
     "max_per_universe": 510
   },
+  "effects": {
+    "video": [
+      {
+        "plugin_id": "transform",
+        "params": {
+          "position_x": 0.0,
+          "position_y": 0.0,
+          "scale_xy": 100.0,
+          "rotation": 0.0
+        }
+      }
+    ],
+    "artnet": [
+      {
+        "plugin_id": "transform",
+        "params": {
+          "position_x": 0.0,
+          "position_y": 0.0,
+          "scale_xy": 100.0,
+          "rotation": 0.0
+        }
+      }
+    ],
+    "clips": [
+      {
+        "plugin_id": "transform",
+        "params": {
+          "position_x": 0.0,
+          "position_y": 0.0,
+          "scale_xy": 100.0,
+          "rotation": 0.0
+        }
+      }
+    ],
+    "_comment": "Default effect chains. video/artnet: arrays of effect configs. clips: array of effects applied to ALL clips"
+  },
   "frontend": {
     "polling_interval": 3000,
     "theme": "dark",
-    "default_page": "editor"
+    "default_page": "editor",
+    "debug_logging": true,
+    "_debug_logging_comment": "Enable/disable console.log debug output in browser console (true/false)"
   },
   "paths": {
     "cache_dir": "caches",
@@ -56,7 +94,8 @@
     "points_json": "punkte_export.json",
     "projects_dir": "PROJECTS",
     "scripts_dir": "scripts",
-    "video_dir": "video"
+    "video_dir": "video",
+    "video_sources": []
   },
   "video": {
     "default_brightness": 100,

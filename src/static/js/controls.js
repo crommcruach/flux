@@ -5,6 +5,45 @@
 
 import { showToast } from './common.js';
 
+
+
+// ========================================
+// DEBUG LOGGING SYSTEM
+// ========================================
+
+let DEBUG_LOGGING = true; // Default: enabled
+
+// Debug logger wrapper functions
+const debug = {
+    log: (...args) => { if (DEBUG_LOGGING) console.log(...args); },
+    info: (...args) => { if (DEBUG_LOGGING) console.info(...args); },
+    warn: (...args) => { if (DEBUG_LOGGING) console.warn(...args); },
+    error: (...args) => console.error(...args), // Errors always shown
+    group: (...args) => { if (DEBUG_LOGGING) console.group(...args); },
+    groupEnd: () => { if (DEBUG_LOGGING) console.groupEnd(); },
+    table: (...args) => { if (DEBUG_LOGGING) console.table(...args); }
+};
+
+// Load debug setting from config
+async function loadDebugConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
+        console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    } catch (error) {
+        console.error('❌ Failed to load debug config, using default (enabled):', error);
+        DEBUG_LOGGING = true;
+    }
+}
+
+// Runtime toggle function (accessible from browser console)
+window.toggleDebug = function(enable) {
+    DEBUG_LOGGING = enable ?? !DEBUG_LOGGING;
+    console.log(`🐛 Debug logging ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    return DEBUG_LOGGING;
+};
+
 const API_BASE = '';
 let availableEffects = [];
 let availableGenerators = [];
@@ -93,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function init() {
     try {
+        await loadDebugConfig();
         await loadAvailableEffects();
         await loadAvailableGenerators();
         await loadVideoPlaylist();
@@ -109,28 +149,28 @@ async function init() {
                                   (typeof id === 'string' && /^\d+\.\d+$/.test(id));
                 
                 if (isFloatId) {
-                    console.warn(`⚠️ Migrating ${playerId} playlist item ${i} (${files[i].name}) from float ID (${id}) to UUID`);
+                    debug.warn(`⚠️ Migrating ${playerId} playlist item ${i} (${files[i].name}) from float ID (${id}) to UUID`);
                     const newId = crypto.randomUUID();
                     files[i].id = newId;
-                    console.log(`   └─ New UUID: ${newId}`);
+                    debug.log(`   └─ New UUID: ${newId}`);
                     needsUpdate = true;
                 } else if (!id) {
-                    console.warn(`⚠️ ${playerId} playlist item ${i} (${files[i].name}) has no ID, generating UUID`);
+                    debug.warn(`⚠️ ${playerId} playlist item ${i} (${files[i].name}) has no ID, generating UUID`);
                     files[i].id = crypto.randomUUID();
                     needsUpdate = true;
                 } else {
-                    console.log(`✅ ${playerId} playlist item ${i} (${files[i].name}) has valid UUID: ${id}`);
+                    debug.log(`✅ ${playerId} playlist item ${i} (${files[i].name}) has valid UUID: ${id}`);
                 }
             }
         }
         
         // If any IDs were migrated, update backend playlists
         if (needsUpdate) {
-            console.log('🔄 Updating backend playlists with new UUIDs...');
+            debug.log('🔄 Updating backend playlists with new UUIDs...');
             await updateVideoPlaylist();
             await updateArtnetPlaylist();
         } else {
-            console.log('✅ All playlist items have valid UUIDs, no migration needed');
+            debug.log('✅ All playlist items have valid UUIDs, no migration needed');
         }
         
         await refreshVideoEffects();
@@ -140,6 +180,7 @@ async function init() {
         setupEffectDropZones();
         setupGeneratorDropZones();
         setupPlaylistContainerDropHandlers(); // Register container handlers once
+        initializeTransitionMenus(); // Initialize transition menu components
     } catch (error) {
         console.error('❌ Init failed:', error);
         throw error;
@@ -232,15 +273,15 @@ window.switchTab = function(tabName) {
 
 async function loadAvailableEffects() {
     try {
-        console.log('📥 Loading available effects from API...');
+        debug.log('📥 Loading available effects from API...');
         const response = await fetch(`${API_BASE}/api/plugins/list`);
         const data = await response.json();
         
-        console.log('📦 API Response:', data);
+        debug.log('📦 API Response:', data);
         
         if (data.success) {
             availableEffects = data.plugins.filter(p => p.type && p.type.toLowerCase() === 'effect');
-            console.log(`✅ Loaded ${availableEffects.length} effects:`, availableEffects.map(e => e.id));
+            debug.log(`✅ Loaded ${availableEffects.length} effects:`, availableEffects.map(e => e.id));
             renderAvailableEffects();
         } else {
             console.error('❌ Failed to load effects:', data.message);
@@ -280,15 +321,15 @@ function renderAvailableEffects() {
 
 async function loadAvailableGenerators() {
     try {
-        console.log('📥 Loading available generators from API...');
+        debug.log('📥 Loading available generators from API...');
         const response = await fetch(`${API_BASE}/api/plugins/list?type=generator`);
         const data = await response.json();
         
-        console.log('📦 Generators API Response:', data);
+        debug.log('📦 Generators API Response:', data);
         
         if (data.success) {
             availableGenerators = data.plugins;
-            console.log(`✅ Loaded ${availableGenerators.length} generators:`, availableGenerators.map(g => g.id));
+            debug.log(`✅ Loaded ${availableGenerators.length} generators:`, availableGenerators.map(g => g.id));
             renderAvailableGenerators();
         } else {
             console.error('❌ Failed to load generators:', data.message);
@@ -417,7 +458,7 @@ function setupGeneratorDropZones() {
     // This function is called once on init
     // The actual drop handling is done in renderVideoPlaylist() and renderArtnetPlaylist()
     // because they rebuild the DOM on each render
-    console.log('✅ Generator drop zones will be handled in playlist rendering');
+    debug.log('✅ Generator drop zones will be handled in playlist rendering');
 }
 
 // Setup container-level drop handlers (ONCE on init, not on every render!)
@@ -543,7 +584,7 @@ function setupPlaylistContainerDropHandlers() {
         }, 0); // Delayed to let child handlers set flag first
     });
     
-    console.log('✅ Container drop handlers registered (once)');
+    debug.log('✅ Container drop handlers registered (once)');
 }
 
 // Load generator as clip into player
@@ -567,7 +608,7 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video', cli
             });
         }
         
-        console.log('🔧 Loading generator with parameters:', defaultParams);
+        debug.log('🔧 Loading generator with parameters:', defaultParams);
         
         // Load generator as clip
         const response = await fetch(`${API_BASE}/api/player/${playerType}/clip/load`, {
@@ -585,7 +626,7 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video', cli
         if (data.success) {
             // Store clip info - use frontend clipId (UUID) instead of backend response
             selectedClipId = clipId || data.clip_id;
-            console.log(`🆔 Generator clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
+            debug.log(`🆔 Generator clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
             selectedClipPath = `generator:${generatorId}`;
             selectedClipPlayerType = playerType;
             
@@ -606,12 +647,12 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video', cli
             renderVideoPlaylist();
             
             showToast(`✅ Generator loaded: ${generator.name}`, 'success');
-            console.log('✅ Generator clip loaded:', data);
+            debug.log('✅ Generator clip loaded:', data);
             
             // Start playback automatically
             try {
                 await fetch(`${API_BASE}/api/player/${playerType}/play`, { method: 'POST' });
-                console.log('▶️ Auto-started generator playback');
+                debug.log('▶️ Auto-started generator playback');
             } catch (error) {
                 console.error('Error starting playback:', error);
             }
@@ -763,7 +804,7 @@ window.updateGeneratorParameter = async function(paramName, value) {
         const result = await response.json();
         
         if (result.success) {
-            console.log(`✅ Generator parameter updated: ${paramName} = ${finalValue}`);
+            debug.log(`✅ Generator parameter updated: ${paramName} = ${finalValue}`);
             
             // Update the generator in the playlist with new parameters
             if (window.currentGeneratorId && selectedClipPath) {
@@ -780,7 +821,7 @@ window.updateGeneratorParameter = async function(paramName, value) {
                     }
                 });
                 
-                console.log(`📋 Updated generator parameters in playlist`);
+                debug.log(`📋 Updated generator parameters in playlist`);
             }
         } else {
             console.error(`Failed to update parameter: ${result.error}`);
@@ -842,12 +883,12 @@ async function loadPlaylist(playerId) {
                 
                 // MIGRATION: Convert old float IDs to new UUIDs
                 if (savedId && typeof savedId === 'number') {
-                    console.warn(`⚠️ Converting old float ID (${savedId}) to UUID`);
+                    debug.warn(`⚠️ Converting old float ID (${savedId}) to UUID`);
                     savedId = null; // Force generation of new UUID
                 }
                 
                 if (!actualPath) {
-                    console.warn(`Empty path in ${playerId} playlist at index`, idx);
+                    debug.warn(`Empty path in ${playerId} playlist at index`, idx);
                     return null;
                 }
                 
@@ -993,7 +1034,7 @@ function renderVideoPlaylist() {
                 // Check if dropping a generator
                 const generatorId = e.dataTransfer.getData('generatorId');
                 if (generatorId) {
-                    console.log(`🌟 DROP GENERATOR to empty ${playlistType} playlist, id:`, generatorId);
+                    debug.log(`🌟 DROP GENERATOR to empty ${playlistType} playlist, id:`, generatorId);
                     const generatorName = e.dataTransfer.getData('generatorName') || generatorId;
                     const newGenerator = {
                         path: `generator:${generatorId}`,
@@ -1008,7 +1049,7 @@ function renderVideoPlaylist() {
                     if (playlistType === 'video') {
                         loadGeneratorClip(generatorId, 'video', newGenerator.id);
                     }
-                    console.log(`📋 Added and loaded generator ${generatorName} to empty ${playlistType} playlist`);
+                    debug.log(`📋 Added and loaded generator ${generatorName} to empty ${playlistType} playlist`);
                     
                     // Delay render to allow event to finish propagating
                     setTimeout(() => {
@@ -1021,7 +1062,7 @@ function renderVideoPlaylist() {
                 // Check if dropping a file
                 const videoPath = e.dataTransfer.getData('video-path');
                 if (videoPath) {
-                    console.log(`🎯 DROP FILE to empty ${playlistType} playlist, path:`, videoPath);
+                    debug.log(`🎯 DROP FILE to empty ${playlistType} playlist, path:`, videoPath);
                     const fileName = videoPath.split(/[/\\]/).pop();
                     const newVideo = {
                         path: videoPath,
@@ -1029,7 +1070,7 @@ function renderVideoPlaylist() {
                         id: crypto.randomUUID()
                     };
                     files.push(newVideo);
-                    console.log(`📋 Added file ${fileName} to empty ${playlistType} playlist`);
+                    debug.log(`📋 Added file ${fileName} to empty ${playlistType} playlist`);
                     
                     // Delay render to allow event to finish propagating
                     setTimeout(() => {
@@ -1100,11 +1141,11 @@ function renderVideoPlaylist() {
                 // Load effects/parameters without switching video
                 if (videoItem.type === 'generator' && videoItem.generator_id) {
                     // Load generator parameters
-                    console.log(`👁️ Hovering generator: ${videoItem.generator_id}`);
+                    debug.log(`👁️ Hovering generator: ${videoItem.generator_id}`);
                     
                     // Use the item's UUID directly from the playlist
                     selectedClipId = videoItem.id;
-                    console.log(`🎯 Using generator clip UUID from playlist: ${selectedClipId}`);
+                    debug.log(`🎯 Using generator clip UUID from playlist: ${selectedClipId}`);
                     
                     selectedClipPath = videoItem.path;
                     selectedClipPlayerType = 'video';
@@ -1136,11 +1177,11 @@ function renderVideoPlaylist() {
                     }
                 } else {
                     // Regular video - show effects
-                    console.log(`👁️ Hovering video: ${videoItem.path}`);
+                    debug.log(`👁️ Hovering video: ${videoItem.path}`);
                     
                     // Use the item's UUID directly from the playlist
                     selectedClipId = videoItem.id;
-                    console.log(`🎯 Using clip UUID from playlist: ${selectedClipId}`);
+                    debug.log(`🎯 Using clip UUID from playlist: ${selectedClipId}`);
                     
                     selectedClipPath = videoItem.path;
                     selectedClipPlayerType = 'video';
@@ -1269,7 +1310,7 @@ function renderVideoPlaylist() {
             // Check if dropping a file from file browser
             const videoPath = e.dataTransfer.getData('video-path');
             if (videoPath) {
-                console.log('🎯 DROP FILE from browser at index:', dropIndex, 'path:', videoPath);
+                debug.log('🎯 DROP FILE from browser at index:', dropIndex, 'path:', videoPath);
                 const fileName = videoPath.split(/[/\\]/).pop();
                 const newVideo = {
                     path: videoPath,
@@ -1278,7 +1319,7 @@ function renderVideoPlaylist() {
                 };
                 videoFiles.splice(dropIndex, 0, newVideo);
                 updateVideoPlaylist();
-                console.log(`📋 Added file ${fileName} at position ${dropIndex}`);
+                debug.log(`📋 Added file ${fileName} at position ${dropIndex}`);
                 
                 // Only autoload if dropped at position 0 and playlist was empty
                 if (dropIndex === 0 && !currentVideo) {
@@ -1291,7 +1332,7 @@ function renderVideoPlaylist() {
             }
             
             // Check if reordering within playlist
-            console.log('🎯 DROP: draggedPlaylist =', draggedPlaylist, 'draggedIndex =', draggedIndex);
+            debug.log('🎯 DROP: draggedPlaylist =', draggedPlaylist, 'draggedIndex =', draggedIndex);
             
             if (draggedPlaylist !== 'video' || draggedIndex === null) {
                 return;
@@ -1351,7 +1392,7 @@ window.loadVideoFile = async function(videoPath, clipId = null) {
             // NEW: Store clip ID and path - use frontend clipId (UUID) instead of backend response
             selectedClipId = clipId || data.clip_id;
             currentVideoItemId = clipId || data.clip_id;  // Update active item ID
-            console.log(`🆔 Video clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
+            debug.log(`🆔 Video clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
             selectedClipPath = videoPath;
             selectedClipPlayerType = 'video';
             
@@ -1362,7 +1403,7 @@ window.loadVideoFile = async function(videoPath, clipId = null) {
             window.currentGeneratorParams = null;
             window.currentGeneratorMeta = null;
             
-            console.log('✅ Video loaded with Clip-ID:', selectedClipId);
+            debug.log('✅ Video loaded with Clip-ID:', selectedClipId);
             await refreshClipEffects();
         } else {
             showToast(`Failed to load video: ${data.error}`, 'error');
@@ -1399,7 +1440,7 @@ window.loadVideo = async function(videoPath) {
             });
             
             renderVideoPlaylist();
-            console.log('✅ Video loaded:', videoPath);
+            debug.log('✅ Video loaded:', videoPath);
         } else {
             showToast(`Failed to load video: ${data.message}`, 'error');
         }
@@ -1434,7 +1475,7 @@ window.removeFromVideoPlaylist = async function(index) {
             const nextIndex = Math.min(index, videoFiles.length - 1);
             const nextItem = videoFiles[nextIndex];
             
-            console.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
+            debug.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
             
             if (nextItem.type === 'generator' && nextItem.generator_id) {
                 await loadGeneratorClip(nextItem.generator_id, 'video', nextItem.id);
@@ -1443,7 +1484,7 @@ window.removeFromVideoPlaylist = async function(index) {
             }
         } else {
             // No more clips - stop player and show black screen
-            console.log('⏹️ No more clips in playlist - stopping player');
+            debug.log('⏹️ No more clips in playlist - stopping player');
             try {
                 await fetch(`${API_BASE}/api/player/video/stop`, { method: 'POST' });
             } catch (error) {
@@ -1508,7 +1549,7 @@ async function next(playerId) {
                 currentArtnetItemId = data.clip_id || null;
             }
             renderPlaylist(playerId);
-            console.log(`⏭️ Next ${config.name}:`, data.video);
+            debug.log(`⏭️ Next ${config.name}:`, data.video);
         } else {
             console.error(`Failed to load next ${config.name}:`, data.message);
         }
@@ -1536,7 +1577,7 @@ async function previous(playerId) {
                 currentArtnetItemId = data.clip_id || null;
             }
             renderPlaylist(playerId);
-            console.log(`⏮️ Previous ${config.name}:`, data.video);
+            debug.log(`⏮️ Previous ${config.name}:`, data.video);
         } else {
             console.error(`Failed to load previous ${config.name}:`, data.message);
         }
@@ -1590,7 +1631,7 @@ async function toggleAutoplay(playerId) {
                 if (playerId === 'artnet') await loadArtnetFile(firstFile.path, firstFile.id);
             }
             await play(playerId);
-            console.log(`🎬 ${config.name} Autoplay: Starte erstes Video`);
+            debug.log(`🎬 ${config.name} Autoplay: Starte erstes Video`);
         }
     }
 }
@@ -1703,7 +1744,7 @@ function renderArtnetPlaylist() {
                 // Check if dropping a generator
                 const generatorId = e.dataTransfer.getData('generatorId');
                 if (generatorId) {
-                    console.log(`🌟 DROP GENERATOR to empty ${playlistType} playlist, id:`, generatorId);
+                    debug.log(`🌟 DROP GENERATOR to empty ${playlistType} playlist, id:`, generatorId);
                     const generatorName = e.dataTransfer.getData('generatorName') || generatorId;
                     const newGenerator = {
                         path: `generator:${generatorId}`,
@@ -1715,14 +1756,14 @@ function renderArtnetPlaylist() {
                     files.push(newGenerator);
                     renderPlaylist(playlistType);
                     updatePlaylist(playlistType);  // Sync to backend!
-                    console.log(`📋 Added generator ${generatorName} to empty ${playlistType} playlist`);
+                    debug.log(`📋 Added generator ${generatorName} to empty ${playlistType} playlist`);
                     return false;
                 }
                 
                 // Check if dropping a file
                 const videoPath = e.dataTransfer.getData('video-path');
                 if (videoPath) {
-                    console.log(`🎯 DROP FILE to empty ${playlistType} playlist, path:`, videoPath);
+                    debug.log(`🎯 DROP FILE to empty ${playlistType} playlist, path:`, videoPath);
                     const fileName = videoPath.split(/[/\\]/).pop();
                     const newVideo = {
                         path: videoPath,
@@ -1732,7 +1773,7 @@ function renderArtnetPlaylist() {
                     files.push(newVideo);
                     renderPlaylist(playlistType);
                     updatePlaylist(playlistType);  // Sync to backend!
-                    console.log(`📋 Added file ${fileName} to empty ${playlistType} playlist`);
+                    debug.log(`📋 Added file ${fileName} to empty ${playlistType} playlist`);
                     return false;
                 }
             });
@@ -1794,11 +1835,11 @@ function renderArtnetPlaylist() {
                 // Load effects/parameters without switching video
                 if (artnetItem.type === 'generator' && artnetItem.generator_id) {
                     // Load generator parameters
-                    console.log(`👁️ Hovering generator: ${artnetItem.generator_id}`);
+                    debug.log(`👁️ Hovering generator: ${artnetItem.generator_id}`);
                     
                     // Use the item's UUID directly from the playlist
                     selectedClipId = artnetItem.id;
-                    console.log(`🎯 Using artnet generator clip UUID from playlist: ${selectedClipId}`);
+                    debug.log(`🎯 Using artnet generator clip UUID from playlist: ${selectedClipId}`);
                     
                     selectedClipPath = artnetItem.path;
                     window.currentGeneratorId = artnetItem.generator_id;
@@ -1836,7 +1877,7 @@ function renderArtnetPlaylist() {
                     window.currentGeneratorId = null;
                     window.currentGeneratorParams = null;
                     window.currentGeneratorMeta = null;
-                    console.log(`🎯 Using artnet video clip UUID from playlist: ${selectedClipId}`);
+                    debug.log(`🎯 Using artnet video clip UUID from playlist: ${selectedClipId}`);
                     await refreshClipEffects();
                 }
             }, 1000);
@@ -1879,12 +1920,12 @@ function renderArtnetPlaylist() {
             e.dataTransfer.effectAllowed = 'all';
             e.dataTransfer.setData('text/plain', index.toString());
             e.dataTransfer.setData('application/x-playlist-item', index.toString());
-            console.log('🎯 ARTNET DRAGSTART: draggedIndex =', draggedIndex);
+            debug.log('🎯 ARTNET DRAGSTART: draggedIndex =', draggedIndex);
         });
         
         // Dragend
         item.addEventListener('dragend', (e) => {
-            console.log('🎯 ARTNET DRAGEND');
+            debug.log('🎯 ARTNET DRAGEND');
             // Delay cleanup to allow drop event to fire first
             setTimeout(() => {
                 item.style.opacity = '1';
@@ -1924,7 +1965,7 @@ function renderArtnetPlaylist() {
             // Check if dropping a generator from sources
             const generatorId = e.dataTransfer.getData('generatorId');
             if (generatorId) {
-                console.log('🌟 ARTNET DROP GENERATOR at index:', dropIndex, 'id:', generatorId);
+                debug.log('🌟 ARTNET DROP GENERATOR at index:', dropIndex, 'id:', generatorId);
                 const generatorName = e.dataTransfer.getData('generatorName') || generatorId;
                 const newGenerator = {
                     path: `generator:${generatorId}`,
@@ -1934,7 +1975,7 @@ function renderArtnetPlaylist() {
                     generator_id: generatorId
                 };
                 artnetFiles.splice(dropIndex, 0, newGenerator);
-                console.log(`📋 Added generator ${generatorName} at position ${dropIndex}`);
+                debug.log(`📋 Added generator ${generatorName} at position ${dropIndex}`);
                 
                 // Delay render to allow event to finish propagating
                 setTimeout(() => renderArtnetPlaylist(), 0);
@@ -1944,7 +1985,7 @@ function renderArtnetPlaylist() {
             // Check if dropping a file from file browser
             const videoPath = e.dataTransfer.getData('video-path');
             if (videoPath) {
-                console.log('🎯 ARTNET DROP FILE from browser at index:', dropIndex, 'path:', videoPath);
+                debug.log('🎯 ARTNET DROP FILE from browser at index:', dropIndex, 'path:', videoPath);
                 const fileName = videoPath.split(/[/\\]/).pop();
                 const newVideo = {
                     path: videoPath,
@@ -1952,7 +1993,7 @@ function renderArtnetPlaylist() {
                     id: crypto.randomUUID() // Unique ID that becomes clip_id
                 };
                 artnetFiles.splice(dropIndex, 0, newVideo);
-                console.log(`📋 Added file ${fileName} at position ${dropIndex}`);
+                debug.log(`📋 Added file ${fileName} at position ${dropIndex}`);
                 
                 // Delay render to allow event to finish propagating
                 setTimeout(() => renderArtnetPlaylist(), 0);
@@ -1960,15 +2001,15 @@ function renderArtnetPlaylist() {
             }
             
             // Check if reordering within playlist
-            console.log('🎯 ARTNET DROP: draggedPlaylist =', draggedPlaylist, 'draggedIndex =', draggedIndex);
+            debug.log('🎯 ARTNET DROP: draggedPlaylist =', draggedPlaylist, 'draggedIndex =', draggedIndex);
             
             if (draggedPlaylist !== 'artnet' || draggedIndex === null) {
-                console.log('🎯 ARTNET DROP: REJECTED - wrong playlist or null index');
+                debug.log('🎯 ARTNET DROP: REJECTED - wrong playlist or null index');
                 return;
             }
             
-            console.log('🎯 ARTNET DROP: draggedIndex =', draggedIndex, 'dropIndex =', dropIndex);
-            console.log('🎯 ARTNET DROP: artnetFiles before =', artnetFiles.map((v, i) => `${i}:${v.name}`));
+            debug.log('🎯 ARTNET DROP: draggedIndex =', draggedIndex, 'dropIndex =', dropIndex);
+            debug.log('🎯 ARTNET DROP: artnetFiles before =', artnetFiles.map((v, i) => `${i}:${v.name}`));
             
             // Adjust drop index if dragging from before the drop position
             let adjustedDropIndex = dropIndex;
@@ -2014,7 +2055,7 @@ window.loadArtnetFile = async function(videoPath, clipId = null) {
             
             // NEW: Store clip ID and path - use frontend clipId (UUID) instead of backend response
             selectedClipId = clipId || data.clip_id;
-            console.log(`🆔 Artnet clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
+            debug.log(`🆔 Artnet clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
             selectedClipPath = videoPath;
             selectedClipPlayerType = 'artnet';
             
@@ -2023,7 +2064,7 @@ window.loadArtnetFile = async function(videoPath, clipId = null) {
             window.currentGeneratorParams = null;
             window.currentGeneratorMeta = null;
             
-            console.log('✅ Art-Net video loaded with Clip-ID:', selectedClipId);
+            debug.log('✅ Art-Net video loaded with Clip-ID:', selectedClipId);
             await refreshClipEffects();
         } else {
             showToast(`Failed to load Art-Net video: ${data.error}`, 'error');
@@ -2094,7 +2135,7 @@ window.removeFromArtnetPlaylist = async function(index) {
             const nextIndex = Math.min(index, artnetFiles.length - 1);
             const nextItem = artnetFiles[nextIndex];
             
-            console.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
+            debug.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
             
             if (nextItem.type === 'generator' && nextItem.generator_id) {
                 await loadGeneratorClip(nextItem.generator_id, 'artnet', nextItem.id);
@@ -2103,7 +2144,7 @@ window.removeFromArtnetPlaylist = async function(index) {
             }
         } else {
             // No more clips - stop player and show black screen
-            console.log('⏹️ No more clips in artnet playlist - stopping player');
+            debug.log('⏹️ No more clips in artnet playlist - stopping player');
             try {
                 await fetch(`${API_BASE}/api/player/artnet/stop`, { method: 'POST' });
             } catch (error) {
@@ -2153,7 +2194,7 @@ window.toggleArtnetLoop = async function() { await toggleLoop('artnet'); };
 
 window.addEffectToVideo = async function(pluginId) {
     try {
-        const response = await fetch(`${API_BASE}/api/player/effects/add`, {
+        const response = await fetch(`${API_BASE}/api/player/video/effects/add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ plugin_id: pluginId })
@@ -2162,7 +2203,7 @@ window.addEffectToVideo = async function(pluginId) {
         const data = await response.json();
         
         if (response.ok && data.success) {
-            console.log('✅ Effect added to video:', pluginId);
+            debug.log('✅ Effect added to video:', pluginId);
             await refreshVideoEffects();
         } else {
             const errorMsg = data.error || data.message || 'Unknown error';
@@ -2177,7 +2218,7 @@ window.addEffectToVideo = async function(pluginId) {
 
 async function refreshVideoEffects() {
     try {
-        const response = await fetch(`${API_BASE}/api/player/effects`);
+        const response = await fetch(`${API_BASE}/api/player/video/effects`);
         const data = await response.json();
         
         if (data.success) {
@@ -2241,7 +2282,7 @@ window.clearVideoEffects = async function() {
     clearVideoEffectsClicks = 0;
     
     try {
-        const response = await fetch(`${API_BASE}/api/player/effects/clear`, {
+        const response = await fetch(`${API_BASE}/api/player/video/effects/clear`, {
             method: 'POST'
         });
         
@@ -2263,7 +2304,7 @@ window.clearVideoEffects = async function() {
 
 window.addEffectToArtnet = async function(pluginId) {
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/effects/add`, {
+        const response = await fetch(`${API_BASE}/api/player/artnet/effects/add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ plugin_id: pluginId })
@@ -2272,7 +2313,7 @@ window.addEffectToArtnet = async function(pluginId) {
         const data = await response.json();
         
         if (response.ok && data.success) {
-            console.log('✅ Effect added to Art-Net:', pluginId);
+            debug.log('✅ Effect added to Art-Net:', pluginId);
             await refreshArtnetEffects();
         } else {
             const errorMsg = data.error || data.message || 'Unknown error';
@@ -2287,7 +2328,7 @@ window.addEffectToArtnet = async function(pluginId) {
 
 async function refreshArtnetEffects() {
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/effects`);
+        const response = await fetch(`${API_BASE}/api/player/artnet/effects`);
         const data = await response.json();
         
         if (data.success) {
@@ -2353,7 +2394,7 @@ window.clearArtnetEffects = async function() {
     clearArtnetEffectsClicks = 0;
     
     try {
-        const response = await fetch(`${API_BASE}/api/artnet/effects/clear`, {
+        const response = await fetch(`${API_BASE}/api/player/artnet/effects/clear`, {
             method: 'POST'
         });
         
@@ -2394,7 +2435,7 @@ window.addEffectToClip = async function(pluginId) {
         const data = await response.json();
         
         if (response.ok && data.success) {
-            console.log('✅ Clip effect added:', pluginId, 'to Clip-ID:', selectedClipId);
+            debug.log('✅ Clip effect added:', pluginId, 'to Clip-ID:', selectedClipId);
             await refreshClipEffects();
         } else {
             const errorMsg = data.error || data.message || 'Unknown error';
@@ -2553,7 +2594,7 @@ function renderEffectItem(effect, index, player) {
     
     // Debug: Log effect data
     if (parameters.length === 0) {
-        console.warn(`⚠️ Effect "${metadata.name || effect.plugin_id}" has no parameters:`, effect);
+        debug.warn(`⚠️ Effect "${metadata.name || effect.plugin_id}" has no parameters:`, effect);
     }
     
     return `
@@ -2599,8 +2640,8 @@ window.removeEffect = async function(player, index) {
         } else {
             // Player effects use URL-only
             endpoint = player === 'video' 
-                ? `${API_BASE}/api/player/effects/${index}`
-                : `${API_BASE}/api/artnet/effects/remove/${index}`;
+                ? `${API_BASE}/api/player/video/effects/${index}`
+                : `${API_BASE}/api/player/artnet/effects/${index}`;
         }
         
         const fetchOptions = {
@@ -2617,7 +2658,7 @@ window.removeEffect = async function(player, index) {
         const data = await response.json();
         
         if (data.success) {
-            console.log(`✅ ${player} effect removed:`, index);
+            debug.log(`✅ ${player} effect removed:`, index);
             if (player === 'video') {
                 await refreshVideoEffects();
             } else if (player === 'artnet') {
@@ -2735,11 +2776,11 @@ async function sendParameterUpdate(player, effectIndex, paramName, value) {
             };
             method = 'PUT';
         } else if (player === 'video') {
-            endpoint = `${API_BASE}/api/player/effects/${effectIndex}/parameters/${paramName}`;
-            body = { value: value };
-            method = 'POST';
+            endpoint = `${API_BASE}/api/player/video/effects/${effectIndex}/parameter`;
+            body = { name: paramName, value: value };
+            method = 'PUT';
         } else {
-            endpoint = `${API_BASE}/api/artnet/effects/${effectIndex}/parameter`;
+            endpoint = `${API_BASE}/api/player/artnet/effects/${effectIndex}/parameter`;
             body = { name: paramName, value: value };
             method = 'PUT';
         }
@@ -2753,7 +2794,7 @@ async function sendParameterUpdate(player, effectIndex, paramName, value) {
         const data = await response.json();
         
         if (data.success) {
-            console.log(`✅ Updated ${player} ${paramName} = ${value}`);
+            debug.log(`✅ Updated ${player} ${paramName} = ${value}`);
         } else {
             console.error(`❌ Failed to update ${player} ${paramName}:`, data.message || data.error);
         }
@@ -2926,21 +2967,63 @@ window.savePlaylists = async function() {
     }
 };
 
+// Initialize modals once ModalManager is available
+let playlistModal = null;
+let snapshotModal = null;
+
+function initializeModals() {
+    if (!window.ModalManager) {
+        debug.warn('⚠️ ModalManager not loaded yet, retrying...');
+        setTimeout(initializeModals, 100);
+        return;
+    }
+    
+    // Create playlist modal
+    playlistModal = ModalManager.create({
+        id: 'playlistModal',
+        title: '📂 Load Playlists',
+        content: '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>',
+        centered: true,
+        size: null
+    });
+    
+    // Create snapshot modal
+    snapshotModal = ModalManager.create({
+        id: 'snapshotModal',
+        title: '🔄 Restore Session Snapshot',
+        content: '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>',
+        centered: true,
+        size: null
+    });
+    
+    debug.log('✅ Modals initialized');
+}
+
+// Call initialization when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeModals);
+} else {
+    initializeModals();
+}
+
 window.refreshPlaylistModal = async function() {
     try {
+        if (!playlistModal) {
+            console.error('❌ Playlist modal not initialized');
+            return;
+        }
+        
         // Get list of available playlists
         const response = await fetch(`${API_BASE}/api/playlists`);
         const data = await response.json();
         
-        const modalBody = document.getElementById('playlistModalBody');
-        
         if (data.status !== 'success' || !data.playlists || data.playlists.length === 0) {
-            modalBody.innerHTML = `
+            playlistModal.setContent(`
                 <div class="text-center">
                     <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
                     <p>No saved playlists found</p>
                 </div>
-            `;
+            `);
             return;
         }
         
@@ -2988,7 +3071,7 @@ window.refreshPlaylistModal = async function() {
         });
         html += '</div>';
         
-        modalBody.innerHTML = html;
+        playlistModal.setContent(html);
         
     } catch (error) {
         console.error('❌ Error refreshing playlists:', error);
@@ -2998,9 +3081,13 @@ window.refreshPlaylistModal = async function() {
 
 window.loadPlaylists = async function() {
     try {
+        if (!playlistModal) {
+            console.error('❌ Playlist modal not initialized');
+            return;
+        }
+        
         // Show modal
-        const modal = new bootstrap.Modal(document.getElementById('playlistModal'));
-        modal.show();
+        playlistModal.show();
         
         // Load playlist list
         await refreshPlaylistModal();
@@ -3008,27 +3095,27 @@ window.loadPlaylists = async function() {
     } catch (error) {
         console.error('❌ Error loading playlists:', error);
         showToast('Error loading playlists', 'error');
-        bootstrap.Modal.getInstance(document.getElementById('playlistModal'))?.hide();
+        playlistModal?.hide();
     }
 };
 
 window.selectPlaylist = async function(playlistName) {
     try {
-        console.log('🎯 Loading playlist:', playlistName);
+        debug.log('🎯 Loading playlist:', playlistName);
         
         // Load the playlist
         const loadResponse = await fetch(`${API_BASE}/api/playlist/load/${playlistName}`);
         const loadData = await loadResponse.json();
         
-        console.log('🎯 Playlist data received:', loadData);
+        debug.log('🎯 Playlist data received:', loadData);
         
-        if (loaddata.success) {
+        if (loadData.success) {
             // Load both playlists
-            videoFiles = loadData.playlist.video_playlist || loadData.playlist.videos || [];
-            artnetFiles = loadData.playlist.artnet_playlist || [];
+            videoFiles = loadData.video_playlist || [];
+            artnetFiles = loadData.artnet_playlist || [];
             
-            console.log('🎯 Video files:', videoFiles.length);
-            console.log('🎯 Art-Net files:', artnetFiles.length);
+            debug.log('🎯 Video files:', videoFiles.length);
+            debug.log('🎯 Art-Net files:', artnetFiles.length);
             
             renderVideoPlaylist();
             renderArtnetPlaylist();
@@ -3036,7 +3123,7 @@ window.selectPlaylist = async function(playlistName) {
             showToast(`Playlists "${playlistName}" loaded (Video: ${videoFiles.length}, Art-Net: ${artnetFiles.length})`, 'success');
             
             // Close modal
-            bootstrap.Modal.getInstance(document.getElementById('playlistModal')).hide();
+            playlistModal?.hide();
         } else {
             showToast(`Failed to load playlists: ${loadData.message}`, 'error');
         }
@@ -3105,74 +3192,49 @@ window.deletePlaylist = async function(playlistName, event) {
 // TRANSITION MENU
 // ========================================
 
-window.toggleTransitionMenu = function(player) {
-    const panel = document.getElementById(`${player}TransitionPanel`);
-    panel.classList.toggle('active');
-};
+let transitionMenus = {}; // Store transition menu controllers
 
-window.closeTransitionMenu = function(player) {
-    const panel = document.getElementById(`${player}TransitionPanel`);
-    panel.classList.remove('active');
-};
-
-window.toggleTransitions = function(player, enabled) {
-    const config = player === 'video' ? videoTransitionConfig : artnetTransitionConfig;
-    config.enabled = enabled;
-    
-    const settings = document.getElementById(`${player}TransitionSettings`);
-    if (enabled) {
-        settings.classList.remove('disabled');
-        showToast(`${player === 'video' ? 'Video' : 'Art-Net'} Transitions enabled`, 'success');
-    } else {
-        settings.classList.add('disabled');
-        showToast(`${player === 'video' ? 'Video' : 'Art-Net'} Transitions disabled`, 'info');
-    }
-    
-    // Send to backend
-    updateTransitionConfig(player);
-};
-
-window.updateTransition = function(player) {
-    const config = player === 'video' ? videoTransitionConfig : artnetTransitionConfig;
-    
-    const effectSelect = document.getElementById(`${player}TransitionEffect`);
-    const durationSlider = document.getElementById(`${player}TransitionDuration`);
-    const easingSelect = document.getElementById(`${player}TransitionEasing`);
-    const durationValue = document.getElementById(`${player}DurationValue`);
-    
-    config.effect = effectSelect.value;
-    config.duration = parseFloat(durationSlider.value);
-    config.easing = easingSelect.value;
-    
-    // Update duration display
-    durationValue.textContent = config.duration.toFixed(1) + 's';
-    
-    // Send to backend
-    updateTransitionConfig(player);
-};
-
-async function updateTransitionConfig(player) {
-    const config = player === 'video' ? videoTransitionConfig : artnetTransitionConfig;
-    const endpoint = player === 'video' 
-        ? `${API_BASE}/api/video/transition/config`
-        : `${API_BASE}/api/artnet/transition/config`;
-    
-    try {
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            console.log(`✅ ${player} transition config updated:`, config);
+function initializeTransitionMenus() {
+    // Wait for template to be loaded
+    const checkTemplate = setInterval(() => {
+        const template = document.getElementById('transition-menu-template');
+        if (template && window.createTransitionMenu) {
+            clearInterval(checkTemplate);
+            
+            // Create transition menus for both players
+            const videoContainer = document.getElementById('videoTransitionMenuContainer');
+            const artnetContainer = document.getElementById('artnetTransitionMenuContainer');
+            
+            if (videoContainer) {
+                transitionMenus.video = window.createTransitionMenu('video', videoContainer);
+                transitionMenus.video.setConfig(playerConfigs.video.transitionConfig);
+                debug.log('✅ Video transition menu initialized');
+            }
+            
+            if (artnetContainer) {
+                transitionMenus.artnet = window.createTransitionMenu('artnet', artnetContainer);
+                transitionMenus.artnet.setConfig(playerConfigs.artnet.transitionConfig);
+                debug.log('✅ Art-Net transition menu initialized');
+            }
         }
-    } catch (error) {
-        console.error(`❌ Error updating ${player} transition config:`, error);
-    }
+    }, 100);
+    
+    // Timeout after 5 seconds
+    setTimeout(() => clearInterval(checkTemplate), 5000);
 }
+
+// Backward compatibility functions (optional)
+window.toggleTransitionMenu = function(playerId) {
+    if (transitionMenus[playerId]) {
+        transitionMenus[playerId].toggle();
+    }
+};
+
+window.closeTransitionMenu = function(playerId) {
+    if (transitionMenus[playerId]) {
+        transitionMenus[playerId].close();
+    }
+};
 
 // ========================================
 // SESSION SNAPSHOT MANAGEMENT
@@ -3200,20 +3262,23 @@ window.saveSnapshot = async function() {
 
 window.refreshSnapshotModal = async function() {
     try {
+        if (!snapshotModal) {
+            console.error('❌ Snapshot modal not initialized');
+            return;
+        }
+        
         // Get list of available snapshots
         const response = await fetch(`${API_BASE}/api/session/snapshots`);
         const data = await response.json();
         
-        const modalBody = document.getElementById('snapshotModalBody');
-        
         if (!data.success || !data.snapshots || data.snapshots.length === 0) {
-            modalBody.innerHTML = `
+            snapshotModal.setContent(`
                 <div class="text-center">
                     <div style="font-size: 3rem; margin-bottom: 1rem;">📸</div>
                     <p>No snapshots found</p>
                     <p class="text-muted small">Create a snapshot to save the current session state</p>
                 </div>
-            `;
+            `);
             return;
         }
         
@@ -3266,7 +3331,7 @@ window.refreshSnapshotModal = async function() {
         });
         html += '</div>';
         
-        modalBody.innerHTML = html;
+        snapshotModal.setContent(html);
         
     } catch (error) {
         console.error('❌ Error refreshing snapshots:', error);
@@ -3276,9 +3341,13 @@ window.refreshSnapshotModal = async function() {
 
 window.loadSnapshotModal = async function() {
     try {
+        if (!snapshotModal) {
+            console.error('❌ Snapshot modal not initialized');
+            return;
+        }
+        
         // Show modal
-        const modal = new bootstrap.Modal(document.getElementById('snapshotModal'));
-        modal.show();
+        snapshotModal.show();
         
         // Load snapshot list
         await refreshSnapshotModal();
@@ -3286,13 +3355,13 @@ window.loadSnapshotModal = async function() {
     } catch (error) {
         console.error('❌ Error loading snapshots:', error);
         showToast('Error loading snapshots', 'error');
-        bootstrap.Modal.getInstance(document.getElementById('snapshotModal'))?.hide();
+        snapshotModal?.hide();
     }
 };
 
 window.selectSnapshot = async function(filename) {
     try {
-        console.log('🔄 Restoring snapshot:', filename);
+        debug.log('🔄 Restoring snapshot:', filename);
         
         // Confirm restore
         if (!confirm(`Restore snapshot "${filename}"?\n\nThis will replace the current session state and reload the page.`)) {
@@ -3311,7 +3380,7 @@ window.selectSnapshot = async function(filename) {
             showToast('✅ Snapshot restored! Reloading...', 'success');
             
             // Close modal
-            bootstrap.Modal.getInstance(document.getElementById('snapshotModal'))?.hide();
+            snapshotModal?.hide();
             
             // Reload page after short delay
             setTimeout(() => {

@@ -46,10 +46,16 @@ def register_web_routes(app, config=None, player_manager=None):
         """Serve the main editor page."""
         return send_from_directory(app.static_folder, 'editor.html')
     
+    @app.route('/player')
+    def player():
+        """Serve the player panel."""
+        return send_from_directory(app.static_folder, 'player.html')
+    
     @app.route('/controls')
     def controls():
-        """Serve the control panel."""
-        return send_from_directory(app.static_folder, 'controls.html')
+        """Redirect old controls URL to player."""
+        from flask import redirect
+        return redirect('/player', code=301)
     
     @app.route('/cli')
     def cli():
