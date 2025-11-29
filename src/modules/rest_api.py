@@ -157,6 +157,10 @@ class RestAPI:
         from .api_player_unified import register_unified_routes
         register_unified_routes(self.app, self.player_manager, self.config)
         
+        # Register Transition API
+        from .api_transitions import register_transition_routes
+        register_transition_routes(self.app, self.player_manager)
+        
         # Register Session Snapshot API
         from .api_session import register_session_routes
         from .session_state import get_session_state

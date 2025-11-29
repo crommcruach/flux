@@ -58,7 +58,7 @@
  * @param {HTMLElement} container - The container element to append the menu to
  * @returns {Object} - The transition menu controller
  */
-window.createTransitionMenu = function(playerId, container) {
+window.createTransitionMenu = async function(playerId, container) {
     // Clone template
     const template = document.getElementById('transition-menu-template');
     const clone = template.content.cloneNode(true);
@@ -153,8 +153,72 @@ window.createTransitionMenu = function(playerId, container) {
         }
     };
     
+    // Load available transitions from API
+    const loadTransitions = async () => {
+        try {
+            const response = await fetch('/api/transitions/list');
+            const data = await response.json();
+            
+            if (data.success && data.transitions) {
+                // Clear existing options (keep only current selection if exists)
+                effectSelect.innerHTML = '';
+                
+                // Populate with available transitions
+                data.transitions.forEach(transition => {
+                    const option = document.createElement('option');
+                    option.value = transition.id;
+                    option.textContent = transition.name;
+                    option.title = transition.description || '';
+                    effectSelect.appendChild(option);
+                });
+                
+                // Set default selection
+                if (data.transitions.length > 0) {
+                    effectSelect.value = config.effect;
+                }
+                
+                console.log(`✅ Loaded ${data.transitions.length} transitions for ${playerId}`);
+            }
+        } catch (error) {
+            console.error(`❌ Error loading transitions for ${playerId}:`, error);
+            // Fallback: Add fade as default
+            effectSelect.innerHTML = '<option value="fade">Fade</option>';
+        }
+    };
+    
+    // Load current config from backend
+    const loadCurrentConfig = async () => {
+        try {
+            const response = await fetch(`/api/player/${playerId}/transition/status`);
+            const data = await response.json();
+            
+            if (data.success && data.config) {
+                config.enabled = data.config.enabled;
+                config.effect = data.config.effect;
+                config.duration = data.config.duration;
+                config.easing = data.config.easing;
+                
+                // Update UI
+                enabledCheckbox.checked = config.enabled;
+                effectSelect.value = config.effect;
+                durationSlider.value = config.duration;
+                easingSelect.value = config.easing;
+                durationValue.textContent = config.duration.toFixed(1) + 's';
+                settings.classList.toggle('disabled', !config.enabled);
+                
+                console.log(`✅ Loaded ${playerId} transition config:`, config);
+            }
+        } catch (error) {
+            console.error(`❌ Error loading ${playerId} transition config:`, error);
+        }
+    };
+    
     // Append to container
     container.appendChild(clone);
+    
+    // Initialize: Load transitions first, then current config
+    await loadTransitions();
+    await loadCurrentConfig();
     
     // Return controller object
     return {

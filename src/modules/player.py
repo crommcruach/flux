@@ -105,6 +105,19 @@ class Player:
         self.last_frame = None  # Letztes Frame (LED-Punkte RGB) für Preview
         self.last_video_frame = None  # Letztes komplettes Frame für Preview
         
+        # Transition System
+        self.transition_config = {
+            "enabled": False,
+            "effect": "fade",
+            "duration": 1.0,
+            "easing": "ease_in_out",
+            "plugin": None
+        }
+        self.transition_buffer = None  # Buffer für letztes Frame (für Transitions)
+        self.transition_active = False
+        self.transition_start_time = 0
+        self.transition_frames = 0
+        
         # Lade Points-Konfiguration
         # validate_bounds nur für Videos, nicht für Scripts
         validate_bounds = isinstance(frame_source, VideoSource)
@@ -448,6 +461,13 @@ class Player:
                             logger.error(f"❌ [{self.player_name}] Fehler beim Initialisieren des nächsten Items: {next_item_path}")
                             break
                         
+                        # Start transition if enabled
+                        if self.transition_config.get("enabled") and self.transition_buffer is not None:
+                            self.transition_active = True
+                            self.transition_start_time = time.time()
+                            self.transition_frames = 0
+                            logger.debug(f"⚡ [{self.player_name}] Transition started: {self.transition_config['effect']}")
+                        
                         # Cleanup alte Source
                         if self.source:
                             self.source.cleanup()
@@ -500,6 +520,37 @@ class Player:
                 # Reset Source für nächsten Loop
                 self.source.reset()
                 continue
+            
+            # Apply transition if active
+            if self.transition_active:
+                elapsed = time.time() - self.transition_start_time
+                duration = self.transition_config.get("duration", 1.0)
+                
+                if elapsed < duration and self.transition_buffer is not None:
+                    # Calculate progress (0.0 to 1.0)
+                    progress = min(1.0, elapsed / duration)
+                    
+                    # Apply transition using plugin
+                    transition_plugin = self.transition_config.get("plugin")
+                    if transition_plugin:
+                        try:
+                            frame = transition_plugin.blend_frames(
+                                self.transition_buffer,
+                                frame,
+                                progress
+                            )
+                            self.transition_frames += 1
+                        except Exception as e:
+                            logger.error(f"❌ [{self.player_name}] Transition error: {e}")
+                            self.transition_active = False
+                else:
+                    # Transition complete
+                    self.transition_active = False
+                    logger.debug(f"✅ [{self.player_name}] Transition complete ({self.transition_frames} frames)")
+            
+            # Store frame for next transition
+            if self.transition_config.get("enabled"):
+                self.transition_buffer = frame.copy()
             
             # Helligkeit und Hue Shift auf komplettes Frame anwenden für Preview
             frame_with_brightness = frame.astype(np.float32)

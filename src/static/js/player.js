@@ -398,10 +398,7 @@ function renderAvailableEffects() {
         </div>
     `).join('');
     
-    // Refresh search filter after rendering
-    if (effectsSearchFilter) {
-        effectsSearchFilter.refresh();
-    }
+    // Tab component handles search refresh automatically
 }
 
 // ========================================
@@ -452,10 +449,7 @@ function renderAvailableGenerators() {
         </div>
     `).join('');
     
-    // Refresh search filter after rendering
-    if (sourcesSearchFilter) {
-        sourcesSearchFilter.refresh();
-    }
+    // Tab component handles search refresh automatically
 }
 
 // Drag & Drop for Effects
@@ -490,107 +484,6 @@ window.endGeneratorDrag = function(event) {
     event.target.style.opacity = '1';
     window.currentDragGenerator = null;
 };
-
-// ========================================
-// SEARCH FILTERS
-// ========================================
-
-let effectsSearchFilter = null;
-let sourcesSearchFilter = null;
-let filesSearchFilter = null;
-
-/**
- * Initialize search filters for Effects, Sources, and Files tabs
- */
-async function initializeSearchFilters() {
-    debug.log('🔍 Initializing search filters...');
-    
-    // Wait for SearchFilter API to be available
-    const maxAttempts = 50;
-    let attempts = 0;
-    
-    while (!window.SearchFilter && attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-    }
-    
-    if (!window.SearchFilter) {
-        console.error('❌ SearchFilter API not available after waiting');
-        return;
-    }
-    
-    debug.log('✅ SearchFilter API loaded');
-    
-    // Initialize Effects Search Filter
-    const effectsContainer = document.getElementById('effectsSearchContainer');
-    if (effectsContainer) {
-        effectsSearchFilter = window.SearchFilter.create({
-            container: effectsContainer,
-            itemsSelector: '#availableEffects .effect-card',
-            getSearchText: (item) => {
-                const title = item.querySelector('.effect-card-title')?.textContent || '';
-                const description = item.querySelector('.effect-card-description')?.textContent || '';
-                return `${title} ${description}`;
-            },
-            placeholder: 'Search effects...',
-            onFilter: (result) => {
-                debug.log(`🔍 Effects: ${result.visible}/${result.total} visible`);
-            }
-        });
-        debug.log('✅ Effects search filter initialized');
-    }
-    
-    // Initialize Sources Search Filter
-    const sourcesContainer = document.getElementById('sourcesSearchContainer');
-    if (sourcesContainer) {
-        sourcesSearchFilter = window.SearchFilter.create({
-            container: sourcesContainer,
-            itemsSelector: '#availableSources .generator-card',
-            getSearchText: (item) => {
-                const title = item.querySelector('.generator-card-title')?.textContent || '';
-                const description = item.querySelector('.generator-card-description')?.textContent || '';
-                return `${title} ${description}`;
-            },
-            placeholder: 'Search sources...',
-            onFilter: (result) => {
-                debug.log(`🔍 Sources: ${result.visible}/${result.total} visible`);
-            }
-        });
-        debug.log('✅ Sources search filter initialized');
-    }
-    
-    // Initialize Files Search Filter (placeholder for future file browser)
-    const filesContainer = document.getElementById('filesSearchContainer');
-    if (filesContainer) {
-        filesSearchFilter = window.SearchFilter.create({
-            container: filesContainer,
-            itemsSelector: '#fileBrowser .file-item', // Will be implemented later
-            getSearchText: (item) => {
-                return item.textContent || '';
-            },
-            placeholder: 'Search files...',
-            onFilter: (result) => {
-                debug.log(`🔍 Files: ${result.visible}/${result.total} visible`);
-            }
-        });
-        debug.log('✅ Files search filter initialized');
-    }
-}
-
-/**
- * Refresh search filters when data changes
- */
-function refreshSearchFilters() {
-    if (effectsSearchFilter) {
-        effectsSearchFilter.refresh();
-    }
-    if (sourcesSearchFilter) {
-        sourcesSearchFilter.refresh();
-    }
-    if (filesSearchFilter) {
-        filesSearchFilter.refresh();
-    }
-}
 
 // Setup drop zones for FX panels
 function setupEffectDropZones() {
@@ -3278,33 +3171,45 @@ window.deletePlaylist = async function(playlistName, event) {
 
 let transitionMenus = {}; // Store transition menu controllers
 
-function initializeTransitionMenus() {
+async function initializeTransitionMenus() {
     // Wait for template to be loaded
-    const checkTemplate = setInterval(() => {
-        const template = document.getElementById('transition-menu-template');
-        if (template && window.createTransitionMenu) {
-            clearInterval(checkTemplate);
+    const checkTemplate = () => {
+        return new Promise((resolve, reject) => {
+            const interval = setInterval(() => {
+                const template = document.getElementById('transition-menu-template');
+                if (template && window.createTransitionMenu) {
+                    clearInterval(interval);
+                    resolve();
+                }
+            }, 100);
             
-            // Create transition menus for both players
-            const videoContainer = document.getElementById('videoTransitionMenuContainer');
-            const artnetContainer = document.getElementById('artnetTransitionMenuContainer');
-            
-            if (videoContainer) {
-                transitionMenus.video = window.createTransitionMenu('video', videoContainer);
-                transitionMenus.video.setConfig(playerConfigs.video.transitionConfig);
-                debug.log('✅ Video transition menu initialized');
-            }
-            
-            if (artnetContainer) {
-                transitionMenus.artnet = window.createTransitionMenu('artnet', artnetContainer);
-                transitionMenus.artnet.setConfig(playerConfigs.artnet.transitionConfig);
-                debug.log('✅ Art-Net transition menu initialized');
-            }
-        }
-    }, 100);
+            // Timeout after 5 seconds
+            setTimeout(() => {
+                clearInterval(interval);
+                reject(new Error('Transition menu template not loaded within timeout'));
+            }, 5000);
+        });
+    };
     
-    // Timeout after 5 seconds
-    setTimeout(() => clearInterval(checkTemplate), 5000);
+    try {
+        await checkTemplate();
+        
+        // Create transition menus for both players
+        const videoContainer = document.getElementById('videoTransitionMenuContainer');
+        const artnetContainer = document.getElementById('artnetTransitionMenuContainer');
+        
+        if (videoContainer) {
+            transitionMenus.video = await window.createTransitionMenu('video', videoContainer);
+            debug.log('✅ Video transition menu initialized');
+        }
+        
+        if (artnetContainer) {
+            transitionMenus.artnet = await window.createTransitionMenu('artnet', artnetContainer);
+            debug.log('✅ Art-Net transition menu initialized');
+        }
+    } catch (error) {
+        console.error('❌ Failed to initialize transition menus:', error);
+    }
 }
 
 // Backward compatibility functions (optional)

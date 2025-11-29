@@ -80,25 +80,35 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 1.2 🔄 Transition-Plugin-System (~8-10h)
+### 1.2 🔄 Transition-Plugin-System (~8-10h) ✅ COMPLETED (2025-11-29)
 
-- [ ] **PluginType.TRANSITION (3h):**
-  - `process_transition(frame_a, frame_b, progress)` Methode
-  - Basis Transition-Plugins: Fade, Wipe (Left/Right/Top/Bottom), Dissolve
+- [x] **PluginType.TRANSITION (3h):** ✅ COMPLETED (2025-11-29)
+  - `blend_frames(frame_a, frame_b, progress)` Methode implementiert
+  - Fade Transition Plugin mit Easing-Funktionen (linear, ease_in, ease_out, ease_in_out)
+  - Tests bestanden (Progress 0.0-1.0, alle Easing-Modi)
+  - Dokumentation: `docs/TRANSITION_SYSTEM.md`
 
-- [ ] **Player Integration (2h):**
-  - Transition-Buffering (letzter Frame)
-  - apply_transition() bei Clip-Wechsel
+- [x] **Player Integration (2h):** ✅ COMPLETED (2025-11-29)
+  - Transition-Buffering (letzter Frame): `self.transition_buffer`
+  - apply_transition() bei Clip-Wechsel (automatisch in Playback-Loop)
+  - Frame-Blending mit Progress-Berechnung (elapsed / duration)
+  - Transition-State: active, start_time, frames_count
 
-- [ ] **API & Config (2h):**
-  - `/api/player/transition/config` Endpoints
-  - Global & Per-Clip Transition-Settings
+- [x] **API & Config (2h):** ✅ COMPLETED (2025-11-29)
+  - `/api/transitions/list` - Verfügbare Transitions
+  - `/api/player/{player_id}/transition/config` - Transition setzen (POST)
+  - `/api/player/{player_id}/transition/status` - Status abrufen (GET)
+  - Player-spezifische Konfiguration (Video & Art-Net)
 
-- [ ] **UI (3h):**
-  - Transition-Settings Section
-  - Enable/Disable Toggle
-  - Effect-Dropdown + Duration-Slider (0.1s - 5.0s)
-  - Easing-Function Selector
+- [x] **UI (3h):** ✅ COMPLETED (2025-11-29)
+  - Reusable Transition-Menu-Komponente (`components/transition-menu.html`)
+  - Enable/Disable Toggle mit Settings-Panel
+  - Effect-Dropdown: Dynamisch geladen von API
+  - Duration-Slider: 0.1-5.0s, 0.1s Steps, Live-Value-Display
+  - Easing-Function Selector: All 4 Modi
+  - Integration in Video & Art-Net Player-UI
+  - Automatisches Config-Loading beim Start
+  - Dokumentation: `docs/TRANSITION_FRONTEND_INTEGRATION.md`, `docs/TRANSITION_QUICKSTART.md`
 
 ---
 
@@ -340,7 +350,7 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 ## 🚀 PRIORITÄT 4 - Hoch-Komplex, Hoch-Wert (~24-40h)
 **Hoher Aufwand, strategisch wichtig**
 
-### 4.1 🎥 Multi-Video-Routing per Art-Net-Objekt (~12-20h)
+### 4.1 🎥 Multi-Video-Routing per Art-Net-Objekt (~40-54h)
 
 - [ ] **Grundidee:** Mehrere Videos gleichzeitig, jedes LED-Objekt bekommt eigenes Video
 - [ ] **Architektur:**
@@ -348,22 +358,53 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
   - LED-Objekte definieren (Name, Universe-Range, Pixel-Count)
   - Routing-Config: `{"object": "strip_1", "video_player_id": "video_1"}`
   
-- [ ] **Kartendeck-UI:**
-  - Skizze hinzufügen
-
-- [ ] **Features:**
-  - Deck = Spalte (enthält gestapelte Clips)
-  - Clips = übereinander gestapelt, minimiert
-  - Click auf Deck → Detail-Ansicht mit allen Clips
-  - Pro Clip: Eigene Effekte, eigene Output-Zuweisung
-  - Playback-Modi: Parallel (alle gleichzeitig) oder Sequential
+- [ ] **Kartendeck-UI mit Slot-Compositing:**
+  - **Slot-Struktur (Kartendeck-Metapher):**
+    - Slot = Playlist-Position mit gestapelten Clip-Alternativen (wie Kartendeck 🎴)
+    - Minimiert: Zeigt Icon + Anzahl (`[3 Clips] 🎴`)
+    - Ausklappen: Zeigt alle Clips im Stack mit Compositing-Settings
+  
+  - **Compositing innerhalb eines Slots:**
+    - Alle Clips im Slot laufen parallel (Layer-Stack)
+    - Werden automatisch übereinander komponiert
+    - Jeder Clip hat eigene Effect-Chain
+    - Blend Mode pro Clip (Normal, Multiply, Screen, Overlay, Add, Subtract)
+    - Opacity pro Clip (0-100%)
+    - Layer-Reihenfolge via Drag & Drop änderbar
+  
+  - **Sequential zwischen Slots:**
+    - Slot 1 → Slot 2 → Slot 3 (mit Transitions)
+    - Transition-Effekte zwischen Slots (Fade, Wipe, Dissolve, etc.)
+    - Auto-Next oder manueller Trigger (Button/Keyboard/MIDI)
+    - Loop-Mode für Slot-Sequenz
+  
+  - **Trigger-Modi pro Slot:**
+    - **Manual:** Button-Click oder Keyboard (Nummerntaste)
+    - **Auto:** Nach Duration automatisch zum nächsten Slot
+    - **Random:** Zufälliger Slot aus Sequenz
+    - **MIDI:** MIDI-Note triggert spezifischen Slot
+  
+  - **Pro Clip im Slot:**
+    - Eigene Effect-Chain
+    - Blend Mode & Opacity (für Compositing)
+    - Weight für Random-Auswahl (bei mehreren Clips)
+    - Auto-Loop oder Play-Once
+  
+  - **Pro Slot:**
+    - Name/Label (z.B. "Intro Varianten", "Drop", "Outro")
+    - Duration (für Auto-Mode)
+    - Transition zum nächsten Slot (Type + Duration)
+    - Output-Routing (LED-Objekt-Zuweisung)
+    - Enable/Disable Toggle
 
 - [ ] **Implementierung:**
   - Phase 1: LED-Objekt-Definition & Config (~2h)
-  - Phase 2: Multi-Player-Manager (~2h)
-  - Phase 3: Routing-System & Frame-Collection (~2h)
-  - Phase 4: API-Endpoints (~2h)
-  - Phase 5: UI (Deck-System, Multi-Preview) (~3h)
+  - Phase 2: Slot-Manager (Slot-Sequenz, Trigger-System) (~3h)
+  - Phase 3: Layer-Compositor für Slot-Compositing (Blend Modes, Opacity) (~3h)
+  - Phase 4: Transition-System zwischen Slots (~2h)
+  - Phase 5: Routing-System & Frame-Collection (~2h)
+  - Phase 6: API-Endpoints (Slot CRUD, Clip Management, Trigger) (~3h)
+  - Phase 7: UI (Kartendeck-View, Ausklapp-Mechanik, Compositing-Controls) (~5h)
 
 **JSON-Config Beispiel:**
 ```json
@@ -373,10 +414,42 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
     {"name": "strip_right", "universes": [3,4], "pixels": 200},
     {"name": "panel_center", "universes": [5,6], "pixels": 256}
   ],
-  "routing": [
-    {"object": "strip_left", "player_id": "video_1"},
-    {"object": "strip_right", "player_id": "video_2"},
-    {"object": "panel_center", "player_id": "video_3"}
+  "slots": [
+    {
+      "slot_id": 1,
+      "name": "Intro Varianten",
+      "duration": 30,
+      "clips": [
+        {
+          "path": "intro_v1.mp4",
+          "effects": [{"plugin_id": "blur", "params": {"strength": 2.0}}],
+          "blend_mode": "normal",
+          "opacity": 100,
+          "layer_order": 0
+        },
+        {
+          "path": "generator:plasma",
+          "effects": [],
+          "blend_mode": "multiply",
+          "opacity": 50,
+          "layer_order": 1
+        }
+      ],
+      "transition_to_next": {"type": "fade", "duration": 1.5},
+      "output_routing": {"led_object": "strip_left"}
+    },
+    {
+      "slot_id": 2,
+      "name": "Drop Section",
+      "duration": 60,
+      "clips": [
+        {"path": "drop_bg.mp4", "blend_mode": "normal", "opacity": 100},
+        {"path": "generator:fire", "blend_mode": "screen", "opacity": 70},
+        {"path": "overlay.mp4", "blend_mode": "add", "opacity": 40}
+      ],
+      "transition_to_next": {"type": "wipe_left", "duration": 0.5},
+      "output_routing": {"led_object": "strip_left"}
+    }
   ]
 }
 ```
