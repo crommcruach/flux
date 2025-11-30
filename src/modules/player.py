@@ -13,6 +13,7 @@ from .artnet_manager import ArtNetManager
 from .points_loader import PointsLoader
 from .frame_source import VideoSource, ScriptSource
 from .plugin_manager import get_plugin_manager
+from .layer import Layer
 from .constants import (
     DEFAULT_SPEED,
     UNLIMITED_LOOPS,
@@ -56,7 +57,13 @@ class Player:
         else:
             self.player_id = 'video'
         
-        self.source = frame_source
+        # Multi-Layer System (NEW)
+        self.layers = []  # List of Layer objects
+        self.layer_counter = 0  # For generating unique layer IDs
+        
+        # Legacy single source (for backward compatibility via @property)
+        self._legacy_source = frame_source
+        
         self.points_json_path = points_json_path
         self.target_ip = target_ip
         self.start_universe = start_universe
@@ -365,13 +372,21 @@ class Player:
             self.artnet_manager.resume_video_mode()
         
         # FPS für Timing
-        fps = self.fps_limit if self.fps_limit else self.source.fps
+        # Multi-Layer: Master-Layer (0) bestimmt FPS
+        if self.layers:
+            fps = self.fps_limit if self.fps_limit else self.layers[0].source.fps
+            logger.debug(f"🎬 Multi-Layer Mode: Master FPS={fps} (Layer 0)")
+        else:
+            fps = self.fps_limit if self.fps_limit else self.source.fps
+            logger.debug(f"🎬 Single-Source Mode: FPS={fps}")
+        
         frame_time = 1.0 / fps if fps > 0 else 0
         next_frame_time = time.time()
         
         frame_wait_delay = self.config.get('video', {}).get('frame_wait_delay', 0.1)
         
-        logger.debug(f"Play-Loop gestartet: FPS={fps}, Source={self.source.get_source_name()}")
+        source_name = self.layers[0].source.get_source_name() if self.layers else self.source.get_source_name()
+        logger.debug(f"Play-Loop gestartet: FPS={fps}, Source={source_name}")
         
         while self.is_running and self.is_playing:
             # Pause-Handling (Event-basiert für low-latency)
@@ -383,8 +398,48 @@ class Player:
             
             loop_start = time.time()
             
-            # Hole nächstes Frame von Source
-            frame, source_delay = self.source.get_next_frame()
+            # ========== MULTI-LAYER COMPOSITING ==========
+            if self.layers and len(self.layers) > 0:
+                # Master Frame (Layer 0 bestimmt Timing und Länge)
+                frame, source_delay = self.layers[0].source.get_next_frame()
+                
+                if frame is not None:
+                    # Wende Layer 0 Effects an
+                    frame = self.apply_layer_effects(self.layers[0], frame)
+                    
+                    # Composite Slave Layers (1-N)
+                    for layer in self.layers[1:]:
+                        if not layer.enabled:
+                            continue
+                        
+                        overlay_frame, _ = layer.source.get_next_frame()
+                        
+                        # Auto-Reset wenn Slave-Layer am Ende (Looping!)
+                        if overlay_frame is None:
+                            logger.debug(f"🔁 Layer {layer.layer_id} reached end, auto-reset (slave loop)")
+                            layer.source.reset()
+                            overlay_frame, _ = layer.source.get_next_frame()
+                        
+                        # Wenn immer noch None (z.B. fehlerhafte Source) - überspringe Layer
+                        if overlay_frame is None:
+                            logger.warning(f"⚠️ Layer {layer.layer_id} returned None after reset, skipping")
+                            continue
+                        
+                        # Wende Layer Effects an
+                        overlay_frame = self.apply_layer_effects(layer, overlay_frame)
+                        
+                        # Composite mit BlendEffect
+                        blend_plugin = self.get_blend_plugin(layer.blend_mode, layer.opacity)
+                        frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
+                    
+                    # Frame ist jetzt das finale composited Frame
+                    # Weiter mit existing logic (brightness, effects, etc.)
+                
+            else:
+                # Fallback: Single-Source Mode (Backward Compatibility)
+                frame, source_delay = self.source.get_next_frame()
+            
+            # ========== REST IST UNVERÄNDERT ==========
             
             if frame is None:
                 # Ende der Source (Video-Loop oder Fehler)
@@ -436,11 +491,12 @@ class Player:
                                 logger.debug(f"🌟 [{self.player_name}] Using playlist_params: {parameters}")
                             
                             # 3. Reuse current generator parameters if same generator
-                            elif not parameters and (isinstance(self.source, GeneratorSource) and 
-                                  self.source.generator_id == generator_id):
-                                parameters = self.source.parameters.copy()
-                                self.playlist_params[generator_id] = parameters.copy()
-                                logger.debug(f"🌟 [{self.player_name}] Reusing and storing modified parameters: {parameters}")
+                            if not parameters:
+                                current_source = self.layers[0].source if self.layers else self.source
+                                if isinstance(current_source, GeneratorSource) and current_source.generator_id == generator_id:
+                                    parameters = current_source.parameters.copy()
+                                    self.playlist_params[generator_id] = parameters.copy()
+                                    logger.debug(f"🌟 [{self.player_name}] Reusing and storing modified parameters: {parameters}")
                             
                             # 4. Fallback to defaults
                             if not parameters:
@@ -469,10 +525,18 @@ class Player:
                             logger.debug(f"⚡ [{self.player_name}] Transition started: {self.transition_config['effect']}")
                         
                         # Cleanup alte Source
-                        if self.source:
-                            self.source.cleanup()
+                        if self.layers:
+                            # Multi-Layer: Ersetze Layer 0 Source
+                            if self.layers[0].source:
+                                self.layers[0].source.cleanup()
+                            self.layers[0].source = new_source
+                            logger.debug(f"🔧 [{self.player_name}] Layer 0 source replaced with new source")
+                        else:
+                            # Single-Source: Legacy behavior
+                            if self.source:
+                                self.source.cleanup()
+                            self.source = new_source
                         
-                        self.source = new_source
                         self.playlist_index = next_index
                         self.current_loop = 0
                         
@@ -513,12 +577,19 @@ class Player:
                 
                 # Kein Autoplay - normales Loop-Verhalten
                 # Loop-Limit prüfen (nur für nicht-infinite Sources)
-                if not self.source.is_infinite and self.max_loops > 0 and self.current_loop >= self.max_loops:
+                current_source = self.layers[0].source if self.layers else self.source
+                if not current_source.is_infinite and self.max_loops > 0 and self.current_loop >= self.max_loops:
                     logger.debug(f"Loop-Limit ({self.max_loops}) erreicht, stoppe...")
                     break
                 
                 # Reset Source für nächsten Loop
-                self.source.reset()
+                if self.layers:
+                    # Multi-Layer: Reset nur Master (Layer 0), Slaves loopen selbst
+                    self.layers[0].source.reset()
+                    logger.debug(f"🔁 [{self.player_name}] Master Layer 0 reset for next loop")
+                else:
+                    # Single-Source: Legacy behavior
+                    self.source.reset()
                 continue
             
             # Apply transition if active
@@ -1150,4 +1221,307 @@ class Player:
         logger.info(f"   Punkte: {old_points} → {self.total_points}")
         logger.info(f"   Universen: {old_universes} → {self.required_universes}")
         logger.info(f"   Canvas: {self.canvas_width}x{self.canvas_height}")
+    
+    # ========== Multi-Layer Management ==========
+    
+    def load_clip_layers(self, clip_id, clip_registry, video_dir=None):
+        """
+        Lädt alle Layers aus einer Clip-Definition und erstellt FrameSources.
+        Ersetzt den aktuellen Layer-Stack.
+        
+        Args:
+            clip_id: UUID des Clips aus ClipRegistry
+            clip_registry: ClipRegistry-Instanz
+            video_dir: Base directory for resolving relative video paths
+        
+        Returns:
+            bool: True bei Erfolg
+        """
+        # Hole Clip-Daten
+        clip_data = clip_registry.get_clip(clip_id)
+        if not clip_data:
+            logger.error(f"❌ [{self.player_name}] Clip {clip_id} nicht gefunden")
+            return False
+        
+        # Build new layer stack first, then swap atomically
+        new_layers = []
+        layer_counter = 0
+        
+        # Hole Layer-Definitionen
+        layer_defs = clip_data.get('layers', [])
+        
+        from modules.frame_source import VideoSource, GeneratorSource, ScriptSource
+        
+        # ALWAYS create Layer 0 from the clip itself (base layer)
+        abs_path = clip_data['absolute_path']
+        base_source = None
+        
+        # Detect source type from path
+        if abs_path.endswith(('.mp4', '.avi', '.mov', '.mkv')):
+            base_source = VideoSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
+        elif abs_path.startswith('generator:'):
+            gen_id = abs_path.replace('generator:', '')
+            # Get generator parameters from clip metadata if available
+            gen_params = clip_data.get('metadata', {}).get('generator_params', {})
+            base_source = GeneratorSource(gen_id, gen_params, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
+        elif abs_path.endswith('.py'):
+            base_source = ScriptSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
+        
+        if base_source and base_source.initialize():
+            from modules.player import Layer
+            base_layer = Layer(layer_counter, base_source, 'normal', 100.0, clip_id)
+            new_layers.append(base_layer)
+            layer_counter += 1
+            logger.info(f"✅ [{self.player_name}] Created clip {clip_id} as Layer 0 (base)")
+        else:
+            logger.error(f"❌ [{self.player_name}] Failed to create base layer for clip {clip_id}")
+            return False
+        
+        # Now add additional layers from definitions (if any)
+        if layer_defs:
+            for layer_def in layer_defs:
+                source_type = layer_def.get('source_type')
+                source_path = layer_def.get('source_path')
+                blend_mode = layer_def.get('blend_mode', 'normal')
+                opacity = layer_def.get('opacity', 1.0) * 100  # Convert to 0-100
+                enabled = layer_def.get('enabled', True)
+                
+                source = None
+                
+                if source_type == 'video':
+                    # Convert relative path to absolute if needed
+                    video_path = source_path
+                    if video_dir and not os.path.isabs(video_path):
+                        video_path = os.path.join(video_dir, video_path)
+                    source = VideoSource(video_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
+                elif source_type == 'generator':
+                    # Get generator parameters from layer definition if available
+                    gen_params = layer_def.get('parameters', {})
+                    source = GeneratorSource(source_path, gen_params, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
+                elif source_type == 'script':
+                    source = ScriptSource(source_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
+                
+                if source and source.initialize():
+                    from modules.player import Layer
+                    new_layer = Layer(layer_counter, source, blend_mode, opacity, clip_id)
+                    new_layer.enabled = enabled
+                    new_layers.append(new_layer)
+                    layer_counter += 1
+                else:
+                    logger.warning(f"⚠️ [{self.player_name}] Failed to create layer source: {source_type}:{source_path}")
+        
+        # Atomically swap layer stack (thread-safe)
+        old_layers = self.layers
+        self.layers = new_layers
+        self.layer_counter = layer_counter
+        
+        # Cleanup old layers after swap
+        for layer in old_layers:
+            try:
+                layer.cleanup()
+            except Exception as e:
+                logger.warning(f"⚠️ Error cleaning up old layer: {e}")
+        
+        logger.info(f"✅ [{self.player_name}] Loaded {len(self.layers)} layers from clip {clip_id}")
+        return True
+    
+    def add_layer(self, source, clip_id=None, blend_mode='normal', opacity=100.0):
+        """
+        Fügt einen neuen Layer zum Stack hinzu.
+        
+        Args:
+            source: FrameSource-Instanz (VideoSource, GeneratorSource, etc.)
+            clip_id: Optional UUID aus ClipRegistry
+            blend_mode: Blend-Modus ('normal', 'multiply', 'screen', etc.)
+            opacity: Layer-Opazität 0-100%
+        
+        Returns:
+            int: Layer-ID des neuen Layers
+        """
+        layer_id = self.layer_counter
+        self.layer_counter += 1
+        
+        layer = Layer(layer_id, source, blend_mode, opacity, clip_id)
+        self.layers.append(layer)
+        
+        logger.info(
+            f"✅ [{self.player_name}] Layer {layer_id} added: {source.get_source_name()} "
+            f"(blend={blend_mode}, opacity={opacity}%)"
+        )
+        
+        return layer_id
+    
+    def remove_layer(self, layer_id):
+        """
+        Entfernt einen Layer aus dem Stack.
+        
+        Args:
+            layer_id: ID des zu entfernenden Layers
+        
+        Returns:
+            bool: True bei Erfolg, False wenn Layer nicht gefunden
+        """
+        for i, layer in enumerate(self.layers):
+            if layer.layer_id == layer_id:
+                # Cleanup Layer-Ressourcen
+                layer.cleanup()
+                
+                # Entferne aus Liste
+                del self.layers[i]
+                
+                logger.info(f"🗑️ [{self.player_name}] Layer {layer_id} removed")
+                return True
+        
+        logger.warning(f"⚠️ [{self.player_name}] Layer {layer_id} not found")
+        return False
+    
+    def get_layer(self, layer_id):
+        """
+        Holt einen Layer anhand seiner ID.
+        
+        Args:
+            layer_id: Layer-ID
+        
+        Returns:
+            Layer oder None wenn nicht gefunden
+        """
+        for layer in self.layers:
+            if layer.layer_id == layer_id:
+                return layer
+        return None
+    
+    def reorder_layers(self, new_order):
+        """
+        Ändert die Reihenfolge der Layers.
+        
+        Args:
+            new_order: Liste von Layer-IDs in neuer Reihenfolge
+        
+        Returns:
+            bool: True bei Erfolg
+        """
+        # Erstelle Mapping layer_id → Layer
+        layer_map = {layer.layer_id: layer for layer in self.layers}
+        
+        # Prüfe ob alle IDs existieren
+        if not all(lid in layer_map for lid in new_order):
+            logger.error(f"❌ [{self.player_name}] Invalid layer IDs in new_order")
+            return False
+        
+        # Setze neue Reihenfolge
+        self.layers = [layer_map[lid] for lid in new_order]
+        
+        logger.info(f"🔄 [{self.player_name}] Layers reordered: {new_order}")
+        return True
+    
+    def update_layer_config(self, layer_id, blend_mode=None, opacity=None, enabled=None):
+        """
+        Aktualisiert Layer-Konfiguration zur Laufzeit.
+        
+        Args:
+            layer_id: Layer-ID
+            blend_mode: Optional neuer Blend-Modus
+            opacity: Optional neue Opazität
+            enabled: Optional enabled-Status
+        
+        Returns:
+            bool: True bei Erfolg
+        """
+        layer = self.get_layer(layer_id)
+        if not layer:
+            return False
+        
+        if blend_mode is not None:
+            layer.blend_mode = blend_mode
+            logger.debug(f"🔧 [{self.player_name}] Layer {layer_id} blend_mode → {blend_mode}")
+        
+        if opacity is not None:
+            layer.opacity = opacity
+            logger.debug(f"🔧 [{self.player_name}] Layer {layer_id} opacity → {opacity}%")
+        
+        if enabled is not None:
+            layer.enabled = enabled
+            status = "enabled" if enabled else "disabled"
+            logger.debug(f"🔧 [{self.player_name}] Layer {layer_id} → {status}")
+        
+        return True
+    
+    def apply_layer_effects(self, layer, frame):
+        """
+        Wendet alle Effekte eines Layers auf ein Frame an.
+        
+        Args:
+            layer: Layer-Objekt
+            frame: Input Frame
+        
+        Returns:
+            Prozessiertes Frame
+        """
+        for effect in layer.effects:
+            try:
+                instance = effect['instance']
+                frame = instance.process_frame(frame)
+            except Exception as e:
+                logger.error(f"❌ [{self.player_name}] Layer {layer.layer_id} effect error: {e}")
+        
+        return frame
+    
+    def get_blend_plugin(self, blend_mode, opacity):
+        """
+        Erstellt BlendEffect Plugin-Instanz mit gegebenen Parametern.
+        
+        Args:
+            blend_mode: Blend-Modus ('normal', 'multiply', etc.)
+            opacity: Opazität 0-100%
+        
+        Returns:
+            BlendEffect Plugin-Instanz
+        """
+        from plugins.effects.blend import BlendEffect
+        
+        blend = BlendEffect()
+        blend.initialize({
+            'blend_mode': blend_mode,
+            'opacity': opacity
+        })
+        
+        return blend
+    
+    # Backward Compatibility: source Property
+    @property
+    def source(self):
+        """
+        Gibt erste Layer-Source zurück für Backward Compatibility.
+        Wenn Layers existieren, gibt Layer 0 Source zurück.
+        Sonst gibt Legacy-Source zurück.
+        """
+        if self.layers:
+            return self.layers[0].source
+        return self._legacy_source
+    
+    @source.setter
+    def source(self, value):
+        """
+        Setzt Source - für Backward Compatibility.
+        Wenn Layers existieren, aktualisiert Layer 0.
+        Sonst speichert in Legacy-Source.
+        """
+        if self.layers:
+            self.layers[0].source = value
+        else:
+            self._legacy_source = value
+    
+    # Backward Compatibility: current_clip_id Property
+    @property
+    def current_clip_id(self):
+        """Gibt Clip-ID von Layer 0 zurück (Backward Compatibility)."""
+        if self.layers:
+            return self.layers[0].clip_id
+        return None
+    
+    @current_clip_id.setter
+    def current_clip_id(self, value):
+        """Setzt Clip-ID von Layer 0 (Backward Compatibility)."""
+        if self.layers:
+            self.layers[0].clip_id = value
     

@@ -59,7 +59,8 @@ class ClipRegistry:
             'filename': os.path.basename(absolute_path),
             'metadata': metadata or {},
             'created_at': datetime.now().isoformat(),
-            'effects': []  # Clip-spezifische Effekte
+            'effects': [],  # Clip-spezifische Effekte
+            'layers': []    # Clip-spezifische Layer-Definitionen
         }
         
         logger.info(f"✅ Clip registriert: {clip_id} → {player_id}/{os.path.basename(absolute_path)}")
@@ -250,6 +251,157 @@ class ClipRegistry:
             return False
         
         self.clips[clip_id]['metadata'].update(metadata)
+        return True
+    
+    # ========================================
+    # LAYER MANAGEMENT (Clip-based)
+    # ========================================
+    
+    def add_layer_to_clip(self, clip_id: str, layer_config: Dict) -> Optional[int]:
+        """
+        Fügt einen Layer zu einem Clip hinzu.
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+            layer_config: Layer-Konfiguration {
+                'source_type': 'video' | 'generator' | 'script',
+                'source_path': path or generator_id,
+                'blend_mode': 'normal' | 'multiply' | ...,
+                'opacity': float (0.0-1.0),
+                'enabled': bool
+            }
+        
+        Returns:
+            layer_id (index) oder None bei Fehler
+        """
+        if clip_id not in self.clips:
+            logger.error(f"Clip nicht gefunden: {clip_id}")
+            return None
+        
+        layers = self.clips[clip_id]['layers']
+        # Layer 0 is always the base clip, so start additional layers at 1
+        layer_id = len(layers) + 1
+        
+        # Füge layer_id hinzu
+        layer_config['layer_id'] = layer_id
+        layers.append(layer_config)
+        
+        logger.info(f"✅ Layer {layer_id} zu Clip {clip_id} hinzugefügt: {layer_config['source_type']}")
+        return layer_id
+    
+    def get_clip_layers(self, clip_id: str) -> List[Dict]:
+        """
+        Holt alle Layer eines Clips.
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+        
+        Returns:
+            Liste von Layer-Konfigurationen
+        """
+        if clip_id not in self.clips:
+            return []
+        
+        return self.clips[clip_id].get('layers', [])
+    
+    def update_clip_layer(self, clip_id: str, layer_id: int, updates: Dict) -> bool:
+        """
+        Aktualisiert Layer-Konfiguration.
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+            layer_id: Layer-ID (NOT index)
+            updates: Dict mit zu aktualisierenden Feldern
+        
+        Returns:
+            True wenn erfolgreich
+        """
+        if clip_id not in self.clips:
+            return False
+        
+        # Layer 0 is the base clip - cannot be updated in registry
+        if layer_id == 0:
+            logger.warning(f"Layer 0 is the base clip - cannot be updated in registry")
+            return False
+        
+        layers = self.clips[clip_id]['layers']
+        
+        # Find layer by layer_id
+        layer = next((l for l in layers if l['layer_id'] == layer_id), None)
+        if not layer:
+            logger.warning(f"Layer {layer_id} not found in clip {clip_id}")
+            return False
+        
+        layer.update(updates)
+        logger.debug(f"Layer {layer_id} von Clip {clip_id} aktualisiert: {updates}")
+        return True
+    
+    def remove_layer_from_clip(self, clip_id: str, layer_id: int) -> bool:
+        """
+        Entfernt einen Layer von einem Clip.
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+            layer_id: Layer-ID (NOT index)
+        
+        Returns:
+            True wenn erfolgreich
+        """
+        if clip_id not in self.clips:
+            return False
+        
+        # Layer 0 is the base clip - CANNOT be removed
+        if layer_id == 0:
+            logger.warning(f"Layer 0 is the base clip - cannot be removed")
+            return False
+        
+        layers = self.clips[clip_id]['layers']
+        
+        # Find layer by layer_id
+        layer_index = next((i for i, l in enumerate(layers) if l['layer_id'] == layer_id), None)
+        if layer_index is None:
+            logger.warning(f"Layer {layer_id} not found in clip {clip_id}")
+            return False
+        
+        removed = layers.pop(layer_index)
+        logger.info(f"✅ Layer {layer_id} von Clip {clip_id} entfernt: {removed.get('source_path')}")
+        return True
+    
+    def reorder_clip_layers(self, clip_id: str, new_order: List[int]) -> bool:
+        """
+        Sortiert Layer eines Clips um.
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+            new_order: Liste von Layer-IDs in neuer Reihenfolge (excluding Layer 0 which is always base)
+        
+        Returns:
+            True wenn erfolgreich
+        """
+        if clip_id not in self.clips:
+            return False
+        
+        layers = self.clips[clip_id]['layers']
+        
+        # Filter out Layer 0 from new_order (it's not in registry)
+        registry_order = [lid for lid in new_order if lid != 0]
+        
+        # Get current layer_ids in registry
+        current_ids = [l['layer_id'] for l in layers]
+        
+        # Validate: new_order must contain exactly the same layer_ids
+        if set(registry_order) != set(current_ids):
+            logger.warning(f"Invalid reorder: expected {current_ids}, got {registry_order}")
+            return False
+        
+        # Build layer_id -> layer mapping
+        layer_map = {l['layer_id']: l for l in layers}
+        
+        # Reorder by new_order
+        new_layers = [layer_map[lid] for lid in registry_order]
+        
+        self.clips[clip_id]['layers'] = new_layers
+        logger.debug(f"Layers von Clip {clip_id} neu sortiert: {registry_order}")
         return True
 
 

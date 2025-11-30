@@ -5,6 +5,7 @@ import os
 import time
 import cv2
 import numpy as np
+import threading
 from abc import ABC, abstractmethod
 from .logger import get_logger
 from .script_generator import ScriptGenerator
@@ -70,6 +71,7 @@ class VideoSource(FrameSource):
         self.video_path = video_path
         self.source_path = video_path  # Generischer Pfad für load_points()
         self.cap = None
+        self._lock = threading.Lock()  # Thread-Safety für FFmpeg
         
         # GIF Support
         self.is_gif = self._is_gif_file(video_path)
@@ -191,16 +193,17 @@ class VideoSource(FrameSource):
     def get_next_frame(self):
         """Gibt nächstes Video-Frame zurück."""
         # Cache-System wurde entfernt - nur noch Live-Modus
-        if not self.cap or not self.cap.isOpened():
-            return None, 0
-        
-        ret, frame = self.cap.read()
-        
-        if not ret:
-            return None, 0  # End of video
-        
-        # BGR zu RGB konvertieren
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        with self._lock:  # Thread-Safety für FFmpeg
+            if not self.cap or not self.cap.isOpened():
+                return None, 0
+            
+            ret, frame = self.cap.read()
+            
+            if not ret:
+                return None, 0  # End of video
+            
+            # BGR zu RGB konvertieren
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         # Transparenz verarbeiten (GIF)
         if self.is_gif:
@@ -220,14 +223,16 @@ class VideoSource(FrameSource):
         """Setzt Video auf Anfang zurück."""
         self.current_frame = 0
         
-        if self.cap and self.cap.isOpened():
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        with self._lock:  # Thread-Safety
+            if self.cap and self.cap.isOpened():
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     
     def cleanup(self):
         """Gibt Video-Ressourcen frei."""
-        if self.cap:
-            self.cap.release()
-            self.cap = None
+        with self._lock:  # Thread-Safety
+            if self.cap:
+                self.cap.release()
+                self.cap = None
     
     def get_source_name(self):
         """Gibt Video-Dateinamen zurück."""

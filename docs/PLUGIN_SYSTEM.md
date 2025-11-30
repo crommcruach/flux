@@ -509,6 +509,37 @@ Siehe:
 
 ## Built-in Effect Plugins
 
+### Blend Effect (Multi-Layer Compositing)
+**ID:** `blend`  
+**Kategorie:** Compositing
+
+Mischt zwei Frames mit verschiedenen Blend-Modi (für Layer-Compositing):
+- **blend_mode** (SELECT) - Blend-Algorithmus:
+  - `normal` - Standard Alpha-Compositing
+  - `multiply` - Farben multiplizieren (dunkles Overlay)
+  - `screen` - Invertiert multiplizieren (helles Overlay)
+  - `overlay` - Multiply + Screen kombiniert
+  - `add` - Additive Blending (Lichter aufaddieren)
+  - `subtract` - Subtraktive Blending (Farben subtrahieren)
+- **opacity** (0-100%) - Overlay-Transparenz
+
+**Verwendung:**
+```python
+# Automatisch vom Player verwendet (Layer-System)
+# Layer 0 (Base) + Layer 1 (Overlay):
+result = blend_plugin.process_frame(
+    frame,              # Base frame (Layer 0)
+    overlay=overlay,    # Overlay frame (Layer 1)
+    blend_mode='screen',
+    opacity=70.0
+)
+```
+
+**Hinweise:**
+- Wird intern vom Multi-Layer-System verwendet
+- Nicht direkt als Player-Effect hinzufügbar
+- Layer-Management via `/api/clips/{clip_id}/layers` API
+
 ### Opacity Effect
 **ID:** `opacity`  
 **Kategorie:** Farb-Manipulation

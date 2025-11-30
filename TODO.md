@@ -614,6 +614,15 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 - **Universal Search Filter** für Effects, Sources, Files (v2.3.1)
 - **Multi-Video-Source Support** via `video_sources` config (v2.3.1)
 - **Default Effect Chains** via config.json (Player & Clip-Level) (v2.3.1)
+- **Multi-Layer Compositing System** (v2.3.2):
+  - Clip-based layers (per playlist item)
+  - Layer 0 = base clip (immutable)
+  - Overlay layers with blend modes (Normal, Multiply, Screen, Overlay, Add, Subtract)
+  - Per-layer opacity control (0-100%)
+  - Layer CRUD API (`/api/clips/{clip_id}/layers`)
+  - Drag-drop layer management in UI
+  - Thread-safe layer loading with auto-reload
+  - Session state persistence for layers
 
 ---
 

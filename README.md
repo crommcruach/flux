@@ -10,6 +10,9 @@ Video-to-Art-Net DMX Control System mit Web-Interface und Multi-Kanal Unterstüt
 - 🎨 **Script Generator** - Prozedurale Grafiken via Python (Shader-ähnlich)
 - 💾 **RGB Cache** - msgpack-basiertes Caching für schnelle Wiedergabe
 - 🔄 **4-Kanal Video System** - Bis zu 1020 Videos (255 pro Kanal)
+- 🎬 **Multi-Layer Compositing** - Clip-based Layer-Stack mit Blend Modes (Normal, Multiply, Screen, Overlay, Add, Subtract)
+- 🎨 **Layer Effects** - Individuelle Effect-Chains pro Layer
+- 📊 **Layer Opacity** - 0-100% Transparenz-Kontrolle pro Layer
 
 ### Art-Net & DMX
 - 🌐 **Art-Net Output** - Multi-Universe Support mit automatischer Grenzlogik
@@ -147,6 +150,17 @@ python src/main.py
 - `GET /api/videos` - Liste aller Videos
 - `POST /api/video/load` - Body: `{"path": "video.mp4"}`
 
+### Layer Management (Compositing)
+- `GET /api/clips/{clip_id}/layers` - Alle Layers eines Clips (inkl. Layer 0)
+- `POST /api/clips/{clip_id}/layers/add` - Layer hinzufügen - Body: `{"source_type": "video", "source_path": "overlay.mp4", "blend_mode": "screen", "opacity": 70.0}`
+- `PATCH /api/clips/{clip_id}/layers/{layer_id}` - Layer aktualisieren - Body: `{"opacity": 50.0, "blend_mode": "multiply"}`
+- `DELETE /api/clips/{clip_id}/layers/{layer_id}` - Layer entfernen
+- `PUT /api/clips/{clip_id}/layers/reorder` - Layer-Reihenfolge ändern - Body: `{"layer_order": [1, 3, 2]}`
+
+**Blend Modes:** `normal`, `multiply`, `screen`, `overlay`, `add`, `subtract`
+
+**Compositing-Reihenfolge:** Layer 0 (Base) → Layer 1 → Layer 2 → ... (bottom to top)
+
 ### Script Generator
 - `GET /api/scripts` - Liste aller Scripts
 - `POST /api/load_script` - Body: `{"script": "rainbow_wave"}`
@@ -189,8 +203,10 @@ Py_artnet/
 ├── src/
 │   ├── main.py                    # Haupteinstiegspunkt
 │   ├── modules/
-│   │   ├── player.py              # Unified Media Player (NEU)
+│   │   ├── player.py              # Unified Media Player with Layer Support
 │   │   ├── frame_source.py        # Frame Source Abstraction (VideoSource, ScriptSource)
+│   │   ├── clip_registry.py       # UUID-based Clip Management with Layers
+│   │   ├── api_clip_layers.py     # Layer Management API (NEU)
 │   │   ├── script_generator.py    # Script Loader & Manager
 │   │   ├── points_loader.py       # Points-JSON Parser
 │   │   ├── cache_manager.py       # RGB Cache Manager

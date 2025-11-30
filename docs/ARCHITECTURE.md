@@ -109,6 +109,231 @@ class Player:
 
 ---
 
+### 🎬 Multi-Layer Compositing System (v2.3.2)
+
+**Implementiert:** 2025-11-30
+
+#### Architektur
+
+**Clip-based Layers:**
+- Jeder Clip (Playlist Item) hat eigenen Layer-Stack
+- Layer 0 = Base Clip (immutabel, immer vorhanden)
+- Layer 1+ = Overlay Layers (Video, Generator, Script)
+- Compositing: Layer 0 (Bottom) → Layer 1 → Layer 2 → ... (Top)
+
+**Layer-Struktur:**
+```python
+Layer = {
+    "layer_id": 0,              # 0 = Base, 1+ = Overlays
+    "source_type": "video",    # video, generator, script
+    "source_path": "clip.mp4", # Path to file or generator ID
+    "blend_mode": "normal",    # normal, multiply, screen, overlay, add, subtract
+    "opacity": 100.0,          # 0-100%
+    "parameters": {}           # Generator parameters (if source_type=generator)
+}
+```
+
+#### Backend-Komponenten
+
+**ClipRegistry Layer Management:**
+```python
+# src/modules/clip_registry.py
+class ClipRegistry:
+    def add_layer_to_clip(self, clip_id, layer_config) -> int:
+        """Fügt Layer hinzu, gibt layer_id zurück (startet bei 1)."""
+        layer_id = len(clip['layers']) + 1
+        clip['layers'].append({...})
+        return layer_id
+    
+    def update_clip_layer(self, clip_id, layer_id, updates):
+        """Aktualisiert Layer (findet per layer_id, nicht Index)."""
+        # Blockt Layer 0 Updates (immutabel)
+        
+    def remove_layer_from_clip(self, clip_id, layer_id):
+        """Entfernt Layer (blockt Layer 0 Deletion)."""
+    
+    def reorder_clip_layers(self, clip_id, new_order):
+        """Ändert Layer-Reihenfolge (exkludiert Layer 0)."""
+```
+
+**Player Layer Loading:**
+```python
+# src/modules/player.py
+class Player:
+    def load_clip_layers(self, clip_id, clip_registry, video_dir=None):
+        """Thread-safe Layer-Loading mit Auto-Reload."""
+        # Build new layer stack
+        new_layers = []
+        
+        # Layer 0: Base clip (always created)
+        base_source = create_source_from_clip(clip_data)
+        new_layers.append(Layer(0, base_source, 'normal', 100.0, clip_id))
+        
+        # Layers 1+: Registry overlays
+        for layer_def in registry_layers:
+            source = create_source_from_def(layer_def)
+            new_layers.append(Layer(layer_id, source, blend_mode, opacity, clip_id))
+        
+        # Atomic swap (thread-safe)
+        old_layers = self.layers
+        self.layers = new_layers
+        
+        # Cleanup old layers
+        for layer in old_layers:
+            layer.cleanup()
+```
+
+**Compositing Loop:**
+```python
+# Video-Rendering mit Layers (player.py, line 400-431)
+if self.layers:
+    # Base layer (Layer 0)
+    frame = self.layers[0].source.get_next_frame()
+    
+    # Blend overlay layers (1, 2, 3...)
+    for layer in self.layers[1:]:
+        overlay_frame = layer.source.get_next_frame()
+        if overlay_frame is not None:
+            # Apply blend mode + opacity
+            frame = blend_plugin.process_frame(
+                frame, 
+                overlay=overlay_frame,
+                blend_mode=layer.blend_mode,
+                opacity=layer.opacity
+            )
+```
+
+#### REST API Endpoints
+
+**Layer CRUD API:**
+```python
+# src/modules/api_clip_layers.py
+GET    /api/clips/{clip_id}/layers              # List all layers (incl. Layer 0)
+POST   /api/clips/{clip_id}/layers/add          # Add overlay layer
+PATCH  /api/clips/{clip_id}/layers/{layer_id}  # Update layer properties
+DELETE /api/clips/{clip_id}/layers/{layer_id}  # Remove layer (blocks Layer 0)
+PUT    /api/clips/{clip_id}/layers/reorder      # Reorder layers (excludes Layer 0)
+```
+
+**Auto-Reload Feature:**
+- API-Endpunkte prüfen, ob Clip gerade aktiv ist
+- Bei Änderungen: `player.load_clip_layers()` automatisch aufrufen
+- Sofortige Aktualisierung ohne manuellen Reload
+
+#### Frontend Integration
+
+**Layer-Panel UI:**
+```javascript
+// src/static/js/player.js
+function renderSelectedClipLayers() {
+    // Layer 0: Special styling (locked)
+    // - "(Base Clip)" label + lock icon
+    // - Disabled blend mode selector
+    // - Disabled opacity slider
+    
+    // Layers 1+: Full controls
+    // - Drag-drop reorder
+    // - Blend mode dropdown
+    // - Opacity slider (debounced 300ms)
+    // - Delete button
+}
+
+// Drag-drop mit Single-Init Guard
+let layerPanelDropZoneInitialized = false;
+function setupLayerPanelDropZone() {
+    if (layerPanelDropZoneInitialized) return;
+    layerPanelDropZoneInitialized = true;
+    // ... event listeners
+}
+
+// Debounced Opacity Updates
+let opacityUpdateTimer = null;
+function updateClipLayerOpacity(clipId, layerId, opacity) {
+    // Immediate UI update
+    opacityValueSpan.textContent = `${opacity}%`;
+    
+    // Debounced API call (300ms)
+    clearTimeout(opacityUpdateTimer);
+    opacityUpdateTimer = setTimeout(async () => {
+        await fetch(`/api/clips/${clipId}/layers/${layerId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ opacity })
+        });
+    }, 300);
+}
+```
+
+#### Session State Persistence
+
+**Layer-Daten werden pro Clip gespeichert:**
+```python
+# src/modules/session_state.py
+session_state = {
+    "clips": {
+        "uuid-123": {
+            "layers": [  # Persistiert zwischen Sessions
+                {"layer_id": 1, "source_type": "video", ...},
+                {"layer_id": 2, "source_type": "generator", ...}
+            ]
+        }
+    }
+}
+```
+
+#### Thread-Safety
+
+**Problem:** Layer-Reload während Playback → IndexError
+
+**Lösung:** Atomic Layer Swap
+```python
+# Build new list first (no mutation)
+new_layers = [Layer(0, ...), Layer(1, ...), ...]
+
+# Atomic pointer swap
+old_layers = self.layers
+self.layers = new_layers  # Single operation
+
+# Cleanup after swap
+for layer in old_layers:
+    layer.cleanup()
+```
+
+#### Blend Modes
+
+**Unterstützte Modi:**
+- `normal` - Standard-Blending (Alpha Composite)
+- `multiply` - Dunkles Overlay (Farben multiplizieren)
+- `screen` - Helles Overlay (Invertiert multiplizieren)
+- `overlay` - Kombination aus Multiply/Screen
+- `add` - Additive Blending (Lichter aufaddieren)
+- `subtract` - Subtraktive Blending (Farben subtrahieren)
+
+**Implementierung:** `src/plugins/effects/blend.py`
+
+#### Performance-Optimierungen
+
+1. **Debounced Updates:** 300ms Verzögerung bei Opacity-Slider (verhindert API-Spam)
+2. **Single Drop-Zone Init:** Guard-Flag verhindert Event-Listener-Akkumulation
+3. **FFmpeg Lock:** VideoSource mit `threading.Lock()` für Thread-Safety
+4. **Lazy Frame Generation:** Generator-Frames nur bei Bedarf generieren
+
+#### Testing
+
+**Comprehensive Test Suite:**
+```python
+# tests/test_api_layers.py (390 lines)
+- ✅ Layer 0 Verification (Base Clip)
+- ✅ Add/Update/Delete Layers
+- ✅ Layer Reordering
+- ✅ Layer Isolation (Clips unabhängig)
+- ✅ Player Integration (Auto-Reload)
+- ✅ Error Handling (Layer 0 Protection)
+```
+
+**Status:** All tests passing ✅
+
+---
+
 ## Architektur (Nach Refactoring 2024)
 
 ### Module-Struktur

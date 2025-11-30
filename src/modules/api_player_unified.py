@@ -115,6 +115,9 @@ def register_unified_routes(app, player_manager, config):
                 player.current_clip_id = clip_id
                 logger.info(f"✅ [{player_id}] Loaded generator: {generator_id} (clip_id={clip_id})")
                 
+                # Load clip layers from registry
+                player.load_clip_layers(clip_id, clip_registry, video_dir)
+                
                 # Resume playback if was playing
                 if was_playing:
                     player.play()
@@ -200,6 +203,9 @@ def register_unified_routes(app, player_manager, config):
                 player.current_clip_id = clip_id
                 player.playlist_ids[absolute_path] = clip_id  # Store UUID for future loops
                 logger.info(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
+                
+                # Load clip layers from registry
+                player.load_clip_layers(clip_id, clip_registry, video_dir)
                 
                 # Update playlist index if applicable
                 if hasattr(player, 'playlist') and player.playlist:
@@ -619,7 +625,7 @@ def register_unified_routes(app, player_manager, config):
                 return jsonify({"success": False, "error": "Invalid index"}), 400
             
             effect = chain[index]
-            effect['instance'].set_parameter(param_name, value)
+            effect['instance'].update_parameter(param_name, value)
             effect['config'][param_name] = value
             
             logger.info(f"✅ Parameter '{param_name}' von Effect {index} auf {value} gesetzt ({player_id})")

@@ -149,6 +149,13 @@ class SessionStateManager:
                     else:
                         clip_item["effects"] = []
                     
+                    # Layers vom Clip (falls vorhanden)
+                    if clip_id:
+                        layers = clip_registry.get_clip_layers(clip_id)
+                        clip_item["layers"] = layers
+                    else:
+                        clip_item["layers"] = []
+                    
                     playlist.append(clip_item)
                 
                 # Globale Player-Effekte
@@ -170,7 +177,7 @@ class SessionStateManager:
                         }
                         global_effects.append(effect_data)
                 
-                # Player-State speichern
+                # Player-State speichern (Layer-Stack wird jetzt pro Clip gespeichert, nicht global)
                 state["players"][player_id] = {
                     "playlist": playlist,
                     "current_index": player.playlist_index,
@@ -215,6 +222,258 @@ class SessionStateManager:
             Player-State-Dict oder None
         """
         return self._state.get('players', {}).get(player_id)
+    
+    def restore(self, player_manager, clip_registry, config) -> bool:
+        """
+        Restauriert Player-Status aus Session State (mit Layer-Support und Migration).
+        
+        Args:
+            player_manager: PlayerManager-Instanz
+            clip_registry: ClipRegistry-Instanz
+            config: Config-Dict für FrameSource-Initialisierung
+            
+        Returns:
+            True bei Erfolg
+        """
+        try:
+            state = self._state
+            
+            if not state or 'players' not in state:
+                logger.info("Kein Session State zum Restaurieren vorhanden")
+                return False
+            
+            # Für beide Player restaurieren
+            for player_id in ['video', 'artnet']:
+                player_state = state['players'].get(player_id)
+                if not player_state:
+                    continue
+                
+                player = player_manager.get_player(player_id)
+                if not player:
+                    logger.warning(f"Player '{player_id}' nicht gefunden beim Restaurieren")
+                    continue
+                
+                # ========== PLAYLIST RESTAURIEREN ==========
+                # Layers werden jetzt pro Clip gespeichert, nicht mehr global am Player
+                
+                # Restauriere Playlist (mit Clip-Layers)
+                playlist = player_state.get('playlist', [])
+                
+                # Registriere alle Clips mit ihren Layers in der Registry
+                for item in playlist:
+                    clip_id = item.get('id')
+                    item_type = item.get('type', 'video')
+                    item_path = item.get('path', '')
+                    clip_layers = item.get('layers', [])
+                    
+                    # Clip registrieren/updaten
+                    if clip_id:
+                        # Check if clip exists
+                        existing_clip = clip_registry.get_clip(clip_id)
+                        if existing_clip:
+                            # Update layers
+                            clip_registry.clips[clip_id]['layers'] = clip_layers
+                        else:
+                            # Create new clip entry
+                            from datetime import datetime
+                            if item_type == 'generator':
+                                gen_id = item.get('generator_id')
+                                clip_registry.clips[clip_id] = {
+                                    'clip_id': clip_id,
+                                    'player_id': player_id,
+                                    'absolute_path': f"generator:{gen_id}",
+                                    'relative_path': f"generator:{gen_id}",
+                                    'filename': gen_id,
+                                    'metadata': {
+                                        'type': 'generator',
+                                        'generator_id': gen_id,
+                                        'parameters': item.get('parameters', {})
+                                    },
+                                    'created_at': datetime.now().isoformat(),
+                                    'effects': item.get('effects', []),
+                                    'layers': clip_layers
+                                }
+                            else:
+                                clip_registry.clips[clip_id] = {
+                                    'clip_id': clip_id,
+                                    'player_id': player_id,
+                                    'absolute_path': item_path,
+                                    'relative_path': item_path,
+                                    'filename': os.path.basename(item_path),
+                                    'metadata': {},
+                                    'created_at': datetime.now().isoformat(),
+                                    'effects': item.get('effects', []),
+                                    'layers': clip_layers
+                                }
+                
+                # Legacy layer migration code removed - Layers are now clip-based
+                
+                if False:  # Disabled old layer restoration code
+                    layers_data = []  # Placeholder
+                    
+                    # Erstelle Layers aus State
+                    from .frame_source import VideoSource, GeneratorSource
+                    
+                    for layer_data in layers_data:
+                        layer_type = layer_data.get('type', 'unknown')
+                        source_path = layer_data.get('path', '')
+                        blend_mode = layer_data.get('blend_mode', 'normal')
+                        opacity = layer_data.get('opacity', 100.0)
+                        clip_id = layer_data.get('clip_id')
+                        
+                        # Erstelle FrameSource basierend auf Typ
+                        source = None
+                        
+                        if layer_type == 'generator':
+                            generator_id = layer_data.get('generator_id')
+                            parameters = layer_data.get('parameters', {})
+                            
+                            if generator_id:
+                                source = GeneratorSource(
+                                    generator_id=generator_id,
+                                    parameters=parameters,
+                                    canvas_width=player.canvas_width,
+                                    canvas_height=player.canvas_height,
+                                    config=config
+                                )
+                                if not source.initialize():
+                                    logger.error(f"❌ Generator '{generator_id}' konnte nicht initialisiert werden")
+                                    continue
+                        
+                        elif layer_type == 'video':
+                            video_path = source_path
+                            if not os.path.isabs(video_path):
+                                video_dir = config.get('paths', {}).get('video_dir', 'video')
+                                video_path = os.path.join(video_dir, video_path)
+                            
+                            if os.path.exists(video_path):
+                                source = VideoSource(
+                                    video_path=video_path,
+                                    canvas_width=player.canvas_width,
+                                    canvas_height=player.canvas_height,
+                                    config=config
+                                )
+                                if not source.initialize():
+                                    logger.error(f"❌ Video '{video_path}' konnte nicht initialisiert werden")
+                                    continue
+                            else:
+                                logger.warning(f"⚠️ Video nicht gefunden: {video_path}")
+                                continue
+                        
+                        else:
+                            logger.warning(f"⚠️ Unbekannter Layer-Typ: {layer_type}")
+                            continue
+                        
+                        # Füge Layer hinzu
+                        if source:
+                            layer_id = player.add_layer(
+                                source=source,
+                                clip_id=clip_id,
+                                blend_mode=blend_mode,
+                                opacity=opacity
+                            )
+                            logger.debug(f"✅ Layer {layer_id} restauriert: {source_path}")
+                            
+                            # Restauriere Layer-Effekte
+                            layer = player.get_layer(layer_id)
+                            if layer:
+                                layer_effects = layer_data.get('effects', [])
+                                # TODO: Effekte restaurieren (wenn Layer-Effekte implementiert sind)
+                
+                else:
+                    # ========== MIGRATION: Altes Format ohne Layers ==========
+                    # Konvertiere Playlist zu Layer-System
+                    playlist = player_state.get('playlist', [])
+                    current_index = player_state.get('current_index', -1)
+                    
+                    if playlist and current_index >= 0 and current_index < len(playlist):
+                        logger.info(f"🔄 Migration: Konvertiere Playlist zu Layer für Player '{player_id}'")
+                        
+                        # Cleanup alte Layers
+                        for layer in list(player.layers):
+                            player.remove_layer(layer.layer_id)
+                        
+                        # Erstelle Layer 0 aus aktuellem Playlist-Item
+                        current_item = playlist[current_index]
+                        item_type = current_item.get('type', 'video')
+                        item_path = current_item.get('path', '')
+                        clip_id = current_item.get('id')
+                        
+                        from .frame_source import VideoSource, GeneratorSource
+                        
+                        source = None
+                        
+                        if item_type == 'generator':
+                            generator_id = current_item.get('generator_id')
+                            parameters = current_item.get('parameters', {})
+                            
+                            if generator_id:
+                                source = GeneratorSource(
+                                    generator_id=generator_id,
+                                    parameters=parameters,
+                                    canvas_width=player.canvas_width,
+                                    canvas_height=player.canvas_height,
+                                    config=config
+                                )
+                                if source.initialize():
+                                    player.add_layer(
+                                        source=source,
+                                        clip_id=clip_id,
+                                        blend_mode='normal',
+                                        opacity=100.0
+                                    )
+                                    logger.info(f"✅ Migration: Generator '{generator_id}' als Layer 0 geladen")
+                        
+                        elif item_type == 'video':
+                            video_path = item_path
+                            if not os.path.isabs(video_path):
+                                video_dir = config.get('paths', {}).get('video_dir', 'video')
+                                video_path = os.path.join(video_dir, video_path)
+                            
+                            if os.path.exists(video_path):
+                                source = VideoSource(
+                                    video_path=video_path,
+                                    canvas_width=player.canvas_width,
+                                    canvas_height=player.canvas_height,
+                                    config=config
+                                )
+                                if source.initialize():
+                                    player.add_layer(
+                                        source=source,
+                                        clip_id=clip_id,
+                                        blend_mode='normal',
+                                        opacity=100.0
+                                    )
+                                    logger.info(f"✅ Migration: Video '{os.path.basename(video_path)}' als Layer 0 geladen")
+                        
+                # Restauriere Playlist unabhängig von Layers
+                playlist = player_state.get('playlist', [])
+                player.playlist = [item['path'] for item in playlist]
+                player.playlist_index = player_state.get('current_index', -1)
+                
+                # Restauriere playlist_ids und playlist_params
+                for item in playlist:
+                    if item.get('id'):
+                        player.playlist_ids[item['path']] = item['id']
+                    if item.get('type') == 'generator' and item.get('generator_id'):
+                        player.playlist_params[item['generator_id']] = item.get('parameters', {})
+                
+                # Restauriere Player-Settings
+                player.autoplay = player_state.get('autoplay', False)
+                player.loop_playlist = player_state.get('loop', False)
+                
+                # Restauriere globale Effekte
+                # TODO: Globale Effekte restaurieren (wenn implementiert)
+                
+                logger.info(f"✅ Player '{player_id}' restauriert: {len(player.layers)} Layer")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Restaurieren von Session State: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
     
     def clear(self) -> bool:
         """

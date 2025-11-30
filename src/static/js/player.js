@@ -207,11 +207,15 @@ async function init() {
         
         await refreshVideoEffects();
         await refreshArtnetEffects();
+        
+        // Layers are now loaded per-clip when clips are loaded
+        
         startPreviewStream();
         startArtnetPreviewStream();
         setupEffectDropZones();
         setupGeneratorDropZones();
         setupPlaylistContainerDropHandlers(); // Register container handlers once
+        setupLayerPanelDropZone(); // Set up layer panel drop zone once
         initializeTransitionMenus(); // Initialize transition menu components
         updatePlaylistButtonStates(); // Set initial button states
     } catch (error) {
@@ -1279,12 +1283,15 @@ function renderPlaylistGeneric(playlistId) {
             updateFunc: () => updateVideoPlaylist(),
             removeFunc: (index) => `removeFromVideoPlaylist(${index})`,
             loadFunc: async (item) => {
+                // Load clip normally
                 currentVideoItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'video', item.id, item.parameters);
                 } else {
                     await loadVideoFile(item.path, item.id);
                 }
+                // Load clip layers after clip is loaded
+                await loadClipLayers(item.id);
             },
             dataAttr: 'data-video-index',
             icon: '📹'
@@ -1296,12 +1303,15 @@ function renderPlaylistGeneric(playlistId) {
             updateFunc: () => updateArtnetPlaylist(),
             removeFunc: (index) => `removeFromArtnetPlaylist(${index})`,
             loadFunc: async (item) => {
+                // Load clip normally
                 currentArtnetItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'artnet', item.id, item.parameters);
                 } else {
                     await loadArtnetFile(item.path, item.id);
                 }
+                // Load clip layers after clip is loaded
+                await loadClipLayers(item.id);
             },
             dataAttr: 'data-artnet-index',
             icon: '🎨'
@@ -1432,25 +1442,31 @@ function renderPlaylistGeneric(playlistId) {
         return;
     }
     
-    // Build HTML with items and drop zones
-    let html = '';
+    // Build HTML with playlist items in horizontal row (layers now managed per-clip)
+    let itemsHtml = '';
     files.forEach((item, index) => {
         const isActive = cfg.currentItemId && item.id === cfg.currentItemId;
         
-        html += `<div class="drop-zone" data-drop-index="${index}" data-playlist="${playlistId}"></div>`;
-        html += `
+        itemsHtml += `<div class="drop-zone" data-drop-index="${index}" data-playlist="${playlistId}"></div>`;
+        itemsHtml += `
             <div class="playlist-item ${isActive ? 'active' : ''}" 
                  ${cfg.dataAttr}="${index}"
                  data-playlist="${playlistId}"
+                 data-clip-id="${item.id}"
                  draggable="true">
-                <div class="playlist-item-name">${item.name}</div>
+                <div class="playlist-item-name">${item.name} ${getLayerBadgeHtml(item.id)}</div>
                 <button class="playlist-item-remove" onclick="${cfg.removeFunc(index)}; event.stopPropagation();" title="Remove from playlist">×</button>
             </div>
         `;
     });
-    html += `<div class="drop-zone" data-drop-index="${files.length}" data-playlist="${playlistId}"></div>`;
+    itemsHtml += `<div class="drop-zone" data-drop-index="${files.length}" data-playlist="${playlistId}"></div>`;
     
-    container.innerHTML = html;
+    // Render playlist items only (no player-global layer stack)
+    container.innerHTML = `
+        <div class="playlist-items-row">
+            ${itemsHtml}
+        </div>
+    `;
     
     // Add event handlers (TODO: Extract to separate function)
     attachPlaylistItemHandlers(container, playlistId, files, cfg);
@@ -1524,7 +1540,15 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
                 }
                 
                 const fileItem = files[index];
-                await cfg.loadFunc(fileItem);
+                
+                // If Ctrl key is pressed, show layer panel instead of loading
+                if (e.ctrlKey || e.metaKey) {
+                    selectedClipId = fileItem.id;
+                    await loadClipLayers(fileItem.id);
+                    renderSelectedClipLayers();
+                } else {
+                    await cfg.loadFunc(fileItem);
+                }
             }
         });
         
@@ -3442,6 +3466,758 @@ window.deleteSnapshot = async function(filename, e) {
         }
     };
 };
+
+// ========================================
+// MULTI-LAYER SYSTEM
+// ========================================
+
+// Layer state (now per clip, not per player)
+let clipLayers = {};  // { clip_id: [{layer_id, source_type, ...}] }
+// selectedClipId already declared above (line 112)
+
+/**
+ * Get layer count for a clip
+ */
+function getClipLayerCount(clipId) {
+    const layers = clipLayers[clipId] || [];
+    return layers.length;
+}
+
+/**
+ * Get layer badge HTML for playlist item
+ */
+function getLayerBadgeHtml(clipId) {
+    const count = getClipLayerCount(clipId);
+    if (count === 0) {
+        return '';
+    }
+    return `<span class="layer-badge" title="${count} layer(s)">🎞️ ${count}</span>`;
+}
+
+/**
+ * Load layers for a clip
+ */
+async function loadClipLayers(clipId) {
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const layers = data.layers || [];
+            clipLayers[clipId] = layers;
+            debug.log(`✅ Loaded ${layers.length} layers for clip ${clipId}`);
+            
+            // Re-render if this clip is currently selected
+            if (selectedClipId === clipId) {
+                renderSelectedClipLayers();
+            }
+        }
+    } catch (error) {
+        debug.error(`❌ Error loading clip layers:`, error);
+    }
+}
+
+/**
+ * Render layer management panel for selected clip
+ */
+function renderSelectedClipLayers() {
+    if (!selectedClipId) return;
+    
+    const layers = clipLayers[selectedClipId] || [];
+    const panelContent = document.getElementById('layerPanelContent');
+    if (!panelContent) return;
+    
+    // Note: layers should always include at least Layer 0 (base clip)
+    if (layers.length === 0) {
+        panelContent.innerHTML = `
+            <div class="text-center" style="padding: 1rem;">
+                <p style="margin: 0.5rem 0; color: var(--text-secondary);">Clip: ${selectedClipId.substring(0, 8)}...</p>
+                <p style="margin: 0.5rem 0;">Failed to load clip layers</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sort by layer_id descending (top layer first in UI)
+    const sortedLayers = [...layers].sort((a, b) => b.layer_id - a.layer_id);
+    
+    const layerCardsHtml = sortedLayers.map(layer => {
+        const isEnabled = layer.enabled !== false;
+        const sourceName = layer.source_path ? layer.source_path.split(/[\\/]/).pop() : 'Unknown';
+        const isBaseLayer = layer.layer_id === 0;
+        
+        return `
+            <div class="layer-card ${!isEnabled ? 'disabled' : ''} ${isBaseLayer ? 'base-layer' : ''}"
+                 data-layer-id="${layer.layer_id}"
+                 style="margin-bottom: 0.5rem; padding: 0.5rem; background: var(--bg-secondary); border-radius: 4px; ${isBaseLayer ? 'border: 2px solid var(--accent-color);' : ''}">
+                <div class="layer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                    <span class="layer-id">🎞️ Layer ${layer.layer_id} ${isBaseLayer ? '(Base Clip)' : ''}</span>
+                    ${!isBaseLayer ? `
+                        <button class="btn btn-sm btn-danger layer-remove" 
+                                onclick="removeLayerFromClip('${selectedClipId}', ${layer.layer_id})"
+                                title="Remove Layer"
+                                style="padding: 0.1rem 0.4rem; font-size: 0.8rem;">
+                            ❌
+                        </button>
+                    ` : '<span style="font-size: 0.7rem; color: var(--accent-color);">🔒</span>'}
+                </div>
+                <div class="layer-source" style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.4rem;">
+                    ${sourceName}
+                </div>
+                <div class="layer-config" style="display: flex; gap: 0.4rem; align-items: center;">
+                    <select class="blend-mode-select" 
+                            onchange="updateClipLayerBlendMode('${selectedClipId}', ${layer.layer_id}, this.value)"
+                            style="flex: 1; padding: 0.2rem; font-size: 0.8rem;"
+                            ${isBaseLayer ? 'disabled' : ''}>
+                        <option value="normal" ${layer.blend_mode === 'normal' ? 'selected' : ''}>Normal</option>
+                        <option value="multiply" ${layer.blend_mode === 'multiply' ? 'selected' : ''}>Multiply</option>
+                        <option value="screen" ${layer.blend_mode === 'screen' ? 'selected' : ''}>Screen</option>
+                        <option value="add" ${layer.blend_mode === 'add' ? 'selected' : ''}>Add</option>
+                        <option value="subtract" ${layer.blend_mode === 'subtract' ? 'selected' : ''}>Subtract</option>
+                        <option value="overlay" ${layer.blend_mode === 'overlay' ? 'selected' : ''}>Overlay</option>
+                    </select>
+                    <input type="range" 
+                           class="opacity-slider" 
+                           min="0" 
+                           max="100" 
+                           value="${Math.round(layer.opacity * 100)}"
+                           oninput="updateClipLayerOpacity('${selectedClipId}', ${layer.layer_id}, this.value)"
+                           title="Opacity: ${Math.round(layer.opacity * 100)}%"
+                           style="width: 80px;"
+                           ${isBaseLayer ? 'disabled' : ''}>
+                    <span class="opacity-value" style="font-size: 0.75rem; min-width: 35px;">${Math.round(layer.opacity * 100)}%</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    panelContent.innerHTML = `
+        <div style="padding: 0.5rem;">
+            <div style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                <small style="color: var(--text-secondary);">Clip: ${selectedClipId.substring(0, 8)}...</small>
+                <button class="btn btn-sm btn-primary" onclick="addLayerToClip('${selectedClipId}')" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">+ Add</button>
+            </div>
+            <div class="layer-stack-items">
+                ${layerCardsHtml}
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Setup drop zone for layer panel (called once on init)
+ */
+let layerPanelDropZoneInitialized = false;
+function setupLayerPanelDropZone() {
+    if (layerPanelDropZoneInitialized) return; // Already set up
+    
+    const panel = document.getElementById('layerPanelContent');
+    if (!panel) return;
+    
+    layerPanelDropZoneInitialized = true;
+    
+    panel.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (selectedClipId) {
+            panel.style.background = 'var(--bg-tertiary)';
+            panel.style.border = '2px dashed var(--accent-color)';
+        }
+    });
+    
+    panel.addEventListener('dragleave', (e) => {
+        panel.style.background = '';
+        panel.style.border = '';
+    });
+    
+    panel.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        panel.style.background = '';
+        panel.style.border = '';
+        
+        if (!selectedClipId) {
+            showToast('No clip selected', 'warning');
+            return;
+        }
+        
+        // Check for video file
+        const filePath = e.dataTransfer.getData('file-path') || e.dataTransfer.getData('video-path');
+        const fileType = e.dataTransfer.getData('file-type');
+        
+        if (filePath) {
+            debug.log(`📥 Adding ${filePath} as layer to clip ${selectedClipId}`);
+            
+            if (fileType === 'image') {
+                // Images should be added as video layers (they're treated as single-frame videos)
+                // Or we could use static_picture generator but that requires special handling
+                showToast('Image layers not yet supported - use videos', 'warning');
+            } else {
+                // Add video layer
+                await addLayerToClip(selectedClipId, filePath, 'video');
+            }
+            return;
+        }
+        
+        // Check for generator
+        const generatorId = e.dataTransfer.getData('generatorId');
+        if (generatorId) {
+            debug.log(`📥 Adding generator ${generatorId} as layer to clip ${selectedClipId}`);
+            await addLayerToClip(selectedClipId, generatorId, 'generator');
+            return;
+        }
+        
+        showToast('Drop a video file or generator here', 'info');
+    });
+}
+
+/**
+ * Close layer panel (deprecated - panel now always visible)
+ */
+window.closeLayerPanel = function() {
+    // Panel is now always visible
+    selectedClipId = null;
+    const panelContent = document.getElementById('layerPanelContent');
+    if (panelContent) {
+        panelContent.innerHTML = `
+            <div class="empty-state">
+                <p style="font-size: 0.85rem; margin: 0.5rem;">Ctrl+Click playlist item</p>
+                <p style="font-size: 0.75rem; margin: 0.5rem; color: var(--text-secondary);">Or drag files here to add as layers</p>
+            </div>
+        `;
+        // No need to call setupLayerPanelDropZone() - it's already set up once
+    }
+};
+
+/**
+ * Add layer to clip (called programmatically or by drag-drop)
+ */
+window.addLayerToClip = async function(clipId, sourcePath, sourceType = 'video') {
+    if (!sourcePath) {
+        // If no path provided, show prompt
+        sourcePath = prompt('Enter video path to add as layer:');
+        if (!sourcePath) return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_type: sourceType,
+                source_path: sourcePath,
+                blend_mode: 'normal',
+                opacity: 1.0
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Layer ${data.layer_id} added`, 'success');
+            await loadClipLayers(clipId);
+            renderSelectedClipLayers();
+        } else {
+            showToast(`Failed to add layer: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error('Error adding layer:', error);
+        showToast('Error adding layer', 'error');
+    }
+};
+
+/**
+ * Remove layer from clip
+ */
+window.removeLayerFromClip = async function(clipId, layerId) {
+    if (!confirm(`Remove layer ${layerId}?`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Layer ${layerId} removed`, 'success');
+            await loadClipLayers(clipId);
+            renderSelectedClipLayers();
+        } else {
+            showToast(`Failed to remove layer: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error('Error removing layer:', error);
+        showToast('Error removing layer', 'error');
+    }
+};
+
+/**
+ * Update layer blend mode
+ */
+window.updateClipLayerBlendMode = async function(clipId, layerId, blendMode) {
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ blend_mode: blendMode })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            debug.log(`✅ Layer ${layerId} blend mode updated to ${blendMode}`);
+            await loadClipLayers(clipId);
+        } else {
+            showToast(`Failed to update blend mode: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error('Error updating blend mode:', error);
+    }
+};
+
+/**
+ * Update layer opacity
+ */
+// Debounce timer for opacity updates
+let opacityUpdateTimer = null;
+
+window.updateClipLayerOpacity = async function(clipId, layerId, opacity) {
+    // Update the UI immediately for smooth visual feedback
+    const opacityValueSpan = document.querySelector(`.layer-card[data-layer-id="${layerId}"] .opacity-value`);
+    if (opacityValueSpan) {
+        opacityValueSpan.textContent = `${opacity}%`;
+    }
+    
+    // Debounce the API call
+    clearTimeout(opacityUpdateTimer);
+    opacityUpdateTimer = setTimeout(async () => {
+        const opacityFloat = parseFloat(opacity) / 100;
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ opacity: opacityFloat })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                debug.log(`✅ Layer ${layerId} opacity updated to ${opacity}%`);
+                await loadClipLayers(clipId);
+            } else {
+                showToast(`Failed to update opacity: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            debug.error('Error updating opacity:', error);
+        }
+    }, 300); // Wait 300ms after user stops dragging
+};
+
+/**
+ * Update layer stack visibility based on layer count
+ * OLD: Now using clip-based layers
+ */
+function updateLayerStackVisibility(playerId) {
+    // No longer applicable - layers are per-clip now
+    debug.log(`Layer stack for ${playerId}: Using clip-based layers`);
+}
+
+/**
+ * Select a layer (for clip loading)
+ * OLD: Now using clip-based layers
+ */
+window.selectLayer = function(playerId, layerId) {
+    // No longer applicable - layers are per-clip now
+    debug.log(`⚠️ selectLayer() is deprecated - use clip-based layer management`);
+};
+
+/**
+ * Open add layer modal
+ */
+window.openAddLayerModal = async function(playerId) {
+    const files = playerId === 'video' ? videoFiles : artnetFiles;
+    
+    // Build modal content
+    const content = document.createElement('div');
+    content.innerHTML = `
+        <div class="mb-3">
+            <label class="form-label">Source Type</label>
+            <select class="form-select" id="layerSourceType">
+                <option value="video">Video from Playlist</option>
+                <option value="generator">Generator</option>
+            </select>
+        </div>
+        <div class="mb-3" id="videoSourceSection">
+            <label class="form-label">Select Video</label>
+            <select class="form-select" id="layerVideoSelect">
+                ${files.length === 0 ? '<option value="">No files in playlist</option>' : ''}
+                ${files.map((f, i) => `<option value="${i}">${f.name}</option>`).join('')}
+            </select>
+        </div>
+        <div class="mb-3" id="generatorSourceSection" style="display: none;">
+            <label class="form-label">Select Generator</label>
+            <select class="form-select" id="layerGeneratorSelect">
+                ${availableGenerators.map(g => `<option value="${g.id}">${g.metadata.name}</option>`).join('')}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Blend Mode</label>
+            <select class="form-select" id="layerBlendMode">
+                <option value="normal">Normal</option>
+                <option value="multiply">Multiply</option>
+                <option value="screen">Screen</option>
+                <option value="add">Add</option>
+                <option value="subtract">Subtract</option>
+                <option value="overlay">Overlay</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Opacity: <span id="layerOpacityValue">100%</span></label>
+            <input type="range" class="form-range" id="layerOpacity" min="0" max="100" value="100"
+                   oninput="document.getElementById('layerOpacityValue').textContent = this.value + '%'">
+        </div>
+    `;
+    
+    const modal = ModalManager.create({
+        id: `addLayerModal-${playerId}`,
+        title: `🎬 Add Layer to ${playerId === 'video' ? 'Video' : 'Art-Net'} Player`,
+        content: content,
+        size: 'md',
+        centered: true,
+        buttons: [
+            {
+                label: 'Cancel',
+                class: 'btn btn-secondary'
+            },
+            {
+                label: 'Add Layer',
+                class: 'btn btn-primary',
+                dismiss: false,
+                callback: async (modalCtrl) => {
+                    const sourceType = document.getElementById('layerSourceType').value;
+                    const blendMode = document.getElementById('layerBlendMode').value;
+                    const opacity = parseFloat(document.getElementById('layerOpacity').value) / 100;
+                    
+                    let sourcePath;
+                    if (sourceType === 'video') {
+                        const index = parseInt(document.getElementById('layerVideoSelect').value);
+                        if (isNaN(index) || index < 0 || index >= files.length) {
+                            showToast('Invalid video selection', 'error');
+                            return;
+                        }
+                        sourcePath = files[index].path;
+                    } else {
+                        sourcePath = document.getElementById('layerGeneratorSelect').value;
+                        if (!sourcePath) {
+                            showToast('Invalid generator selection', 'error');
+                            return;
+                        }
+                    }
+                    
+                    modalCtrl.hide();
+                    await addLayer(playerId, sourceType, sourcePath, blendMode, opacity);
+                    modalCtrl.destroy();
+                }
+            }
+        ]
+    });
+    
+    // Setup source type toggle
+    const sourceTypeSelect = content.querySelector('#layerSourceType');
+    const videoSection = content.querySelector('#videoSourceSection');
+    const generatorSection = content.querySelector('#generatorSourceSection');
+    
+    sourceTypeSelect.addEventListener('change', () => {
+        if (sourceTypeSelect.value === 'video') {
+            videoSection.style.display = 'block';
+            generatorSection.style.display = 'none';
+        } else {
+            videoSection.style.display = 'none';
+            generatorSection.style.display = 'block';
+        }
+    });
+    
+    modal.show();
+};
+
+/**
+ * Add a layer
+ */
+async function addLayer(playerId, sourceType, sourcePath, blendMode = 'normal', opacity = 1.0) {
+    try {
+        const body = {
+            source_type: sourceType,
+            blend_mode: blendMode,
+            opacity: opacity
+        };
+        
+        if (sourceType === 'video') {
+            body.video_path = sourcePath;
+        } else if (sourceType === 'generator') {
+            body.generator_id = sourcePath;
+        }
+        
+        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Layer ${data.layer_id} added`, 'success');
+            // await loadLayers(playerId); // OLD: Now using clip-based layers
+        } else {
+            showToast(`Error: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error(`❌ Error adding layer:`, error);
+        showToast('Error adding layer', 'error');
+    }
+}
+
+/**
+ * Remove a layer
+ */
+window.removeLayer = async function(playerId, layerId) {
+    if (!confirm(`Remove layer ${layerId}?`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Layer ${layerId} removed`, 'success');
+            
+            // Clear selection if removed layer was selected
+            if (selectedLayerId[playerId] === layerId) {
+                selectedLayerId[playerId] = null;
+            }
+            
+            // await loadLayers(playerId); // OLD: Now using clip-based layers
+        } else {
+            showToast(`Error: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error(`❌ Error removing layer:`, error);
+        showToast('Error removing layer', 'error');
+    }
+};
+
+/**
+ * Update layer blend mode
+ */
+window.updateLayerBlendMode = async function(playerId, layerId, blendMode) {
+    try {
+        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ blend_mode: blendMode })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            debug.log(`✅ Layer ${layerId} blend mode: ${blendMode}`);
+            // await loadLayers(playerId); // OLD: Now using clip-based layers
+        } else {
+            showToast(`Error: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error(`❌ Error updating blend mode:`, error);
+        showToast('Error updating blend mode', 'error');
+    }
+};
+
+/**
+ * Update layer opacity
+ */
+window.updateLayerOpacity = async function(playerId, layerId, value) {
+    const opacity = parseFloat(value) / 100;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ opacity: opacity })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // OLD: Update UI immediately (optimistic update) - now using clip-based layers
+            
+            // Update only the opacity display without full re-render
+            const card = document.querySelector(`[data-layer-id="${layerId}"] .opacity-value`);
+            if (card) {
+                card.textContent = `${Math.round(opacity * 100)}%`;
+            }
+        }
+    } catch (error) {
+        debug.error(`❌ Error updating opacity:`, error);
+    }
+};
+
+/**
+ * Toggle layer enabled/disabled
+ */
+window.toggleLayer = async function(playerId, layerId) {
+    // OLD: Now using clip-based layers
+    const newEnabled = true; // Default value
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: newEnabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Layer ${layerId} ${newEnabled ? 'enabled' : 'disabled'}`, 'success');
+            // await loadLayers(playerId); // OLD: Now using clip-based layers
+        } else {
+            showToast(`Error: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error(`❌ Error toggling layer:`, error);
+        showToast('Error toggling layer', 'error');
+    }
+};
+
+/**
+ * Setup drag and drop for layer reordering
+ */
+function setupLayerDragAndDrop(playerId) {
+    const container = document.getElementById(`${playerId}LayerItems`);
+    if (!container) return;
+    
+    const cards = container.querySelectorAll('.layer-card[draggable="true"]');
+    
+    let draggedElement = null;
+    
+    cards.forEach(card => {
+        card.addEventListener('dragstart', (e) => {
+            draggedElement = card;
+            card.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        
+        card.addEventListener('dragend', (e) => {
+            card.classList.remove('dragging');
+            draggedElement = null;
+        });
+        
+        card.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            
+            if (draggedElement && draggedElement !== card) {
+                const rect = card.getBoundingClientRect();
+                const midpoint = rect.top + rect.height / 2;
+                
+                if (e.clientY < midpoint) {
+                    container.insertBefore(draggedElement, card);
+                } else {
+                    container.insertBefore(draggedElement, card.nextSibling);
+                }
+            }
+        });
+        
+        card.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            
+            // Get new order from DOM
+            const newOrder = Array.from(container.querySelectorAll('.layer-card'))
+                .map(c => parseInt(c.dataset.layerId))
+                .reverse(); // Reverse because UI shows top-to-bottom but API expects bottom-to-top
+            
+            // Always keep layer 0 at index 0
+            const masterIndex = newOrder.indexOf(0);
+            if (masterIndex !== 0) {
+                newOrder.splice(masterIndex, 1);
+                newOrder.unshift(0);
+            }
+            
+            await reorderLayers(playerId, newOrder);
+        });
+    });
+}
+
+/**
+ * Load clip into selected layer
+ */
+async function loadClipIntoLayer(playerId, layerId, item) {
+    try {
+        const body = {};
+        
+        if (item.type === 'generator' && item.generator_id) {
+            body.source_type = 'generator';
+            body.generator_id = item.generator_id;
+            if (item.parameters) {
+                body.parameters = item.parameters;
+            }
+        } else {
+            body.source_type = 'video';
+            body.video_path = item.path;
+        }
+        
+        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}/clip/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Loaded ${item.name} into Layer ${layerId}`, 'success');
+            // await loadLayers(playerId); // OLD: Now using clip-based layers
+        } else {
+            showToast(`Error: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error(`❌ Error loading clip into layer:`, error);
+        showToast('Error loading clip into layer', 'error');
+    }
+}
+
+/**
+ * Reorder layers
+ */
+async function reorderLayers(playerId, layerOrder) {
+    try {
+        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/reorder`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ layer_order: layerOrder })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Layers reordered', 'success');
+            // await loadLayers(playerId); // OLD: Now using clip-based layers
+        } else {
+            showToast(`Error: ${data.error}`, 'error');
+            // await loadLayers(playerId); // OLD: Now using clip-based layers
+        }
+    } catch (error) {
+        debug.error(`❌ Error reordering layers:`, error);
+        showToast('Error reordering layers', 'error');
+        // await loadLayers(playerId); // OLD: Now using clip-based layers
+    }
+}
+
+// ========================================
+// INITIALIZATION: Load layers on startup
+// ========================================
+
+// Add to init() function - we'll need to call loadLayers for both players
+// This will be integrated when init() is modified
 
 // Cleanup
 window.addEventListener('beforeunload', () => {
