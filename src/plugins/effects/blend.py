@@ -17,6 +17,7 @@ class BlendEffect(PluginBase):
     - Add: Addiert Farben (Dodge)
     - Subtract: Subtrahiert Farben
     - Overlay: Kombiniert Multiply und Screen
+    - Mask: Nutzt Overlay-Luminanz als Alpha-Maske (weiß = sichtbar, schwarz = transparent)
     """
     
     METADATA = {
@@ -24,12 +25,12 @@ class BlendEffect(PluginBase):
         'name': 'Blend Mode',
         'description': 'Layer-Komposition mit verschiedenen Blend-Modi',
         'author': 'Flux Team',
-        'version': '1.0.0',
+        'version': '1.1.0',
         'type': PluginType.EFFECT,
         'category': 'Komposition'
     }
     
-    BLEND_MODES = ['normal', 'multiply', 'screen', 'add', 'subtract', 'overlay']
+    BLEND_MODES = ['normal', 'multiply', 'screen', 'add', 'subtract', 'overlay', 'mask']
     
     PARAMETERS = [
         {
@@ -99,6 +100,8 @@ class BlendEffect(PluginBase):
             blended = self._blend_subtract(base, over)
         elif self.blend_mode == 'overlay':
             blended = self._blend_overlay(base, over)
+        elif self.blend_mode == 'mask':
+            blended = self._blend_mask(base, over)
         else:
             # Fallback zu Normal
             blended = self._blend_normal(base, over)
@@ -158,6 +161,25 @@ class BlendEffect(PluginBase):
         
         # Kombiniere basierend auf Maske
         return np.where(mask, multiply, screen)
+    
+    def _blend_mask(self, base, over):
+        """
+        Mask Blend: Nutzt Overlay-Luminanz als Alpha-Maske.
+        Weiß (1.0) = base vollständig sichtbar
+        Schwarz (0.0) = base transparent (schwarz)
+        """
+        # Konvertiere Overlay zu Graustufen (Luminanz)
+        # Verwende Standard-RGB-zu-Grau-Konversion: 0.299*R + 0.587*G + 0.114*B
+        if len(over.shape) == 3 and over.shape[2] == 3:
+            luminance = 0.299 * over[:, :, 0] + 0.587 * over[:, :, 1] + 0.114 * over[:, :, 2]
+            # Erweitere zu 3 Kanälen für Broadcasting
+            mask = np.stack([luminance, luminance, luminance], axis=2)
+        else:
+            # Falls bereits Graustufen
+            mask = over
+        
+        # Wende Maske auf Base an: base * mask
+        return base * mask
     
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""

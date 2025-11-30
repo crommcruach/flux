@@ -10,6 +10,7 @@ Ermöglicht:
 
 from flask import request, jsonify
 import logging
+from plugins.effects.blend import BlendEffect
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,14 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
         player_manager: PlayerManager-Instanz
         video_dir: Base directory for video files
     """
+    
+    @app.route('/api/blend-modes', methods=['GET'])
+    def get_blend_modes():
+        """Gibt verfügbare Blend-Modes zurück."""
+        return jsonify({
+            "success": True,
+            "blend_modes": BlendEffect.BLEND_MODES
+        })
     
     def reload_player_layers_if_active(clip_id):
         """Helper: Reload layers in player if this clip is currently loaded"""
@@ -110,7 +119,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
             if source_type not in ['video', 'generator', 'script']:
                 return jsonify({"success": False, "error": "Invalid source_type"}), 400
             
-            if blend_mode not in ['normal', 'multiply', 'screen', 'add', 'subtract', 'overlay']:
+            if blend_mode not in BlendEffect.BLEND_MODES:
                 return jsonify({"success": False, "error": "Invalid blend_mode"}), 400
             
             # Create layer config
@@ -179,7 +188,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
             
             # Validate blend_mode if provided
             if 'blend_mode' in data:
-                if data['blend_mode'] not in ['normal', 'multiply', 'screen', 'add', 'subtract', 'overlay']:
+                if data['blend_mode'] not in BlendEffect.BLEND_MODES:
                     return jsonify({"success": False, "error": "Invalid blend_mode"}), 400
             
             # Update

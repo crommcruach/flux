@@ -14,6 +14,7 @@ let availableGenerators = [];
 let videoEffects = [];
 let artnetEffects = [];
 let clipEffects = [];
+let availableBlendModes = []; // Dynamically loaded from backend
 let updateInterval = null;
 let playlistUpdateInterval = null;
 
@@ -166,6 +167,7 @@ async function init() {
         
         await loadAvailableEffects();
         await loadAvailableGenerators();
+        await loadAvailableBlendModes();
         // initializeSearchFilters(); // DISABLED: Tab components now handle their own search
         await loadVideoPlaylist();
         await loadArtnetPlaylist();
@@ -429,6 +431,27 @@ async function loadAvailableGenerators() {
     }
 }
 
+async function loadAvailableBlendModes() {
+    try {
+        debug.log('📥 Loading available blend modes from API...');
+        const response = await fetch(`${API_BASE}/api/blend-modes`);
+        const data = await response.json();
+        
+        if (data.success) {
+            availableBlendModes = data.blend_modes;
+            debug.log(`✅ Loaded ${availableBlendModes.length} blend modes:`, availableBlendModes);
+        } else {
+            console.error('❌ Failed to load blend modes:', data.message);
+            // Fallback to basic modes
+            availableBlendModes = ['normal', 'multiply', 'screen', 'add', 'subtract', 'overlay'];
+        }
+    } catch (error) {
+        console.error('❌ Error loading blend modes:', error);
+        // Fallback to basic modes
+        availableBlendModes = ['normal', 'multiply', 'screen', 'add', 'subtract', 'overlay'];
+    }
+}
+
 function renderAvailableGenerators() {
     const container = document.getElementById('availableSources');
     
@@ -474,7 +497,7 @@ window.startGeneratorDrag = function(event, generatorId) {
     }
     
     // Make dragged element semi-transparent
-    event.target.style.opacity = '0.5';
+    event.target.classList.add('dragging');
     
     // Store in global var as backup (dataTransfer might not be accessible during dragover)
     window.currentDragGenerator = {
@@ -485,7 +508,7 @@ window.startGeneratorDrag = function(event, generatorId) {
 
 // Handle drag end for generators
 window.endGeneratorDrag = function(event) {
-    event.target.style.opacity = '1';
+    event.target.classList.remove('dragging');
     window.currentDragGenerator = null;
 };
 
@@ -501,16 +524,16 @@ function setupEffectDropZones() {
         panel.addEventListener('dragover', (e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
-            panel.style.background = 'var(--bg-tertiary)';
+            panel.classList.add('drop-target');
         });
         
         panel.addEventListener('dragleave', (e) => {
-            panel.style.background = '';
+            panel.classList.remove('drop-target');
         });
         
         panel.addEventListener('drop', async (e) => {
             e.preventDefault();
-            panel.style.background = '';
+            panel.classList.remove('drop-target');
             
             const effectId = e.dataTransfer.getData('effectId');
             if (effectId) {
@@ -527,16 +550,16 @@ function setupEffectDropZones() {
     clipFxPanel.addEventListener('dragover', (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
-        clipFxPanel.style.background = 'var(--bg-tertiary)';
+        clipFxPanel.classList.add('drop-target');
     });
     
     clipFxPanel.addEventListener('dragleave', (e) => {
-        clipFxPanel.style.background = '';
+        clipFxPanel.classList.remove('drop-target');
     });
     
     clipFxPanel.addEventListener('drop', async (e) => {
         e.preventDefault();
-        clipFxPanel.style.background = '';
+        clipFxPanel.classList.remove('drop-target');
         
         const effectId = e.dataTransfer.getData('effectId');
         if (effectId && selectedClipId && selectedClipPlayerType) {
@@ -629,7 +652,8 @@ function setupPlaylistContainerDropHandlers() {
                     name: `🌟 ${generatorName}`,
                     id: crypto.randomUUID(), // Unique ID that becomes clip_id
                     type: 'generator',
-                    generator_id: generatorId
+                    generator_id: generatorId,
+                    parameters: {}
                 };
                 videoFiles.push(newGenerator);
                 // Autoload first generator
@@ -659,7 +683,7 @@ function setupPlaylistContainerDropHandlers() {
                         generator_id: 'static_picture',
                         parameters: {
                             image_path: filePath,
-                            duration: 30
+                            duration: 10
                         }
                     };
                 } else {
@@ -760,7 +784,8 @@ function setupPlaylistContainerDropHandlers() {
                     name: `🌟 ${generatorName}`,
                     id: crypto.randomUUID(), // Unique ID that becomes clip_id
                     type: 'generator',
-                    generator_id: generatorId
+                    generator_id: generatorId,
+                    parameters: {}
                 };
                 artnetFiles.push(newGenerator);
                 renderPlaylist('artnet');
@@ -786,7 +811,7 @@ function setupPlaylistContainerDropHandlers() {
                         generator_id: 'static_picture',
                         parameters: {
                             image_path: filePath,
-                            duration: 30
+                            duration: 10
                         }
                     };
                 } else {
@@ -881,6 +906,14 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video', cli
             window.currentGeneratorParams = finalParams;
             window.currentGeneratorMeta = generator;
             
+            // Update parameters in playlist object so they persist
+            const playlist = playerType === 'video' ? videoFiles : artnetFiles;
+            const playlistItem = playlist.find(item => item.id === selectedClipId);
+            if (playlistItem && playlistItem.type === 'generator') {
+                playlistItem.parameters = finalParams;
+                debug.log('💾 Saved generator parameters to playlist item:', finalParams);
+            }
+            
             // Set currentVideo for playlist highlighting (normalize path like loadVideoFile does)
             currentVideo = `generator:${generatorId}`.replace(/^[\\\/]+/, '');
             renderPlaylist(playerType);
@@ -933,26 +966,26 @@ function renderGeneratorParametersSection() {
     
     // Build collapsible parameter section
     let html = `
-        <div class="generator-params-section expanded" style="border-bottom: 1px solid var(--border-color); margin-bottom: 1rem;">
-            <div class="effect-header" onclick="this.parentElement.classList.toggle('expanded')" style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                    <span style="font-size: 1.2rem;">🌟</span>
+        <div class="generator-params-section expanded">
+            <div class="effect-header" onclick="this.parentElement.classList.toggle('expanded')">
+                <div>
+                    <span class="param-icon">🌟</span>
                     <strong>Generator Parameters</strong>
                 </div>
                 <span class="expand-icon">▼</span>
             </div>
-            <div class="effect-params" style="padding: 0.5rem;">
+            <div class="effect-params">
     `;
     
     parameters.forEach(param => {
         const currentValue = window.currentGeneratorParams?.[param.name] ?? param.default;
         
         html += `
-            <div class="param-control" style="margin-bottom: 1rem; padding: 0.5rem;">
-                <label style="display: block; margin-bottom: 0.25rem; font-weight: 500;">
+            <div class="param-control">
+                <label>
                     ${param.label || param.name}
                 </label>
-                <small style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">
+                <small>
                     ${param.description || ''}
                 </small>
         `;
@@ -961,23 +994,24 @@ function renderGeneratorParametersSection() {
         if (param.type === 'float' || param.type === 'int') {
             const step = param.step || (param.type === 'int' ? 1 : 0.01);
             html += `
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div class="param-control-row">
                     <input type="range" 
                            id="gen-param-${param.name}"
                            min="${param.min}"
                            max="${param.max}"
                            step="${step}"
                            value="${currentValue}"
+                           data-default="${param.default}"
                            onchange="updateGeneratorParameter('${param.name}', this.value)"
-                           style="flex: 1;">
-                    <span id="gen-param-${param.name}-value" style="min-width: 50px; text-align: right;">
+                           oncontextmenu="resetGeneratorParameterToDefault(event, '${param.name}', ${param.default})">
+                    <span id="gen-param-${param.name}-value" class="param-value">
                         ${currentValue}
                     </span>
                 </div>
             `;
         } else if (param.type === 'bool') {
             html += `
-                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <label class="checkbox-label">
                     <input type="checkbox" 
                            id="gen-param-${param.name}"
                            ${currentValue ? 'checked' : ''}
@@ -1005,6 +1039,26 @@ function renderGeneratorParametersSection() {
     
     return html;
 }
+
+/**
+ * Reset generator parameter to default value on right-click
+ */
+window.resetGeneratorParameterToDefault = function(event, paramName, defaultValue) {
+    event.preventDefault(); // Prevent context menu
+    
+    const slider = document.getElementById(`gen-param-${paramName}`);
+    const valueDisplay = document.getElementById(`gen-param-${paramName}-value`);
+    
+    if (slider && valueDisplay) {
+        slider.value = defaultValue;
+        valueDisplay.textContent = defaultValue;
+        
+        // Send update to backend
+        updateGeneratorParameter(paramName, defaultValue);
+    }
+    
+    return false;
+};
 
 // Update generator parameter
 window.updateGeneratorParameter = async function(paramName, value) {
@@ -1045,22 +1099,20 @@ window.updateGeneratorParameter = async function(paramName, value) {
         if (result.success) {
             debug.log(`✅ Generator parameter updated: ${paramName} = ${finalValue}`);
             
-            // Update the generator in the playlist with new parameters
-            if (window.currentGeneratorId && selectedClipPath) {
+            // Update the generator in the playlist with new parameters (only current instance by clip ID)
+            if (selectedClipId && selectedClipPlayerType) {
                 const playerType = selectedClipPlayerType;
                 const playlistArray = playerType === 'video' ? videoFiles : artnetFiles;
                 
-                // Find all instances of this generator in playlist and update their parameters
-                playlistArray.forEach(item => {
-                    if (item.type === 'generator' && item.generator_id === window.currentGeneratorId) {
-                        if (!item.parameters) {
-                            item.parameters = {};
-                        }
-                        item.parameters[paramName] = finalValue;
+                // Find THIS specific generator instance by clip ID
+                const playlistItem = playlistArray.find(item => item.id === selectedClipId);
+                if (playlistItem && playlistItem.type === 'generator') {
+                    if (!playlistItem.parameters) {
+                        playlistItem.parameters = {};
                     }
-                });
-                
-                debug.log(`📋 Updated generator parameters in playlist`);
+                    playlistItem.parameters[paramName] = finalValue;
+                    debug.log(`💾 Updated parameter in playlist item ${selectedClipId}: ${paramName} = ${finalValue}`);
+                }
             }
         } else {
             console.error(`Failed to update parameter: ${result.error}`);
@@ -1265,6 +1317,9 @@ async function loadPlaylist(playerId) {
     }
     
     renderPlaylist(playerId);
+    
+    // Load layer counts for all clips in background (for badge display)
+    loadAllClipLayerCounts(config.files);
 }
 
 // Generic render function - USES GENERIC IMPLEMENTATION
@@ -1283,15 +1338,14 @@ function renderPlaylistGeneric(playlistId) {
             updateFunc: () => updateVideoPlaylist(),
             removeFunc: (index) => `removeFromVideoPlaylist(${index})`,
             loadFunc: async (item) => {
-                // Load clip normally
+                // Load clip and play (called on double-click)
                 currentVideoItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'video', item.id, item.parameters);
                 } else {
                     await loadVideoFile(item.path, item.id);
                 }
-                // Load clip layers after clip is loaded
-                await loadClipLayers(item.id);
+                // Note: loadClipLayers() is only called on Ctrl+Click, not on double-click
             },
             dataAttr: 'data-video-index',
             icon: '📹'
@@ -1303,15 +1357,14 @@ function renderPlaylistGeneric(playlistId) {
             updateFunc: () => updateArtnetPlaylist(),
             removeFunc: (index) => `removeFromArtnetPlaylist(${index})`,
             loadFunc: async (item) => {
-                // Load clip normally
+                // Load clip and play (called on double-click)
                 currentArtnetItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'artnet', item.id, item.parameters);
                 } else {
                     await loadArtnetFile(item.path, item.id);
                 }
-                // Load clip layers after clip is loaded
-                await loadClipLayers(item.id);
+                // Note: loadClipLayers() is only called on Ctrl+Click, not on double-click
             },
             dataAttr: 'data-artnet-index',
             icon: '🎨'
@@ -1330,10 +1383,10 @@ function renderPlaylistGeneric(playlistId) {
     // Empty state handling
     if (files.length === 0) {
         container.innerHTML = `
-            <div class="empty-state drop-zone" data-drop-index="0" data-playlist="${playlistId}" style="width: 100%; padding: 2rem; text-align: center; min-height: 150px;">
-                <div style="font-size: 2rem; margin-bottom: 0.5rem;">📂</div>
-                <p style="margin: 0.5rem 0;">Playlist leer</p>
-                <small style="color: var(--text-secondary, #999);">Drag & Drop aus Files Tab oder Sources</small>
+            <div class="empty-state drop-zone" data-drop-index="0" data-playlist="${playlistId}">
+                <div class="empty-state-icon-large">📂</div>
+                <p class="empty-state-title">Playlist leer</p>
+                <small class="empty-state-subtitle">Drag & Drop aus Files Tab oder Sources</small>
             </div>
         `;
         
@@ -1348,11 +1401,11 @@ function renderPlaylistGeneric(playlistId) {
                 if (e.dataTransfer) {
                     e.dataTransfer.dropEffect = 'copy';
                 }
-                emptyZone.style.background = 'var(--bg-tertiary)';
+                emptyZone.classList.add('drop-target');
             });
             
             emptyZone.addEventListener('dragleave', (e) => {
-                emptyZone.style.background = '';
+                emptyZone.classList.remove('drop-target');
             });
             
             emptyZone.addEventListener('drop', (e) => {
@@ -1360,7 +1413,7 @@ function renderPlaylistGeneric(playlistId) {
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                emptyZone.style.background = '';
+                emptyZone.classList.remove('drop-target');
                 
                 const playlistType = emptyZone.dataset.playlist || playlistId;
                 
@@ -1373,7 +1426,8 @@ function renderPlaylistGeneric(playlistId) {
                         name: `🌟 ${generatorName}`,
                         id: crypto.randomUUID(),
                         type: 'generator',
-                        generator_id: generatorId
+                        generator_id: generatorId,
+                        parameters: {}
                     };
                     files.push(newGenerator);
                     
@@ -1405,7 +1459,7 @@ function renderPlaylistGeneric(playlistId) {
                             generator_id: 'static_picture',
                             parameters: {
                                 image_path: filePath,
-                                duration: 30
+                                duration: 10
                             }
                         };
                     } else {
@@ -1476,25 +1530,26 @@ function renderPlaylistGeneric(playlistId) {
 // Helper function for item event handlers
 function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
     let isDragging = false;
-    let hoverTimer = null;
     
     container.querySelectorAll('.playlist-item').forEach((item) => {
         const indexAttr = item.getAttribute(cfg.dataAttr);
         const index = parseInt(indexAttr);
         
-        // Hover handler
-        item.addEventListener('mouseenter', (e) => {
-            if (isDragging) return;
-            if (hoverTimer) clearTimeout(hoverTimer);
-            
-            hoverTimer = setTimeout(async () => {
+        // Single click handler - select clip and show layer panel
+        item.addEventListener('click', async (e) => {
+            if (!isDragging && !e.target.classList.contains('playlist-item-remove')) {
                 const fileItem = files[index];
-                if (!fileItem) return;
                 
+                // Select clip
                 selectedClipId = fileItem.id;
                 selectedClipPath = fileItem.path;
                 selectedClipPlayerType = playlistId;
                 
+                // Always load clip layers (auto-show if layers exist)
+                await loadClipLayers(fileItem.id);
+                renderSelectedClipLayers();
+                
+                // Load effects/generator parameters
                 if (fileItem.type === 'generator' && fileItem.generator_id) {
                     const generator = availableGenerators.find(g => g.id === fileItem.generator_id);
                     if (generator) {
@@ -1521,34 +1576,14 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
                     window.currentGeneratorMeta = null;
                     await refreshClipEffects();
                 }
-            }, 1000);
-        });
-        
-        item.addEventListener('mouseleave', (e) => {
-            if (hoverTimer) {
-                clearTimeout(hoverTimer);
-                hoverTimer = null;
             }
         });
         
-        // Click handler
-        item.addEventListener('click', async (e) => {
+        // Double click handler - play video
+        item.addEventListener('dblclick', async (e) => {
             if (!isDragging && !e.target.classList.contains('playlist-item-remove')) {
-                if (hoverTimer) {
-                    clearTimeout(hoverTimer);
-                    hoverTimer = null;
-                }
-                
                 const fileItem = files[index];
-                
-                // If Ctrl key is pressed, show layer panel instead of loading
-                if (e.ctrlKey || e.metaKey) {
-                    selectedClipId = fileItem.id;
-                    await loadClipLayers(fileItem.id);
-                    renderSelectedClipLayers();
-                } else {
-                    await cfg.loadFunc(fileItem);
-                }
+                await cfg.loadFunc(fileItem);
             }
         });
         
@@ -1557,14 +1592,14 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
             isDragging = true;
             window.draggedIndex = index;
             window.draggedPlaylist = playlistId;
-            item.style.opacity = '0.5';
+            item.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'all';
             e.dataTransfer.setData('text/plain', index.toString());
         });
         
         item.addEventListener('dragend', (e) => {
             setTimeout(() => {
-                item.style.opacity = '1';
+                item.classList.remove('dragging');
                 container.querySelectorAll('.drop-zone').forEach(zone => zone.classList.remove('drag-over'));
                 isDragging = false;
                 window.draggedIndex = null;
@@ -1611,7 +1646,8 @@ function attachPlaylistDropZoneHandlers(container, playlistId, files, cfg) {
                     name: `🌟 ${generatorName}`,
                     id: crypto.randomUUID(),
                     type: 'generator',
-                    generator_id: generatorId
+                    generator_id: generatorId,
+                    parameters: {}
                 };
                 files.splice(dropIndex, 0, newGenerator);
                 // Autoload if first item in video playlist
@@ -1639,7 +1675,7 @@ function attachPlaylistDropZoneHandlers(container, playlistId, files, cfg) {
                         generator_id: 'static_picture',
                         parameters: {
                             image_path: filePath,
-                            duration: 30
+                            duration: 10
                         }
                     };
                 } else {
@@ -2546,7 +2582,7 @@ let clearClipEffectsClicks = 0;
 let clearClipEffectsTimer = null;
 
 window.clearClipEffects = async function() {
-    if (!selectedClip || !selectedClipPlayerType) {
+    if (!selectedClipId || !selectedClipPlayerType) {
         showToast('No clip selected', 'warning');
         return;
     }
@@ -2607,7 +2643,7 @@ function renderEffectItem(effect, index, player) {
                     <span>${metadata.name || effect.plugin_id}</span>
                 </div>
                 <div class="effect-actions">
-                    <button class="btn btn-sm btn-danger btn-icon" onclick="event.stopPropagation(); removeEffect('${player}', ${index})">🗑️</button>
+                    <button class="btn btn-sm btn-danger btn-icon" onclick="removeEffect('${player}', ${index}, event)">🗑️</button>
                 </div>
             </div>
             <div class="effect-body">
@@ -2630,48 +2666,74 @@ window.toggleEffect = function(player, index, event) {
     }
 };
 
-window.removeEffect = async function(player, index) {
-    try {
-        let endpoint;
-        let bodyData = null;
+window.removeEffect = async function(player, index, e) {
+    e.stopPropagation();
+    
+    const button = e.currentTarget;
+    const originalText = button.innerHTML;
+    const originalOnclick = button.onclick;
+    
+    // First click: Confirm
+    button.innerHTML = '✓';
+    button.classList.remove('btn-danger');
+    button.classList.add('btn-warning');
+    button.onclick = null;
+    
+    // Reset after 3 seconds
+    const resetTimer = setTimeout(() => {
+        button.innerHTML = originalText;
+        button.classList.remove('btn-warning');
+        button.classList.add('btn-danger');
+        button.onclick = originalOnclick;
+    }, 3000);
+    
+    // Second click: Execute
+    button.onclick = async (e) => {
+        e.stopPropagation();
+        clearTimeout(resetTimer);
         
-        if (player === 'clip') {
-            // NEW: Unified API endpoint (no body needed, clip_id in URL)
-            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/${index}`;
-            bodyData = null;
-        } else {
-            // Player effects use URL-only
-            endpoint = player === 'video' 
-                ? `${API_BASE}/api/player/video/effects/${index}`
-                : `${API_BASE}/api/player/artnet/effects/${index}`;
-        }
-        
-        const fetchOptions = {
-            method: 'DELETE'
-        };
-        
-        if (bodyData) {
-            fetchOptions.headers = { 'Content-Type': 'application/json' };
-            fetchOptions.body = JSON.stringify(bodyData);
-        }
-        
-        const response = await fetch(endpoint, fetchOptions);
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            debug.log(`✅ ${player} effect removed:`, index);
-            if (player === 'video') {
-                await refreshVideoEffects();
-            } else if (player === 'artnet') {
-                await refreshArtnetEffects();
-            } else if (player === 'clip') {
-                await refreshClipEffects();
+        try {
+            let endpoint;
+            let bodyData = null;
+            
+            if (player === 'clip') {
+                endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/${index}`;
+                bodyData = null;
+            } else {
+                endpoint = player === 'video' 
+                    ? `${API_BASE}/api/player/video/effects/${index}`
+                    : `${API_BASE}/api/player/artnet/effects/${index}`;
             }
+            
+            const fetchOptions = {
+                method: 'DELETE'
+            };
+            
+            if (bodyData) {
+                fetchOptions.headers = { 'Content-Type': 'application/json' };
+                fetchOptions.body = JSON.stringify(bodyData);
+            }
+            
+            const response = await fetch(endpoint, fetchOptions);
+            const data = await response.json();
+            
+            if (data.success) {
+                debug.log(`✅ ${player} effect removed:`, index);
+                if (player === 'video') {
+                    await refreshVideoEffects();
+                } else if (player === 'artnet') {
+                    await refreshArtnetEffects();
+                } else if (player === 'clip') {
+                    await refreshClipEffects();
+                }
+            } else {
+                showToast(`Error: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error(`❌ Error removing ${player} effect:`, error);
+            showToast('Error removing effect', 'error');
         }
-    } catch (error) {
-        console.error(`❌ Error removing ${player} effect:`, error);
-    }
+    };
 };
 
 // ========================================
@@ -2689,12 +2751,13 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
     switch (paramType) {
         case 'FLOAT':
         case 'INT':
-            const step = paramType === 'INT' ? 1 : 0.1;
+            const step = 1; // Always use integer steps
+            const defaultValue = param.default || 0;
             control = `
                 <div class="parameter-control">
                     <div class="parameter-label">
                         <label for="${controlId}">${param.name}</label>
-                        <span class="parameter-value" id="${controlId}_value">${value}</span>
+                        <span class="parameter-value" id="${controlId}_value">${Math.round(value)}</span>
                     </div>
                     <input 
                         type="range" 
@@ -2703,8 +2766,10 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
                         min="${param.min || 0}" 
                         max="${param.max || 100}" 
                         step="${step}"
-                        value="${value}"
-                        oninput="updateParameter('${player}', ${effectIndex}, '${param.name}', parseFloat(this.value), '${controlId}_value')"
+                        value="${Math.round(value)}"
+                        data-default="${defaultValue}"
+                        oninput="updateParameter('${player}', ${effectIndex}, '${param.name}', parseInt(this.value), '${controlId}_value')"
+                        oncontextmenu="resetParameterToDefault(event, '${player}', ${effectIndex}, '${param.name}', ${defaultValue}, '${controlId}', '${controlId}_value')"
                     >
                 </div>
             `;
@@ -2738,6 +2803,27 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
 
 // Debounce timer für Parameter-Updates
 const parameterUpdateTimers = {};
+
+/**
+ * Reset parameter to default value on right-click
+ */
+window.resetParameterToDefault = function(event, player, effectIndex, paramName, defaultValue, sliderId, valueDisplayId) {
+    event.preventDefault(); // Prevent context menu
+    
+    const slider = document.getElementById(sliderId);
+    const valueDisplay = document.getElementById(valueDisplayId);
+    
+    if (slider && valueDisplay) {
+        const roundedDefault = Math.round(defaultValue);
+        slider.value = roundedDefault;
+        valueDisplay.textContent = roundedDefault;
+        
+        // Send update to backend
+        updateParameter(player, effectIndex, paramName, roundedDefault, valueDisplayId);
+    }
+    
+    return false;
+};
 
 window.updateParameter = async function(player, effectIndex, paramName, value, valueDisplayId = null) {
     try {
@@ -2832,7 +2918,7 @@ function renderFileTree(tree, container = null, level = 0) {
     tree.forEach(item => {
         const itemDiv = document.createElement('div');
         itemDiv.className = 'file-item';
-        itemDiv.style.paddingLeft = `${level * 20 + 8}px`;
+        itemDiv.style.paddingLeft = `${level * 20 + 8}px`; // Dynamic nesting depth
         
         if (item.type === 'folder') {
             itemDiv.innerHTML = `
@@ -2841,7 +2927,7 @@ function renderFileTree(tree, container = null, level = 0) {
                     <span class="file-name">${item.name}</span>
                     <span class="folder-toggle">▶</span>
                 </div>
-                <div class="folder-children" style="display: none;"></div>
+                <div class="folder-children"></div>
             `;
             container.appendChild(itemDiv);
             
@@ -2871,12 +2957,12 @@ window.toggleFolder = function(element) {
     const children = parent.querySelector('.folder-children');
     const toggle = element.querySelector('.folder-toggle');
     
-    if (children.style.display === 'none') {
-        children.style.display = 'block';
-        toggle.textContent = '▼';
-    } else {
-        children.style.display = 'none';
+    if (children.classList.contains('expanded')) {
+        children.classList.remove('expanded');
         toggle.textContent = '▶';
+    } else {
+        children.classList.add('expanded');
+        toggle.textContent = '▼';
     }
 };
 
@@ -3021,7 +3107,7 @@ window.refreshPlaylistModal = async function() {
         if (data.status !== 'success' || !data.playlists || data.playlists.length === 0) {
             playlistModal.setContent(`
                 <div class="text-center">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
+                    <div class="large-icon">📂</div>
                     <p>No saved playlists found</p>
                 </div>
             `);
@@ -3043,12 +3129,10 @@ window.refreshPlaylistModal = async function() {
             const artnetCount = playlist.artnet_count || 0;
             
             html += `
-                <div class="list-group-item" 
-                     style="background: var(--bg-tertiary, #333); color: var(--text-primary, #e0e0e0); border: 1px solid var(--border-color, #444); margin-bottom: 0.5rem; border-radius: 4px; padding: 0;">
+                <div class="list-group-item modal-list-item">
                     <div class="d-flex">
                         <button type="button" 
-                                class="flex-grow-1 btn text-start p-3" 
-                                style="background: none; border: none; color: inherit;"
+                                class="flex-grow-1 btn text-start p-3 btn-main" 
                                 onclick="selectPlaylist('${playlist.name}')">
                             <div class="d-flex w-100 justify-content-between">
                                 <h6 class="mb-1">${playlist.name}</h6>
@@ -3060,8 +3144,7 @@ window.refreshPlaylistModal = async function() {
                             </p>
                         </button>
                         <button type="button" 
-                                class="btn btn-danger" 
-                                style="border-radius: 0 4px 4px 0; min-width: 60px;"
+                                class="btn btn-danger btn-delete" 
                                 onclick="deletePlaylist('${playlist.name}', event)"
                                 title="Playlist löschen">
                             🗑️
@@ -3287,7 +3370,7 @@ window.refreshSnapshotModal = async function() {
         if (!data.success || !data.snapshots || data.snapshots.length === 0) {
             snapshotModal.setContent(`
                 <div class="text-center">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">📸</div>
+                    <div class="large-icon">📸</div>
                     <p>No snapshots found</p>
                     <p class="text-muted small">Create a snapshot to save the current session state</p>
                 </div>
@@ -3312,13 +3395,11 @@ window.refreshSnapshotModal = async function() {
             const sizeKB = (snapshot.size / 1024).toFixed(1);
             
             html += `
-                <div class="list-group-item" 
-                     style="background: var(--bg-tertiary, #333); color: var(--text-primary, #e0e0e0); border: 1px solid var(--border-color, #444); margin-bottom: 0.5rem; border-radius: 4px; padding: 0;">
+                <div class="list-group-item modal-list-item">
                     <div class="d-flex">
                         <button type="button" 
-                                class="flex-grow-1 btn text-start p-3" 
-                                style="background: none; border: none; color: inherit;"
-                                onclick="selectSnapshot('${snapshot.filename}')">
+                                class="flex-grow-1 btn text-start p-3 btn-main" 
+                                onclick="selectSnapshot('${snapshot.filename}')>
                             <div class="d-flex w-100 justify-content-between align-items-start">
                                 <div>
                                     <h6 class="mb-1">📸 ${snapshot.filename}</h6>
@@ -3332,8 +3413,7 @@ window.refreshSnapshotModal = async function() {
                             </p>
                         </button>
                         <button type="button" 
-                                class="btn btn-danger" 
-                                style="border-radius: 0 4px 4px 0; min-width: 60px;"
+                                class="btn btn-danger btn-delete" 
                                 onclick="deleteSnapshot('${snapshot.filename}', event)"
                                 title="Snapshot löschen">
                             🗑️
@@ -3476,6 +3556,20 @@ let clipLayers = {};  // { clip_id: [{layer_id, source_type, ...}] }
 // selectedClipId already declared above (line 112)
 
 /**
+ * Load layer counts for all clips in background (for badge display)
+ */
+async function loadAllClipLayerCounts(clips) {
+    for (const clip of clips) {
+        if (clip.id && !clipLayers[clip.id]) {
+            // Load layers in background without awaiting
+            loadClipLayers(clip.id).catch(err => {
+                debug.error(`Failed to load layers for clip ${clip.id}:`, err);
+            });
+        }
+    }
+}
+
+/**
  * Get layer count for a clip
  */
 function getClipLayerCount(clipId) {
@@ -3488,7 +3582,8 @@ function getClipLayerCount(clipId) {
  */
 function getLayerBadgeHtml(clipId) {
     const count = getClipLayerCount(clipId);
-    if (count === 0) {
+    // Only show badge if clip has overlay layers (more than just Layer 0)
+    if (count <= 1) {
         return '';
     }
     return `<span class="layer-badge" title="${count} layer(s)">🎞️ ${count}</span>`;
@@ -3511,6 +3606,19 @@ async function loadClipLayers(clipId) {
             if (selectedClipId === clipId) {
                 renderSelectedClipLayers();
             }
+            
+            // Re-render playlist to update badge (only if clip has overlay layers)
+            if (layers.length > 1) {  // Only if has overlay layers (Layer 0 is always present)
+                // Find which playlist this clip belongs to
+                const inVideo = videoFiles.some(f => f.id === clipId);
+                const inArtnet = artnetFiles.some(f => f.id === clipId);
+                
+                if (inVideo) {
+                    renderPlaylist('video');
+                } else if (inArtnet) {
+                    renderPlaylist('artnet');
+                }
+            }
         }
     } catch (error) {
         debug.error(`❌ Error loading clip layers:`, error);
@@ -3528,13 +3636,26 @@ function renderSelectedClipLayers() {
     if (!panelContent) return;
     
     // Note: layers should always include at least Layer 0 (base clip)
-    if (layers.length === 0) {
+    // If only Layer 0 exists (no overlay layers), show empty state
+    if (layers.length === 0 || layers.length === 1) {
+        // Update header with playlist info
+        const playlist = selectedClipPlayerType === 'video' ? videoFiles : artnetFiles;
+        const clipIndex = playlist.findIndex(item => item.id === selectedClipId);
+        const position = clipIndex >= 0 ? clipIndex + 1 : '?';
+        const playlistName = selectedClipPlayerType === 'video' ? 'Video' : 'Art-Net';
+        
+        const panelTitle = document.getElementById('layerPanelTitle');
+        if (panelTitle) {
+            panelTitle.innerHTML = `🎞️ Layers <small class="layer-panel-title-small">(${playlistName} #${position})</small>`;
+        }
+        
         panelContent.innerHTML = `
-            <div class="text-center" style="padding: 1rem;">
-                <p style="margin: 0.5rem 0; color: var(--text-secondary);">Clip: ${selectedClipId.substring(0, 8)}...</p>
-                <p style="margin: 0.5rem 0;">Failed to load clip layers</p>
+            <div class="empty-state">
+                <p class="empty-state-hint">Klicke auf Clip um Layer zu verwalten</p>
+                <p class="empty-state-secondary">Drag files from Files tab to add layers</p>
             </div>
         `;
+        // No need to call setupLayerPanelDropZone() - it's already set up once
         return;
     }
     
@@ -3549,32 +3670,32 @@ function renderSelectedClipLayers() {
         return `
             <div class="layer-card ${!isEnabled ? 'disabled' : ''} ${isBaseLayer ? 'base-layer' : ''}"
                  data-layer-id="${layer.layer_id}"
-                 style="margin-bottom: 0.5rem; padding: 0.5rem; background: var(--bg-secondary); border-radius: 4px; ${isBaseLayer ? 'border: 2px solid var(--accent-color);' : ''}">
-                <div class="layer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-                    <span class="layer-id">🎞️ Layer ${layer.layer_id} ${isBaseLayer ? '(Base Clip)' : ''}</span>
+                 draggable="false">
+                <div class="layer-header">
+                    <span class="layer-id">
+                        ${!isBaseLayer ? '<span class="layer-drag-handle" title="Drag to reorder">☰</span>' : ''}
+                        🎞️ Layer ${layer.layer_id} ${isBaseLayer ? '(Base Clip)' : ''}
+                    </span>
                     ${!isBaseLayer ? `
                         <button class="btn btn-sm btn-danger layer-remove" 
-                                onclick="removeLayerFromClip('${selectedClipId}', ${layer.layer_id})"
-                                title="Remove Layer"
-                                style="padding: 0.1rem 0.4rem; font-size: 0.8rem;">
+                                onclick="removeLayerFromClip('${selectedClipId}', ${layer.layer_id}, event)"
+                                title="Remove Layer">
                             ❌
                         </button>
-                    ` : '<span style="font-size: 0.7rem; color: var(--accent-color);">🔒</span>'}
+                    ` : '<span class="layer-lock-icon">🔒</span>'}
                 </div>
-                <div class="layer-source" style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.4rem;">
+                <div class="layer-source">
                     ${sourceName}
                 </div>
-                <div class="layer-config" style="display: flex; gap: 0.4rem; align-items: center;">
+                <div class="layer-config">
                     <select class="blend-mode-select" 
                             onchange="updateClipLayerBlendMode('${selectedClipId}', ${layer.layer_id}, this.value)"
-                            style="flex: 1; padding: 0.2rem; font-size: 0.8rem;"
                             ${isBaseLayer ? 'disabled' : ''}>
-                        <option value="normal" ${layer.blend_mode === 'normal' ? 'selected' : ''}>Normal</option>
-                        <option value="multiply" ${layer.blend_mode === 'multiply' ? 'selected' : ''}>Multiply</option>
-                        <option value="screen" ${layer.blend_mode === 'screen' ? 'selected' : ''}>Screen</option>
-                        <option value="add" ${layer.blend_mode === 'add' ? 'selected' : ''}>Add</option>
-                        <option value="subtract" ${layer.blend_mode === 'subtract' ? 'selected' : ''}>Subtract</option>
-                        <option value="overlay" ${layer.blend_mode === 'overlay' ? 'selected' : ''}>Overlay</option>
+                        ${availableBlendModes.map(mode => `
+                            <option value="${mode}" ${layer.blend_mode === mode ? 'selected' : ''}>
+                                ${mode.charAt(0).toUpperCase() + mode.slice(1)}
+                            </option>
+                        `).join('')}
                     </select>
                     <input type="range" 
                            class="opacity-slider" 
@@ -3583,25 +3704,34 @@ function renderSelectedClipLayers() {
                            value="${Math.round(layer.opacity * 100)}"
                            oninput="updateClipLayerOpacity('${selectedClipId}', ${layer.layer_id}, this.value)"
                            title="Opacity: ${Math.round(layer.opacity * 100)}%"
-                           style="width: 80px;"
                            ${isBaseLayer ? 'disabled' : ''}>
-                    <span class="opacity-value" style="font-size: 0.75rem; min-width: 35px;">${Math.round(layer.opacity * 100)}%</span>
+                    <span class="opacity-value">${Math.round(layer.opacity * 100)}%</span>
                 </div>
             </div>
         `;
     }).join('');
     
+    // Update panel header with playlist info
+    const playlist = selectedClipPlayerType === 'video' ? videoFiles : artnetFiles;
+    const clipIndex = playlist.findIndex(item => item.id === selectedClipId);
+    const position = clipIndex >= 0 ? clipIndex + 1 : '?';
+    const playlistName = selectedClipPlayerType === 'video' ? 'Video' : 'Art-Net';
+    
+    const panelTitle = document.getElementById('layerPanelTitle');
+    if (panelTitle) {
+        panelTitle.innerHTML = `🎞️ Layers <small class="layer-panel-title-small">(${playlistName} #${position})</small>`;
+    }
+    
     panelContent.innerHTML = `
-        <div style="padding: 0.5rem;">
-            <div style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
-                <small style="color: var(--text-secondary);">Clip: ${selectedClipId.substring(0, 8)}...</small>
-                <button class="btn btn-sm btn-primary" onclick="addLayerToClip('${selectedClipId}')" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">+ Add</button>
-            </div>
-            <div class="layer-stack-items">
+        <div class="layer-stack-container">
+            <div class="layer-stack-items" id="layerStackItems">
                 ${layerCardsHtml}
             </div>
         </div>
     `;
+    
+    // Setup drag & drop for reordering
+    setupLayerDragAndDrop();
 }
 
 /**
@@ -3620,21 +3750,18 @@ function setupLayerPanelDropZone() {
         e.preventDefault();
         e.stopPropagation();
         if (selectedClipId) {
-            panel.style.background = 'var(--bg-tertiary)';
-            panel.style.border = '2px dashed var(--accent-color)';
+            panel.classList.add('drop-target-bordered');
         }
     });
     
     panel.addEventListener('dragleave', (e) => {
-        panel.style.background = '';
-        panel.style.border = '';
+        panel.classList.remove('drop-target-bordered');
     });
     
     panel.addEventListener('drop', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        panel.style.background = '';
-        panel.style.border = '';
+        panel.classList.remove('drop-target-bordered');
         
         if (!selectedClipId) {
             showToast('No clip selected', 'warning');
@@ -3678,25 +3805,32 @@ window.closeLayerPanel = function() {
     // Panel is now always visible
     selectedClipId = null;
     const panelContent = document.getElementById('layerPanelContent');
+    // Reset panel header
+    const panelTitle = document.getElementById('layerPanelTitle');
+    if (panelTitle) {
+        panelTitle.innerHTML = '🎞️ Layers';
+    }
+    
     if (panelContent) {
         panelContent.innerHTML = `
             <div class="empty-state">
-                <p style="font-size: 0.85rem; margin: 0.5rem;">Ctrl+Click playlist item</p>
-                <p style="font-size: 0.75rem; margin: 0.5rem; color: var(--text-secondary);">Or drag files here to add as layers</p>
+                <p class="empty-state-hint">Klicke auf Clip um Layer zu verwalten</p>
+                <p class="empty-state-secondary">Drag files from Files tab to add layers</p>
             </div>
         `;
         // No need to call setupLayerPanelDropZone() - it's already set up once
     }
 };
 
+// Add layers via drag & drop from Files tab - no modal needed
+
 /**
  * Add layer to clip (called programmatically or by drag-drop)
  */
 window.addLayerToClip = async function(clipId, sourcePath, sourceType = 'video') {
     if (!sourcePath) {
-        // If no path provided, show prompt
-        sourcePath = prompt('Enter video path to add as layer:');
-        if (!sourcePath) return;
+        showToast('No source path provided', 'warning');
+        return;
     }
     
     try {
@@ -3713,7 +3847,6 @@ window.addLayerToClip = async function(clipId, sourcePath, sourceType = 'video')
         
         const data = await response.json();
         if (data.success) {
-            showToast(`Layer ${data.layer_id} added`, 'success');
             await loadClipLayers(clipId);
             renderSelectedClipLayers();
         } else {
@@ -3726,28 +3859,52 @@ window.addLayerToClip = async function(clipId, sourcePath, sourceType = 'video')
 };
 
 /**
- * Remove layer from clip
+ * Remove layer from clip (two-click confirmation)
  */
-window.removeLayerFromClip = async function(clipId, layerId) {
-    if (!confirm(`Remove layer ${layerId}?`)) return;
+window.removeLayerFromClip = async function(clipId, layerId, e) {
+    e.stopPropagation();
     
-    try {
-        const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
-            method: 'DELETE'
-        });
+    const button = e.currentTarget;
+    const originalText = button.innerHTML;
+    const originalOnclick = button.onclick;
+    
+    // First click: Confirm
+    button.innerHTML = '✓';
+    button.classList.remove('btn-danger');
+    button.classList.add('btn-warning');
+    button.onclick = null;
+    
+    // Reset after 3 seconds
+    const resetTimer = setTimeout(() => {
+        button.innerHTML = originalText;
+        button.classList.remove('btn-warning');
+        button.classList.add('btn-danger');
+        button.onclick = originalOnclick;
+    }, 3000);
+    
+    // Second click: Execute
+    button.onclick = async (e) => {
+        e.stopPropagation();
+        clearTimeout(resetTimer);
         
-        const data = await response.json();
-        if (data.success) {
-            showToast(`Layer ${layerId} removed`, 'success');
-            await loadClipLayers(clipId);
-            renderSelectedClipLayers();
-        } else {
-            showToast(`Failed to remove layer: ${data.error}`, 'error');
+        try {
+            const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                showToast(`Layer ${layerId} removed`, 'success');
+                await loadClipLayers(clipId);
+                renderSelectedClipLayers();
+            } else {
+                showToast(`Failed to remove layer: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            debug.error('Error removing layer:', error);
+            showToast('Error removing layer', 'error');
         }
-    } catch (error) {
-        debug.error('Error removing layer:', error);
-        showToast('Error removing layer', 'error');
-    }
+    };
 };
 
 /**
@@ -3829,151 +3986,7 @@ window.selectLayer = function(playerId, layerId) {
     debug.log(`⚠️ selectLayer() is deprecated - use clip-based layer management`);
 };
 
-/**
- * Open add layer modal
- */
-window.openAddLayerModal = async function(playerId) {
-    const files = playerId === 'video' ? videoFiles : artnetFiles;
-    
-    // Build modal content
-    const content = document.createElement('div');
-    content.innerHTML = `
-        <div class="mb-3">
-            <label class="form-label">Source Type</label>
-            <select class="form-select" id="layerSourceType">
-                <option value="video">Video from Playlist</option>
-                <option value="generator">Generator</option>
-            </select>
-        </div>
-        <div class="mb-3" id="videoSourceSection">
-            <label class="form-label">Select Video</label>
-            <select class="form-select" id="layerVideoSelect">
-                ${files.length === 0 ? '<option value="">No files in playlist</option>' : ''}
-                ${files.map((f, i) => `<option value="${i}">${f.name}</option>`).join('')}
-            </select>
-        </div>
-        <div class="mb-3" id="generatorSourceSection" style="display: none;">
-            <label class="form-label">Select Generator</label>
-            <select class="form-select" id="layerGeneratorSelect">
-                ${availableGenerators.map(g => `<option value="${g.id}">${g.metadata.name}</option>`).join('')}
-            </select>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">Blend Mode</label>
-            <select class="form-select" id="layerBlendMode">
-                <option value="normal">Normal</option>
-                <option value="multiply">Multiply</option>
-                <option value="screen">Screen</option>
-                <option value="add">Add</option>
-                <option value="subtract">Subtract</option>
-                <option value="overlay">Overlay</option>
-            </select>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">Opacity: <span id="layerOpacityValue">100%</span></label>
-            <input type="range" class="form-range" id="layerOpacity" min="0" max="100" value="100"
-                   oninput="document.getElementById('layerOpacityValue').textContent = this.value + '%'">
-        </div>
-    `;
-    
-    const modal = ModalManager.create({
-        id: `addLayerModal-${playerId}`,
-        title: `🎬 Add Layer to ${playerId === 'video' ? 'Video' : 'Art-Net'} Player`,
-        content: content,
-        size: 'md',
-        centered: true,
-        buttons: [
-            {
-                label: 'Cancel',
-                class: 'btn btn-secondary'
-            },
-            {
-                label: 'Add Layer',
-                class: 'btn btn-primary',
-                dismiss: false,
-                callback: async (modalCtrl) => {
-                    const sourceType = document.getElementById('layerSourceType').value;
-                    const blendMode = document.getElementById('layerBlendMode').value;
-                    const opacity = parseFloat(document.getElementById('layerOpacity').value) / 100;
-                    
-                    let sourcePath;
-                    if (sourceType === 'video') {
-                        const index = parseInt(document.getElementById('layerVideoSelect').value);
-                        if (isNaN(index) || index < 0 || index >= files.length) {
-                            showToast('Invalid video selection', 'error');
-                            return;
-                        }
-                        sourcePath = files[index].path;
-                    } else {
-                        sourcePath = document.getElementById('layerGeneratorSelect').value;
-                        if (!sourcePath) {
-                            showToast('Invalid generator selection', 'error');
-                            return;
-                        }
-                    }
-                    
-                    modalCtrl.hide();
-                    await addLayer(playerId, sourceType, sourcePath, blendMode, opacity);
-                    modalCtrl.destroy();
-                }
-            }
-        ]
-    });
-    
-    // Setup source type toggle
-    const sourceTypeSelect = content.querySelector('#layerSourceType');
-    const videoSection = content.querySelector('#videoSourceSection');
-    const generatorSection = content.querySelector('#generatorSourceSection');
-    
-    sourceTypeSelect.addEventListener('change', () => {
-        if (sourceTypeSelect.value === 'video') {
-            videoSection.style.display = 'block';
-            generatorSection.style.display = 'none';
-        } else {
-            videoSection.style.display = 'none';
-            generatorSection.style.display = 'block';
-        }
-    });
-    
-    modal.show();
-};
-
-/**
- * Add a layer
- */
-async function addLayer(playerId, sourceType, sourcePath, blendMode = 'normal', opacity = 1.0) {
-    try {
-        const body = {
-            source_type: sourceType,
-            blend_mode: blendMode,
-            opacity: opacity
-        };
-        
-        if (sourceType === 'video') {
-            body.video_path = sourcePath;
-        } else if (sourceType === 'generator') {
-            body.generator_id = sourcePath;
-        }
-        
-        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/add`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast(`Layer ${data.layer_id} added`, 'success');
-            // await loadLayers(playerId); // OLD: Now using clip-based layers
-        } else {
-            showToast(`Error: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        debug.error(`❌ Error adding layer:`, error);
-        showToast('Error adding layer', 'error');
-    }
-}
+// NOTE: Old player-level layer modal removed - now using clip-based layers with file browser modal
 
 /**
  * Remove a layer
@@ -4089,25 +4102,44 @@ window.toggleLayer = async function(playerId, layerId) {
 };
 
 /**
- * Setup drag and drop for layer reordering
+ * Setup drag and drop for layer reordering (clip-based layers)
+ * Drag nur über Burger-Icon aktivierbar
  */
-function setupLayerDragAndDrop(playerId) {
-    const container = document.getElementById(`${playerId}LayerItems`);
+function setupLayerDragAndDrop() {
+    const container = document.getElementById('layerStackItems');
     if (!container) return;
     
-    const cards = container.querySelectorAll('.layer-card[draggable="true"]');
+    const cards = container.querySelectorAll('.layer-card');
     
     let draggedElement = null;
     
     cards.forEach(card => {
+        const dragHandle = card.querySelector('.layer-drag-handle');
+        if (!dragHandle) return; // Skip base layer (no drag handle)
+        
+        // Make card draggable only when dragging from handle
+        dragHandle.addEventListener('mousedown', (e) => {
+            card.setAttribute('draggable', 'true');
+            dragHandle.classList.add('drag-handle-grabbing');
+        });
+        
+        dragHandle.addEventListener('mouseup', (e) => {
+            card.setAttribute('draggable', 'false');
+            dragHandle.classList.remove('drag-handle-grabbing');
+        });
+        
         card.addEventListener('dragstart', (e) => {
             draggedElement = card;
             card.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', card.dataset.layerId);
         });
         
         card.addEventListener('dragend', (e) => {
             card.classList.remove('dragging');
+            card.setAttribute('draggable', 'false');
+            const dragHandle = card.querySelector('.layer-drag-handle');
+            if (dragHandle) dragHandle.classList.remove('drag-handle-grabbing');
             draggedElement = null;
         });
         
@@ -4116,6 +4148,16 @@ function setupLayerDragAndDrop(playerId) {
             e.dataTransfer.dropEffect = 'move';
             
             if (draggedElement && draggedElement !== card) {
+                // Don't allow dropping on base layer (layer 0)
+                const targetLayerId = parseInt(card.dataset.layerId);
+                if (targetLayerId === 0) {
+                    e.dataTransfer.dropEffect = 'none';
+                    return;
+                }
+                
+                // Add visual feedback
+                card.classList.add('drag-over');
+                
                 const rect = card.getBoundingClientRect();
                 const midpoint = rect.top + rect.height / 2;
                 
@@ -4127,24 +4169,61 @@ function setupLayerDragAndDrop(playerId) {
             }
         });
         
+        card.addEventListener('dragleave', (e) => {
+            card.classList.remove('drag-over');
+        });
+        
         card.addEventListener('drop', async (e) => {
             e.preventDefault();
+            e.stopPropagation();
             
-            // Get new order from DOM
-            const newOrder = Array.from(container.querySelectorAll('.layer-card'))
-                .map(c => parseInt(c.dataset.layerId))
-                .reverse(); // Reverse because UI shows top-to-bottom but API expects bottom-to-top
+            // Remove visual feedback
+            card.classList.remove('drag-over');
             
-            // Always keep layer 0 at index 0
-            const masterIndex = newOrder.indexOf(0);
-            if (masterIndex !== 0) {
-                newOrder.splice(masterIndex, 1);
-                newOrder.unshift(0);
-            }
+            if (!selectedClipId) return;
             
-            await reorderLayers(playerId, newOrder);
+            // Get new order from DOM (top to bottom in UI)
+            const uiOrder = Array.from(container.querySelectorAll('.layer-card'))
+                .map(c => parseInt(c.dataset.layerId));
+            
+            // Filter out layer 0 (base layer is not in the reorder list)
+            const newOrder = uiOrder.filter(id => id !== 0);
+            
+            debug.log(`🔄 Reordering layers: ${newOrder.join(', ')}`);
+            
+            await reorderClipLayers(selectedClipId, newOrder);
         });
     });
+}
+
+/**
+ * Reorder clip layers via API
+ */
+async function reorderClipLayers(clipId, newOrder) {
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/reorder`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_order: newOrder })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            debug.log(`✅ Layers reordered for clip ${clipId}`);
+            // Reload layers to get updated order from backend
+            await loadClipLayers(clipId);
+        } else {
+            showToast(`Failed to reorder layers: ${data.error}`, 'error');
+            // Reload to restore correct order
+            await loadClipLayers(clipId);
+        }
+    } catch (error) {
+        console.error('❌ Error reordering layers:', error);
+        showToast('Error reordering layers', 'error');
+        // Reload to restore correct order
+        await loadClipLayers(clipId);
+    }
 }
 
 /**
