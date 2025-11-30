@@ -57,9 +57,9 @@ class PlasmaGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 30,
-            'min': 5,
-            'max': 600,
+            'default': 10,
+            'min': 1,
+            'max': 60,
             'step': 5,
             'description': 'Playback duration in seconds (for playlist auto-advance)'
         }
@@ -71,7 +71,7 @@ class PlasmaGenerator(PluginBase):
         self.speed = config.get('speed', 0.5)
         self.scale = config.get('scale', 1.0)
         self.hue_shift = config.get('hue_shift', 0.1)
-        self.duration = config.get('duration', 30)
+        self.duration = config.get('duration', 10)
         self.time = 0.0
         print(f"[PLASMA] Initialized with speed={self.speed}, scale={self.scale}, hue_shift={self.hue_shift}")
     

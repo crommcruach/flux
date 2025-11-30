@@ -1,19 +1,15 @@
 /* ========================================
-   PLAYER PAGE STYLES
-   Specific styles for the player interface
+   Controls Page Styles
    ======================================== */
 
-/* Body Override for Player Page */
+/* Body Override */
 body {
     overflow: hidden;
     margin: 0;
     padding: 0;
 }
 
-/* ========================================
-   MAIN LAYOUT
-   ======================================== */
-
+/* Layout */
 .app-layout {
     display: flex;
     flex-direction: column;
@@ -21,10 +17,7 @@ body {
     max-height: 95vh;
 }
 
-/* ========================================
-   PLAYLIST MANAGEMENT BAR
-   ======================================== */
-
+/* Global Playlist Controls */
 .playlist-management-bar {
     padding: 0.5rem 1rem;
     background: var(--panel-bg);
@@ -40,6 +33,9 @@ body {
     display: flex;
     gap: 1rem;
     align-items: center;
+}
+
+.playlist-management-bar-title span {
     font-weight: 600;
     font-size: 0.9rem;
 }
@@ -59,10 +55,7 @@ body {
     justify-content: center;
 }
 
-/* ========================================
-   PLAYER SECTION (Video & Art-Net)
-   ======================================== */
-
+/* Player Section */
 .player-section {
     display: grid;
     grid-template-columns: 260px 40px 1fr;
@@ -77,7 +70,6 @@ body {
     z-index: auto;
 }
 
-/* Preview Box */
 .preview-box {
     display: flex;
     flex-direction: column;
@@ -101,7 +93,6 @@ body {
     object-fit: contain;
 }
 
-/* Player Controls */
 .player-controls {
     display: flex;
     gap: 0.25rem;
@@ -120,10 +111,7 @@ body {
     min-width: unset;
 }
 
-/* ========================================
-   PLAYLIST AREA
-   ======================================== */
-
+/* Playlist */
 .playlist-area {
     display: flex;
     flex-direction: column;
@@ -151,6 +139,7 @@ body {
     scroll-behavior: smooth;
 }
 
+/* Playlist items row (horizontal scroll) */
 .playlist-items-row {
     display: flex;
     gap: 0.5rem;
@@ -179,10 +168,7 @@ body {
     border: 2px dashed var(--accent-color);
 }
 
-/* ========================================
-   PLAYLIST ITEMS
-   ======================================== */
-
+/* Playlist Items */
 .playlist-item {
     flex-shrink: 0;
     width: 120px;
@@ -224,6 +210,15 @@ body {
 
 .playlist-item[draggable="true"]:active {
     cursor: grabbing;
+}
+
+.playlist-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    position: absolute;
+    top: 0;
+    left: 0;
 }
 
 .playlist-item-name {
@@ -301,10 +296,7 @@ body {
     font-weight: bold;
 }
 
-/* ========================================
-   BOTTOM SECTION - Tabs + FX Controls
-   ======================================== */
-
+/* Bottom Section - Tabs + FX Controls */
 .bottom-section {
     flex: 1;
     display: grid;
@@ -314,10 +306,7 @@ body {
     overflow: hidden;
 }
 
-/* ========================================
-   TABS PANEL
-   ======================================== */
-
+/* Left Tabs */
 .tabs-panel {
     background: var(--panel-bg);
     border: 1px solid var(--border-color);
@@ -371,10 +360,7 @@ body {
     display: block;
 }
 
-/* ========================================
-   FX CONTROL PANELS
-   ======================================== */
-
+/* FX Control Panels */
 .fx-panel {
     background: var(--panel-bg);
     border: 1px solid var(--border-color);
@@ -409,10 +395,7 @@ body {
     overflow-y: auto;
 }
 
-/* ========================================
-   EFFECT ITEMS (Collapsible)
-   ======================================== */
-
+/* Effect Item */
 .effect-item {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -483,44 +466,40 @@ body {
     width: 100%;
 }
 
-/* ========================================
-   DRAGGABLE CARDS (Shared styles for effects/generators/files)
-   ======================================== */
-
-.draggable-card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 0.75rem;
-    margin-bottom: 0.5rem;
-    cursor: grab;
-    transition: all 0.2s;
-    user-select: none;
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--text-secondary);
 }
 
-.draggable-card:hover {
-    border-color: var(--accent-color);
-    transform: translateX(4px);
+.empty-state-icon {
+    font-size: 3rem;
+    opacity: 0.3;
+    margin-bottom: 1rem;
 }
 
-.draggable-card:active {
-    cursor: grabbing;
-    opacity: 0.7;
-}
-
-.draggable-card-title {
-    font-weight: 600;
-    margin-bottom: 0.25rem;
+.empty-state h6 {
+    margin: 0.5rem 0 0.25rem;
     color: var(--text-primary);
 }
 
-.draggable-card-description {
-    font-size: 0.85rem;
-    color: var(--text-secondary);
+.empty-state p {
     margin: 0;
+    font-size: 0.9rem;
 }
 
-/* Effect-specific cards - extends draggable-card */
+/* Utility Classes */
+.btn-icon {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Effect Card in Library */
 .effect-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -554,7 +533,7 @@ body {
     margin: 0;
 }
 
-/* Generator-specific cards - extends draggable-card */
+/* Generator Cards (similar to effect cards) */
 .generator-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -567,7 +546,7 @@ body {
 }
 
 .generator-card:hover {
-    border-color: #ffd700;
+    border-color: #ffd700; /* Gold color for generators */
     transform: translateX(4px);
 }
 
@@ -588,68 +567,76 @@ body {
     margin: 0;
 }
 
-/* ========================================
-   EMPTY STATE
-   ======================================== */
-
-.empty-state {
-    text-align: center;
-    padding: 2rem 1rem;
-    color: var(--text-secondary);
+/* File Browser */
+.file-tree {
+    user-select: none;
 }
 
-.empty-state-icon {
-    font-size: 3rem;
-    opacity: 0.3;
-    margin-bottom: 1rem;
+.file-item {
+    margin: 2px 0;
 }
 
-.empty-state h6 {
-    margin: 0.5rem 0 0.25rem;
-    color: var(--text-primary);
+.file-item-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
 }
 
-.empty-state p {
-    margin: 0;
-    font-size: 0.9rem;
+.file-item-content:hover {
+    background: var(--bg-secondary);
 }
 
-.empty-state-hint {
-    font-size: 0.85rem;
-    margin: 0.5rem;
+.file-item-content.folder {
+    font-weight: 500;
 }
 
-/* Empty state variations */
-.empty-state.drop-zone {
-    width: 100%;
-    padding: 2rem;
-    text-align: center;
-    min-height: 150px;
+.file-item-content.video {
+    cursor: grab;
 }
 
-.empty-state-icon-large {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
+.file-item-content.video:active {
+    cursor: grabbing;
 }
 
-.empty-state-title {
-    margin: 0.5rem 0;
+.file-icon,
+.folder-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
 }
 
-.empty-state-subtitle {
-    color: var(--text-secondary);
+.file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.empty-state-secondary {
+.file-size {
     font-size: 0.75rem;
-    margin: 0.5rem;
     color: var(--text-secondary);
+    flex-shrink: 0;
 }
 
-/* ========================================
-   TRANSITION MENU
-   ======================================== */
+.folder-toggle {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+}
 
+.folder-children {
+    overflow: hidden;
+    transition: all 0.2s;
+}
+
+/* Toast styles now in /static/components/toast.html */
+
+/* Transition Menu */
 .transition-menu {
     position: relative;
     display: flex;
@@ -739,10 +726,14 @@ body {
     pointer-events: none;
 }
 
-/* ========================================
-   GENERATOR PARAMETERS SECTION
-   ======================================== */
+.form-label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    color: var(--text-secondary);
+}
 
+/* Generator Parameters Section */
 .generator-params-section .effect-params {
     display: none;
 }
@@ -759,8 +750,98 @@ body {
     transform: rotate(180deg);
 }
 
+/* Modal Overrides */
+.modal-content {
+    background: var(--panel-bg);
+    color: var(--text-primary);
+}
+
 /* ========================================
-   LAYER MANAGEMENT COMPONENTS
+   FILE BROWSER COMPONENT
+   ======================================== */
+
+/* File Browser Tree */
+.file-browser-tree {
+    user-select: none;
+}
+
+.file-browser-item {
+    margin: 2px 0;
+}
+
+.file-browser-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.file-browser-content:hover {
+    background: var(--bg-secondary);
+}
+
+.file-browser-content.selected {
+    background: var(--primary-color);
+    color: #fff;
+}
+
+.file-browser-content.folder {
+    font-weight: 500;
+}
+
+.file-browser-content.file.video {
+    cursor: grab;
+}
+
+.file-browser-content.file.video:active {
+    cursor: grabbing;
+}
+
+.file-browser-content.file.image {
+    cursor: pointer;
+}
+
+/* FILE Parameter Input */
+.file-input-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.file-input-wrapper input {
+    flex: 1;
+}
+
+.file-input-wrapper .btn-browse {
+    flex-shrink: 0;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+}
+
+/* File Browser Modal */
+.file-browser-modal .modal-body {
+    padding: 0.5rem;
+}
+
+.file-browser-modal .file-browser-tree {
+    min-height: 200px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.modal-header {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-body {
+    color: var(--text-primary);
+}
+
+/* ========================================
+   LAYER STACK COMPONENT (IN PLAYLIST)
    ======================================== */
 
 .layer-stack-inline {
@@ -797,7 +878,7 @@ body {
     gap: 0.3rem;
 }
 
-/* Layer Cards */
+/* Layer Card */
 .layer-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -826,7 +907,7 @@ body {
     border-top: 2px solid var(--accent-color);
 }
 
-.layer-card.base-layer {
+.layer-card.master {
     border-left: 3px solid #ffd700;
     background: linear-gradient(90deg, rgba(255, 215, 0, 0.1) 0%, var(--bg-secondary) 10%);
 }
@@ -840,6 +921,7 @@ body {
     opacity: 0.5;
 }
 
+/* Layer Header */
 .layer-header {
     display: flex;
     align-items: center;
@@ -849,7 +931,7 @@ body {
     font-weight: 600;
 }
 
-.layer-drag-handle {
+.drag-handle {
     color: var(--text-secondary);
     font-size: 1rem;
     cursor: grab;
@@ -857,7 +939,7 @@ body {
     line-height: 1;
 }
 
-.layer-card:active .layer-drag-handle {
+.layer-card:active .drag-handle {
     cursor: grabbing;
 }
 
@@ -887,7 +969,7 @@ body {
     min-width: unset;
 }
 
-/* Layer Config Controls */
+/* Layer Config Row */
 .layer-config {
     display: flex;
     align-items: center;
@@ -974,6 +1056,7 @@ body {
     opacity: 0.6;
 }
 
+/* Layer Source */
 .layer-source {
     font-size: 0.7rem;
     color: var(--text-secondary);
@@ -981,346 +1064,4 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     padding: 0.2rem 0;
-}
-
-/* ========================================
-   FILE BROWSER COMPONENTS
-   ======================================== */
-
-.file-tree,
-.file-browser-tree {
-    user-select: none;
-}
-
-.file-item,
-.file-browser-item {
-    margin: 2px 0;
-}
-
-.file-item-content,
-.file-browser-content {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.5rem;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.file-item-content:hover,
-.file-browser-content:hover {
-    background: var(--bg-secondary);
-}
-
-.file-browser-content.selected {
-    background: var(--primary-color);
-    color: #fff;
-}
-
-.file-item-content.folder,
-.file-browser-content.folder {
-    font-weight: 500;
-}
-
-.file-item-content.video,
-.file-browser-content.file.video {
-    cursor: grab;
-}
-
-.file-item-content.video:active,
-.file-browser-content.file.video:active {
-    cursor: grabbing;
-}
-
-.file-icon,
-.folder-icon {
-    font-size: 1.1rem;
-    flex-shrink: 0;
-}
-
-.file-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.file-size {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-}
-
-.folder-toggle {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-    width: 16px;
-    text-align: center;
-}
-
-.folder-children {
-    overflow: hidden;
-    transition: all 0.2s;
-}
-
-/* File Parameter Input */
-.file-input-wrapper {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-}
-
-.file-input-wrapper input {
-    flex: 1;
-}
-
-.file-input-wrapper .btn-browse {
-    flex-shrink: 0;
-    padding: 0.4rem 0.8rem;
-    font-size: 0.85rem;
-}
-
-/* File Browser Modal */
-.file-browser-modal .modal-body {
-    padding: 0.5rem;
-}
-
-.file-browser-modal .file-browser-tree {
-    min-height: 200px;
-    max-height: 500px;
-    overflow-y: auto;
-}
-
-/* ========================================
-   UTILITY CLASSES
-   ======================================== */
-
-.btn-icon {
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.form-label {
-    font-size: 0.85rem;
-    font-weight: 500;
-    margin-bottom: 0.25rem;
-    color: var(--text-secondary);
-}
-
-/* ========================================
-   DRAG & DROP STATES
-   ======================================== */
-
-/* Dragging States */
-.dragging {
-    opacity: 0.5;
-}
-
-.drag-handle-grabbing {
-    cursor: grabbing !important;
-}
-
-/* Drop Target Highlighting */
-.drop-target {
-    background: var(--bg-tertiary) !important;
-}
-
-.drop-target-bordered {
-    background: var(--bg-tertiary) !important;
-    border: 2px dashed var(--accent-color) !important;
-}
-
-/* ========================================
-   GENERATOR PARAMETERS
-   ======================================== */
-
-.generator-params-section {
-    border-bottom: 1px solid var(--border-color);
-    margin-bottom: 1rem;
-}
-
-.generator-params-section .effect-header {
-    cursor: pointer;
-    padding: 0.75rem;
-    background: var(--bg-tertiary);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.generator-params-section .effect-header > div:first-child {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.generator-params-section .effect-header .param-icon {
-    font-size: 1.2rem;
-}
-
-.generator-params-section .effect-params {
-    padding: 0.5rem;
-}
-
-.param-control {
-    margin-bottom: 1rem;
-    padding: 0.5rem;
-}
-
-.param-control label {
-    display: block;
-    margin-bottom: 0.25rem;
-    font-weight: 500;
-}
-
-.param-control small {
-    display: block;
-    margin-bottom: 0.5rem;
-    color: var(--text-secondary);
-}
-
-.param-control-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.param-control-row input[type="range"] {
-    flex: 1;
-}
-
-.param-control-row .param-value {
-    min-width: 50px;
-    text-align: right;
-}
-
-.param-control label.checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-}
-
-/* ========================================
-   LAYER CARDS
-   ======================================== */
-
-.layer-card {
-    margin-bottom: 0.5rem;
-    padding: 0.5rem;
-    background: var(--bg-secondary);
-    border-radius: 4px;
-}
-
-.layer-card.base-layer {
-    border: 2px solid var(--accent-color);
-}
-
-.layer-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.4rem;
-}
-
-.layer-drag-handle {
-    cursor: grab;
-    user-select: none;
-    margin-right: 0.3rem;
-}
-
-.layer-remove {
-    padding: 0.1rem 0.4rem;
-    font-size: 0.8rem;
-}
-
-.layer-lock-icon {
-    font-size: 0.7rem;
-    color: var(--accent-color);
-}
-
-.layer-source {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    margin-bottom: 0.4rem;
-}
-
-.layer-config {
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
-}
-
-.layer-config .blend-mode-select {
-    flex: 1;
-    padding: 0.2rem;
-    font-size: 0.8rem;
-}
-
-.layer-config .opacity-slider {
-    width: 80px;
-}
-
-.layer-config .opacity-value {
-    font-size: 0.75rem;
-    min-width: 35px;
-}
-
-/* Layer Stack Container */
-.layer-stack-container {
-    padding: 0.5rem;
-}
-
-/* Layer Panel Title */
-.layer-panel-title-small {
-    color: var(--text-secondary);
-    font-weight: normal;
-}
-
-/* ========================================
-   FILE/FOLDER BROWSER
-   ======================================== */
-
-.folder-children {
-    display: none;
-}
-
-.folder-children.expanded {
-    display: block;
-}
-
-/* Large icon for empty states */
-.large-icon {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-}
-
-/* ========================================
-   MODAL LIST ITEMS
-   ======================================== */
-
-.modal-list-item {
-    background: var(--bg-tertiary, #333);
-    color: var(--text-primary, #e0e0e0);
-    border: 1px solid var(--border-color, #444);
-    margin-bottom: 0.5rem;
-    border-radius: 4px;
-    padding: 0;
-}
-
-.modal-list-item .btn-main {
-    background: none;
-    border: none;
-    color: inherit;
-}
-
-.modal-list-item .btn-delete {
-    border-radius: 0 4px 4px 0;
-    min-width: 60px;
 }

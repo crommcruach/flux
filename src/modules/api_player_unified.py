@@ -90,6 +90,11 @@ def register_unified_routes(app, player_manager, config):
                         player.playlist_ids[gen_path] = clip_id
                     else:
                         player.playlist_ids = {gen_path: clip_id}
+                    
+                    # Store parameters for future access
+                    if not hasattr(player, 'playlist_params'):
+                        player.playlist_params = {}
+                    player.playlist_params[generator_id] = parameters.copy()
                 else:
                     # Fallback: Generate new clip_id
                     gen_path = f"generator:{generator_id}"
@@ -104,6 +109,11 @@ def register_unified_routes(app, player_manager, config):
                         player.playlist_ids[gen_path] = clip_id
                     else:
                         player.playlist_ids = {gen_path: clip_id}
+                    
+                    # Store parameters for future access
+                    if not hasattr(player, 'playlist_params'):
+                        player.playlist_params = {}
+                    player.playlist_params[generator_id] = parameters.copy()
                 
                 # Load generator into player
                 success = player.switch_source(generator_source)
@@ -732,10 +742,14 @@ def register_unified_routes(app, player_manager, config):
             playlist = []
             if hasattr(player, 'playlist'):
                 for path in player.playlist:
-                    try:
-                        rel_path = os.path.relpath(path, video_dir)
-                    except:
+                    # Don't relativize generator paths
+                    if path.startswith('generator:'):
                         rel_path = path
+                    else:
+                        try:
+                            rel_path = os.path.relpath(path, video_dir)
+                        except:
+                            rel_path = path
                     
                     # Build playlist item object
                     if path.startswith('generator:'):
@@ -1129,6 +1143,18 @@ def register_unified_routes(app, player_manager, config):
             player.autoplay = autoplay
             player.loop_playlist = loop
             
+            # Store generator parameters for playlist items
+            if not hasattr(player, 'playlist_params'):
+                player.playlist_params = {}
+            for item in playlist:
+                if not isinstance(item, str):
+                    item_type = item.get('type', 'video')
+                    if item_type == 'generator':
+                        generator_id = item.get('generator_id')
+                        parameters = item.get('parameters', {})
+                        if generator_id and parameters:
+                            player.playlist_params[generator_id] = parameters.copy()
+            
             # Setze Index auf aktuelles Video wenn vorhanden
             current_video_in_playlist = False
             if hasattr(player.source, 'video_path') and player.source.video_path:
@@ -1150,7 +1176,7 @@ def register_unified_routes(app, player_manager, config):
                     player.play()
                     logger.info(f"▶️ [{player_id}] Video automatisch gestartet (in Playlist)")
             else:
-                # Aktuelles Video wurde aus Playlist entfernt
+                # Aktuelles Video wurde aus Playlist entfernt ODER kein Video geladen
                 if hasattr(player.source, 'video_path') and player.source.video_path:
                     logger.info(f"🗑️ [{player_id}] Video aus Playlist entfernt - lade leere Source: {os.path.basename(player.source.video_path)}")
                     player.stop()
@@ -1166,6 +1192,66 @@ def register_unified_routes(app, player_manager, config):
                     # Lösche Preview-Frames (leert die Anzeige)
                     player.last_frame = None
                     player.last_video_frame = None
+                
+                # Wenn Playlist nicht leer ist und autoplay aktiviert: lade und starte erstes Video
+                if absolute_playlist and autoplay and not player.is_playing:
+                    player.playlist_index = 0
+                    first_item = absolute_playlist[0]
+                    logger.info(f"🎬 [{player_id}] Autoplay aktiviert - lade erstes Video: {os.path.basename(first_item)}")
+                    
+                    # Lade erstes Video/Generator
+                    if first_item.startswith('generator:'):
+                        generator_id = first_item.replace('generator:', '')
+                        parameters = player.playlist_params.get(generator_id, {})
+                        from .frame_source import GeneratorSource
+                        new_source = GeneratorSource(generator_id, parameters, canvas_width=player.canvas_width, canvas_height=player.canvas_height)
+                    else:
+                        from .frame_source import VideoSource
+                        new_source = VideoSource(first_item, canvas_width=player.canvas_width, canvas_height=player.canvas_height)
+                    
+                    if new_source.initialize():
+                        if hasattr(player, 'source') and player.source:
+                            player.source.cleanup()
+                        
+                        # Hole oder registriere Clip-ID für erstes Item
+                        first_clip_id = playlist_ids.get(first_item)
+                        if not first_clip_id:
+                            # Registriere Clip wenn noch keine ID vorhanden
+                            if first_item.startswith('generator:'):
+                                generator_id = first_item.replace('generator:', '')
+                                parameters = player.playlist_params.get(generator_id, {})
+                                first_clip_id = clip_registry.register_clip(
+                                    player_id=player_id,
+                                    absolute_path=first_item,
+                                    relative_path=first_item,
+                                    metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
+                                )
+                            else:
+                                relative_path = os.path.relpath(first_item, video_dir)
+                                first_clip_id = clip_registry.register_clip(
+                                    player_id=player_id,
+                                    absolute_path=first_item,
+                                    relative_path=relative_path,
+                                    metadata={}
+                                )
+                            playlist_ids[first_item] = first_clip_id
+                        
+                        # Setze current_clip_id
+                        player.current_clip_id = first_clip_id
+                        
+                        # Lade Layer für den Clip
+                        if not player.load_clip_layers(first_clip_id, clip_registry, video_dir):
+                            # Fallback: Ersetze nur Source
+                            if player.layers:
+                                player.layers[0].source = new_source
+                            else:
+                                player.source = new_source
+                            logger.warning(f"⚠️ [{player_id}] Could not load layers for first clip, using single-source fallback")
+                        
+                        player.play()
+                        logger.info(f"▶️ [{player_id}] Erstes Video automatisch gestartet (clip_id={first_clip_id})")
+                    else:
+                        logger.error(f"❌ [{player_id}] Fehler beim Laden des ersten Videos")
                 
                 player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
             

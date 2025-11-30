@@ -113,9 +113,9 @@ class ScreencaptureGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 3600,
-            'min': 5,
-            'max': 86400,
+            'default': 10,
+            'min': 1,
+            'max': 60,
             'step': 60,
             'description': 'Maximale Capture-Dauer vor Auto-Advance (1h Standard)'
         }
@@ -132,7 +132,7 @@ class ScreencaptureGenerator(PluginBase):
         self.region_height = int(config.get('region_height', 1080))
         self.show_cursor = bool(config.get('show_cursor', True))
         self.brightness = float(config.get('brightness', 1.0))
-        self.duration = int(config.get('duration', 3600))
+        self.duration = int(config.get('duration', 10))
         
         self.sct = None
         self.last_frame = None

@@ -1,0 +1,27 @@
+{
+  "last_updated": "2025-11-30T21:21:51.559236",
+  "players": {
+    "video": {
+      "playlist": [
+        {
+          "path": "video\\testbild.mp4",
+          "id": "77c0dcf0-afc1-42e5-a1ab-63c9eafe683f",
+          "type": "video",
+          "effects": [],
+          "layers": []
+        }
+      ],
+      "current_index": 0,
+      "autoplay": true,
+      "loop": true,
+      "global_effects": []
+    },
+    "artnet": {
+      "playlist": [],
+      "current_index": -1,
+      "autoplay": true,
+      "loop": true,
+      "global_effects": []
+    }
+  }
+}

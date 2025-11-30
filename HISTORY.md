@@ -23,6 +23,20 @@
   - **Time & Motion (5):** trails, stop_motion, delay_rgb, freeze, strobe
   - **Blur (1):** blur (Gaussian/Box)
 
+### Multi-Layer Compositing System (v2.3.2)
+- ✓ **Clip-Based Layer Architecture** - Jeder Clip hat eigenen Layer-Stack (Layer 0 = Base)
+- ✓ **Layer Class** - `layer.py` mit blend_mode, opacity, effects, clip_id
+- ✓ **Player Layer Management** - add_layer(), remove_layer(), reorder_layers(), load_clip_layers()
+- ✓ **Multi-Layer Compositing Loop** - Sequential frame-fetching, auto-loop overlays
+- ✓ **Clip-Based Layer API** - `/api/clips/{clip_id}/layers/*` REST Endpoints
+- ✓ **ClipRegistry Layer Storage** - Per-clip layers array mit persistence
+- ✓ **Session State Integration** - Layer-Stack in Snapshots/Projects gespeichert
+- ✓ **Frontend Layer Panel** - Drag & drop, blend mode/opacity controls, add/remove layers
+- ✓ **BlendEffect Plugin** - 6 blend modes (normal, multiply, screen, overlay, add, subtract)
+- ✓ **Per-Layer Effects** - Effekte vor Compositing angewendet
+- ✓ **Backward Compatibility** - Alte Sessions automatisch konvertiert
+- ✓ **Thread-Safe Loading** - Auto-reload bei Clip-Wechsel
+
 ### Code Cleanup & Deprecation
 - ✓ **Legacy Player gelöscht** - video_player.py (868 Zeilen) und script_player.py (~620 Zeilen)
 - ✓ **~1500 Zeilen toter Code eliminiert**
@@ -39,6 +53,9 @@
 - ✓ **ARCHITECTURE.md** - Unified API Dokumentation
 - ✓ **docs/UNIFIED_API.md** - API-Referenz mit allen Endpoints
 - ✓ **docs/MIGRATION.md** - Migration Guide von alten APIs
+- ✓ **docs/MULTI_LAYER_ARCHITECTURE.md** - Layer-System Architektur
+- ✓ **docs/BLEND_EFFECT.md** - BlendEffect Plugin Dokumentation
+- ✓ **TODO_LAYERS.md** - Multi-Layer Implementation Tracking
 
 ### Vorteile
 - **Keine Pfad-basierten Kollisionen** - UUID-basierte Identifikation
@@ -47,6 +64,7 @@
 - **Unabhängige Player** - Verschiedene Videos mit verschiedenen Effekten gleichzeitig
 - **Erweiterbar** - Plugin-System für neue Effekte ohne Core-Changes
 - **Testbar** - Jedes Plugin isoliert testbar
+- **Flexible Compositing** - Clip-basierte Layer-Stacks mit individuellen Effekten
 
 ---
 

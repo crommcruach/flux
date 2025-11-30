@@ -52,6 +52,37 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
   - Opacity-Parameter pro Blend-Mode
   - Mix-Parameter für Blend-Stärke
 
+- [ ] **Clip Trimming & Playback Control (6-10h):**
+  - **In/Out Points:** Start/End-Frame pro Clip definieren (Dual-Range-Slider)
+  - **Reverse Playback:** Clip rückwärts abspielen (Toggle-Option)
+  - **Backend (ClipRegistry):**
+    - Metadata: `in_point` (Frame), `out_point` (Frame), `reverse` (bool)
+    - API: POST `/api/clips/<clip_id>/trim` (in_point, out_point)
+    - API: POST `/api/clips/<clip_id>/reverse` (enabled: bool)
+  - **Backend (VideoSource):**
+    - Frame-Range-Check bei get_next_frame()
+    - Reverse-Mode: Frame-Counter rückwärts
+    - Loop-Verhalten: Zurück zu in_point (forward) / out_point (reverse)
+  - **Frontend UI:**
+    - Dual-Range-Slider im Clip FX Tab (Section: ⏱️ Clip Timing)
+    - Live-Preview: "Playing 5.0s - 8.0s (3.0s trimmed)"
+    - Frame/Sekunden-Toggle für Anzeige
+    - Reverse-Checkbox mit Icon (⏪)
+    - Reset-Button ("Full Clip")
+  - **Features:**
+    - Non-destructive (Original bleibt unberührt)
+    - Per-Clip individuell (jede Playlist-Instanz eigene Settings)
+    - Projekt-JSON-Persistierung
+    - Auto-Advance basiert auf getrimter Duration
+
+- [ ] **Layer-Effekte über Clip FX Tab (8-12h):**
+  - API-Endpoints für Layer-Effekte (POST/PATCH/DELETE `/api/clips/<clip_id>/layers/<layer_id>/effects`)
+  - Layer-Selection-Logik: Click auf Layer-Card → Layer ausgewählt (visuelles Feedback)
+  - Clip FX Tab erweitern: Dynamischer Titel ('Clip FX' vs 'Layer FX')
+  - API-Calls umleiten wenn Layer ausgewählt (zu Layer-Endpoints statt Clip-Endpoints)
+  - Drag & Drop von Effekten funktioniert für Clip UND Layer
+  - Backend: apply_layer_effects() Integration, Layer.effects Array populieren
+
 - [x] **Generator-Plugins (3-4h):** ✅ COMPLETED
   - Scripts nach `plugins/generators/` migriert
   - plasma, rainbow_wave, pulse, matrix_rain, fire implementiert
@@ -483,7 +514,20 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 
 ---
 
-### 5.2 🛠️ Weitere Verbesserungen
+### 5.2 🧪 Testing & Verification
+
+- [ ] **Multi-Layer System Testing (~2-4h):**
+  - [ ] Run `tests/test_api_layers.py` to verify all tests pass
+  - [ ] Test live multi-layer playback with different FPS sources
+    - [ ] Verify: Overlay läuft nicht doppelt so schnell bei höherer FPS
+    - [ ] Verify: Frame-Skipping funktioniert bei niedrigerer FPS
+  - [ ] Verify snapshot restore with layers
+  - [ ] Test generator + video layer combinations
+  - [ ] Test layer with effects + blend modes
+  - [ ] Test autoplay with multi-layer clips
+  - [ ] Test transitions on layer 0 with overlays active
+
+### 5.3 🛠️ Weitere Verbesserungen
 
 - [ ] **Playlist Playback Refactoring (~4-6h):**
   - Überarbeitung Loop/Autoplay/Play-Funktionen

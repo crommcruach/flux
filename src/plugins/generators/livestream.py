@@ -101,9 +101,9 @@ class LiveStreamGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 3600,
-            'min': 5,
-            'max': 86400,
+            'default': 10,
+            'min': 1,
+            'max': 60,
             'step': 60,
             'description': 'Maximale Stream-Dauer vor Auto-Advance (1h Standard)'
         }
@@ -120,7 +120,7 @@ class LiveStreamGenerator(PluginBase):
         self.use_tcp = bool(config.get('use_tcp', True))
         self.low_latency = bool(config.get('low_latency', True))
         self.brightness = float(config.get('brightness', 1.0))
-        self.duration = int(config.get('duration', 3600))
+        self.duration = int(config.get('duration', 10))
         
         self.cap = None
         self.last_frame = None

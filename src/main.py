@@ -128,31 +128,9 @@ def main():
         os.makedirs(video_dir)
         print(f"Video-Ordner erstellt: {video_dir}")
     
-    # Suche nach Videos im video-Ordner (zuerst in kanal_1, dann root)
-    from modules.constants import VIDEO_EXTENSIONS
-    video_extensions = VIDEO_EXTENSIONS
-    video_path = None
-    
-    # Prüfe zuerst kanal_1 Ordner
-    kanal1_dir = os.path.join(video_dir, "kanal_1")
-    if os.path.exists(kanal1_dir):
-        videos_kanal1 = sorted([f for f in os.listdir(kanal1_dir) if f.endswith(video_extensions)])
-        if videos_kanal1:
-            video_path = os.path.join(kanal1_dir, videos_kanal1[0])
-            print(f"Standard-Video: kanal_1/{videos_kanal1[0]}")
-    
-    # Fallback: Suche im Haupt-Video-Ordner
-    if not video_path and os.path.exists(video_dir):
-        videos_root = sorted([f for f in os.listdir(video_dir) if f.endswith(video_extensions)])
-        if videos_root:
-            video_path = os.path.join(video_dir, videos_root[0])
-            print(f"Standard-Video: {videos_root[0]}")
-    
-    # Wenn gar nichts gefunden wurde
-    if not video_path:
-        print(f"WARNUNG: Kein Video gefunden!")
-        print(f"Bitte Video in {video_dir} oder {kanal1_dir} ablegen.")
-        video_path = os.path.join(video_dir, "placeholder.mp4")
+    # Video-Ordner Existenz ist sichergestellt, aber kein Video wird automatisch geladen
+    # User muss explizit ein Video laden (via Web-UI, API oder CLI)
+    # Legacy video_path Variable wird nicht mehr verwendet (Player startet mit DummySource)
     
     # Suche Punkte-JSON-Dateien
     json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')] if os.path.exists(data_dir) else []

@@ -38,9 +38,9 @@ class StaticPictureGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 30,
-            'min': 5,
-            'max': 600,
+            'default': 10,
+            'min': 1,
+            'max': 60,
             'step': 5,
             'description': 'Anzeigedauer in Sekunden (für Playlist Auto-Advance)'
         }
@@ -49,7 +49,7 @@ class StaticPictureGenerator(PluginBase):
     def initialize(self, config):
         """Initialisiert Generator mit Parametern."""
         self.image_path = config.get('image_path', '')
-        self.duration = int(config.get('duration', 30))
+        self.duration = int(config.get('duration', 10))
         self.time = 0.0
         self.image = None
         self.image_loaded = False

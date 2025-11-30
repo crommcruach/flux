@@ -78,9 +78,9 @@ class PulseGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 30,
-            'min': 5,
-            'max': 600,
+            'default': 10,
+            'min': 1,
+            'max': 60,
             'step': 5,
             'description': 'Playback duration in seconds (for playlist auto-advance)'
         }
@@ -93,7 +93,7 @@ class PulseGenerator(PluginBase):
         self.max_brightness = config.get('max_brightness', 1.0)
         self.hue_rotation = config.get('hue_rotation', 0.2)
         self.saturation = config.get('saturation', 1.0)
-        self.duration = config.get('duration', 30)
+        self.duration = config.get('duration', 10)
         self.time = 0.0
     
     def _hsv_to_rgb(self, h, s, v):

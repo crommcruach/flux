@@ -1609,3 +1609,11 @@ body.editor-page {
     background: var(--border-color);
     margin: 4px 0;
 }
+
+/* ========================================
+   COLLAPSIBLE/TOGGLE ELEMENTS
+   ======================================== */
+
+.toggle-collapse {
+    cursor: pointer;
+}

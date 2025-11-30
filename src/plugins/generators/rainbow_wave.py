@@ -54,9 +54,9 @@ class RainbowWaveGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 30,
-            'min': 5,
-            'max': 600,
+            'default': 10,
+            'min': 1,
+            'max': 60,
             'step': 5,
             'description': 'Playback duration in seconds (for playlist auto-advance)'
         }
@@ -67,7 +67,7 @@ class RainbowWaveGenerator(PluginBase):
         self.speed = config.get('speed', 2.0)
         self.wave_length = config.get('wave_length', 60.0)
         self.vertical = config.get('vertical', False)
-        self.duration = config.get('duration', 30)
+        self.duration = config.get('duration', 10)
         self.time = 0.0
     
     def _hsv_to_rgb_vectorized(self, h, s, v):

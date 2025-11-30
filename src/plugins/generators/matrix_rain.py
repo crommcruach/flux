@@ -68,9 +68,9 @@ class MatrixRainGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 30,
-            'min': 5,
-            'max': 600,
+            'default': 10,
+            'min': 1,
+            'max': 60,
             'step': 5,
             'description': 'Playback duration in seconds (for playlist auto-advance)'
         }
@@ -82,7 +82,7 @@ class MatrixRainGenerator(PluginBase):
         self.min_speed = config.get('min_speed', 2.0)
         self.max_speed = config.get('max_speed', 8.0)
         self.detail = config.get('detail', 10)
-        self.duration = config.get('duration', 30)
+        self.duration = config.get('duration', 10)
         self.time = 0.0
         self.rain_strips = {}
         self.initialized = False

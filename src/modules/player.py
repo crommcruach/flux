@@ -422,7 +422,8 @@ class Player:
                         
                         # Wenn immer noch None (z.B. fehlerhafte Source) - überspringe Layer
                         if overlay_frame is None:
-                            logger.warning(f"⚠️ Layer {layer.layer_id} returned None after reset, skipping")
+                            source_info = getattr(layer.source, 'video_path', getattr(layer.source, 'generator_name', 'Unknown'))
+                            logger.warning(f"⚠️ Layer {layer.layer_id} (source: {source_info}) returned None after reset, skipping")
                             continue
                         
                         # Wende Layer Effects an
@@ -568,6 +569,11 @@ class Player:
                         
                         self.current_clip_id = clip_id
                         
+                        # Load layers for new clip (wichtig: überschreibt alte Layer!)
+                        video_dir = self.config.get('paths', {}).get('video_dir', 'video')
+                        if not self.load_clip_layers(clip_id, clip_registry, video_dir):
+                            logger.warning(f"⚠️ [{self.player_name}] Could not load layers for clip {clip_id}, using single-source fallback")
+                        
                         item_name = generator_id if next_item_path.startswith('generator:') else os.path.basename(next_item_path)
                         logger.info(f"✅ [{self.player_name}] Nächstes Item geladen: {item_name} (clip_id={clip_id})")
                         continue
@@ -639,6 +645,14 @@ class Player:
             
             # Wende Art-Net Effect Chain an (für Art-Net Ausgabe)
             frame_for_artnet = self.apply_effects(frame_with_brightness, chain_type='artnet')
+            
+            # Alpha-Compositing für Preview (wenn RGBA vorhanden)
+            if frame_for_video_preview.shape[2] == 4:
+                frame_for_video_preview = self._alpha_composite_to_black(frame_for_video_preview)
+            
+            # Alpha-Compositing für Art-Net (wenn RGBA vorhanden)
+            if frame_for_artnet.shape[2] == 4:
+                frame_for_artnet = self._alpha_composite_to_black(frame_for_artnet)
             
             # Speichere komplettes Frame für Video-Preview (konvertiere zu BGR für OpenCV)
             self.last_video_frame = cv2.cvtColor(frame_for_video_preview, cv2.COLOR_RGB2BGR)
@@ -1079,6 +1093,25 @@ class Player:
                     continue
         
         return processed_frame
+    
+    def _alpha_composite_to_black(self, rgba_frame):
+        """
+        Composites RGBA frame onto black background using alpha channel.
+        
+        Args:
+            rgba_frame: RGBA frame (H, W, 4)
+            
+        Returns:
+            RGB frame with alpha composited onto black
+        """
+        # Extract RGB and alpha
+        rgb = rgba_frame[:, :, :3].astype(np.float32)
+        alpha = rgba_frame[:, :, 3:].astype(np.float32) / 255.0
+        
+        # Composite: result = rgb * alpha + black * (1 - alpha) = rgb * alpha
+        composited = (rgb * alpha).astype(np.uint8)
+        
+        return composited
     
     # Recording
     def start_recording(self, name=None):

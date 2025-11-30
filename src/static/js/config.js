@@ -136,7 +136,7 @@ function renderConfigSection(sectionKey, sectionData, parentPath = '') {
     // Alle Abschnitte collapsable machen
     return `
         <div class="config-section" id="section-${sectionId}">
-            <div class="config-section-header toggle-collapse" data-bs-toggle="collapse" data-bs-target="#collapse-${sectionId}" style="cursor:pointer;">
+            <div class="config-section-header toggle-collapse" data-bs-toggle="collapse" data-bs-target="#collapse-${sectionId}">
                 <h3 class="config-section-title"><i class="bi bi-chevron-down collapse-icon"></i> ${sectionKey}</h3>
             </div>
             <div class="collapse" id="collapse-${sectionId}">

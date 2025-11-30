@@ -106,9 +106,9 @@ class WebcamGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 3600,
-            'min': 5,
-            'max': 86400,
+            'default': 10,
+            'min': 1,
+            'max': 60,
             'step': 60,
             'description': 'Maximale Capture-Dauer vor Auto-Advance (1h Standard)'
         }
@@ -124,7 +124,7 @@ class WebcamGenerator(PluginBase):
         self.brightness = float(config.get('brightness', 1.0))
         self.contrast = float(config.get('contrast', 1.0))
         self.saturation = float(config.get('saturation', 1.0))
-        self.duration = int(config.get('duration', 3600))
+        self.duration = int(config.get('duration', 10))
         
         self.cap = None
         self.last_frame = None
