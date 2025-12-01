@@ -1,11 +1,157 @@
 {
-  "last_updated": "2025-12-01T00:06:19.007021",
+  "last_updated": "2025-12-01T09:28:15.363988",
   "players": {
     "video": {
       "playlist": [
         {
           "path": "video\\testbild.mp4",
-          "id": "9a5dc94c-ea6e-4439-94c9-6e5e1dc5ab66",
+          "id": "e3a3ea91-92e1-4534-99b7-aec75229157b",
+          "type": "video",
+          "effects": [
+            {
+              "plugin_id": "transform",
+              "metadata": {
+                "id": "transform",
+                "name": "Transform",
+                "description": "2D Transformationen: Position, Skalierung und Rotation",
+                "author": "Flux Team",
+                "version": "1.0.0",
+                "type": "effect",
+                "category": "Transformation",
+                "parameters": [
+                  {
+                    "name": "position_x",
+                    "label": "Position X",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": -2000.0,
+                    "max": 2000.0,
+                    "step": 1.0,
+                    "description": "Horizontale Position (Pixel, negativ = links, positiv = rechts)"
+                  },
+                  {
+                    "name": "position_y",
+                    "label": "Position Y",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": -2000.0,
+                    "max": 2000.0,
+                    "step": 1.0,
+                    "description": "Vertikale Position (Pixel, negativ = oben, positiv = unten)"
+                  },
+                  {
+                    "name": "scale_xy",
+                    "label": "Scale XY (Symmetric)",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Symmetrische Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "scale_x",
+                    "label": "Scale X",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Horizontale Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "scale_y",
+                    "label": "Scale Y",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Vertikale Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "rotation_x",
+                    "label": "Rotation X",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um X-Achse in Grad (3D-Perspektive)"
+                  },
+                  {
+                    "name": "rotation_y",
+                    "label": "Rotation Y",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um Y-Achse in Grad (3D-Perspektive)"
+                  },
+                  {
+                    "name": "rotation_z",
+                    "label": "Rotation Z",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um Z-Achse in Grad (2D-Rotation im Uhrzeigersinn)"
+                  },
+                  {
+                    "name": "anchor_x",
+                    "label": "Anchor X",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt X in Prozent (50% = Mitte, 0% = links, 100% = rechts)"
+                  },
+                  {
+                    "name": "anchor_y",
+                    "label": "Anchor Y",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt Y in Prozent (50% = Mitte, 0% = oben, 100% = unten)"
+                  },
+                  {
+                    "name": "anchor_z",
+                    "label": "Anchor Z",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt Z in Prozent (50% = Mitte, beeinflusst 3D-Perspektive)"
+                  }
+                ]
+              },
+              "parameters": {
+                "position_x": 0.0,
+                "position_y": 0.0,
+                "scale_xy": 100.0,
+                "rotation": 0.0,
+                "scale_x": 100.0,
+                "scale_y": 100.0,
+                "rotation_x": 0.0,
+                "rotation_y": 0.0,
+                "rotation_z": 0.0,
+                "anchor_x": 50.0,
+                "anchor_y": 50.0,
+                "anchor_z": 50.0
+              }
+            }
+          ],
+          "layers": []
+        },
+        {
+          "path": "video\\kanal_4/test.mp4",
+          "id": "55a7fc3f-8894-4194-98ca-0ded5667b9e5",
           "type": "video",
           "effects": [
             {
@@ -150,7 +296,7 @@
           "layers": []
         }
       ],
-      "current_index": 0,
+      "current_index": 1,
       "autoplay": true,
       "loop": true,
       "global_effects": [
@@ -169,7 +315,7 @@
       "playlist": [
         {
           "path": "video\\testbild.mp4",
-          "id": "29c97785-4008-4e6a-a2d0-2e274a8b205b",
+          "id": "b61500e5-d6b1-4ccb-8003-a9d971d4b86c",
           "type": "video",
           "effects": [
             {

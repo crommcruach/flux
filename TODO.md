@@ -46,11 +46,14 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
   - DefaultEffectsManager mit vollständiger Validierung
   - Dokumentation: `docs/DEFAULT_EFFECTS.md`
 
-- [ ] **Blend Mode Effect Plugin (4-6h):**
-  - Blend-Modes: Normal, Multiply, Screen, Overlay, Darken, Lighten, etc.
-  - Blending mit Farbe oder zweitem Layer
-  - Opacity-Parameter pro Blend-Mode
-  - Mix-Parameter für Blend-Stärke
+- [x] **Blend Mode Effect Plugin (4-6h):** ✅ COMPLETED (2025-12-01)
+  - 14 Blend-Modes implementiert: Normal, Multiply, Screen, Overlay, Add, Subtract, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion
+  - Blending mit konfigurierbarer RGB-Farbe
+  - Opacity-Parameter (0-100%) für Blend-Intensität
+  - Mix-Parameter (0-100%) für Blend zwischen Original und Effekt
+  - Alle mathematischen Blend-Formeln korrekt implementiert
+  - Vollständig getestet mit allen Blend-Modi
+  - Plugin-Datei: `src/plugins/effects/blend_mode.py`
 
 - [ ] **Clip Trimming & Playback Control (6-10h):**
   - **In/Out Points:** Start/End-Frame pro Clip definieren (Dual-Range-Slider)
@@ -103,11 +106,6 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
   - Parameter-Sets speichern/laden
   - Preset-Manager API (CRUD)
   - UI: Preset-Selector & Editor
-
-- [ ] **Milkdrop via Screencapture testen:**
-  - Screencapture-Generator mit Milkdrop/projectM-Fenster
-  - Region-Capture für optimale Performance
-  - Alternative: Window-Capture API
 
 ---
 
@@ -516,6 +514,11 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 
 ### 5.2 🧪 Testing & Verification
 
+- [ ] **Milkdrop via Screencapture testen:**
+  - Screencapture-Generator mit Milkdrop/projectM-Fenster
+  - Region-Capture für optimale Performance
+  - Alternative: Window-Capture API
+
 - [ ] **Multi-Layer System Testing (~2-4h):**
   - [ ] Run `tests/test_api_layers.py` to verify all tests pass
   - [ ] Test live multi-layer playback with different FPS sources
@@ -528,6 +531,14 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
   - [ ] Test transitions on layer 0 with overlays active
 
 ### 5.3 🛠️ Weitere Verbesserungen
+
+- [ ] **Vollständige Player/Playlist-Generalisierung (~8-12h):**
+  - Hardcodierte Playlist-Arrays entfernen (`videoFiles`, `artnetFiles`)
+  - Hardcodierte Current-Item-IDs zu `playerConfigs[playerId].currentItemId` migrieren
+  - Spezifische Lade-Funktionen (`loadVideoFile`, `loadArtnetFile`) durch generische Funktion mit `playerId` Parameter ersetzen
+  - HTML/UI dynamisch aus `playerConfigs` generieren (Player-Container, Buttons)
+  - Legacy-onclick-Handler (`window.playVideo`, etc.) entfernen und durch generische Event-Handler ersetzen
+  - **Ziel:** Neuer Player nur durch Hinzufügen in `playerConfigs` möglich, ohne Code-Änderungen
 
 - [ ] **Playlist Playback Refactoring (~4-6h):**
   - Überarbeitung Loop/Autoplay/Play-Funktionen

@@ -128,9 +128,10 @@ def register_unified_routes(app, player_manager, config):
                 # Load clip layers from registry
                 player.load_clip_layers(clip_id, clip_registry, video_dir)
                 
-                # Resume playback if was playing
-                if was_playing:
+                # Start playback if was playing OR autoplay is enabled
+                if was_playing or player.autoplay:
                     player.play()
+                    logger.info(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
                 
                 # Auto-save session state (force=True für kritische Clip-Änderung)
                 session_state = get_session_state()
@@ -224,9 +225,10 @@ def register_unified_routes(app, player_manager, config):
                     except ValueError:
                         player.playlist_index = -1
                 
-                # Resume playback if was playing
-                if was_playing:
+                # Start playback if was playing OR autoplay is enabled
+                if was_playing or player.autoplay:
                     player.play()
+                    logger.info(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
                 
                 # Auto-save session state (force=True für kritische Clip-Änderung)
                 session_state = get_session_state()
@@ -1194,7 +1196,13 @@ def register_unified_routes(app, player_manager, config):
                     player.last_video_frame = None
                 
                 # Wenn Playlist nicht leer ist und autoplay aktiviert: lade und starte erstes Video
-                if absolute_playlist and autoplay and not player.is_playing:
+                # WICHTIG: Auch wenn Player läuft, ersetze durch erstes Playlist-Video wenn DummySource aktiv
+                has_dummy_source = hasattr(player.source, '__class__') and player.source.__class__.__name__ == 'DummySource'
+                should_autostart = absolute_playlist and autoplay and (
+                    not player.is_playing or has_dummy_source
+                )
+                
+                if should_autostart:
                     player.playlist_index = 0
                     first_item = absolute_playlist[0]
                     logger.info(f"🎬 [{player_id}] Autoplay aktiviert - lade erstes Video: {os.path.basename(first_item)}")
