@@ -88,6 +88,26 @@ class LiveStreamGenerator(PluginBase):
             'description': 'Minimiert Latenz durch kleineren Buffer (kann zu Frame-Drops führen)'
         },
         {
+            'name': 'start_time',
+            'label': 'Start Time (seconds)',
+            'type': ParameterType.INT,
+            'default': 0,
+            'min': 0,
+            'max': 36000,
+            'step': 1,
+            'description': 'Startzeitpunkt für YouTube-Videos (in Sekunden, 0 = Anfang)'
+        },
+        {
+            'name': 'end_time',
+            'label': 'End Time (seconds)',
+            'type': ParameterType.INT,
+            'default': 0,
+            'min': 0,
+            'max': 36000,
+            'step': 1,
+            'description': 'Endzeitpunkt für YouTube-Videos (in Sekunden, 0 = bis Ende)'
+        },
+        {
             'name': 'brightness',
             'label': 'Helligkeit',
             'type': ParameterType.FLOAT,
@@ -119,6 +139,8 @@ class LiveStreamGenerator(PluginBase):
         self.timeout = int(config.get('timeout', 10))
         self.use_tcp = bool(config.get('use_tcp', True))
         self.low_latency = bool(config.get('low_latency', True))
+        self.start_time = int(config.get('start_time', 0))
+        self.end_time = int(config.get('end_time', 0))
         self.brightness = float(config.get('brightness', 1.0))
         self.duration = int(config.get('duration', 10))
         
@@ -139,6 +161,32 @@ class LiveStreamGenerator(PluginBase):
         """Extrahiert die echte Stream-URL von YouTube mit yt-dlp."""
         try:
             import yt_dlp
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            
+            # Füge Start- und End-Parameter zur URL hinzu
+            parsed_url = urlparse(url)
+            query_params = parse_qs(parsed_url.query)
+            
+            # Füge Start-Zeit hinzu (falls gesetzt)
+            if self.start_time > 0:
+                query_params['t'] = [f"{self.start_time}s"]
+            
+            # Füge End-Zeit hinzu (falls gesetzt)
+            if self.end_time > 0:
+                query_params['end'] = [f"{self.end_time}s"]
+            
+            # Rekonstruiere URL mit neuen Parametern
+            new_query = urlencode(query_params, doseq=True)
+            modified_url = urlunparse((
+                parsed_url.scheme,
+                parsed_url.netloc,
+                parsed_url.path,
+                parsed_url.params,
+                new_query,
+                parsed_url.fragment
+            ))
+            
+            logger.info(f"YouTube URL with time parameters: {modified_url}")
             
             ydl_opts = {
                 'format': 'best[ext=mp4]/best',
@@ -147,8 +195,15 @@ class LiveStreamGenerator(PluginBase):
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return info['url']
+                info = ydl.extract_info(modified_url, download=False)
+                stream_url = info['url']
+                
+                # Wenn Start-Zeit gesetzt ist, füge sie auch zur Stream-URL hinzu
+                # (manche Streams unterstützen direktes Seeking)
+                if self.start_time > 0:
+                    logger.info(f"Setting stream to start at {self.start_time} seconds")
+                
+                return stream_url
                 
         except ImportError:
             logger.error("yt-dlp not installed. Install with: pip install yt-dlp")
@@ -208,6 +263,14 @@ class LiveStreamGenerator(PluginBase):
             # Setze Timeout (in Millisekunden)
             self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.timeout * 1000)
             self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, self.timeout * 1000)
+            
+            # Wenn Start-Zeit gesetzt ist, versuche zu dieser Position zu springen
+            if self.start_time > 0:
+                fps = self.cap.get(cv2.CAP_PROP_FPS)
+                if fps > 0:
+                    start_frame = int(self.start_time * fps)
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                    logger.info(f"Seeking to frame {start_frame} (start_time: {self.start_time}s, fps: {fps})")
             
             # Versuche ersten Frame zu lesen
             ret, frame = self.cap.read()
@@ -272,6 +335,23 @@ class LiveStreamGenerator(PluginBase):
             ret, captured_frame = self.cap.read()
             
             if ret and captured_frame is not None:
+                # Prüfe ob End-Zeit erreicht ist
+                if self.end_time > 0:
+                    fps = self.cap.get(cv2.CAP_PROP_FPS)
+                    current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+                    if fps > 0:
+                        current_time = current_pos / fps
+                        if current_time >= self.end_time:
+                            # Loop zurück zur Start-Zeit
+                            if self.start_time > 0:
+                                start_frame = int(self.start_time * fps)
+                                self.cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                                logger.debug(f"Reached end_time ({self.end_time}s), looping back to start_time ({self.start_time}s)")
+                            else:
+                                # Zurück zum Anfang
+                                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                                logger.debug(f"Reached end_time ({self.end_time}s), looping back to start")
+                
                 self.last_frame = captured_frame
                 self.frame_count += 1
                 
@@ -357,6 +437,20 @@ class LiveStreamGenerator(PluginBase):
             if self.cap and self.low_latency:
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.buffer_size)
             return True
+        elif name == 'start_time':
+            old_start = self.start_time
+            self.start_time = int(value)
+            # Bei YouTube-Streams neu verbinden wenn Start-Zeit geändert wird
+            if old_start != self.start_time and ('youtube.com' in self.stream_url.lower() or 'youtu.be' in self.stream_url.lower()):
+                if self.cap:
+                    self.cap.release()
+                    self.cap = None
+                self.connection_attempts = 0
+                self._connect()
+            return True
+        elif name == 'end_time':
+            self.end_time = int(value)
+            return True
         elif name == 'brightness':
             self.brightness = float(value)
             return True
@@ -376,6 +470,8 @@ class LiveStreamGenerator(PluginBase):
             'timeout': self.timeout,
             'use_tcp': self.use_tcp,
             'low_latency': self.low_latency,
+            'start_time': self.start_time,
+            'end_time': self.end_time,
             'brightness': self.brightness,
             'duration': self.duration
         }

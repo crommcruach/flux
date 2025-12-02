@@ -81,6 +81,7 @@ def register_video_routes(app, player_manager, video_dir, config):
         """Lädt ein Video in den Video Player."""
         data = request.get_json()
         video_path = data.get('path')
+        clip_id = data.get('clip_id')  # Frontend kann UUID mitgeben
         
         if not video_path:
             return jsonify({"status": "error", "message": "Kein Pfad angegeben"}), 400
@@ -99,13 +100,17 @@ def register_video_routes(app, player_manager, video_dir, config):
             
             was_playing = player.is_playing
             
-            # Erstelle neue VideoSource
+            # Erstelle neue VideoSource mit clip_id für trim settings
             video_source = VideoSource(
                 video_path,
                 player.canvas_width,
                 player.canvas_height,
-                config
+                config,
+                clip_id=clip_id  # Pass clip_id to load trim settings
             )
+            
+            # Set current_clip_id on player for reload functionality
+            player.current_clip_id = clip_id
             
             # Wechsle Source
             success = player.switch_source(video_source)
@@ -609,13 +614,13 @@ def register_video_routes(app, player_manager, video_dir, config):
                     if isinstance(param, dict):
                         param_dict = param.copy()
                         # Convert ParameterType enum to string if present
-                        if 'type' in param_dict and hasattr(param_dict['type'], 'value'):
-                            param_dict['type'] = param_dict['type'].value
+                        if 'type' in param_dict and hasattr(param_dict['type'], 'name'):
+                            param_dict['type'] = param_dict['type'].name
                     else:
                         # Handle Parameter objects (fallback)
                         param_dict = {
                             'name': param.name,
-                            'type': param.type.value if hasattr(param.type, 'value') else str(param.type),
+                            'type': param.type.name if hasattr(param.type, 'name') else str(param.type),
                             'default': param.default,
                             'min': getattr(param, 'min', None),
                             'max': getattr(param, 'max', None),

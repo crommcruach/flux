@@ -211,15 +211,15 @@ class DefaultEffectsManager:
                         if isinstance(param, dict):
                             # Already a dict, ensure type is string
                             param_dict = param.copy()
-                            if 'type' in param_dict and hasattr(param_dict['type'], 'value'):
-                                param_dict['type'] = param_dict['type'].value
+                            if 'type' in param_dict and hasattr(param_dict['type'], 'name'):
+                                param_dict['type'] = param_dict['type'].name
                             elif 'type' in param_dict:
                                 param_dict['type'] = str(param_dict['type'])
                         else:
                             # Convert parameter object to dict
                             param_dict = {
                                 'name': param.name,
-                                'type': param.type.value if hasattr(param.type, 'value') else str(param.type),
+                                'type': param.type.name if hasattr(param.type, 'name') else str(param.type),
                                 'default': param.default,
                                 'min': getattr(param, 'min', None),
                                 'max': getattr(param, 'max', None),

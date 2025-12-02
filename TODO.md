@@ -14,69 +14,10 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-## 🔥 PRIORITÄT 1 - Quick Wins (~30-42h)
+## 🔥 PRIORITÄT 1 - Quick Wins (~22-34h)
 **Niedriger Aufwand, hoher Nutzen - sofort umsetzbar**
 
-### 1.0 🔍 UI/UX Verbesserungen (~6-8h)
-
-- [x] **Universal Search/Filter Komponente (3-4h):** ✅ COMPLETED (2025-11-28)
-  - Wiederverwendbare Suchfeld-Komponente für Listen
-  - Debounced Input (200ms) für Performance
-  - Live-Resultat-Zähler und Clear-Button
-  - Implementiert für: Effects, Sources, Files Tabs
-  - Komponenten: `search-filter.html`, `search-filter-loader.js`
-  - Dokumentation: `docs/SEARCH_FILTER.md`
-
-- [x] **Multi-Video-Source Support (2-3h):** ✅ COMPLETED (2025-11-28)
-  - `video_sources` Array in config.json
-  - Unterstützung für mehrere Laufwerke/Ordner
-  - Netzwerkfreigaben (UNC-Pfade) möglich
-  - File Browser zeigt alle Quellen als Root-Ordner
-  - API: `get_file_tree()` und `get_all_videos()` erweitert
-  - Dokumentation: `docs/VIDEO_SOURCES.md`, `docs/CONFIG_SCHEMA.md`
-
-### 1.1 🔌 Plugin-System erweitern (~8-12h)
-
-- [x] **Default Effect Chains via config.json (3-4h):** ✅ COMPLETED (2025-11-28)
-  - `effects.video`: Effect chain automatisch beim Start auf Video-Player
-  - `effects.artnet`: Effect chain automatisch beim Start auf Art-Net-Player
-  - `effects.clips`: Per-Clip Default-Effekte (UUID oder Pfad-basiert)
-  - config.json Schema validiert und dokumentiert
-  - Auto-Apply beim Player-Init und Clip-Registrierung
-  - DefaultEffectsManager mit vollständiger Validierung
-  - Dokumentation: `docs/DEFAULT_EFFECTS.md`
-
-- [x] **Blend Mode Effect Plugin (4-6h):** ✅ COMPLETED (2025-12-01)
-  - 14 Blend-Modes implementiert: Normal, Multiply, Screen, Overlay, Add, Subtract, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion
-  - Blending mit konfigurierbarer RGB-Farbe
-  - Opacity-Parameter (0-100%) für Blend-Intensität
-  - Mix-Parameter (0-100%) für Blend zwischen Original und Effekt
-  - Alle mathematischen Blend-Formeln korrekt implementiert
-  - Vollständig getestet mit allen Blend-Modi
-  - Plugin-Datei: `src/plugins/effects/blend_mode.py`
-
-- [ ] **Clip Trimming & Playback Control (6-10h):**
-  - **In/Out Points:** Start/End-Frame pro Clip definieren (Dual-Range-Slider)
-  - **Reverse Playback:** Clip rückwärts abspielen (Toggle-Option)
-  - **Backend (ClipRegistry):**
-    - Metadata: `in_point` (Frame), `out_point` (Frame), `reverse` (bool)
-    - API: POST `/api/clips/<clip_id>/trim` (in_point, out_point)
-    - API: POST `/api/clips/<clip_id>/reverse` (enabled: bool)
-  - **Backend (VideoSource):**
-    - Frame-Range-Check bei get_next_frame()
-    - Reverse-Mode: Frame-Counter rückwärts
-    - Loop-Verhalten: Zurück zu in_point (forward) / out_point (reverse)
-  - **Frontend UI:**
-    - Dual-Range-Slider im Clip FX Tab (Section: ⏱️ Clip Timing)
-    - Live-Preview: "Playing 5.0s - 8.0s (3.0s trimmed)"
-    - Frame/Sekunden-Toggle für Anzeige
-    - Reverse-Checkbox mit Icon (⏪)
-    - Reset-Button ("Full Clip")
-  - **Features:**
-    - Non-destructive (Original bleibt unberührt)
-    - Per-Clip individuell (jede Playlist-Instanz eigene Settings)
-    - Projekt-JSON-Persistierung
-    - Auto-Advance basiert auf getrimter Duration
+### 1.0 🔌 Plugin-System erweitern (~8-12h)
 
 - [ ] **Layer-Effekte über Clip FX Tab (8-12h):**
   - API-Endpoints für Layer-Effekte (POST/PATCH/DELETE `/api/clips/<clip_id>/layers/<layer_id>/effects`)
@@ -86,62 +27,9 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
   - Drag & Drop von Effekten funktioniert für Clip UND Layer
   - Backend: apply_layer_effects() Integration, Layer.effects Array populieren
 
-- [x] **Generator-Plugins (3-4h):** ✅ COMPLETED
-  - Scripts nach `plugins/generators/` migriert
-  - plasma, rainbow_wave, pulse, matrix_rain, fire implementiert
-  - METADATA + PARAMETERS für alle Generatoren hinzugefügt
-
-- [x] **Source-Plugins (4-6h):** ✅ COMPLETED
-  - Webcam: Live-Video von lokalen USB-/integrierten Kameras
-  - LiveStream: HTTP/RTSP/HLS/RTMP/YouTube Streaming-Protokolle
-  - Screencapture: Screen/Monitor-Capture mit mss
-
-- [x] **UI-Generierung (3-4h):** ✅ COMPLETED
-  - Automatische Form-Generierung aus PARAMETERS-Array
-  - Parameter-Panel im Web-Interface (Generator + Effects)
-  - Live-Preview beim Parameter-Ändern
-  - Unterstützt: FLOAT, INT, BOOL, STRING, SELECT, COLOR, RANGE
-  
-- [ ] **Preset-System (2-3h):**
-  - Parameter-Sets speichern/laden
-  - Preset-Manager API (CRUD)
-  - UI: Preset-Selector & Editor
-
 ---
 
-### 1.2 🔄 Transition-Plugin-System (~8-10h) ✅ COMPLETED (2025-11-29)
-
-- [x] **PluginType.TRANSITION (3h):** ✅ COMPLETED (2025-11-29)
-  - `blend_frames(frame_a, frame_b, progress)` Methode implementiert
-  - Fade Transition Plugin mit Easing-Funktionen (linear, ease_in, ease_out, ease_in_out)
-  - Tests bestanden (Progress 0.0-1.0, alle Easing-Modi)
-  - Dokumentation: `docs/TRANSITION_SYSTEM.md`
-
-- [x] **Player Integration (2h):** ✅ COMPLETED (2025-11-29)
-  - Transition-Buffering (letzter Frame): `self.transition_buffer`
-  - apply_transition() bei Clip-Wechsel (automatisch in Playback-Loop)
-  - Frame-Blending mit Progress-Berechnung (elapsed / duration)
-  - Transition-State: active, start_time, frames_count
-
-- [x] **API & Config (2h):** ✅ COMPLETED (2025-11-29)
-  - `/api/transitions/list` - Verfügbare Transitions
-  - `/api/player/{player_id}/transition/config` - Transition setzen (POST)
-  - `/api/player/{player_id}/transition/status` - Status abrufen (GET)
-  - Player-spezifische Konfiguration (Video & Art-Net)
-
-- [x] **UI (3h):** ✅ COMPLETED (2025-11-29)
-  - Reusable Transition-Menu-Komponente (`components/transition-menu.html`)
-  - Enable/Disable Toggle mit Settings-Panel
-  - Effect-Dropdown: Dynamisch geladen von API
-  - Duration-Slider: 0.1-5.0s, 0.1s Steps, Live-Value-Display
-  - Easing-Function Selector: All 4 Modi
-  - Integration in Video & Art-Net Player-UI
-  - Automatisches Config-Loading beim Start
-  - Dokumentation: `docs/TRANSITION_FRONTEND_INTEGRATION.md`, `docs/TRANSITION_QUICKSTART.md`
-
----
-
-### 1.3 🎬 Playlist-Sequenzer (~8-12h)
+### 1.1 🎬 Playlist-Sequenzer (~8-12h)
 
 - [ ] **Show-Editor UI (4h):**
   - Liste von Clips mit Drag & Drop
@@ -175,7 +63,7 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 1.4 🎹 MIDI-over-Ethernet Support (~6-10h)
+### 1.3 🎹 MIDI-over-Ethernet Support (~6-10h)
 
 - [ ] **MIDI Control via Ethernet (minimale Latenz) (6-10h):**
   - **Grundidee:** MIDI-Signale über Ethernet statt USB für <5ms Latenz
@@ -289,32 +177,6 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 ## 🔧 PRIORITÄT 3 - Mittel-Komplex, Mittel-Wert (~33-51h)
 **Mittlerer Aufwand, mittlere Business-Priorität**
 
-### 3.1 🎨 Effect-Bibliothek erweitern (~15-25h)
-
-- [ ] **Geometrie & Transform (3-5h):**
-  - Flip, Mirror, Slide, Keystone, Fish Eye, Twist
-
-- [ ] **Blur & Distortion (2-3h):**
-  - Radial Blur, Pixelate (LoRez), Displace, Wave Warp
-
-- [ ] **Glitch & Noise (2-3h):**
-  - Shift Glitch, Distortion, Static, Shift RGB
-
-- [ ] **Edge & Detection (1-2h):**
-  - Edge Detection, Auto Mask
-
-- [ ] **Composite & Mask (2-3h):**
-  - ChromaKey, Keystone Mask, Vignette, Drop Shadow
-
-- [ ] **Simple 3D & Kaleidoscope (3-5h):**
-  - Kaleidoscope, Tile, Circles, Bendoscope
-
-- [ ] **Leicht implementierbare Zusatz-Effekte:**
-  - Sharpen, Emboss, Sepia, Gamma Correction
-  - Color Temperature, Channel Mixer, Noise, Solarize
-  - Duotone, Oil Paint, Mosaic, Zoom, Rotate
-  - Border, Crop, Alpha Blend, Lumetri Color
-
 ---
 
 ### 3.2 🎵 Audio-Reactive Support (~10-14h)
@@ -343,27 +205,32 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ### 3.3 🎬 HAP Codec Support & Video Converter (~8-12h)
 
-- [ ] **HAP Codec Decoder (4-5h):**
-  - **HAP Varianten:** HAP (DXT1), HAP Alpha (DXT5), HAP Q (BC7)
-  - **Vorteile:** 5-10x schnelleres Decoding vs. H.264
-  - **FFmpeg Integration:** libavcodec HAP Support
-  - **Features:**
-    - Automatische HAP-Format-Erkennung
-    - Fallback auf Standard-Codecs
-    - Performance-Messung
+- [x] **HAP Codec Decoder (4-5h):** ✅ COMPLETED (2025-12-02)
+  - ✅ HAP Varianten: HAP (DXT1), HAP Alpha (DXT5), HAP Q (BC7)
+  - ✅ FFmpeg Integration: libavcodec HAP Support
+  - ✅ Automatische HAP-Format-Erkennung
+  - ✅ Fallback auf Standard-Codecs
+  - ✅ Performance-Messung
 
-- [ ] **Universal Video Converter (4-7h):**
-  - **Input-Formate:** AVI, MP4, MOV, GIF, PNG-Sequences
-  - **Output-Profile:** HAP (Performance), H.264 (Hardware-Encoding)
-  - **Features:**
-    - Batch-Processing: Ganze Ordner konvertieren
-    - Auto-Resize: Auf Canvas-Größe skalieren
-    - Loop-Optimierung: Nahtlose Loops
-  - **Implementierung:**
-    - Phase 1: FFmpeg-Wrapper (~2h)
-    - Phase 2: Batch-Processing (~2h)
-    - Phase 3: CLI-Tool (~1h)
-    - Phase 4: Web-UI (~2h)
+- [x] **Universal Video Converter (4-7h):** ✅ COMPLETED (2025-12-02)
+  - ✅ Input-Formate: AVI, MP4, MOV, GIF, PNG-Sequences
+  - ✅ Output-Profile: HAP (Performance), H.264 (Hardware-Encoding)
+  - ✅ Batch-Processing: Ganze Ordner konvertieren
+  - ✅ Auto-Resize: Auf Canvas-Größe skalieren
+  - ✅ Loop-Optimierung: Nahtlose Loops
+  - ✅ Separate HTML-Page: Eigenständige Converter-UI (converter.html)
+  - ✅ FFmpeg-Wrapper mit Progress-Tracking
+  - ✅ REST API Endpoints
+  - ✅ Web-UI mit separater HTML-Page
+
+- [ ] **Converter UI Optimierung (~2-3h):**
+  - [ ] File Browser für lokale Dateien
+  - [ ] Preview der zu konvertierenden Dateien
+  - [ ] Real-time Progress während Conversion
+  - [ ] Queue Management (Pause/Resume/Cancel)
+  - [ ] Preset-System (Common Canvas-Größen speichern)
+  - [ ] Drag & Drop für Dateien
+  - [ ] Batch-Operationen: Alle auswählen/abwählen
 
 **CLI-Beispiele:**
 ```bash
@@ -499,10 +366,42 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 
 ---
 
-## 🎨 PRIORITÄT 5 - Niedrig-Komplex, Niedrig-Priorität (~8-12h)
+## 🎨 PRIORITÄT 5 - Niedrig-Komplex, Niedrig-Priorität (~14-20h)
 **Maintenance, Polishing, Nice-to-have**
 
-### 5.1 🎨 GUI-Optimierungen (~8-12h)
+### 5.1 🔌 Plugin-System (Optional) (~2-3h)
+
+- [ ] **Preset System für Effect Parameters (2-3h):**
+  - Effect-Preset-Speicherung (Name + Parameter-Werte)
+  - Preset-Library pro Effect-Plugin
+  - UI: Save/Load/Delete Presets im Effect-Panel
+  - API: `/api/effects/<effect_id>/presets` CRUD
+  - Dokumentation: `docs/EFFECT_PRESETS.md`
+
+---
+
+### 5.2 🎨 GUI-Optimierungen (~12-18h)
+
+- [ ] **Art-Net Preview Expansion (4-6h):**
+  - **Realtime LED Object Visualization:**
+    - Live-View aller LED-Objekte mit aktuellen Farben
+    - 2D-Representation: LED-Strip/Matrix als Pixel-Reihe
+    - Farbcodierung: RGB-Werte als colored boxes
+    - Auto-Update: 10-30 FPS live refresh
+  - **Object-List View:**
+    - Universe-Info pro Objekt (Universe 1-4, etc.)
+    - Pixel-Count & Status (Online/Offline)
+    - DMX-Address-Range anzeigen
+  - **Features:**
+    - Toggle zwischen Compact-View (Icons) und Expanded-View (Full Colors)
+    - Click auf Objekt → Highlight in Preview
+    - Color-Picker: Click auf Pixel → zeigt RGB-Wert
+    - Performance-Mode: Reduced FPS bei niedriger CPU
+  - **Implementierung:**
+    - Phase 1: WebSocket für Live-DMX-Data (~2h)
+    - Phase 2: Canvas-Renderer für LED-Objects (~2h)
+    - Phase 3: UI-Controls & Toggle (~1h)
+    - Phase 4: Performance-Optimierung (~1h)
 
 - [ ] **Drag & Drop Layout-Editor:**
   - GridStack.js Integration
@@ -512,25 +411,25 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 
 ---
 
-### 5.2 🧪 Testing & Verification
+### 5.3 🧪 Testing & Verification
 
 - [ ] **Milkdrop via Screencapture testen:**
   - Screencapture-Generator mit Milkdrop/projectM-Fenster
   - Region-Capture für optimale Performance
   - Alternative: Window-Capture API
 
-- [ ] **Multi-Layer System Testing (~2-4h):**
-  - [ ] Run `tests/test_api_layers.py` to verify all tests pass
-  - [ ] Test live multi-layer playback with different FPS sources
-    - [ ] Verify: Overlay läuft nicht doppelt so schnell bei höherer FPS
-    - [ ] Verify: Frame-Skipping funktioniert bei niedrigerer FPS
-  - [ ] Verify snapshot restore with layers
-  - [ ] Test generator + video layer combinations
-  - [ ] Test layer with effects + blend modes
-  - [ ] Test autoplay with multi-layer clips
-  - [ ] Test transitions on layer 0 with overlays active
+- [x] **Multi-Layer System Testing (~2-4h):** ✅ COMPLETED (2025-12-02)
+  - ✅ Run `tests/test_api_layers.py` to verify all tests pass
+  - ✅ Test live multi-layer playback with different FPS sources
+    - ✅ Verify: Overlay läuft nicht doppelt so schnell bei höherer FPS
+    - ✅ Verify: Frame-Skipping funktioniert bei niedrigerer FPS
+  - ✅ Verify snapshot restore with layers
+  - ✅ Test generator + video layer combinations
+  - ✅ Test layer with effects + blend modes
+  - ✅ Test autoplay with multi-layer clips
+  - ✅ Test transitions on layer 0 with overlays active
 
-### 5.3 🛠️ Weitere Verbesserungen
+### 5.4 🛠️ Weitere Verbesserungen
 
 - [ ] **Vollständige Player/Playlist-Generalisierung (~8-12h):**
   - Hardcodierte Playlist-Arrays entfernen (`videoFiles`, `artnetFiles`)
@@ -600,23 +499,22 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 
 | Priorität | Aufwand | Nutzen | Summe Stunden |
 |-----------|---------|--------|---------------|
-| **P1** | Niedrig | Hoch | ~30-42h |
+| **P1** | Niedrig | Hoch | ~22-34h |
 | **P2** | Mittel | Hoch | ~14-24h |
 | **P3** | Mittel | Mittel | ~33-51h |
 | **P4** | Hoch | Hoch | ~24-40h |
-| **P5** | Niedrig | Niedrig | ~8-12h |
+| **P5** | Niedrig | Niedrig | ~14-21h |
 | **P6** | Sehr Hoch | Mittel | ~64-86h |
-| **GESAMT** | | | **~173-255h** |
+| **GESAMT** | | | **~171-256h** |
 
 ---
 
 ## 🎯 Empfohlene Umsetzungs-Reihenfolge
 
-### Phase 1: Foundation (P1) - ~30-42h
-1. Plugin-System erweitern (Generator-Plugins, Presets, UI)
-2. Transition-System implementieren
-3. Playlist-Sequenzer
-4. MIDI-over-Ethernet Support
+### Phase 1: Foundation (P1) - ~22-34h
+1. Plugin-System erweitern (Layer-Effekte)
+2. Playlist-Sequenzer
+3. MIDI-over-Ethernet Support
 
 **Ziel:** Vollständige Show-Control mit Effects & Transitions
 
@@ -648,27 +546,29 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 
 ---
 
-### Phase 5+: Polish & Future (P5+P6) - ~72-98h
-1. GUI-Optimierungen
-2. Maintenance & Tests
-3. Optional: Timeline-Sequenzer
+### Phase 5+: Polish & Future (P5+P6) - ~78-107h
+1. Effect Presets (Optional)
+2. GUI-Optimierungen
+3. Maintenance & Tests
+4. Optional: Timeline-Sequenzer
 
 **Ziel:** Production-Polishing & Langzeit-Features
 
 ---
 
-## 📚 Status (Stand: 2025-11-28)
+## 📚 Status (Stand: 2025-12-02)
 
 ### ✅ Fertiggestellt (v2.3)
 - **Unified API Architecture** mit UUID-basiertem Clip-Management
 - **Dual-Player-System** (Video Preview + Art-Net Output)
 - **Plugin-System** vollständig implementiert (PluginBase, PluginManager, API)
-- **17 Effect-Plugins:** 11 Farb-Manipulation, 5 Time & Motion, 1 Blur
+- **18 Effect-Plugins:** 11 Farb-Manipulation, 5 Time & Motion, 1 Blur, 1 Blending
 - **ClipRegistry** mit UUID-basierter Clip-Identifikation
 - **Code-Cleanup** (~1500 Zeilen deprecated Code entfernt)
 - **Universal Search Filter** für Effects, Sources, Files (v2.3.1)
 - **Multi-Video-Source Support** via `video_sources` config (v2.3.1)
 - **Default Effect Chains** via config.json (Player & Clip-Level) (v2.3.1)
+- **Transition Plugin System** mit Fade Transition & Reusable UI Component (v2.3.1)
 - **Multi-Layer Compositing System** (v2.3.2):
   - Clip-based layers (per playlist item)
   - Layer 0 = base clip (immutable)
@@ -678,6 +578,13 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
   - Drag-drop layer management in UI
   - Thread-safe layer loading with auto-reload
   - Session state persistence for layers
+- **Clip Trimming System** (v2.3.3):
+  - In/Out Points pro Clip mit Non-Destructive Editing
+  - Reverse Playback Support
+  - Ion.RangeSlider UI mit Collapsible Section
+  - Right-Click Reset to Full Range
+  - Backend as Source of Truth für Clip IDs
+  - Live-Apply bei aktiver Wiedergabe
 
 ---
 

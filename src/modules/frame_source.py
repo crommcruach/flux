@@ -66,12 +66,37 @@ class FrameSource(ABC):
 class VideoSource(FrameSource):
     """Video-Datei als Frame-Quelle (mit Cache-Support)."""
     
-    def __init__(self, video_path, canvas_width, canvas_height, config=None):
+    def __init__(self, video_path, canvas_width, canvas_height, config=None, clip_id=None):
         super().__init__(canvas_width, canvas_height, config)
         self.video_path = video_path
         self.source_path = video_path  # Generischer Pfad für load_points()
         self.cap = None
         self._lock = threading.Lock()  # Thread-Safety für FFmpeg
+        
+        # Clip trimming and playback control
+        self.clip_id = clip_id
+        self.in_point = None  # Start frame (None = video start)
+        self.out_point = None  # End frame (None = video end)
+        self.reverse = False  # Reverse playback
+        
+        # Load trim settings from ClipRegistry if clip_id provided
+        if self.clip_id:
+            from .clip_registry import get_clip_registry
+            clip_registry = get_clip_registry()
+            playback_info = clip_registry.get_clip_playback_info(self.clip_id)
+            if playback_info:
+                self.in_point = playback_info.get('in_point')
+                self.out_point = playback_info.get('out_point')
+                self.reverse = playback_info.get('reverse', False)
+                # Set current_frame to in_point if trimming is active
+                if self.in_point is not None:
+                    self.current_frame = self.in_point
+                if self.in_point is not None or self.out_point is not None or self.reverse:
+                    logger.info(f"✂️ VideoSource trim settings loaded from ClipRegistry: clip_id={self.clip_id}, in={self.in_point}, out={self.out_point}, reverse={self.reverse}, start_frame={self.current_frame}")
+                else:
+                    logger.info(f"📹 VideoSource initialized with clip_id={self.clip_id} (no trim settings)")
+            else:
+                logger.warning(f"⚠️ VideoSource clip_id={self.clip_id} but no playback_info found in ClipRegistry")
         
         # GIF Support
         self.is_gif = self._is_gif_file(video_path)
@@ -152,6 +177,14 @@ class VideoSource(FrameSource):
         
         # Schließe alte Capture falls vorhanden
         if self.cap and self.cap.isOpened():
+            # Already initialized - but ensure ClipRegistry has total_frames
+            if self.clip_id and self.total_frames > 0:
+                from .clip_registry import get_clip_registry
+                clip_registry = get_clip_registry()
+                clip = clip_registry.get_clip(self.clip_id)
+                if clip and clip.get('total_frames') is None:
+                    clip['total_frames'] = self.total_frames
+                    logger.debug(f"  ✓ Updated ClipRegistry (already init): clip_id={self.clip_id}, total_frames={self.total_frames}")
             return True  # Bereits initialisiert
         
         if not os.path.exists(self.video_path):
@@ -179,6 +212,15 @@ class VideoSource(FrameSource):
         original_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         original_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
+        # Update ClipRegistry with total_frames if clip_id is set
+        if self.clip_id:
+            from .clip_registry import get_clip_registry
+            clip_registry = get_clip_registry()
+            clip = clip_registry.get_clip(self.clip_id)
+            if clip:
+                clip['total_frames'] = self.total_frames
+                logger.debug(f"  ✓ Updated ClipRegistry: clip_id={self.clip_id}, total_frames={self.total_frames}")
+        
         # GIF Frame-Delays laden
         if self.is_gif and self.gif_respect_timing:
             self.gif_frame_delays = self._load_gif_frame_delays()
@@ -196,6 +238,31 @@ class VideoSource(FrameSource):
         with self._lock:  # Thread-Safety für FFmpeg
             if not self.cap or not self.cap.isOpened():
                 return None, 0
+            
+            # Check trim boundaries BEFORE reading frame
+            effective_in = self.in_point if self.in_point is not None else 0
+            effective_out = self.out_point if self.out_point is not None else self.total_frames - 1
+            
+            # Determine which frame to read
+            if not self.reverse:
+                # Forward playback
+                actual_frame = self.current_frame
+                
+                # Check if we've reached out_point
+                if actual_frame > effective_out:
+                    return None, 0  # End of trimmed clip
+            else:
+                # Reverse playback: play from out_point down to in_point
+                # current_frame counts up (0, 1, 2...) but we read backwards
+                playback_position = self.current_frame - effective_in
+                actual_frame = effective_out - playback_position
+                
+                # Check if we've gone before in_point
+                if actual_frame < effective_in:
+                    return None, 0  # End of trimmed clip (in reverse)
+            
+            # Seek to the frame we want to read
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame)
             
             ret, frame = self.cap.read()
             
@@ -219,13 +286,38 @@ class VideoSource(FrameSource):
         self.current_frame += 1
         return frame, delay
     
+    def reload_trim_settings(self):
+        """Lädt Trim-Einstellungen aus ClipRegistry neu."""
+        if self.clip_id:
+            from .clip_registry import get_clip_registry
+            clip_registry = get_clip_registry()
+            playback_info = clip_registry.get_clip_playback_info(self.clip_id)
+            old_current = self.current_frame
+            logger.info(f"reload_trim_settings: clip_id={self.clip_id}, current_frame={old_current}, playback_info={playback_info}")
+            if playback_info:
+                self.in_point = playback_info.get('in_point')
+                self.out_point = playback_info.get('out_point')
+                self.reverse = playback_info.get('reverse', False)
+                logger.info(f"✅ VideoSource trim settings reloaded: in={self.in_point}, out={self.out_point}, reverse={self.reverse}")
+                # Reset to appropriate starting position
+                self.reset()
+                logger.info(f"🔄 VideoSource reset: current_frame {old_current} → {self.current_frame}")
+                return True
+            else:
+                logger.warning(f"⚠️ No playback_info found for clip_id={self.clip_id}")
+        else:
+            logger.warning(f"⚠️ VideoSource has no clip_id set")
+        return False
+    
     def reset(self):
-        """Setzt Video auf Anfang zurück."""
-        self.current_frame = 0
+        """Setzt Video auf Anfang zurück (oder in_point wenn trimmed)."""
+        # Start at in_point if trimming is active, otherwise frame 0
+        start_frame = self.in_point if self.in_point is not None else 0
+        self.current_frame = start_frame
         
         with self._lock:  # Thread-Safety
             if self.cap and self.cap.isOpened():
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     
     def cleanup(self):
         """Gibt Video-Ressourcen frei."""

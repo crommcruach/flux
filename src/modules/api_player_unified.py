@@ -197,12 +197,13 @@ def register_unified_routes(app, player_manager, config):
                         metadata={}
                     )
                 
-                # Load video into player
+                # Load video into player with clip_id for trim/reverse support
                 video_source = VideoSource(
                     absolute_path,
                     player.canvas_width,
                     player.canvas_height,
-                    config
+                    config,
+                    clip_id=clip_id
                 )
                 
                 success = player.switch_source(video_source)
@@ -214,6 +215,7 @@ def register_unified_routes(app, player_manager, config):
                 player.current_clip_id = clip_id
                 player.playlist_ids[absolute_path] = clip_id  # Store UUID for future loops
                 logger.info(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
+                logger.debug(f"   Player state: current_clip_id={player.current_clip_id}, source type={type(video_source).__name__}")
                 
                 # Load clip layers from registry
                 player.load_clip_layers(clip_id, clip_registry, video_dir)
@@ -373,12 +375,12 @@ def register_unified_routes(app, player_manager, config):
                 for param in plugin_class.PARAMETERS:
                     if isinstance(param, dict):
                         param_dict = param.copy()
-                        if 'type' in param_dict and hasattr(param_dict['type'], 'value'):
-                            param_dict['type'] = param_dict['type'].value
+                        if 'type' in param_dict and hasattr(param_dict['type'], 'name'):
+                            param_dict['type'] = param_dict['type'].name
                     else:
                         param_dict = {
                             'name': param.name,
-                            'type': param.type.value if hasattr(param.type, 'value') else str(param.type),
+                            'type': param.type.name if hasattr(param.type, 'name') else str(param.type),
                             'default': param.default,
                             'min': getattr(param, 'min', None),
                             'max': getattr(param, 'max', None),
@@ -858,8 +860,9 @@ def register_unified_routes(app, player_manager, config):
                 )
                 success = player.switch_source(generator_source)
             else:
-                # It's a video file
-                video_source = VideoSource(next_video_path, player.canvas_width, player.canvas_height, config)
+                # It's a video file - look up clip_id for trim/reverse support
+                clip_id = player.playlist_ids.get(next_video_path)
+                video_source = VideoSource(next_video_path, player.canvas_width, player.canvas_height, config, clip_id=clip_id)
                 success = player.switch_source(video_source)
         
             if not success:
@@ -960,8 +963,9 @@ def register_unified_routes(app, player_manager, config):
                 )
                 success = player.switch_source(generator_source)
             else:
-                # It's a video file
-                video_source = VideoSource(prev_video_path, player.canvas_width, player.canvas_height, config)
+                # It's a video file - look up clip_id for trim/reverse support
+                clip_id = player.playlist_ids.get(prev_video_path)
+                video_source = VideoSource(prev_video_path, player.canvas_width, player.canvas_height, config, clip_id=clip_id)
                 success = player.switch_source(video_source)
         
             if not success:
@@ -1117,6 +1121,7 @@ def register_unified_routes(app, player_manager, config):
                 # Speichere UUID-Mapping UND registriere Clip sofort
                 if item_id:
                     playlist_ids[absolute_path] = item_id
+                    logger.debug(f"📝 Playlist mapping: {absolute_path} → {item_id}")
                     
                     # Registriere Clip in Registry wenn noch nicht vorhanden
                     if item_id not in clip_registry.clips:
@@ -1139,6 +1144,15 @@ def register_unified_routes(app, player_manager, config):
                             clip_registry.clips[item_id] = clip_registry.clips[registered_id]
                             clip_registry.clips[item_id]['clip_id'] = item_id
                             del clip_registry.clips[registered_id]
+                    else:
+                        logger.debug(f"✓ Clip {item_id} already registered, reusing existing clip")
+                else:
+                    # No item_id provided - check if clip already exists by path
+                    existing_id = clip_registry.find_clip_by_path(player_id, absolute_path)
+                    if existing_id:
+                        logger.debug(f"✓ Found existing clip for path: {existing_id} → {os.path.basename(absolute_path)}")
+                        playlist_ids[absolute_path] = existing_id
+                    # If no existing clip, it will be registered during autoplay
             
             player.playlist = absolute_playlist
             player.playlist_ids = playlist_ids  # Neue Property für UUID-Mapping
@@ -1206,6 +1220,7 @@ def register_unified_routes(app, player_manager, config):
                     player.playlist_index = 0
                     first_item = absolute_playlist[0]
                     logger.info(f"🎬 [{player_id}] Autoplay aktiviert - lade erstes Video: {os.path.basename(first_item)}")
+                    logger.debug(f"   playlist_ids mapping: {playlist_ids}")
                     
                     # Lade erstes Video/Generator
                     if first_item.startswith('generator:'):
@@ -1215,7 +1230,10 @@ def register_unified_routes(app, player_manager, config):
                         new_source = GeneratorSource(generator_id, parameters, canvas_width=player.canvas_width, canvas_height=player.canvas_height)
                     else:
                         from .frame_source import VideoSource
-                        new_source = VideoSource(first_item, canvas_width=player.canvas_width, canvas_height=player.canvas_height)
+                        # Look up clip_id for trim/reverse support
+                        first_clip_id = playlist_ids.get(first_item)
+                        logger.debug(f"   Looking up clip_id for '{first_item}': {first_clip_id}")
+                        new_source = VideoSource(first_item, canvas_width=player.canvas_width, canvas_height=player.canvas_height, clip_id=first_clip_id)
                     
                     if new_source.initialize():
                         if hasattr(player, 'source') and player.source:

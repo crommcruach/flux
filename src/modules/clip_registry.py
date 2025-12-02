@@ -60,7 +60,11 @@ class ClipRegistry:
             'metadata': metadata or {},
             'created_at': datetime.now().isoformat(),
             'effects': [],  # Clip-spezifische Effekte
-            'layers': []    # Clip-spezifische Layer-Definitionen
+            'layers': [],   # Clip-spezifische Layer-Definitionen
+            # Trimming & Playback Control
+            'in_point': None,   # Start-Frame (None = Video-Start)
+            'out_point': None,  # End-Frame (None = Video-Ende)
+            'reverse': False    # Rückwärts abspielen
         }
         
         logger.info(f"✅ Clip registriert: {clip_id} → {player_id}/{os.path.basename(absolute_path)}")
@@ -403,6 +407,73 @@ class ClipRegistry:
         self.clips[clip_id]['layers'] = new_layers
         logger.debug(f"Layers von Clip {clip_id} neu sortiert: {registry_order}")
         return True
+    
+    def set_clip_trim(self, clip_id: str, in_point: Optional[int], out_point: Optional[int]) -> bool:
+        """
+        Setzt In/Out Points für Clip-Trimming.
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+            in_point: Start-Frame (None = Video-Start)
+            out_point: End-Frame (None = Video-Ende)
+        
+        Returns:
+            True wenn erfolgreich, False wenn Clip nicht gefunden
+        """
+        clip = self.get_clip(clip_id)
+        if not clip:
+            logger.warning(f"⚠️ Clip {clip_id} nicht gefunden für trim operation")
+            return False
+        
+        clip['in_point'] = in_point
+        clip['out_point'] = out_point
+        
+        logger.info(f"✂️ Clip {clip_id} trimmed: in={in_point}, out={out_point}")
+        return True
+    
+    def set_clip_reverse(self, clip_id: str, enabled: bool) -> bool:
+        """
+        Aktiviert/deaktiviert Rückwärts-Wiedergabe für Clip.
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+            enabled: True = rückwärts, False = vorwärts
+        
+        Returns:
+            True wenn erfolgreich, False wenn Clip nicht gefunden
+        """
+        clip = self.get_clip(clip_id)
+        if not clip:
+            logger.warning(f"⚠️ Clip {clip_id} nicht gefunden für reverse operation")
+            return False
+        
+        clip['reverse'] = enabled
+        
+        logger.info(f"⏪ Clip {clip_id} reverse: {enabled}")
+        return True
+    
+    def get_clip_playback_info(self, clip_id: str) -> Optional[Dict]:
+        """
+        Holt Playback-Informationen für Clip (trim, reverse, etc.).
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+        
+        Returns:
+            Dict mit playback info oder None
+        """
+        clip = self.get_clip(clip_id)
+        if not clip:
+            return None
+        
+        return {
+            'in_point': clip.get('in_point'),
+            'out_point': clip.get('out_point'),
+            'reverse': clip.get('reverse', False),
+            'filename': clip.get('filename'),
+            'relative_path': clip.get('relative_path'),
+            'total_frames': clip.get('total_frames')
+        }
 
 
 # Globale Singleton-Instanz

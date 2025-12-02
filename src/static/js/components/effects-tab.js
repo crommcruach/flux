@@ -201,14 +201,12 @@ export class EffectsTab {
         const effectCards = document.querySelectorAll(`#${this.containerId} .effect-card`);
         
         effectCards.forEach(card => {
-            card.addEventListener('dragstart', (e) => {
-                const effectId = card.getAttribute('data-effect-id');
-                e.dataTransfer.setData('effect-id', effectId);
-                e.dataTransfer.effectAllowed = 'copy';
-                card.classList.add('dragging');
-            });
-            
-            card.addEventListener('dragend', (e) => {
+        card.addEventListener('dragstart', (e) => {
+            const effectId = card.getAttribute('data-effect-id');
+            e.dataTransfer.setData('effectId', effectId);
+            e.dataTransfer.effectAllowed = 'copy';
+            card.classList.add('dragging');
+        });            card.addEventListener('dragend', (e) => {
                 card.classList.remove('dragging');
             });
         });

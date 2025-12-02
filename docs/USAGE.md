@@ -126,6 +126,133 @@ def generate_frame(frame_number, width, height, time, fps):
 
 Siehe `scripts/README.md` für weitere Beispiele.
 
+## Video Converter
+
+Der integrierte Video Converter unterstützt HAP Codec und verschiedene Optimierungen für LED-Mapping.
+
+### Voraussetzungen
+
+FFmpeg muss installiert sein:
+
+```powershell
+# Windows (via winget)
+winget install --id=Gyan.FFmpeg -e
+
+# Nach Installation: Terminal neu starten
+# Status prüfen:
+ffmpeg -version
+```
+
+### Via Web Interface
+
+1. Öffne `http://localhost:5000/converter`
+2. Wähle Output-Format:
+   - **HAP** - DXT1 Kompression (beste Performance)
+   - **HAP Alpha** - DXT5 mit Transparenz
+   - **HAP Q** - BC7 höchste Qualität
+   - **H.264** - Standard MP4 (CPU)
+   - **H.264 NVENC** - NVIDIA GPU-Encoding
+3. Eingabemuster:
+   - Einzelne Datei: `testbild.mp4`
+   - Ordner: `video/kanal_1/*.mp4`
+   - Rekursiv: `video/**/*.mp4`
+4. Output-Ordner: `video/converted`
+5. Optionen:
+   - **Resize Mode**: fit, fill, stretch, auto
+   - **Target Size**: Canvas-Größe (z.B. 60x300)
+   - **Loop Optimization**: Fade In/Out für nahtlose Loops
+6. Klicke "Convert Videos"
+
+### Via REST API
+
+**Einzelne Datei konvertieren:**
+```bash
+curl -X POST http://localhost:5000/api/converter/convert \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_path": "testbild.mp4",
+    "output_format": "HAP",
+    "output_dir": "video/converted",
+    "resize_mode": "fit",
+    "target_size": [60, 300],
+    "loop_optimization": true
+  }'
+```
+
+**Batch-Konvertierung:**
+```bash
+curl -X POST http://localhost:5000/api/converter/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_pattern": "video/**/*.mp4",
+    "output_format": "HAP",
+    "output_dir": "video/converted",
+    "resize_mode": "fit",
+    "target_size": [60, 300]
+  }'
+```
+
+**Video-Info abrufen:**
+```bash
+curl -X POST http://localhost:5000/api/converter/info \
+  -H "Content-Type: application/json" \
+  -d '{"video_path": "testbild.mp4"}'
+```
+
+### Output-Formate
+
+| Format | Codec | Beschreibung | Use Case |
+|--------|-------|--------------|----------|
+| **HAP** | DXT1 | Schnellste Wiedergabe | LED-Mapping, Echtzeit |
+| **HAP Alpha** | DXT5 | Mit Transparenz | Overlays, Compositing |
+| **HAP Q** | BC7 | Höchste Qualität | Hochauflösende LEDs |
+| **H.264** | libx264 | Standard MP4 | Kompatibilität |
+| **H.264 NVENC** | h264_nvenc | GPU-Encoding | Schnelle Konvertierung |
+
+### Resize Modes
+
+- **none**: Keine Größenänderung
+- **fit**: Einpassen mit Letterbox (behält Seitenverhältnis)
+- **fill**: Füllen mit Crop (behält Seitenverhältnis)
+- **stretch**: Strecken auf Zielgröße (verzerrt)
+- **auto**: Verwendet Canvas-Größe aus config.json
+
+### Loop-Optimierung
+
+Aktiviert Fade In/Out für nahtlose Video-Loops:
+- **Fade Duration**: 0.5 Sekunden
+- **Effect**: Schwarzer Ein-/Ausblende am Anfang und Ende
+- **Use Case**: Videos die endlos wiederholt werden
+
+### Beispiele
+
+**Alle Videos in HAP konvertieren:**
+```bash
+# Via API
+curl -X POST http://localhost:5000/api/converter/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_pattern": "video/**/*.mp4",
+    "output_format": "HAP",
+    "output_dir": "video/hap_optimized",
+    "resize_mode": "auto",
+    "loop_optimization": true
+  }'
+```
+
+**Einzelnes Video mit Custom-Größe:**
+```bash
+curl -X POST http://localhost:5000/api/converter/convert \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_path": "myvideo.mp4",
+    "output_format": "HAP",
+    "output_dir": "output",
+    "resize_mode": "fit",
+    "target_size": [120, 600]
+  }'
+```
+
 ## Konfiguration verwalten
 
 ### Via Web Interface

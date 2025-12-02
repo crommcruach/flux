@@ -656,6 +656,217 @@ Response: {"status": "success", "message": "Aufzeichnung gestoppt"}
 
 ---
 
+## Video Converter
+
+### GET /api/converter/status
+Prüft FFmpeg-Verfügbarkeit und Version.
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "ffmpeg_available": true,
+  "ffmpeg_version": "6.1.1",
+  "ffprobe_available": true
+}
+```
+
+**Response (FFmpeg nicht gefunden):**
+```json
+{
+  "success": false,
+  "error": "FFmpeg not found. Please install FFmpeg...",
+  "ffmpeg_available": false,
+  "installation_guide": "..."
+}
+```
+
+### GET /api/converter/formats
+Listet alle verfügbaren Output-Formate auf.
+
+**Response:**
+```json
+{
+  "success": true,
+  "formats": [
+    {
+      "id": "HAP",
+      "name": "HAP (DXT1)",
+      "description": "HAP codec with DXT1 compression",
+      "extension": ".mov"
+    },
+    {
+      "id": "HAP_ALPHA",
+      "name": "HAP Alpha (DXT5)",
+      "description": "HAP codec with alpha channel",
+      "extension": ".mov"
+    },
+    {
+      "id": "HAP_Q",
+      "name": "HAP Q (BC7)",
+      "description": "HAP codec with highest quality",
+      "extension": ".mov"
+    },
+    {
+      "id": "H264",
+      "name": "H.264",
+      "description": "Standard H.264 (CPU)",
+      "extension": ".mp4"
+    },
+    {
+      "id": "H264_NVENC",
+      "name": "H.264 NVENC",
+      "description": "H.264 GPU encoding (NVIDIA)",
+      "extension": ".mp4"
+    }
+  ]
+}
+```
+
+### POST /api/converter/info
+Ruft Video-Metadaten über ffprobe ab.
+
+**Request:**
+```json
+{
+  "video_path": "testbild.mp4"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "info": {
+    "width": 1920,
+    "height": 1080,
+    "duration": 10.5,
+    "fps": 30.0,
+    "codec": "h264",
+    "bitrate": 5000000
+  }
+}
+```
+
+### POST /api/converter/convert
+Konvertiert eine einzelne Video-Datei.
+
+**Request:**
+```json
+{
+  "input_path": "video/testbild.mp4",
+  "output_format": "HAP",
+  "output_dir": "video/converted",
+  "resize_mode": "fit",
+  "target_size": [60, 300],
+  "loop_optimization": true
+}
+```
+
+**Parameters:**
+- `input_path`: Pfad zur Eingabedatei (relativ oder absolut)
+- `output_format`: HAP, HAP_ALPHA, HAP_Q, H264, H264_NVENC
+- `output_dir`: Zielverzeichnis für konvertierte Datei
+- `resize_mode`: none, fit, fill, stretch, auto (optional)
+- `target_size`: [width, height] in Pixeln (optional)
+- `loop_optimization`: Boolean für Fade In/Out (optional, default: false)
+
+**Response:**
+```json
+{
+  "success": true,
+  "output_path": "video/converted/testbild.mov",
+  "input_size_mb": 15.2,
+  "output_size_mb": 8.5,
+  "compression_ratio": 0.56,
+  "duration": 10.5
+}
+```
+
+### POST /api/converter/batch
+Konvertiert mehrere Videos basierend auf Glob-Pattern.
+
+**Request:**
+```json
+{
+  "input_pattern": "video/**/*.mp4",
+  "output_format": "HAP",
+  "output_dir": "video/converted",
+  "resize_mode": "auto",
+  "loop_optimization": true
+}
+```
+
+**Parameters:**
+- `input_pattern`: Glob-Pattern (z.B. `video/**/*.mp4`, `*.avi`)
+- Weitere Parameter wie bei `/convert`
+
+**Response:**
+```json
+{
+  "success": true,
+  "total_files": 15,
+  "successful": 14,
+  "failed": 1,
+  "results": [
+    {
+      "input_path": "video/test1.mp4",
+      "output_path": "video/converted/test1.mov",
+      "success": true,
+      "input_size_mb": 12.5,
+      "output_size_mb": 7.2,
+      "compression_ratio": 0.58
+    },
+    {
+      "input_path": "video/corrupt.mp4",
+      "success": false,
+      "error": "FFmpeg conversion failed"
+    }
+  ],
+  "total_input_size_mb": 180.5,
+  "total_output_size_mb": 98.3,
+  "total_compression_ratio": 0.54
+}
+```
+
+### GET /api/converter/canvas-size
+Lädt Canvas-Größe aus config.json für Auto-Resize.
+
+**Response:**
+```json
+{
+  "success": true,
+  "width": 60,
+  "height": 300
+}
+```
+
+**Error Response:**
+```json
+{
+  "success": false,
+  "error": "Canvas size not configured",
+  "default": [60, 300]
+}
+```
+
+### Resize Modes
+
+- **none**: Keine Größenänderung
+- **fit**: Einpassen mit schwarzen Balken (Letterbox), behält Seitenverhältnis
+- **fill**: Füllen mit Crop, behält Seitenverhältnis
+- **stretch**: Strecken auf Zielgröße (verzerrt Bild)
+- **auto**: Verwendet Canvas-Größe aus config.json
+
+### Loop Optimization
+
+Fügt Fade In/Out am Anfang und Ende des Videos hinzu:
+- **Duration**: 0.5 Sekunden
+- **Effect**: Schwarzer Fade In + Fade Out
+- **Use Case**: Nahtlose Video-Loops
+
+---
+
 ## WebSocket Events
 
 ### Client → Server

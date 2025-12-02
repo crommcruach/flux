@@ -131,6 +131,8 @@ class RestAPI:
         from .api_benchmark import register_benchmark_routes
         from .api_layers import register_layer_routes
         from .api_clip_layers import register_clip_layer_routes
+        from .api_clip_trim import register_clip_trim_api
+        from .api_converter import converter_bp
         from .clip_registry import get_clip_registry
         
         # Registriere alle Routen
@@ -150,6 +152,10 @@ class RestAPI:
         register_benchmark_routes(self.app, self.player_manager)
         register_layer_routes(self.app, self.player_manager, self.config)
         register_clip_layer_routes(self.app, get_clip_registry(), self.player_manager, self.video_dir)
+        register_clip_trim_api(self.app, get_clip_registry(), self.player_manager)
+        
+        # Register Converter Blueprint
+        self.app.register_blueprint(converter_bp)
         
         # NOTE: Legacy effect APIs (api_effects.py, api_artnet_effects.py) are now deprecated
         # Use Unified Player API instead: /api/player/<player_id>/effects/*

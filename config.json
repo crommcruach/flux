@@ -107,7 +107,8 @@
       ".mov",
       ".mkv",
       ".wmv",
-      ".gif"
+      ".gif",
+      ".mov"
     ],
     "frame_wait_delay": 0.1,
     "gif_respect_frame_timing": true,

@@ -13,6 +13,7 @@ Video-to-Art-Net DMX Control System mit Web-Interface und Multi-Kanal Unterstüt
 - 🎬 **Multi-Layer Compositing** - Clip-based Layer-Stack mit Blend Modes (Normal, Multiply, Screen, Overlay, Add, Subtract)
 - 🎨 **Layer Effects** - Individuelle Effect-Chains pro Layer
 - 📊 **Layer Opacity** - 0-100% Transparenz-Kontrolle pro Layer
+- 🎞️ **Video Converter** - FFmpeg-basierter Konverter mit HAP Codec Support (DXT1, DXT5, BC7), H.264, Batch-Verarbeitung, Loop-Optimierung
 
 ### Art-Net & DMX
 - 🌐 **Art-Net Output** - Multi-Universe Support mit automatischer Grenzlogik
@@ -22,7 +23,7 @@ Video-to-Art-Net DMX Control System mit Web-Interface und Multi-Kanal Unterstüt
 
 ### Web Interface
 - 📡 **REST API** - Flask-basierte API mit WebSocket, CORS Support
-- 🖥️ **Bootstrap GUI** - Canvas Editor + Control Panel + Config Manager
+- 🖥️ **Bootstrap GUI** - Canvas Editor + Control Panel + Config Manager + Video Converter
 - 🌙 **Dark Mode** - Vollständiges Theme-System mit LocalStorage
 - 🛎️ **Toast-Benachrichtigungen** - Theme-aware Notifications
 - 🔍 **Canvas-Zoom & Scrollbars** - Zoom per Maus & Buttons, automatische Scrollbalken
@@ -77,6 +78,7 @@ python src/main.py
 # Web-Interfaces öffnen
 # http://localhost:5000 - Canvas Editor (Bootstrap GUI)
 # http://localhost:5000/controls - Control Panel
+# http://localhost:5000/converter - Video Converter
 ```
 
 ## CLI Befehle
@@ -196,6 +198,14 @@ python src/main.py
 - `POST /api/cache/clear` - Cache leeren
 - `GET /api/cache/stats` - Cache-Statistiken
 
+### Video Converter
+- `GET /api/converter/status` - FFmpeg-Verfügbarkeit prüfen
+- `GET /api/converter/formats` - Verfügbare Output-Formate (HAP, HAP Alpha, HAP Q, H.264, H.264 NVENC)
+- `POST /api/converter/info` - Video-Metadaten abrufen (ffprobe)
+- `POST /api/converter/convert` - Einzelne Datei konvertieren
+- `POST /api/converter/batch` - Batch-Konvertierung mit Glob-Pattern
+- `GET /api/converter/canvas-size` - Canvas-Größe aus config.json laden
+
 ## Projektstruktur
 
 ```
@@ -206,7 +216,9 @@ Py_artnet/
 │   │   ├── player.py              # Unified Media Player with Layer Support
 │   │   ├── frame_source.py        # Frame Source Abstraction (VideoSource, ScriptSource)
 │   │   ├── clip_registry.py       # UUID-based Clip Management with Layers
-│   │   ├── api_clip_layers.py     # Layer Management API (NEU)
+│   │   ├── api_clip_layers.py     # Layer Management API
+│   │   ├── video_converter.py     # FFmpeg Video Converter (HAP, H.264)
+│   │   ├── api_converter.py       # Converter REST API
 │   │   ├── script_generator.py    # Script Loader & Manager
 │   │   ├── points_loader.py       # Points-JSON Parser
 │   │   ├── cache_manager.py       # RGB Cache Manager
@@ -221,7 +233,8 @@ Py_artnet/
 │   └── static/                    # Web-Interface Assets
 │       ├── index.html             # Bootstrap Canvas Editor
 │       ├── controls.html          # Control Panel
-│       ├── config.html            # Dynamic Config Manager (NEU)
+│       ├── config.html            # Dynamic Config Manager
+│       ├── converter.html         # Video Converter UI
 │       ├── styles.css             # Gemeinsame Styles
 │       ├── editor.js              # Editor Logic
 │       ├── controls.js            # Control Panel Logic

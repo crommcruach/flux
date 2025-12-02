@@ -82,6 +82,11 @@ def register_web_routes(app, config=None, player_manager=None):
         """Serve the fullscreen video page."""
         return send_from_directory(app.static_folder, 'fullscreen.html')
     
+    @app.route('/converter')
+    def converter():
+        """Serve the video converter page."""
+        return send_from_directory(app.static_folder, 'converter.html')
+    
     # ========================================
     # VIDEO PREVIEW STREAM
     # ========================================

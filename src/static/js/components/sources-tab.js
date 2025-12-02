@@ -182,6 +182,7 @@ export class SourcesTab {
         return `
             <div class="source-card" 
                  data-source-id="${source.id}"
+                 data-source-name="${source.name}"
                  data-source-type="generator"
                  draggable="true"
                  title="${source.description || source.name}">
@@ -205,9 +206,10 @@ export class SourcesTab {
         sourceCards.forEach(card => {
             card.addEventListener('dragstart', (e) => {
                 const sourceId = card.getAttribute('data-source-id');
+                const sourceName = card.getAttribute('data-source-name');
                 const sourceType = card.getAttribute('data-source-type');
-                e.dataTransfer.setData('source-id', sourceId);
-                e.dataTransfer.setData('source-type', sourceType);
+                e.dataTransfer.setData('generatorId', sourceId);
+                e.dataTransfer.setData('generatorName', sourceName);
                 e.dataTransfer.effectAllowed = 'copy';
                 card.classList.add('dragging');
             });

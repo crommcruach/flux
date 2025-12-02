@@ -510,8 +510,12 @@ class Player:
                             new_source = GeneratorSource(generator_id, parameters, self.canvas_width, self.canvas_height, self.config)
                             logger.debug(f"🌟 [{self.player_name}] Loading generator: {generator_id}")
                         else:
-                            new_source = VideoSource(next_item_path, self.canvas_width, self.canvas_height, self.config)
-                            logger.debug(f"🎬 [{self.player_name}] Loading video: {next_item_path}")
+                            # Look up clip_id for this video to support trim/reverse
+                            clip_id = self.playlist_ids.get(next_item_path)
+                            logger.info(f"🔍 [{self.player_name}] Looking up clip_id: path='{next_item_path}', found={clip_id}")
+                            logger.debug(f"   playlist_ids keys: {list(self.playlist_ids.keys())}")
+                            new_source = VideoSource(next_item_path, self.canvas_width, self.canvas_height, self.config, clip_id=clip_id)
+                            logger.debug(f"🎬 [{self.player_name}] Loading video: {next_item_path} (clip_id={clip_id})")
                         
                         # Initialisiere neue Source
                         if not new_source.initialize():
@@ -1291,7 +1295,7 @@ class Player:
         
         # Detect source type from path
         if abs_path.endswith(('.mp4', '.avi', '.mov', '.mkv')):
-            base_source = VideoSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
+            base_source = VideoSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height, config=self.config, clip_id=clip_id)
         elif abs_path.startswith('generator:'):
             gen_id = abs_path.replace('generator:', '')
             # Get generator parameters from clip metadata if available
@@ -1326,7 +1330,8 @@ class Player:
                     video_path = source_path
                     if video_dir and not os.path.isabs(video_path):
                         video_path = os.path.join(video_dir, video_path)
-                    source = VideoSource(video_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
+                    # Additional layers don't get clip_id - only base layer should have trim/reverse
+                    source = VideoSource(video_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height, config=self.config)
                 elif source_type == 'generator':
                     # Get generator parameters from layer definition if available
                     gen_params = layer_def.get('parameters', {})

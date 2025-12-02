@@ -2511,6 +2511,8 @@ async function refreshClipEffects() {
         if (data.success) {
             clipEffects = data.effects || [];
             renderClipEffects();
+            // Load trim settings after rendering
+            await loadTrimSettings();
         }
     } catch (error) {
         console.error('❌ Error refreshing clip effects:', error);
@@ -2540,10 +2542,34 @@ function renderClipEffects() {
         expandedStates.add(item.id);
     });
     
-    // Build HTML: Generator Parameters (if any) + Effects
+    // Build HTML: Trim Controls + Generator Parameters (if any) + Effects
     let html = '';
     
-    // Add generator parameters section first
+    // Add trimming controls section first (only for video clips, not generators)
+    if (selectedClipId && !window.currentGeneratorId) {
+        html += `
+            <div class="trim-controls-section" style="margin-bottom: 1rem;">
+                <div class="effect-item-header" onclick="toggleTrimSection(event)" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span class="effect-toggle">▶</span>
+                        <span style="font-weight: 600;">✂️ Clip Trimming</span>
+                    </div>
+                </div>
+                <div class="trim-body" style="display: none; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-left: 3px solid var(--accent-color); border-radius: 0 0 6px 6px; margin-top: -1px;">
+                    <div class="form-group mb-3">
+                        <label class="form-label" style="font-size: 0.85rem; margin-bottom: 0.75rem;">Trim Range (Frames):</label>
+                        <input type="text" id="trimRangeSlider" name="trim_range" value="" style="display: none;"/>
+                    </div>
+                    <div class="form-check form-switch" style="margin-top: 1rem;">
+                        <input class="form-check-input" type="checkbox" id="reversePlayback" onchange="toggleReverse(this.checked)">
+                        <label class="form-check-label" for="reversePlayback">⏪ Reverse Playback</label>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Add generator parameters section
     html += renderGeneratorParametersSection();
     
     // Add effects section
@@ -2619,6 +2645,231 @@ window.clearClipEffects = async function() {
     } catch (error) {
         console.error('❌ Error clearing clip effects:', error);
         showToast('Error clearing clip effects', 'error');
+    }
+};
+
+// ========================================
+// CLIP TRIMMING MANAGEMENT
+// ========================================
+
+// Load current trim settings from backend
+async function loadTrimSettings() {
+    console.log('🔍 loadTrimSettings called:', { selectedClipId, hasGenerator: !!window.currentGeneratorId });
+    if (!selectedClipId || window.currentGeneratorId) {
+        console.log('⏭️ Skipping loadTrimSettings (no clip or is generator)');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/playback`);
+        const data = await response.json();
+        console.log('📊 Trim settings response:', data);
+        
+        if (data.success) {
+            const sliderInput = document.getElementById('trimRangeSlider');
+            const reverseCheckbox = document.getElementById('reversePlayback');
+            
+            console.log('🎛️ Trim elements found:', { slider: !!sliderInput, reverseCheckbox: !!reverseCheckbox });
+            
+            if (sliderInput && data.total_frames !== null && data.total_frames !== undefined) {
+                const maxFrames = data.total_frames - 1;
+                const fromFrame = data.in_point !== null ? data.in_point : 0;
+                const toFrame = data.out_point !== null ? data.out_point : maxFrames;
+                
+                // Set data attributes for slider initialization
+                sliderInput.setAttribute('data-max', maxFrames);
+                sliderInput.setAttribute('data-from', fromFrame);
+                sliderInput.setAttribute('data-to', toFrame);
+                
+                console.log(`✏️ Slider config: from=${fromFrame}, to=${toFrame}, max=${maxFrames}`);
+                
+                // Initialize or update slider
+                setupTrimRangeSliders();
+            }
+            
+            if (reverseCheckbox) {
+                reverseCheckbox.checked = data.reverse || false;
+                console.log(`✏️ Set reverse checkbox: ${reverseCheckbox.checked}`);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading trim settings:', error);
+    }
+}
+
+// Reload clip settings for active clip
+async function reloadClipSettings() {
+    if (!selectedClipId) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/reload`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (data.reloaded) {
+                showToast('✅ Trim settings applied to playback', 'success');
+                debug.log('✅ Clip settings reloaded for active playback');
+            } else {
+                showToast('💾 Settings saved (load clip to see changes)', 'info');
+                debug.log('Settings saved - clip not currently playing');
+            }
+        }
+    } catch (error) {
+        console.error('Error reloading clip settings:', error);
+        showToast('⚠️ Failed to reload settings', 'error');
+    }
+}
+
+// Toggle trim section expand/collapse
+window.toggleTrimSection = function(event) {
+    event.stopPropagation();
+    const header = event.currentTarget;
+    const section = header.closest('.trim-controls-section');
+    const body = section.querySelector('.trim-body');
+    const toggle = header.querySelector('.effect-toggle');
+    
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        toggle.textContent = '▼';
+    } else {
+        body.style.display = 'none';
+        toggle.textContent = '▶';
+    }
+};
+
+// Global variable to store slider instance
+let trimSliderInstance = null;
+
+// Setup trim range slider with ion.rangeSlider
+function setupTrimRangeSliders() {
+    const sliderInput = document.getElementById('trimRangeSlider');
+    
+    if (!sliderInput) return;
+    
+    // Destroy existing instance if it exists
+    if (trimSliderInstance) {
+        try {
+            $(sliderInput).data("ionRangeSlider").destroy();
+        } catch (e) {
+            // Ignore if already destroyed
+        }
+    }
+    
+    // Get current values from backend (will be set by loadTrimSettings)
+    const maxFrames = parseInt(sliderInput.getAttribute('data-max')) || 100;
+    const fromFrame = parseInt(sliderInput.getAttribute('data-from')) || 0;
+    const toFrame = parseInt(sliderInput.getAttribute('data-to')) || maxFrames;
+    
+    // Initialize ion.rangeSlider
+    $(sliderInput).ionRangeSlider({
+        skin: "round",
+        type: "double",
+        min: 0,
+        max: maxFrames,
+        from: fromFrame,
+        to: toFrame,
+        grid: true,
+        grid_num: 10,
+        hide_min_max: false,
+        hide_from_to: false,
+        prefix: "Frame ",
+        onFinish: function (data) {
+            // Called when user releases slider
+            updateTrimPointsFromSlider(data.from, data.to);
+        }
+    });
+    
+    // Store instance
+    trimSliderInstance = $(sliderInput).data("ionRangeSlider");
+    
+    // Add right-click to reset slider to full range
+    $('.irs').on('contextmenu', function(e) {
+        e.preventDefault();
+        if (trimSliderInstance) {
+            trimSliderInstance.update({
+                from: 0,
+                to: maxFrames
+            });
+            // Trigger update to backend
+            updateTrimPointsFromSlider(0, maxFrames);
+        }
+    });
+}
+
+// Update trim points from slider values
+async function updateTrimPointsFromSlider(inPoint, outPoint) {
+    if (!selectedClipId) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/trim`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ in_point: inPoint, out_point: outPoint })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast('Trim points updated', 'success');
+            await reloadClipSettings();
+        } else {
+            showToast(data.error || 'Error updating trim', 'error');
+        }
+    } catch (error) {
+        console.error('Error updating trim:', error);
+        showToast('Error updating trim', 'error');
+    }
+}
+
+
+
+// Toggle reverse playback
+window.toggleReverse = async function(enabled) {
+    if (!selectedClipId) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/reverse`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: enabled })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Reverse playback ${enabled ? 'enabled' : 'disabled'}`, 'success');
+            // Reload settings for active clip
+            await reloadClipSettings();
+        } else {
+            showToast(data.error || 'Error toggling reverse', 'error');
+        }
+    } catch (error) {
+        console.error('Error toggling reverse:', error);
+        showToast('Error toggling reverse', 'error');
+    }
+};
+
+// Reset trim to full clip
+window.resetTrim = async function() {
+    if (!selectedClipId) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/reset-trim`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast('Trim reset to full clip', 'success');
+            await loadTrimSettings();
+            // Reload settings for active clip
+            await reloadClipSettings();
+        } else {
+            showToast(data.error || 'Error resetting trim', 'error');
+        }
+    } catch (error) {
+        console.error('Error resetting trim:', error);
+        showToast('Error resetting trim', 'error');
     }
 };
 
@@ -2751,13 +3002,15 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
     switch (paramType) {
         case 'FLOAT':
         case 'INT':
-            const step = 1; // Always use integer steps
-            const defaultValue = param.default || 0;
+            const intStep = param.step || 1;
+            const intDecimals = intStep >= 1 ? 0 : (intStep >= 0.1 ? 1 : 2);
+            const intDefaultValue = param.default || 0;
+            const intDisplayValue = intDecimals === 0 ? Math.round(value) : value.toFixed(intDecimals);
             control = `
                 <div class="parameter-control">
                     <div class="parameter-label">
                         <label for="${controlId}">${param.name}</label>
-                        <span class="parameter-value" id="${controlId}_value">${Math.round(value)}</span>
+                        <span class="parameter-value" id="${controlId}_value">${intDisplayValue}</span>
                     </div>
                     <input 
                         type="range" 
@@ -2765,11 +3018,12 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
                         id="${controlId}"
                         min="${param.min || 0}" 
                         max="${param.max || 100}" 
-                        step="${step}"
-                        value="${Math.round(value)}"
-                        data-default="${defaultValue}"
-                        oninput="updateParameter('${player}', ${effectIndex}, '${param.name}', parseInt(this.value), '${controlId}_value')"
-                        oncontextmenu="resetParameterToDefault(event, '${player}', ${effectIndex}, '${param.name}', ${defaultValue}, '${controlId}', '${controlId}_value')"
+                        step="${intStep}"
+                        value="${value}"
+                        data-default="${intDefaultValue}"
+                        data-decimals="${intDecimals}"
+                        oninput="updateParameter('${player}', ${effectIndex}, '${param.name}', ${intDecimals === 0 ? 'parseInt(this.value)' : 'parseFloat(this.value)'}, '${controlId}_value')"
+                        oncontextmenu="resetParameterToDefault(event, '${player}', ${effectIndex}, '${param.name}', ${intDefaultValue}, '${controlId}', '${controlId}_value')"
                     >
                 </div>
             `;
@@ -2790,6 +3044,36 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
                             ${param.name}
                         </label>
                     </div>
+                </div>
+            `;
+            break;
+            
+        case 'SELECT':
+            control = `
+                <div class="parameter-control">
+                    <label for="${controlId}" class="parameter-label">${param.name}</label>
+                    <select 
+                        class="form-select" 
+                        id="${controlId}"
+                        onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.value)"
+                    >
+                        ${param.options.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+            break;
+            
+        case 'COLOR':
+            control = `
+                <div class="parameter-control">
+                    <label for="${controlId}" class="parameter-label">${param.name}</label>
+                    <input 
+                        type="color" 
+                        class="form-control form-control-color" 
+                        id="${controlId}"
+                        value="${value || '#FFFFFF'}"
+                        onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.value)"
+                    >
                 </div>
             `;
             break;
@@ -2827,9 +3111,14 @@ window.resetParameterToDefault = function(event, player, effectIndex, paramName,
 
 window.updateParameter = async function(player, effectIndex, paramName, value, valueDisplayId = null) {
     try {
-        // Sofort UI-Update für responsives Feedback
+        // Sofort UI-Update für responsives Feedback mit korrekter Formatierung
         if (valueDisplayId) {
-            document.getElementById(valueDisplayId).textContent = value;
+            const displayElement = document.getElementById(valueDisplayId);
+            if (displayElement) {
+                const slider = document.getElementById(valueDisplayId.replace('_value', ''));
+                const decimals = slider ? parseInt(slider.getAttribute('data-decimals') || '0') : 0;
+                displayElement.textContent = decimals === 0 ? Math.round(value) : value.toFixed(decimals);
+            }
         }
         
         // Debounce: Warte 150ms nach letzter Änderung

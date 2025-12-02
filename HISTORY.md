@@ -1,6 +1,98 @@
 # Py_artnet - Version History
 
-## v2.3 - Unified API & Plugin System (2025-11-26)
+## v2.3 - Unified API & Plugin System (2025-11-26 - 2025-12-02)
+
+### v2.3.4 - Effect Library Expansion (2025-12-02)
+- ✓ **60+ neue Effect-Plugins implementiert** - Massive Erweiterung der Effect-Bibliothek
+- ✓ **Geometrie & Transform (6 Effekte):**
+  - Flip (Horizontal/Vertical/Both Spiegelung)
+  - Mirror (5 Modi: left-to-right, right-to-left, top-to-bottom, bottom-to-top, quad)
+  - Slide (Endlose X/Y Verschiebung mit Wrap-Around)
+  - Keystone (Perspektivische Trapez-Verzerrung, horizontal/vertikal)
+  - Fish Eye (Sphärische Linsenverzerrung, -2.0 bis +2.0)
+  - Twist (Spiralförmige Drehung mit konfigurierbarem Radius)
+- ✓ **Blur & Distortion (4 Effekte):**
+  - Radial Blur (Motion/Zoom Blur von Zentrum aus)
+  - Pixelate (LoRez Retro-Look mit konfigurierbarer Blockgröße)
+  - Displace (Verschiebung basierend auf Helligkeits-Map)
+  - Wave Warp (Sinusförmige Wellenverzerrung horizontal/vertikal)
+- ✓ **Glitch & Noise (4 Effekte):**
+  - Shift Glitch (Digitale Zeilenverschiebung mit konfigurierbarer Intensität)
+  - Distortion (Barrel/Pincushion Linsenverzerrung)
+  - Static (TV-Static/Schnee-Rauschen, schwarz/weiß oder farbig)
+  - Shift RGB (RGB-Kanal-Verschiebung für chromatische Aberration)
+- ✓ **Edge & Detection (2 Effekte):**
+  - Edge Detection (Sobel/Canny/Laplacian mit mehreren Farbmodi)
+  - Auto Mask (Automatische Maskierung durch Helligkeit/Farbbereich/Kanten)
+- ✓ **Composite & Mask (4 Effekte):**
+  - Chroma Key (Green/Blue screen removal mit Spill Suppression)
+  - Keystone Mask (Perspektivische Maskierung mit 4-Punkt-Kontrolle)
+  - Vignette (Rand-Abdunklung/-Aufhellung mit Circular/Rectangular Shape)
+  - Drop Shadow (Schatten mit Offset, Blur, Opacity und Detection Modes)
+- ✓ **Simple 3D & Kaleidoscope (4 Effekte):**
+  - Kaleidoscope (Mirror segments mit Rotation und Zoom)
+  - Tile (Grid-Repeat mit Mirror-Modi und Offset)
+  - Circles (Concentric circle mapping mit 3 Modi: radial_warp, circular_repeat, spiral)
+  - Bendoscope (Kaleidoskop + Circular Bending + Twist für psychedelische Effekte)
+- ✓ **Leicht implementierbare Zusatz-Effekte (15 Effekte):**
+  - Sharpen (Unsharp Mask mit konfigurierbarer Stärke)
+  - Emboss (3D-Relief-Effekt mit 4 Hauptrichtungen)
+  - Sepia (Vintage-Ton mit Intensitäts-Parameter)
+  - Gamma Correction (Lookup-Table-basiert, schnell)
+  - Color Temperature (Warm/Kalt-Anpassung)
+  - Channel Mixer (9 Parameter für vollständige RGB-Kontrolle)
+  - Noise (Gaussian & Salt/Pepper)
+  - Solarize (Invertierung über Schwellwert)
+  - Duotone (Zwei-Farben-Mapping für Schatten/Highlights)
+  - Oil Paint (Ölmalerei-Simulation mit Pinselgröße)
+  - Mosaic (Pixelation/Blockierung)
+  - Zoom (Zoom In/Out mit Zentrum-Kontrolle)
+  - Rotate (Rotation mit Zentrum-Kontrolle)
+  - Border (3 Modi: Solid, Replicate, Reflect)
+  - Crop (Prozentuale Zuschnitt mit Scale-Back-Option)
+- ✓ **NumPy String Type Bugfix** - COLOR Parameter handling korrigiert für np.str_ types
+
+### v2.3.3 - Clip Trimming & ion.rangeSlider UI (2025-12-01)
+- ✓ **Clip Trimming System** - In/Out Points pro Clip mit Non-Destructive Editing
+  - **ClipRegistry Integration:** Metadata für in_point, out_point, reverse, total_frames
+  - **REST API:** POST `/api/clips/<clip_id>/trim`, `/api/clips/<clip_id>/reverse`, `/api/clips/<clip_id>/reset-trim`, `/api/clips/<clip_id>/reload`
+  - **VideoSource Frame-Range-Check:** current_frame initialisiert auf in_point statt 0
+  - **Reverse Playback:** Frame-Counter rückwärts, Loop zurück zu out_point
+  - **Live-Apply:** reload_trim_settings() für aktive Wiedergabe
+- ✓ **Ion.RangeSlider Integration** - Professional UI Component für Trim Points
+  - **Double Range Slider:** Zwei Handles für in_point/out_point mit Grid Display
+  - **jQuery & ion.rangeSlider 2.3.1** via CDN
+  - **Collapsible Section:** Toggle-Arrow wie Effects-System
+  - **Right-Click Reset:** Context-Menu setzt Slider auf volle Clip-Range zurück
+  - **Dark Theme Styling:** Custom CSS für ion.rangeSlider
+- ✓ **Backend as Source of Truth:** Frontend nutzt backend-generierte clip_id statt eigene UUID
+  - **Bug Fix:** controls.js verwendet `data.clip_id` statt `crypto.randomUUID()`
+  - **Konsistente Clip-ID:** UUID über gesamten Lifecycle (Playlist → Playback → Loops)
+
+### v2.3.2 - Multi-Layer Compositing System (2025-11-28)
+- ✓ **Clip-Based Layer Architecture** - Layer-Stack pro Clip (Layer 0 = Base)
+- ✓ **BlendEffect Plugin** - 6 Blend Modes: Normal, Multiply, Screen, Overlay, Add, Subtract
+- ✓ **Layer CRUD API** - `/api/clips/{clip_id}/layers/*` Endpoints
+- ✓ **Frontend Layer Panel** - Drag & Drop, Blend Mode/Opacity Controls
+- ✓ **Thread-Safe Layer Loading** - Auto-Reload bei Clip-Wechsel
+- ✓ **Session State Persistence** - Layer-Stack in Snapshots/Projects
+
+### v2.3.1 - UI/UX Improvements (2025-11-28)
+- ✓ **Universal Search Filter Component** - Debounced Search mit Live-Resultat-Zähler
+  - Implementiert für: Effects, Sources, Files Tabs
+  - Komponenten: `search-filter.html`, `search-filter-loader.js`
+  - Dokumentation: `docs/SEARCH_FILTER.md`
+- ✓ **Multi-Video-Source Support** - `video_sources` Array in config.json
+  - UNC-Pfade (Netzwerkfreigaben) unterstützt
+  - File Browser zeigt alle Quellen als Root-Ordner
+  - API: `get_file_tree()` und `get_all_videos()` erweitert
+  - Dokumentation: `docs/VIDEO_SOURCES.md`, `docs/CONFIG_SCHEMA.md`
+- ✓ **Default Effect Chains** - Auto-Apply via config.json
+  - `effects.video`: Effect Chain beim Video-Player-Start
+  - `effects.artnet`: Effect Chain beim Art-Net-Player-Start
+  - `effects.clips`: Per-Clip Default-Effekte (UUID oder Pfad-basiert)
+  - DefaultEffectsManager mit vollständiger Validierung
+  - Dokumentation: `docs/DEFAULT_EFFECTS.md`
 
 ### Unified API Architecture mit UUID-basiertem Clip-Management
 - ✓ **ClipRegistry System** - UUID-basierte Clip-Identifikation (Singleton-Pattern)
@@ -18,10 +110,11 @@
 - ✓ **Parameter-System** - 5 Typen (float, int, bool, select, color) mit Validation
 - ✓ **Runtime-Updates** - Parameter während Playback änderbar
 - ✓ **Plugin-API** - `/api/plugins/*` Endpoints für CRUD-Operationen
-- ✓ **17 Effect-Plugins implementiert:**
+- ✓ **18 Effect-Plugins implementiert:**
   - **Farb-Manipulation (11):** add_subtract, brightness_contrast, colorize, tint, hue_rotate, invert, saturation, exposure, levels, posterize, threshold
   - **Time & Motion (5):** trails, stop_motion, delay_rgb, freeze, strobe
   - **Blur (1):** blur (Gaussian/Box)
+  - **Blending (1):** blend_mode (14 Modi: Normal, Multiply, Screen, Overlay, Add, Subtract, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion)
 
 ### Multi-Layer Compositing System (v2.3.2)
 - ✓ **Clip-Based Layer Architecture** - Jeder Clip hat eigenen Layer-Stack (Layer 0 = Base)
@@ -36,6 +129,19 @@
 - ✓ **Per-Layer Effects** - Effekte vor Compositing angewendet
 - ✓ **Backward Compatibility** - Alte Sessions automatisch konvertiert
 - ✓ **Thread-Safe Loading** - Auto-reload bei Clip-Wechsel
+
+### Transition Plugin System (v2.3.1)
+- ✓ **PluginType.TRANSITION** - `blend_frames(frame_a, frame_b, progress)` Methode
+- ✓ **Fade Transition Plugin** - Easing-Funktionen: linear, ease_in, ease_out, ease_in_out
+- ✓ **Player Integration** - Transition-Buffering mit apply_transition() bei Clip-Wechsel
+- ✓ **REST API** - `/api/transitions/list`, `/api/player/{player_id}/transition/config`, `/api/player/{player_id}/transition/status`
+- ✓ **Reusable UI Component** - `components/transition-menu.html`
+  - Enable/Disable Toggle mit Settings-Panel
+  - Effect-Dropdown dynamisch geladen von API
+  - Duration-Slider: 0.1-5.0s, 0.1s Steps, Live-Value-Display
+  - Easing-Function Selector: 4 Modi
+  - Integration in Video & Art-Net Player-UI
+- ✓ **Dokumentation** - `docs/TRANSITION_SYSTEM.md`, `docs/TRANSITION_FRONTEND_INTEGRATION.md`, `docs/TRANSITION_QUICKSTART.md`
 
 ### Code Cleanup & Deprecation
 - ✓ **Legacy Player gelöscht** - video_player.py (868 Zeilen) und script_player.py (~620 Zeilen)
