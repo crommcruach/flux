@@ -78,6 +78,18 @@
     line-height: 1.3;
 }
 
+/* Override Bootstrap text-muted for effects and sources */
+.effect-card .text-muted,
+.effect-card-body .text-muted,
+.source-card .text-muted,
+.source-card-body .text-muted,
+.effect-card-body small,
+.source-card-body small {
+    color: var(--text-tertiary) !important;
+    font-weight: 500;
+    opacity: 1 !important;
+}
+
 /* File Browser - Tree View */
 .file-tree {
     font-size: 0.875rem;
@@ -128,7 +140,8 @@
 .tree-node-size {
     flex-shrink: 0;
     font-size: 0.75rem;
-    color: var(--text-secondary);
+    color: var(--text-tertiary);
+    font-weight: 500;
 }
 
 /* File Browser - List View */
@@ -186,17 +199,33 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--text-tertiary);
+    font-weight: 500;
 }
 
 .file-size {
     flex-shrink: 0;
     font-size: 0.75rem;
+    color: var(--text-tertiary);
+    font-weight: 500;
+}
+
+/* Override Bootstrap text-muted for better contrast */
+.file-item .text-muted,
+.tree-node .text-muted {
+    color: var(--text-tertiary) !important;
+    font-weight: 500;
 }
 
 /* Search Box */
 .search-box {
     margin-bottom: 0.75rem;
     padding: 0 0.5rem;
+}
+
+.search-box input::placeholder {
+    color: var(--text-tertiary);
+    opacity: 0.9;
 }
 
 /* Dark Mode Support */
@@ -206,6 +235,7 @@
     --border-color: #dee2e6;
     --text-primary: #212529;
     --text-secondary: #6c757d;
+    --text-tertiary: #495057;
     --primary-color: #007bff;
 }
 
@@ -215,5 +245,6 @@
     --border-color: #3f4147;
     --text-primary: #e4e6eb;
     --text-secondary: #b0b3b8;
+    --text-tertiary: #c8ccd1;
     --primary-color: #4e9eff;
 }

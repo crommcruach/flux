@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,80 +7,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/css/styles.css">
-    <style>
-        .converter-container {
-            max-width: 1200px;
-            margin: 20px auto;
-            padding: 20px;
-        }
-        
-        .format-card {
-            cursor: pointer;
-            transition: all 0.3s;
-            border: 2px solid transparent;
-        }
-        
-        .format-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        }
-        
-        .format-card.selected {
-            border-color: var(--bs-primary);
-            background-color: rgba(13, 110, 253, 0.1);
-        }
-        
-        .conversion-queue-item {
-            padding: 10px;
-            margin: 5px 0;
-            border-radius: 5px;
-            background: var(--bg-darker);
-        }
-        
-        .conversion-queue-item.success {
-            border-left: 4px solid var(--bs-success);
-        }
-        
-        .conversion-queue-item.error {
-            border-left: 4px solid var(--bs-danger);
-        }
-        
-        .conversion-queue-item.processing {
-            border-left: 4px solid var(--bs-info);
-        }
-        
-        .file-browser {
-            max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid var(--border-color);
-            border-radius: 5px;
-            padding: 10px;
-        }
-        
-        .file-item {
-            padding: 8px;
-            cursor: pointer;
-            border-radius: 3px;
-            margin: 2px 0;
-        }
-        
-        .file-item:hover {
-            background: var(--hover-bg);
-        }
-        
-        .file-item.selected {
-            background: var(--bs-primary);
-            color: white;
-        }
-        
-        .progress-section {
-            display: none;
-        }
-        
-        .progress-section.active {
-            display: block;
-        }
-    </style>
+    <link rel="stylesheet" href="/css/tab-components.css">
+    <link rel="stylesheet" href="/css/converter.css">
 </head>
 <body>
     <!-- Menu Bar -->
@@ -88,10 +16,6 @@
 
     <div class="converter-container">
         <div class="card">
-            <div class="card-header">
-                <h2><i class="bi bi-film"></i> Video Converter</h2>
-                <p class="mb-0">Universal Video Converter with HAP Codec Support</p>
-            </div>
             <div class="card-body">
                 <!-- Step 1: Format Selection -->
                 <div class="mb-4">
@@ -102,36 +26,85 @@
                 <!-- Step 2: File Selection -->
                 <div class="mb-4">
                     <h5>2. Select Files</h5>
+                    
+                    <!-- Two Column Layout -->
                     <div class="row">
+                        <!-- Left Column: File Browser -->
                         <div class="col-md-6">
-                            <label class="form-label">Input Pattern or File</label>
-                            <div class="input-group">
-                                <input type="text" class="form-control" id="input-pattern" 
-                                       placeholder="e.g., video/**/*.mp4 or testbild.mp4" value="video/**/*.mp4">
-                                <button class="btn btn-outline-secondary" id="browse-btn">
-                                    <i class="bi bi-folder"></i> Browse
-                                </button>
+                            <h6 class="mb-3">📁 File Browser</h6>
+                            <div id="converter-search-container"></div>
+                            <div class="file-browser-container" id="converter-files-container" style="height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.375rem; padding: 0.5rem;">
+                                <div class="text-center text-muted">
+                                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                                    Loading files...
+                                </div>
                             </div>
-                            <small class="text-muted">
-                                Examples: <code>video/**/*.mp4</code> (all videos), 
-                                <code>kanal_1/*.mp4</code> (folder), 
-                                <code>testbild.mp4</code> (single file)
-                            </small>
                         </div>
+                        
+                        <!-- Right Column: Output Dir, Drop Zone, Actions -->
                         <div class="col-md-6">
-                            <label class="form-label">Output Directory</label>
-                            <input type="text" class="form-control" id="output-dir" 
-                                   placeholder="e.g., video_converted" value="video_converted">
-                            <small class="text-muted">Relative to project root or absolute path</small>
+                            <!-- Output Directory -->
+                            <div class="mb-3">
+                                <label class="form-label">Output Directory</label>
+                                <input type="text" class="form-control" id="output-dir" 
+                                       placeholder="e.g., video/converted" value="video/converted">
+                                <small class="text-muted">Relative to project root or absolute path</small>
+                            </div>
+                            
+                            <!-- Drop Zone -->
+                            <div>
+                                <h6 class="mb-3">🎯 Selected Files</h6>
+                                <div class="drop-zone" id="drop-zone" style="min-height: 250px;">
+                                    <div class="drop-zone-icon">📦</div>
+                                    <div class="drop-zone-text">Drag files here</div>
+                                    <div class="drop-zone-hint">
+                                        or drag from file browser<br>
+                                        or click to browse local files
+                                    </div>
+                                    <input type="file" id="file-upload-input" multiple accept="video/*,image/*" style="display: none;">
+                                    <div class="selected-files-list" id="selected-files-list">
+                                        <!-- Selected files will appear here -->
+                                    </div>
+                                </div>
+                                <div class="mt-3 d-flex gap-2">
+                                    <button class="btn btn-sm btn-outline-primary" id="browse-files-btn">
+                                        <i class="bi bi-folder2-open"></i> Browse Local Files
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" id="clear-selection-btn">
+                                        <i class="bi bi-trash"></i> Clear All
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-info" id="use-pattern-btn">
+                                        <i class="bi bi-terminal"></i> Use Pattern Instead
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     
-                    <!-- File Preview -->
-                    <div class="mt-3">
-                        <button class="btn btn-sm btn-info" id="preview-files-btn">
-                            <i class="bi bi-eye"></i> Preview Files
-                        </button>
-                        <div id="file-preview" class="mt-2"></div>
+                    <!-- Pattern Input (Alternative Mode) -->
+                    <div class="mt-3 d-none" id="pattern-input-section">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6>Pattern Mode</h6>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Input Pattern or File</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="input-pattern" 
+                                                   placeholder="e.g., video/**/*.mp4 or testbild.mp4" value="video/**/*.mp4">
+                                            <button class="btn btn-outline-secondary" id="use-browser-btn">
+                                                <i class="bi bi-folder"></i> Back to Browser
+                                            </button>
+                                        </div>
+                                        <small class="text-muted">
+                                            Examples: <code>video/**/*.mp4</code> (all videos), 
+                                            <code>kanal_1/*.mp4</code> (folder), 
+                                            <code>testbild.mp4</code> (single file)
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -223,279 +196,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // State
-        let selectedFormat = 'hap';
-        let availableFormats = [];
-        let canvasSize = {width: 60, height: 300};
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', async () => {
-            // Load menu bar
-            const menuResponse = await fetch('menu-bar.html');
-            document.getElementById('menu-bar-container').innerHTML = await menuResponse.text();
-
-            // Check converter status first
-            await checkConverterStatus();
-            
-            // Load formats
-            await loadFormats();
-            
-            // Load canvas size
-            await loadCanvasSize();
-            
-            // Event listeners
-            document.getElementById('start-conversion-btn').addEventListener('click', startConversion);
-            document.getElementById('preview-files-btn').addEventListener('click', previewFiles);
-            document.getElementById('use-canvas-size-btn').addEventListener('click', useCanvasSize);
-        });
-
-        async function checkConverterStatus() {
-            try {
-                const response = await fetch('/api/converter/status');
-                const data = await response.json();
-                
-                if (!data.success || !data.ffmpeg_available) {
-                    // Show installation instructions
-                    showFFmpegInstallationGuide();
-                    document.getElementById('start-conversion-btn').disabled = true;
-                }
-            } catch (error) {
-                console.error('Error checking converter status:', error);
-                showToast('Error checking converter status: ' + error.message, 'warning');
-            }
-        }
-
-        function showFFmpegInstallationGuide() {
-            const guide = document.createElement('div');
-            guide.className = 'alert alert-warning alert-dismissible fade show';
-            guide.innerHTML = `
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                <h5><i class="bi bi-exclamation-triangle"></i> FFmpeg Not Found</h5>
-                <p class="mb-2">FFmpeg is required for video conversion. Please install it:</p>
-                <div class="bg-dark p-3 rounded mb-3">
-                    <code style="color: #0f0;">winget install Gyan.FFmpeg</code>
-                </div>
-                <p class="mb-2"><strong>Steps:</strong></p>
-                <ol class="mb-2">
-                    <li>Open PowerShell as Administrator</li>
-                    <li>Run the command above</li>
-                    <li>Close and reopen PowerShell to refresh PATH</li>
-                    <li>Verify with: <code>ffmpeg -version</code></li>
-                    <li>Restart the Flux server</li>
-                </ol>
-                <p class="mb-0 small">
-                    <strong>Alternative:</strong> Download manually from 
-                    <a href="https://ffmpeg.org/download.html" target="_blank">ffmpeg.org/download.html</a>
-                </p>
-            `;
-            
-            // Insert at top of card body
-            const cardBody = document.querySelector('.card-body');
-            cardBody.insertBefore(guide, cardBody.firstChild);
-        }
-
-        async function loadFormats() {
-            try {
-                const response = await fetch('/api/converter/formats');
-                const data = await response.json();
-                availableFormats = data.formats;
-                
-                const container = document.getElementById('format-cards');
-                container.innerHTML = '';
-                
-                data.formats.forEach(format => {
-                    const card = document.createElement('div');
-                    card.className = 'col-md-3 mb-3';
-                    card.innerHTML = `
-                        <div class="card format-card ${format.id === selectedFormat ? 'selected' : ''}" 
-                             data-format="${format.id}">
-                            <div class="card-body text-center">
-                                <h5>${format.name}</h5>
-                                <p class="small mb-0">${format.description}</p>
-                            </div>
-                        </div>
-                    `;
-                    container.appendChild(card);
-                    
-                    card.querySelector('.format-card').addEventListener('click', () => {
-                        document.querySelectorAll('.format-card').forEach(c => c.classList.remove('selected'));
-                        card.querySelector('.format-card').classList.add('selected');
-                        selectedFormat = format.id;
-                    });
-                });
-            } catch (error) {
-                console.error('Error loading formats:', error);
-                showToast('Error loading formats: ' + error.message, 'danger');
-            }
-        }
-
-        async function loadCanvasSize() {
-            try {
-                const response = await fetch('/api/converter/canvas-size');
-                const data = await response.json();
-                if (data.success) {
-                    canvasSize = data.canvas;
-                }
-            } catch (error) {
-                console.error('Error loading canvas size:', error);
-            }
-        }
-
-        function useCanvasSize() {
-            document.getElementById('target-width').value = canvasSize.width;
-            document.getElementById('target-height').value = canvasSize.height;
-            document.getElementById('resize-mode').value = 'fit';
-        }
-
-        async function previewFiles() {
-            const pattern = document.getElementById('input-pattern').value;
-            const preview = document.getElementById('file-preview');
-            preview.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Loading...';
-            
-            // TODO: Implement file preview via API
-            preview.innerHTML = '<div class="alert alert-info">File preview not yet implemented. Pattern: ' + pattern + '</div>';
-        }
-
-        async function startConversion() {
-            let inputPattern = document.getElementById('input-pattern').value.trim();
-            const outputDir = document.getElementById('output-dir').value.trim();
-            const resizeMode = document.getElementById('resize-mode').value;
-            const optimizeLoop = document.getElementById('optimize-loop').checked;
-            
-            // If input doesn't contain wildcards and doesn't start with a path, add video/ prefix
-            if (!inputPattern.includes('*') && !inputPattern.includes('\\') && !inputPattern.includes('/')) {
-                // Single filename without path - check common video directories
-                inputPattern = `video/**/${inputPattern}`;
-                showToast('Searching in video folders for: ' + inputPattern, 'info');
-            }
-            
-            const width = document.getElementById('target-width').value;
-            const height = document.getElementById('target-height').value;
-            const targetSize = (width && height) ? [parseInt(width), parseInt(height)] : null;
-            
-            // Show progress section
-            document.getElementById('progress-section').classList.add('active');
-            document.getElementById('results-summary').classList.add('d-none');
-            document.getElementById('start-conversion-btn').classList.add('d-none');
-            document.getElementById('stop-conversion-btn').classList.remove('d-none');
-            
-            // Reset progress
-            updateProgress(0, 'Starting conversion...');
-            document.getElementById('conversion-queue').innerHTML = '';
-            
-            try {
-                const requestBody = {
-                    input_pattern: inputPattern,
-                    output_dir: outputDir,
-                    format: selectedFormat,
-                    target_size: targetSize,
-                    resize_mode: resizeMode,
-                    optimize_loop: optimizeLoop
-                };
-                
-                console.log('Sending conversion request:', requestBody);
-                
-                const response = await fetch('/api/converter/batch', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(requestBody)
-                });
-                
-                const data = await response.json();
-                console.log('Conversion response:', data);
-                
-                if (response.ok && data.success) {
-                    // Show results
-                    showResults(data);
-                } else {
-                    const errorMsg = data.error || 'Unknown error';
-                    
-                    // Show helpful message for "no files found" error
-                    if (errorMsg.includes('No files found')) {
-                        showToast(
-                            `${errorMsg}\n\nTip: Check if the file exists and the path is correct.\n` +
-                            `Examples:\n` +
-                            `- video/**/*.mp4 (all MP4 in video folders)\n` +
-                            `- video/kanal_1/*.mp4 (specific folder)\n` +
-                            `- C:/path/to/video.mp4 (absolute path)`,
-                            'warning'
-                        );
-                    } else {
-                        const errorDetails = data.details ? '\n\n' + data.details : '';
-                        showToast('Conversion failed: ' + errorMsg + errorDetails, 'danger');
-                    }
-                    updateProgress(0, 'Conversion failed: ' + errorMsg);
-                }
-            } catch (error) {
-                console.error('Conversion error:', error);
-                showToast('Conversion error: ' + error.message, 'danger');
-                updateProgress(0, 'Error: ' + error.message);
-            } finally {
-                document.getElementById('start-conversion-btn').classList.remove('d-none');
-                document.getElementById('stop-conversion-btn').classList.add('d-none');
-            }
-        }
-
-        function updateProgress(percent, text) {
-            document.getElementById('progress-bar').style.width = percent + '%';
-            document.getElementById('progress-percent').textContent = Math.round(percent) + '%';
-            document.getElementById('progress-text').textContent = text;
-        }
-
-        function showResults(data) {
-            updateProgress(100, 'Conversion complete!');
-            
-            // Show queue
-            const queue = document.getElementById('conversion-queue');
-            queue.innerHTML = '';
-            
-            let totalInputSize = 0;
-            let totalOutputSize = 0;
-            
-            data.results.forEach(result => {
-                const item = document.createElement('div');
-                item.className = `conversion-queue-item ${result.success ? 'success' : 'error'}`;
-                
-                const filename = result.input_path.split(/[/\\]/).pop();
-                const status = result.success ? 
-                    `✓ ${result.output_size_mb.toFixed(2)} MB (${(result.compression_ratio * 100).toFixed(1)}% of original)` :
-                    `✗ ${result.error}`;
-                
-                item.innerHTML = `
-                    <div class="d-flex justify-content-between">
-                        <span><strong>${filename}</strong></span>
-                        <span>${status}</span>
-                    </div>
-                `;
-                queue.appendChild(item);
-                
-                if (result.success) {
-                    totalInputSize += result.input_size_mb;
-                    totalOutputSize += result.output_size_mb;
-                }
-            });
-            
-            // Show summary
-            document.getElementById('success-count').textContent = data.successful;
-            document.getElementById('failed-count').textContent = data.failed;
-            document.getElementById('total-input-size').textContent = totalInputSize.toFixed(2);
-            document.getElementById('total-output-size').textContent = totalOutputSize.toFixed(2);
-            const compressionRatio = totalInputSize > 0 ? (totalOutputSize / totalInputSize * 100) : 0;
-            document.getElementById('compression-ratio').textContent = compressionRatio.toFixed(1);
-            document.getElementById('results-summary').classList.remove('d-none');
-        }
-
-        function showToast(message, type = 'info') {
-            // Simple toast notification
-            const toast = document.createElement('div');
-            toast.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
-            toast.style.zIndex = '9999';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            setTimeout(() => toast.remove(), 5000);
-        }
-    </script>
+    <script type="module" src="/js/converter.js"></script>
 </body>
 </html>

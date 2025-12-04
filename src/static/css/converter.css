@@ -1,0 +1,345 @@
+/* Video Converter Styles */
+
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.converter-container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm);
+    color: var(--text-primary);
+}
+
+.card-header {
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 8px 8px 0 0;
+    padding: 1.5rem;
+}
+
+.card-header h2 {
+    color: var(--text-primary);
+    margin: 0 0 0.5rem 0;
+    font-size: 1.75rem;
+    font-weight: 600;
+}
+
+.card-body {
+    padding: 2rem;
+}
+
+.card-body h5 {
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+.card-body h6 {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* Format Cards */
+.format-card {
+    cursor: pointer;
+    transition: all 0.3s;
+    border: 2px solid var(--border-color);
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+}
+
+.format-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 12px var(--shadow-color);
+    border-color: var(--accent-color);
+}
+
+.format-card.selected {
+    border-color: var(--accent-color);
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.format-card .card-body {
+    padding: 1rem;
+}
+
+.format-card h5 {
+    color: var(--text-primary);
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.format-card p {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+/* Form Controls */
+.form-label {
+    color: var(--text-primary);
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.form-control, .form-select {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 6px;
+}
+
+.form-control:focus, .form-select:focus {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-color);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
+}
+
+.form-check-input {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+.form-check-input:checked {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+}
+
+.form-check-label {
+    color: var(--text-primary);
+}
+
+small.text-muted {
+    color: var(--text-secondary) !important;
+}
+
+/* Drop Zone */
+.drop-zone {
+    border: 3px dashed var(--border-color);
+    border-radius: 8px;
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-tertiary);
+}
+
+.drop-zone:hover {
+    border-color: var(--accent-color);
+    background: rgba(52, 152, 219, 0.05);
+}
+
+.drop-zone.drag-over {
+    border-color: var(--btn-primary);
+    background: rgba(39, 174, 96, 0.1);
+    transform: scale(1.01);
+}
+
+.drop-zone-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.6;
+}
+
+.drop-zone-text {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.drop-zone-hint {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+/* Selected Files */
+.selected-files-list {
+    margin-top: 1rem;
+    flex-grow: 1;
+    overflow-y: auto;
+    max-height: 200px;
+}
+
+.selected-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+}
+
+.selected-file-item .file-icon {
+    margin-right: 0.5rem;
+    font-size: 1.2rem;
+}
+
+.selected-file-item .file-name {
+    flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+}
+
+.selected-file-item .remove-btn {
+    flex-shrink: 0;
+    margin-left: 0.75rem;
+    cursor: pointer;
+    color: var(--btn-danger);
+    font-size: 1.1rem;
+}
+
+.selected-file-item .remove-btn:hover {
+    opacity: 0.7;
+}
+
+/* File Browser */
+.file-browser-container {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+}
+
+/* File Browser - Multiselect */
+.file-item.selected,
+.tree-node.file.selected {
+    background: rgba(52, 152, 219, 0.2) !important;
+    border-left: 3px solid var(--accent-color) !important;
+}
+
+.file-item.selected:hover,
+.tree-node.file.selected:hover {
+    background: rgba(52, 152, 219, 0.3) !important;
+}
+
+.file-item,
+.tree-node.file {
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+/* Progress Section */
+.progress-section {
+    display: none;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.progress-section.active {
+    display: block;
+}
+
+.progress {
+    background: var(--bg-tertiary);
+    height: 2rem;
+    border-radius: 6px;
+}
+
+.progress-bar {
+    background: linear-gradient(90deg, var(--btn-primary) 0%, var(--btn-info) 100%);
+    font-weight: 600;
+}
+
+/* Conversion Queue */
+.conversion-queue-item {
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    border-left: 4px solid var(--border-color);
+}
+
+.conversion-queue-item.success {
+    border-left-color: var(--btn-primary);
+    background: rgba(39, 174, 96, 0.1);
+}
+
+.conversion-queue-item.error {
+    border-left-color: var(--btn-danger);
+    background: rgba(231, 76, 60, 0.1);
+}
+
+/* Buttons */
+.btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.btn-primary {
+    background: var(--btn-primary);
+    border-color: var(--btn-primary);
+}
+
+.btn-primary:hover {
+    background: var(--btn-primary-hover);
+    border-color: var(--btn-primary-hover);
+}
+
+.btn-danger {
+    background: var(--btn-danger);
+    border-color: var(--btn-danger);
+}
+
+.btn-danger:hover {
+    background: var(--btn-danger-hover);
+    border-color: var(--btn-danger-hover);
+}
+
+.btn-info {
+    background: var(--btn-info);
+    border-color: var(--btn-info);
+}
+
+.btn-info:hover {
+    background: var(--btn-info-hover);
+    border-color: var(--btn-info-hover);
+}
+
+.btn-outline-primary, .btn-outline-danger, .btn-outline-info {
+    border-width: 2px;
+}
+
+/* Alert */
+.alert {
+    border-radius: 6px;
+    border-left-width: 4px;
+}
+
+.alert-warning {
+    background: var(--info-bg);
+    border-color: var(--info-border);
+    color: var(--info-text);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .converter-container {
+        padding: 10px;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+}

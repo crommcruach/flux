@@ -24,6 +24,9 @@ class ClipRegistry:
         # Mapping: clip_id (UUID) -> clip_data
         self.clips: Dict[str, Dict] = {}
         
+        # Version tracking for cache invalidation (B3 Performance Optimization)
+        self._clip_effects_version: Dict[str, int] = {}  # clip_id -> version_counter
+        
         # Optional: Default effects manager for auto-applying effects
         self._default_effects_manager = None
     
@@ -133,6 +136,31 @@ class ClipRegistry:
             if clip['player_id'] == player_id
         ]
     
+    def _invalidate_cache(self, clip_id: str) -> None:
+        """
+        Invalidiert Effect-Cache für einen Clip durch Erhöhung des Version-Counters.
+        Wird bei allen Änderungen an Effekten aufgerufen (add, remove, update, clear).
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+        """
+        current_version = self._clip_effects_version.get(clip_id, 0)
+        self._clip_effects_version[clip_id] = current_version + 1
+        logger.debug(f"🔄 Cache invalidated for clip {clip_id} (version: {current_version} → {current_version + 1})")
+    
+    def get_effects_version(self, clip_id: str) -> int:
+        """
+        Gibt die aktuelle Version des Effect-Cache für einen Clip zurück.
+        Player nutzen dies für Version-basierte Cache-Invalidierung.
+        
+        Args:
+            clip_id: Eindeutige Clip-ID
+        
+        Returns:
+            Version-Counter (0 wenn Clip nicht existiert oder keine Version)
+        """
+        return self._clip_effects_version.get(clip_id, 0)
+    
     def set_default_effects_manager(self, manager):
         """
         Setzt den Default Effects Manager für Auto-Apply bei Clip-Registrierung.
@@ -183,6 +211,7 @@ class ClipRegistry:
             return False
         
         self.clips[clip_id]['effects'].append(effect_data)
+        self._invalidate_cache(clip_id)  # B3: Cache invalidieren
         logger.debug(f"Effekt zu Clip hinzugefügt: {clip_id} → {effect_data.get('plugin_id')}")
         return True
     
@@ -218,6 +247,7 @@ class ClipRegistry:
         effects = self.clips[clip_id]['effects']
         if 0 <= effect_index < len(effects):
             removed = effects.pop(effect_index)
+            self._invalidate_cache(clip_id)  # B3: Cache invalidieren
             logger.debug(f"Effekt von Clip entfernt: {clip_id} → {removed.get('plugin_id')}")
             return True
         
@@ -237,6 +267,7 @@ class ClipRegistry:
             return False
         
         self.clips[clip_id]['effects'] = []
+        self._invalidate_cache(clip_id)  # B3: Cache invalidieren
         logger.debug(f"Alle Effekte von Clip entfernt: {clip_id}")
         return True
     

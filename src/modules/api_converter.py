@@ -21,6 +21,36 @@ active_jobs = {}
 jobs_lock = threading.Lock()
 
 
+def _resolve_path(path_str: str, try_video_dir: bool = True) -> str:
+    """
+    Resolve a path to absolute path.
+    If relative, try multiple locations:
+    1. Relative to video/ directory (for files from FilesTab) if try_video_dir=True
+    2. Relative to current working directory
+    """
+    path = Path(path_str)
+    if path.is_absolute():
+        return str(path.resolve())
+    
+    # For FilesTab files, try video directory first
+    if try_video_dir:
+        video_path = Path.cwd() / 'video' / path
+        if video_path.exists():
+            return str(video_path.resolve())
+    
+    # Try relative to current working directory
+    full_path = Path.cwd() / path
+    if full_path.exists():
+        return str(full_path.resolve())
+    
+    # If try_video_dir was True and neither worked, still prefer video path for error message
+    if try_video_dir:
+        return str((Path.cwd() / 'video' / path).resolve())
+    
+    # Otherwise return the cwd-relative path
+    return str(full_path.resolve())
+
+
 @converter_bp.route('/api/converter/status', methods=['GET'])
 def converter_status():
     """Check if converter is available and working"""
@@ -122,10 +152,31 @@ def convert_video():
         if len(target_size) != 2:
             return jsonify({"error": "target_size must be [width, height]"}), 400
     
+    # Resolve paths to absolute
+    input_path = _resolve_path(data['input_path'], try_video_dir=True)
+    output_path = _resolve_path(data['output_path'], try_video_dir=False)
+    
+    # Debug logging
+    print(f"🔍 Path resolution:")
+    print(f"  Original input: {data['input_path']}")
+    print(f"  Resolved input: {input_path}")
+    print(f"  File exists: {Path(input_path).exists()}")
+    
+    # Check if input file exists
+    if not Path(input_path).exists():
+        return jsonify({
+            "error": f"Input file not found: {input_path}",
+            "original_path": data['input_path']
+        }), 404
+    
+    # Ensure output directory exists
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
     # Create job
     job = ConversionJob(
-        input_path=data['input_path'],
-        output_path=data['output_path'],
+        input_path=input_path,
+        output_path=output_path,
         format=output_format,
         target_size=target_size,
         resize_mode=resize_mode,
@@ -245,6 +296,46 @@ def batch_convert():
         error_details = traceback.format_exc()
         print(f"Converter error: {error_details}")
         return jsonify({"error": str(e), "details": error_details}), 500
+
+
+@converter_bp.route('/api/converter/upload', methods=['POST'])
+def upload_file():
+    """Upload a local file to the server for conversion"""
+    try:
+        # Check if file was uploaded
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+        
+        # Create upload directory if it doesn't exist
+        upload_dir = Path.cwd() / 'video' / 'uploads'
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Sanitize filename
+        import re
+        safe_filename = re.sub(r'[^\w\-_\. ]', '_', file.filename)
+        
+        # Save file
+        file_path = upload_dir / safe_filename
+        file.save(str(file_path))
+        
+        # Return relative path (from video directory)
+        relative_path = f"uploads/{safe_filename}"
+        
+        return jsonify({
+            "success": True,
+            "path": relative_path,
+            "filename": safe_filename
+        })
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Upload error: {error_details}")
+        return jsonify({"error": str(e)}), 500
 
 
 @converter_bp.route('/api/converter/canvas-size', methods=['GET'])

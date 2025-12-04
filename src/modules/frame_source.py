@@ -234,43 +234,44 @@ class VideoSource(FrameSource):
     
     def get_next_frame(self):
         """Gibt nächstes Video-Frame zurück."""
-        # Cache-System wurde entfernt - nur noch Live-Modus
-        with self._lock:  # Thread-Safety für FFmpeg
-            if not self.cap or not self.cap.isOpened():
-                return None, 0
+        # Performance-Optimierung: Kein Lock für sequentielle Reads (thread-safe)
+        if not self.cap or not self.cap.isOpened():
+            return None, 0
+        
+        # Check trim boundaries BEFORE reading frame
+        effective_in = self.in_point if self.in_point is not None else 0
+        effective_out = self.out_point if self.out_point is not None else self.total_frames - 1
+        
+        # Determine which frame to read
+        if not self.reverse:
+            # Forward playback
+            actual_frame = self.current_frame
             
-            # Check trim boundaries BEFORE reading frame
-            effective_in = self.in_point if self.in_point is not None else 0
-            effective_out = self.out_point if self.out_point is not None else self.total_frames - 1
+            # Check if we've reached out_point
+            if actual_frame > effective_out:
+                return None, 0  # End of trimmed clip
+        else:
+            # Reverse playback: play from out_point down to in_point
+            # current_frame counts up (0, 1, 2...) but we read backwards
+            playback_position = self.current_frame - effective_in
+            actual_frame = effective_out - playback_position
             
-            # Determine which frame to read
-            if not self.reverse:
-                # Forward playback
-                actual_frame = self.current_frame
-                
-                # Check if we've reached out_point
-                if actual_frame > effective_out:
-                    return None, 0  # End of trimmed clip
-            else:
-                # Reverse playback: play from out_point down to in_point
-                # current_frame counts up (0, 1, 2...) but we read backwards
-                playback_position = self.current_frame - effective_in
-                actual_frame = effective_out - playback_position
-                
-                # Check if we've gone before in_point
-                if actual_frame < effective_in:
-                    return None, 0  # End of trimmed clip (in reverse)
-            
-            # Seek to the frame we want to read
+            # Check if we've gone before in_point
+            if actual_frame < effective_in:
+                return None, 0  # End of trimmed clip (in reverse)
+        
+        # Seek to the frame we want to read (Lock nur für seek - non-sequential access)
+        with self._lock:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame)
-            
-            ret, frame = self.cap.read()
-            
-            if not ret:
-                return None, 0  # End of video
-            
-            # BGR zu RGB konvertieren
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Read frame ohne Lock (FFmpeg sequential read ist thread-safe)
+        ret, frame = self.cap.read()
+        
+        if not ret:
+            return None, 0  # End of video
+        
+        # BGR zu RGB konvertieren
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         # Transparenz verarbeiten (GIF)
         if self.is_gif:
@@ -315,13 +316,13 @@ class VideoSource(FrameSource):
         start_frame = self.in_point if self.in_point is not None else 0
         self.current_frame = start_frame
         
-        with self._lock:  # Thread-Safety
+        with self._lock:  # Lock für seek-Operation (non-sequential access)
             if self.cap and self.cap.isOpened():
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     
     def cleanup(self):
         """Gibt Video-Ressourcen frei."""
-        with self._lock:  # Thread-Safety
+        with self._lock:  # Lock für VideoCapture.release() (kritische Operation)
             if self.cap:
                 self.cap.release()
                 self.cap = None

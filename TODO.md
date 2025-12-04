@@ -203,7 +203,7 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 3.3 🎬 HAP Codec Support & Video Converter (~8-12h)
+### 3.3 🎬 HAP Codec Support & Video Converter ✅ COMPLETED (~12h)
 
 - [x] **HAP Codec Decoder (4-5h):** ✅ COMPLETED (2025-12-02)
   - ✅ HAP Varianten: HAP (DXT1), HAP Alpha (DXT5), HAP Q (BC7)
@@ -214,32 +214,30 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 - [x] **Universal Video Converter (4-7h):** ✅ COMPLETED (2025-12-02)
   - ✅ Input-Formate: AVI, MP4, MOV, GIF, PNG-Sequences
-  - ✅ Output-Profile: HAP (Performance), H.264 (Hardware-Encoding)
-  - ✅ Batch-Processing: Ganze Ordner konvertieren
-  - ✅ Auto-Resize: Auf Canvas-Größe skalieren
-  - ✅ Loop-Optimierung: Nahtlose Loops
+  - ✅ Output-Profile: HAP (Performance), H.264 (Hardware-Encoding), H.264 NVENC (GPU)
+  - ✅ Batch-Processing: Ganze Ordner konvertieren mit glob patterns (recursive)
+  - ✅ Resize Modes: none, fit, fill, stretch, auto
+  - ✅ Loop-Optimierung: Nahtlose Loops mit FFmpeg fade filters
   - ✅ Separate HTML-Page: Eigenständige Converter-UI (converter.html)
   - ✅ FFmpeg-Wrapper mit Progress-Tracking
-  - ✅ REST API Endpoints
-  - ✅ Web-UI mit separater HTML-Page
+  - ✅ REST API Endpoints: status, formats, info, convert, batch, upload, canvas-size
+  - ✅ Web-UI mit separater HTML-Page und Dark Mode
 
-- [ ] **Converter UI Optimierung (~2-3h):**
-  - [ ] File Browser für lokale Dateien
-  - [ ] Preview der zu konvertierenden Dateien
-  - [ ] Real-time Progress während Conversion
-  - [ ] Queue Management (Pause/Resume/Cancel)
-  - [ ] Preset-System (Common Canvas-Größen speichern)
-  - [ ] Drag & Drop für Dateien
-  - [ ] Batch-Operationen: Alle auswählen/abwählen
-
-**CLI-Beispiele:**
-```bash
-# Einzelnes Video zu HAP
-python convert.py video.mp4 --format hap --resize 60x300
-
-# Batch-Convert ganzer Ordner
-python convert.py kanal_1/*.mp4 --format hap --auto-resize
-```
+- [x] **Converter UI Implementation (3h):** ✅ COMPLETED (2025-12-02)
+  - ✅ File Browser Integration (FilesTab component mit tree/list view)
+  - ✅ Drag & Drop Zone (from file browser + from file system)
+  - ✅ Local File Upload (browse button + drag & drop support)
+  - ✅ Dual-Mode Selection: Browser Mode (drag & drop) vs Pattern Mode (glob)
+  - ✅ Multi-file Sequential Conversion mit progress tracking
+  - ✅ Canvas Size Integration (loads from config.json, fallback 60x300)
+  - ✅ Output Directory Selection
+  - ✅ Format Selection Cards (HAP, HAP Alpha, HAP Q, H.264, H.264 NVENC)
+  - ✅ Conversion Options (Resize Mode, Optimize Loop, Target Size)
+  - ✅ Progress Bar & Queue Display
+  - ✅ Results Summary (success/failed counts, compression ratio)
+  - ✅ Consistent Styling (matches app design with CSS variables)
+  - ✅ Search Filter für File Browser (works in both tree and list view)
+  - ✅ Auto-expand folders when searching in tree view
 
 ---
 
@@ -431,6 +429,29 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 
 ### 5.4 🛠️ Weitere Verbesserungen
 
+- [ ] **File Browser Thumbnails (~6-10h):**
+  - **Thumbnail Generation:**
+    - Video: Erstes Frame als Thumbnail (FFmpeg -ss 0 -vframes 1)
+    - Image: Resized Preview (Pillow/OpenCV)
+    - Cache-System: Thumbnails in `data/thumbnails/` speichern
+    - Lazy-Loading: Thumbnails on-demand generieren
+  - **UI Features:**
+    - Toggle-Button: Enable/Disable Thumbnail-Anzeige
+    - List-View: Thumbnail neben Dateinamen (50x50px)
+    - Tree-View: Thumbnail neben File-Icon (40x40px)
+    - Hover-Popup: Größeres Preview (200x200px) bei Mouse-Hover
+    - Loading-State: Spinner während Thumbnail-Generation
+  - **Performance:**
+    - Thumbnail-Size: 100x100px (JPEG, 85% Qualität)
+    - Max. Generation-Time: 500ms pro Video
+    - Batch-Generation: API-Endpoint `/api/files/thumbnails/generate`
+    - Cache-Cleanup: Alte Thumbnails nach 30 Tagen löschen
+  - **Implementation:**
+    - Phase 1: Thumbnail-Generator (FFmpeg + Pillow) (~2h)
+    - Phase 2: Cache-System & API (~2h)
+    - Phase 3: FilesTab UI Integration (~2h)
+    - Phase 4: Toggle & Settings (~1h)
+
 - [ ] **Vollständige Player/Playlist-Generalisierung (~8-12h):**
   - Hardcodierte Playlist-Arrays entfernen (`videoFiles`, `artnetFiles`)
   - Hardcodierte Current-Item-IDs zu `playerConfigs[playerId].currentItemId` migrieren
@@ -501,11 +522,11 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
 |-----------|---------|--------|---------------|
 | **P1** | Niedrig | Hoch | ~22-34h |
 | **P2** | Mittel | Hoch | ~14-24h |
-| **P3** | Mittel | Mittel | ~33-51h |
+| **P3** | Mittel | Mittel | ~21-39h (✅ 12h completed) |
 | **P4** | Hoch | Hoch | ~24-40h |
 | **P5** | Niedrig | Niedrig | ~14-21h |
 | **P6** | Sehr Hoch | Mittel | ~64-86h |
-| **GESAMT** | | | **~171-256h** |
+| **GESAMT** | | | **~159-244h** |
 
 ---
 
@@ -585,6 +606,21 @@ python convert.py kanal_1/*.mp4 --format hap --auto-resize
   - Right-Click Reset to Full Range
   - Backend as Source of Truth für Clip IDs
   - Live-Apply bei aktiver Wiedergabe
+- **HAP Codec & Universal Video Converter** (v2.3.4):
+  - FFmpeg-based video converter mit HAP codec support
+  - Multiple output formats: HAP, HAP Alpha, HAP Q, H.264, H.264 NVENC
+  - Batch processing mit glob patterns (recursive support)
+  - Resize modes: none, fit, fill, stretch, auto
+  - Loop optimization mit fade in/out
+  - Standalone converter.html page mit dark mode
+  - File browser integration (FilesTab component)
+  - Drag & drop from file browser and file system
+  - Local file upload support
+  - Dual-mode selection: Browser Mode vs Pattern Mode
+  - Multi-file sequential conversion mit progress tracking
+  - Smart path resolution (workspace root + video/ directory)
+  - Search filter for file browser (tree + list view)
+  - Auto-expand folders when searching
 
 ---
 

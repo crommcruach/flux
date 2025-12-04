@@ -43,7 +43,7 @@ window.toggleDebug = function(enable) {
 };
 
 export class FilesTab {
-    constructor(containerId, searchContainerId, viewMode = 'list') {
+    constructor(containerId, searchContainerId, viewMode = 'list', enableMultiselect = false) {
         this.containerId = containerId;
         this.searchContainerId = searchContainerId;
         this.files = [];
@@ -52,6 +52,8 @@ export class FilesTab {
         this.viewMode = viewMode; // 'list', 'tree', or 'button' (button = user can toggle)
         this.currentView = viewMode === 'button' ? 'list' : viewMode; // Actual view when in button mode
         this.expandedFolders = new Set();
+        this.enableMultiselect = enableMultiselect; // Enable multiselect mode
+        this.selectedFiles = new Set(); // Track selected files in multiselect mode
     }
     
     /**
@@ -203,7 +205,10 @@ export class FilesTab {
      * Filter files based on search term
      */
     filterFiles() {
-        if (this.viewMode === 'list') {
+        const activeView = this.viewMode === 'button' ? this.currentView : this.viewMode;
+        
+        if (activeView === 'list') {
+            // Filter list view
             if (!this.searchTerm) {
                 this.filteredFiles = [...this.files];
             } else {
@@ -215,6 +220,9 @@ export class FilesTab {
                            path.includes(this.searchTerm);
                 });
             }
+        } else if (activeView === 'tree') {
+            // For tree view, we'll filter during render
+            // Just trigger a re-render
         }
         
         this.render();
@@ -255,14 +263,64 @@ export class FilesTab {
             return;
         }
         
+        // Apply search filter if active
+        const filteredTree = this.searchTerm ? this.filterTreeNodes(this.fileTree) : this.fileTree;
+        
+        if (filteredTree.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔍</div>
+                    <p>No files found matching "${this.searchTerm}"</p>
+                </div>
+            `;
+            return;
+        }
+        
         let html = '<div class="file-tree">';
-        this.fileTree.forEach(node => {
+        filteredTree.forEach(node => {
             html += this.renderTreeNode(node, 0);
         });
         html += '</div>';
         
         container.innerHTML = html;
         this.attachTreeEventListeners();
+    }
+    
+    /**
+     * Filter tree nodes based on search term
+     */
+    filterTreeNodes(nodes) {
+        const filtered = [];
+        
+        for (const node of nodes) {
+            if (node.type === 'file') {
+                // Check if file matches search
+                const name = node.name?.toLowerCase() || '';
+                const path = node.path?.toLowerCase() || '';
+                
+                if (name.includes(this.searchTerm) || path.includes(this.searchTerm)) {
+                    filtered.push(node);
+                }
+            } else if (node.type === 'folder') {
+                // Recursively filter children
+                const filteredChildren = node.children ? this.filterTreeNodes(node.children) : [];
+                
+                // Include folder if it has matching children or matches itself
+                const name = node.name?.toLowerCase() || '';
+                if (filteredChildren.length > 0 || name.includes(this.searchTerm)) {
+                    filtered.push({
+                        ...node,
+                        children: filteredChildren
+                    });
+                    // Auto-expand folders when searching
+                    if (this.searchTerm) {
+                        this.expandedFolders.add(node.path);
+                    }
+                }
+            }
+        }
+        
+        return filtered;
     }
     
     /**
@@ -292,9 +350,10 @@ export class FilesTab {
             return html;
         } else {
             const icon = node.type === 'video' ? '🎬' : '🖼️';
+            const isSelected = this.selectedFiles.has(node.path);
             
             return `
-                <div class="tree-node file" 
+                <div class="tree-node file ${isSelected ? 'selected' : ''}" 
                      style="padding-left: ${indent}px" 
                      data-path="${node.path}"
                      data-type="${node.type}"
@@ -327,9 +386,10 @@ export class FilesTab {
         
         this.filteredFiles.forEach(file => {
             const icon = file.type === 'video' ? '🎬' : '🖼️';
+            const isSelected = this.selectedFiles.has(file.path);
             
             html += `
-                <div class="file-item" 
+                <div class="file-item ${isSelected ? 'selected' : ''}" 
                      data-path="${file.path}"
                      data-type="${file.type}"
                      draggable="true">
@@ -417,15 +477,53 @@ export class FilesTab {
             });
         });
         
+        // File click events (for multiselect)
+        if (this.enableMultiselect) {
+            container.querySelectorAll('.tree-node.file').forEach(file => {
+                file.addEventListener('click', (e) => {
+                    const path = file.getAttribute('data-path');
+                    const type = file.getAttribute('data-type');
+                    
+                    // Toggle selection
+                    if (this.selectedFiles.has(path)) {
+                        this.selectedFiles.delete(path);
+                    } else {
+                        this.selectedFiles.add(path);
+                    }
+                    
+                    // Dispatch custom event for parent component
+                    this.dispatchSelectionEvent();
+                    
+                    this.render();
+                });
+            });
+        }
+        
         // File drag events
         container.querySelectorAll('.tree-node.file').forEach(file => {
             file.addEventListener('dragstart', (e) => {
                 const path = file.getAttribute('data-path');
                 const type = file.getAttribute('data-type');
-                debug.log('🎬 DRAG START (tree):', path, 'type:', type);
-                e.dataTransfer.setData('text/plain', path); // Standard MIME type for compatibility
-                e.dataTransfer.setData('file-path', path);
-                e.dataTransfer.setData('file-type', type);
+                
+                // If multiselect is enabled and files are selected, drag all selected files
+                if (this.enableMultiselect && this.selectedFiles.size > 0) {
+                    // If the dragged file is not in selection, add it
+                    if (!this.selectedFiles.has(path)) {
+                        this.selectedFiles.add(path);
+                        this.render();
+                    }
+                    
+                    debug.log('🎬 DRAG START (tree) - Multiple files:', Array.from(this.selectedFiles));
+                    e.dataTransfer.setData('text/plain', path); // Single path for compatibility
+                    e.dataTransfer.setData('file-paths', JSON.stringify(Array.from(this.selectedFiles)));
+                    e.dataTransfer.setData('file-type', type);
+                } else {
+                    debug.log('🎬 DRAG START (tree):', path, 'type:', type);
+                    e.dataTransfer.setData('text/plain', path);
+                    e.dataTransfer.setData('file-path', path);
+                    e.dataTransfer.setData('file-type', type);
+                }
+                
                 e.dataTransfer.effectAllowed = 'copy';
                 file.classList.add('dragging');
             });
@@ -437,19 +535,87 @@ export class FilesTab {
     }
     
     /**
+     * Dispatch selection change event
+     */
+    dispatchSelectionEvent() {
+        const container = document.getElementById(this.containerId);
+        if (container) {
+            const event = new CustomEvent('filesSelected', {
+                detail: {
+                    selectedFiles: Array.from(this.selectedFiles)
+                }
+            });
+            container.dispatchEvent(event);
+        }
+    }
+    
+    /**
+     * Clear selection
+     */
+    clearSelection() {
+        this.selectedFiles.clear();
+        this.render();
+        this.dispatchSelectionEvent();
+    }
+    
+    /**
+     * Get selected files
+     */
+    getSelectedFiles() {
+        return Array.from(this.selectedFiles);
+    }
+    
+    /**
      * Attach list view event listeners
      */
     attachListEventListeners() {
         const fileItems = document.querySelectorAll(`#${this.containerId} .file-item`);
         
         fileItems.forEach(item => {
+            // Click event for multiselect
+            if (this.enableMultiselect) {
+                item.addEventListener('click', (e) => {
+                    const path = item.getAttribute('data-path');
+                    const type = item.getAttribute('data-type');
+                    
+                    // Toggle selection
+                    if (this.selectedFiles.has(path)) {
+                        this.selectedFiles.delete(path);
+                    } else {
+                        this.selectedFiles.add(path);
+                    }
+                    
+                    // Dispatch custom event for parent component
+                    this.dispatchSelectionEvent();
+                    
+                    this.render();
+                });
+            }
+            
+            // Drag events
             item.addEventListener('dragstart', (e) => {
                 const path = item.getAttribute('data-path');
                 const type = item.getAttribute('data-type');
-                debug.log('🎬 DRAG START (list):', path, 'type:', type);
-                e.dataTransfer.setData('text/plain', path); // Standard MIME type for compatibility
-                e.dataTransfer.setData('file-path', path);
-                e.dataTransfer.setData('file-type', type);
+                
+                // If multiselect is enabled and files are selected, drag all selected files
+                if (this.enableMultiselect && this.selectedFiles.size > 0) {
+                    // If the dragged file is not in selection, add it
+                    if (!this.selectedFiles.has(path)) {
+                        this.selectedFiles.add(path);
+                        this.render();
+                    }
+                    
+                    debug.log('🎬 DRAG START (list) - Multiple files:', Array.from(this.selectedFiles));
+                    e.dataTransfer.setData('text/plain', path); // Single path for compatibility
+                    e.dataTransfer.setData('file-paths', JSON.stringify(Array.from(this.selectedFiles)));
+                    e.dataTransfer.setData('file-type', type);
+                } else {
+                    debug.log('🎬 DRAG START (list):', path, 'type:', type);
+                    e.dataTransfer.setData('text/plain', path);
+                    e.dataTransfer.setData('file-path', path);
+                    e.dataTransfer.setData('file-type', type);
+                }
+                
                 e.dataTransfer.effectAllowed = 'copy';
                 item.classList.add('dragging');
             });

@@ -93,6 +93,11 @@ class PluginBase(ABC):
             config: Dictionary mit Parameter-Werten (Key = Parameter Name)
         """
         self.config = config or {}
+        
+        # B6 Performance: JSON-Caching für API-Responses
+        self._cached_metadata_json = None
+        self._cached_parameters_json = None
+        
         self.validate_metadata()
         self.validate_parameters()
         self.initialize(self.config)
@@ -265,6 +270,48 @@ class PluginBase(ABC):
             Plugin-Metadaten
         """
         return self.METADATA
+    
+    def get_metadata_json(self) -> Dict[str, Any]:
+        """
+        Gibt METADATA Dictionary mit Enum→String Konvertierung zurück (gecacht).
+        B6 Performance Optimization: Cached für API-Responses (120/min → 1/plugin-lifetime).
+        
+        Returns:
+            Plugin-Metadaten mit serialisierten Enums
+        """
+        if self._cached_metadata_json is None:
+            # Einmalig konvertieren
+            metadata = self.METADATA.copy()
+            
+            # Konvertiere PluginType Enum zu String
+            if 'type' in metadata and isinstance(metadata['type'], PluginType):
+                metadata['type'] = metadata['type'].value
+            
+            self._cached_metadata_json = metadata
+        
+        return self._cached_metadata_json
+    
+    def get_parameters_json(self) -> List[Dict[str, Any]]:
+        """
+        Gibt PARAMETERS Array mit Enum→String Konvertierung zurück (gecacht).
+        B6 Performance Optimization: Cached für API-Responses.
+        
+        Returns:
+            Parameter-Definitionen mit serialisierten Enums
+        """
+        if self._cached_parameters_json is None:
+            # Deep copy to avoid modifying class-level PARAMETERS
+            import copy
+            parameters = copy.deepcopy(self.PARAMETERS)
+            
+            # Konvertiere ParameterType Enum zu String
+            for param in parameters:
+                if 'type' in param and isinstance(param['type'], ParameterType):
+                    param['type'] = param['type'].value
+            
+            self._cached_parameters_json = parameters
+        
+        return self._cached_parameters_json
     
     def __repr__(self):
         return f"<{self.__class__.__name__} id={self.METADATA.get('id', 'unknown')} type={self.METADATA.get('type', 'unknown')}>"

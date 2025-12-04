@@ -99,6 +99,11 @@ class Player:
         # Effect Chains für Plugins (getrennt für Video-Preview und Art-Net)
         self.video_effect_chain = []  # Video-Preview FX (nicht zu Art-Net)
         self.artnet_effect_chain = []  # Art-Net Output FX (nicht zu Video-Preview)
+        
+        # B3 Performance: ClipRegistry-Effect-Cache mit Version-Tracking
+        self._cached_clip_effects = None  # Cached effect list
+        self._cached_clip_id = None       # Clip ID of cached effects
+        self._cached_version = -1         # Version counter for cache invalidation
         self.current_clip_id = None  # UUID of currently loaded clip (for clip effects from registry)
         self.plugin_manager = get_plugin_manager()
         
@@ -633,22 +638,36 @@ class Player:
             if self.transition_config.get("enabled"):
                 self.transition_buffer = frame.copy()
             
-            # Helligkeit und Hue Shift auf komplettes Frame anwenden für Preview
-            frame_with_brightness = frame.astype(np.float32)
-            frame_with_brightness *= self.brightness
-            frame_with_brightness = np.clip(frame_with_brightness, 0, 255).astype(np.uint8)
+            # Helligkeit in-place anwenden (Performance-Optimierung: keine Kopie!)
+            if self.brightness != 1.0:
+                # NumPy in-place multiplication (arbeitet direkt auf frame)
+                np.multiply(frame, self.brightness, out=frame, casting='unsafe')
+                np.clip(frame, 0, 255, out=frame)
+                frame = frame.astype(np.uint8)
             
-            # Hue Shift anwenden wenn aktiviert
+            # Hue Shift in-place anwenden wenn aktiviert
             if self.hue_shift != 0:
-                frame_hsv = cv2.cvtColor(frame_with_brightness, cv2.COLOR_RGB2HSV)
+                frame_hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
                 frame_hsv[:, :, 0] = (frame_hsv[:, :, 0].astype(np.int16) + self.hue_shift // 2) % 180
-                frame_with_brightness = cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2RGB)
+                cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2RGB, dst=frame)
             
-            # Wende Video Effect Chain an (nur für Preview)
-            frame_for_video_preview = self.apply_effects(frame_with_brightness, chain_type='video')
-            
-            # Wende Art-Net Effect Chain an (für Art-Net Ausgabe)
-            frame_for_artnet = self.apply_effects(frame_with_brightness, chain_type='artnet')
+            # Wende Effect Chains an - nur kopieren wenn beide Chains unterschiedlich sind
+            if self.video_effect_chain and self.artnet_effect_chain:
+                # Beide Chains aktiv: Kopie nötig für separate Processing
+                frame_for_video_preview = self.apply_effects(frame.copy(), chain_type='video')
+                frame_for_artnet = self.apply_effects(frame, chain_type='artnet')
+            elif self.video_effect_chain:
+                # Nur Video-Chain: Art-Net nutzt Original
+                frame_for_video_preview = self.apply_effects(frame.copy(), chain_type='video')
+                frame_for_artnet = frame
+            elif self.artnet_effect_chain:
+                # Nur Art-Net-Chain: Video nutzt Original
+                frame_for_artnet = self.apply_effects(frame, chain_type='artnet')
+                frame_for_video_preview = frame
+            else:
+                # Keine Effects: Beide nutzen Original (View, keine Kopie!)
+                frame_for_video_preview = frame
+                frame_for_artnet = frame
             
             # Alpha-Compositing für Preview (wenn RGBA vorhanden)
             if frame_for_video_preview.shape[2] == 4:
@@ -658,8 +677,11 @@ class Player:
             if frame_for_artnet.shape[2] == 4:
                 frame_for_artnet = self._alpha_composite_to_black(frame_for_artnet)
             
-            # Speichere komplettes Frame für Video-Preview (konvertiere zu BGR für OpenCV)
-            self.last_video_frame = cv2.cvtColor(frame_for_video_preview, cv2.COLOR_RGB2BGR)
+            # Speichere komplettes Frame für Video-Preview (BGR-Conversion mit Buffer-Reuse)
+            if not hasattr(self, '_bgr_buffer') or self._bgr_buffer.shape != frame_for_video_preview.shape[:2]:
+                self._bgr_buffer = np.empty((frame_for_video_preview.shape[0], frame_for_video_preview.shape[1], 3), dtype=np.uint8)
+            cv2.cvtColor(frame_for_video_preview, cv2.COLOR_RGB2BGR, dst=self._bgr_buffer)
+            self.last_video_frame = self._bgr_buffer
             
             # NumPy-optimierte Pixel-Extraktion (verwende Art-Net Frame!)
             valid_mask = (
@@ -679,8 +701,8 @@ class Player:
             dmx_buffer[valid_mask] = rgb_values
             dmx_buffer = dmx_buffer.flatten().tolist()
             
-            # Speichere für Preview
-            self.last_frame = dmx_buffer.copy()
+            # Speichere für Preview (Liste ist bereits Kopie, kein .copy() nötig)
+            self.last_frame = dmx_buffer
             
             # Recording
             if self.is_recording:
@@ -1030,8 +1052,35 @@ class Player:
         
         # 1. Apply clip-level effects first (if current clip has effects)
         # NEU: Effekte aus ClipRegistry laden (UUID-basiert) statt aus self.clip_effects (path-basiert)
+        # B3 Performance Optimization: Version-basierte Cache-Invalidierung
         if self.clip_registry and hasattr(self, 'current_clip_id') and self.current_clip_id:
-            clip_effects = self.clip_registry.get_clip_effects(self.current_clip_id)
+            current_version = self.clip_registry.get_effects_version(self.current_clip_id)
+            
+            # Cache-Check: clip_id UND version müssen übereinstimmen
+            if (self._cached_clip_id == self.current_clip_id and 
+                self._cached_version == current_version):
+                # Cache hit! Nutze gecachte Effekte (99.9% der Frames)
+                clip_effects = self._cached_clip_effects
+            else:
+                # Cache miss: Lade Effekte neu (nur bei Clip-Wechsel oder Parameter-Änderung)
+                clip_effects = self.clip_registry.get_clip_effects(self.current_clip_id)
+                
+                # Pre-instantiate plugin instances (remove lazy-loading overhead)
+                for effect_data in clip_effects:
+                    if 'instance' not in effect_data:
+                        plugin_id = effect_data['plugin_id']
+                        if plugin_id in self.plugin_manager.registry:
+                            plugin_class = self.plugin_manager.registry[plugin_id]
+                            effect_data['instance'] = plugin_class()
+                            logger.info(f"✅ [{self.player_name}] Created clip effect instance: {plugin_id} for clip {self.current_clip_id}")
+                        else:
+                            logger.warning(f"Plugin '{plugin_id}' not found in registry")
+                
+                # Update cache
+                self._cached_clip_effects = clip_effects
+                self._cached_clip_id = self.current_clip_id
+                self._cached_version = current_version
+                logger.debug(f"📦 [{self.player_name}] Effect cache updated for clip {self.current_clip_id} (version: {current_version})")
             
             if clip_effects:
                 # Log once per second to avoid spam
@@ -1041,19 +1090,10 @@ class Player:
                 
                 for effect_data in clip_effects:
                     try:
-                        # Lazy instance creation
-                        if 'instance' not in effect_data:
-                            plugin_id = effect_data['plugin_id']
-                            if plugin_id in self.plugin_manager.registry:
-                                plugin_class = self.plugin_manager.registry[plugin_id]
-                                effect_data['instance'] = plugin_class()
-                                logger.info(f"✅ [{self.player_name}] Created clip effect instance: {plugin_id} for clip {self.current_clip_id}")
-                            else:
-                                logger.warning(f"Plugin '{plugin_id}' not found in registry")
-                                continue
+                        # Instance ist garantiert vorhanden (pre-instantiated im Cache)
+                        plugin_instance = effect_data['instance']
                         
                         # Update parameters from effect_data EVERY frame (parameters may have changed via API)
-                        plugin_instance = effect_data['instance']
                         for param_name, param_value in effect_data['parameters'].items():
                             setattr(plugin_instance, param_name, param_value)
                         

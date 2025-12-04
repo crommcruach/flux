@@ -195,6 +195,7 @@ class PluginManager:
     def get_plugin_metadata(self, plugin_id: str) -> Optional[Dict]:
         """
         Gibt METADATA eines Plugins zurück.
+        B6 Performance: Nutzt gecachte JSON-Version (keine redundanten Enum-Conversions).
         
         Args:
             plugin_id: Plugin-ID
@@ -205,17 +206,22 @@ class PluginManager:
         if plugin_id not in self.registry:
             return None
         
-        metadata = self.registry[plugin_id].METADATA.copy()
-        
-        # Konvertiere PluginType Enum zu String
-        if 'type' in metadata and isinstance(metadata['type'], PluginType):
-            metadata['type'] = metadata['type'].value
-        
-        return metadata
+        # B6: Nutze gecachte JSON-Version (Enum→String bereits konvertiert)
+        # Erstelle temporäre Instanz nur für Metadata-Zugriff (lightweight)
+        try:
+            temp_instance = self.registry[plugin_id]()
+            return temp_instance.get_metadata_json()
+        except:
+            # Fallback: Manuelle Konvertierung (falls __init__ fehlschlägt)
+            metadata = self.registry[plugin_id].METADATA.copy()
+            if 'type' in metadata and isinstance(metadata['type'], PluginType):
+                metadata['type'] = metadata['type'].value
+            return metadata
     
     def get_plugin_parameters(self, plugin_id: str) -> Optional[List[Dict]]:
         """
         Gibt PARAMETERS eines Plugins zurück (für UI-Generierung).
+        B6 Performance: Nutzt gecachte JSON-Version (keine redundanten Enum-Conversions).
         
         Args:
             plugin_id: Plugin-ID
@@ -226,19 +232,18 @@ class PluginManager:
         if plugin_id not in self.registry:
             return None
         
-        # Deep copy to avoid modifying the original class PARAMETERS
-        import copy
-        parameters = copy.deepcopy(self.registry[plugin_id].PARAMETERS)
-        
-        # Konvertiere ParameterType Enum zu String (falls noch nicht)
-        for param in parameters:
-            if 'type' in param:
-                # Check if it's already a string or an enum
-                if isinstance(param['type'], ParameterType):
+        # B6: Nutze gecachte JSON-Version (Enum→String bereits konvertiert & deep-copied)
+        try:
+            temp_instance = self.registry[plugin_id]()
+            return temp_instance.get_parameters_json()
+        except:
+            # Fallback: Manuelle Konvertierung (falls __init__ fehlschlägt)
+            import copy
+            parameters = copy.deepcopy(self.registry[plugin_id].PARAMETERS)
+            for param in parameters:
+                if 'type' in param and isinstance(param['type'], ParameterType):
                     param['type'] = param['type'].value
-                # If it's already a string, leave it as is
-        
-        return parameters
+            return parameters
     
     def validate_parameter_value(self, plugin_id: str, param_name: str, value) -> bool:
         """

@@ -466,6 +466,9 @@ def register_unified_routes(app, player_manager, config):
             effect = effects[index]
             effect['parameters'][param_name] = param_value
             
+            # B3: Invalidate cache so player detects parameter change
+            clip_registry._invalidate_cache(clip_id)
+            
             logger.debug(f"🔧 Clip effect parameter updated: {clip_id}[{index}].{param_name} = {param_value}")
             
             # Auto-save session state
