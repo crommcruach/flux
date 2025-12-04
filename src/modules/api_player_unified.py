@@ -510,6 +510,45 @@ def register_unified_routes(app, player_manager, config):
             logger.error(f"Error updating clip effect parameter: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
     
+    @app.route('/api/player/<player_id>/clip/<clip_id>/effects/<int:index>/toggle', methods=['POST'])
+    def toggle_clip_effect(player_id, clip_id, index):
+        """
+        Toggles enabled/disabled state of a clip effect.
+        Parameters are preserved, but effect is not applied when disabled.
+        """
+        try:
+            effects = clip_registry.get_clip_effects(clip_id)
+            
+            if index < 0 or index >= len(effects):
+                return jsonify({"success": False, "error": "Invalid effect index"}), 400
+            
+            effect = effects[index]
+            
+            # Toggle enabled state (default is enabled if not set)
+            current_state = effect.get('enabled', True)
+            new_state = not current_state
+            effect['enabled'] = new_state
+            
+            # Invalidate cache so player detects the change
+            clip_registry._invalidate_cache(clip_id)
+            
+            logger.info(f"Clip effect {clip_id}[{index}] toggled: {'enabled' if new_state else 'disabled'}")
+            
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                session_state.save(player_manager, clip_registry)
+            
+            return jsonify({
+                "success": True,
+                "enabled": new_state,
+                "message": f"Effect {'enabled' if new_state else 'disabled'}"
+            })
+            
+        except Exception as e:
+            logger.error(f"Error toggling clip effect: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
     @app.route('/api/player/<player_id>/clip/<clip_id>/effects/clear', methods=['POST'])
     def clear_clip_effects(player_id, clip_id):
         """Entfernt alle Effekte von einem Clip."""
@@ -696,6 +735,34 @@ def register_unified_routes(app, player_manager, config):
             
         except Exception as e:
             logger.error(f"Error updating player effect parameter: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/player/<player_id>/effects/<int:index>/toggle', methods=['POST'])
+    def toggle_player_effect(player_id, index):
+        """Toggles the enabled/disabled state of a player-level effect."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            # Determine chain type based on player_id
+            chain_type = 'artnet' if player_id == 'artnet' else 'video'
+            
+            # Use the toggle method from player
+            success, enabled, message = player.toggle_effect_enabled(index, chain_type=chain_type)
+            
+            if success:
+                # Auto-save session state
+                session_state = get_session_state()
+                if session_state:
+                    session_state.save(player_manager, clip_registry)
+                
+                return jsonify({"success": True, "enabled": enabled, "message": message})
+            else:
+                return jsonify({"success": False, "message": message}), 400
+                
+        except Exception as e:
+            logger.error(f"Error toggling player effect: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
     
     # ========================================

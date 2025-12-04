@@ -194,4 +194,82 @@ def register_effect_routes(app, player_manager):
                 'message': message
             }), 400
     
+    @app.route('/api/player/video/effects/<int:index>/toggle', methods=['POST'])
+    def toggle_video_effect(index):
+        """
+        Toggles enabled/disabled state of a video effect.
+        Parameters are preserved, but effect is not applied when disabled.
+        
+        Args:
+            index: Index of the effect
+        
+        Returns:
+            200: {success: true, enabled: bool, message: "..."}
+            400: {success: false, message: "..."}
+            404: {error: "No active player"}
+        """
+        player = player_manager.get_video_player()
+        
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+        
+        success, enabled, message = player.toggle_effect_enabled(index, chain_type='video')
+        
+        if success:
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                clip_registry = get_clip_registry()
+                session_state.save(player_manager, clip_registry)
+            
+            return jsonify({
+                'success': True,
+                'enabled': enabled,
+                'message': message
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': message
+            }), 400
+    
+    @app.route('/api/player/artnet/effects/<int:index>/toggle', methods=['POST'])
+    def toggle_artnet_effect(index):
+        """
+        Toggles enabled/disabled state of an artnet effect.
+        Parameters are preserved, but effect is not applied when disabled.
+        
+        Args:
+            index: Index of the effect
+        
+        Returns:
+            200: {success: true, enabled: bool, message: "..."}
+            400: {success: false, message: "..."}
+            404: {error: "No active player"}
+        """
+        player = player_manager.get_artnet_player()
+        
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+        
+        success, enabled, message = player.toggle_effect_enabled(index, chain_type='artnet')
+        
+        if success:
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                clip_registry = get_clip_registry()
+                session_state.save(player_manager, clip_registry)
+            
+            return jsonify({
+                'success': True,
+                'enabled': enabled,
+                'message': message
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': message
+            }), 400
+    
     logger.info("Effect Chain API endpoints registered")

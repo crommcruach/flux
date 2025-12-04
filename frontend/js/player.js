@@ -3088,18 +3088,32 @@ function renderEffectItem(effect, index, player) {
         debug.warn(`⚠️ Effect "${metadata.name || effect.plugin_id}" has no parameters:`, effect);
     }
     
+    // Debug transform specifically
+    if (effect.plugin_id === 'transform') {
+        console.log(`🔍 Transform metadata.parameters (schema):`, parameters);
+        console.log(`🔍 Transform effect.parameters (values):`, effect.parameters);
+        parameters.forEach(param => {
+            console.log(`  - ${param.name}: type=${param.type}, min=${param.min}, max=${param.max}, value=${effect.parameters[param.name]}`);
+        });
+    }
+    
+    const isEnabled = effect.enabled !== false; // Default: enabled if not specified
+    
     return `
-        <div class="effect-item ${isSystemPlugin ? 'system-plugin' : ''}" id="${player}-effect-${index}">
+        <div class="effect-item ${isSystemPlugin ? 'system-plugin' : ''} ${!isEnabled ? 'effect-disabled' : ''}" id="${player}-effect-${index}">
             <div class="effect-header" onclick="toggleEffect('${player}', ${index}, event)">
                 <div class="effect-title">
                     <span class="effect-toggle"></span>
                     <span>${metadata.name || effect.plugin_id}${isSystemPlugin ? ' 🔒' : ''}</span>
                 </div>
                 <div class="effect-actions">
-                    ${!isSystemPlugin ? 
-                        `<button class="btn btn-sm btn-danger btn-icon" onclick="removeEffect('${player}', ${index}, event)">🗑️</button>` : 
-                        ''
-                    }
+                    ${!isSystemPlugin ? `
+                        <span class="effect-enable-switch" onclick="toggleEffectEnabledClick('${player}', ${index}, event)">
+                            <input type="checkbox" ${isEnabled ? 'checked' : ''}>
+                            <span class="effect-enable-slider"></span>
+                        </span>
+                        <button class="btn btn-sm btn-danger btn-icon" onclick="removeEffect('${player}', ${index}, event)">🗑️</button>
+                    ` : ''}
                 </div>
             </div>
             <div class="effect-body">
@@ -3119,6 +3133,66 @@ window.toggleEffect = function(player, index, event) {
     const element = document.getElementById(`${player}-effect-${index}`);
     if (element) {
         element.classList.toggle('expanded');
+    }
+};
+
+window.toggleEffectEnabledClick = async function(player, index, event) {
+    event.stopPropagation();
+    
+    // Find the checkbox within the clicked element
+    const switchElement = event.currentTarget;
+    const checkbox = switchElement.querySelector('input[type="checkbox"]');
+    if (!checkbox) return;
+    
+    // Toggle the checkbox
+    checkbox.checked = !checkbox.checked;
+    const newState = checkbox.checked;
+    
+    try {
+        // Determine endpoint based on player type
+        let endpoint;
+        if (player === 'clip') {
+            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/${index}/toggle`;
+        } else if (player === 'video') {
+            endpoint = `${API_BASE}/api/player/video/effects/${index}/toggle`;
+        } else if (player === 'artnet') {
+            endpoint = `${API_BASE}/api/player/artnet/effects/${index}/toggle`;
+        }
+        
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            debug.log(`✅ ${player} effect ${index} toggled: enabled=${data.enabled}`);
+            
+            // Sync checkbox state with server response
+            checkbox.checked = data.enabled;
+            
+            // Update UI state
+            const effectItem = document.getElementById(`${player}-effect-${index}`);
+            if (effectItem) {
+                if (data.enabled) {
+                    effectItem.classList.remove('effect-disabled');
+                } else {
+                    effectItem.classList.add('effect-disabled');
+                }
+            }
+            
+            showToast(`Effect ${data.enabled ? 'enabled' : 'disabled'}`, 'success');
+        } else {
+            // Revert checkbox on error
+            checkbox.checked = !newState;
+            showToast(`Error: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        // Revert checkbox on error
+        checkbox.checked = !newState;
+        console.error(`❌ Error toggling ${player} effect:`, error);
+        showToast('Error toggling effect', 'error');
     }
 };
 
@@ -3201,6 +3275,11 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
     const controlId = `${player}_effect_${effectIndex}_${param.name}`;
     
     const paramType = (param.type || '').toUpperCase();
+    
+    // Debug: Log if param type is missing
+    if (!paramType) {
+        console.warn(`⚠️ Parameter '${param.name}' has no type:`, param);
+    }
     
     let control = '';
     
@@ -3380,7 +3459,48 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
             break;
             
         default:
-            control = `<p class="text-warning">Unknown parameter type: ${param.type}</p>`;
+            // Fallback: If no type is specified, try to infer from value
+            if (typeof value === 'number' && param.min !== undefined && param.max !== undefined) {
+                // Looks like a numeric parameter, render as slider
+                console.warn(`⚠️ Parameter '${param.name}' has no type but looks numeric, rendering as FLOAT`);
+                const fallbackStep = param.step || 1;
+                const fallbackDecimals = fallbackStep >= 1 ? 0 : (fallbackStep >= 0.1 ? 1 : 2);
+                const fallbackValue = value;
+                const fallbackMin = param.min || 0;
+                const fallbackMax = param.max || 100;
+                
+                control = `
+                    <div class="parameter-control">
+                        <div class="parameter-label">
+                            <label for="${controlId}">${param.label || param.name}</label>
+                            <span class="parameter-value" id="${controlId}_value">${fallbackDecimals === 0 ? Math.round(fallbackValue) : fallbackValue.toFixed(fallbackDecimals)}</span>
+                        </div>
+                        <div id="${controlId}" class="triple-slider-container" 
+                             data-default="${param.default || 0}" 
+                             data-decimals="${fallbackDecimals}"
+                             oncontextmenu="resetParameterToDefaultTriple(event, '${player}', ${effectIndex}, '${param.name}', ${param.default || 0}, '${controlId}', '${controlId}_value', ${fallbackDecimals})"></div>
+                    </div>
+                `;
+                // Initialize slider
+                setTimeout(() => {
+                    initTripleSlider(controlId, {
+                        min: fallbackMin,
+                        max: fallbackMax,
+                        value: fallbackValue,
+                        step: fallbackStep,
+                        showRangeHandles: true,
+                        rangeMin: fallbackMin,
+                        rangeMax: fallbackMax,
+                        onChange: (newValue) => {
+                            const finalValue = fallbackDecimals === 0 ? Math.round(newValue) : newValue;
+                            document.getElementById(`${controlId}_value`).textContent = fallbackDecimals === 0 ? Math.round(finalValue) : finalValue.toFixed(fallbackDecimals);
+                            updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`);
+                        }
+                    });
+                }, 0);
+            } else {
+                control = `<p class="text-muted">${param.label || param.name}: ${value}</p>`;
+            }
     }
     
     return control;

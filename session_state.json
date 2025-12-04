@@ -1,11 +1,11 @@
 {
-  "last_updated": "2025-12-04T15:11:36.483110",
+  "last_updated": "2025-12-04T16:22:23.843532",
   "players": {
     "video": {
       "playlist": [
         {
           "path": "video\\testbild.mp4",
-          "id": "7b33554e-3ea5-4127-87ee-d586bd3c55c0",
+          "id": "58c46ce2-c1f9-47f7-b501-d288977926a2",
           "type": "video",
           "effects": [
             {
@@ -63,15 +63,11 @@
               },
               "parameters": {
                 "transport_position": {
-                  "_value": 92,
+                  "_value": 1,
                   "_rangeMin": 0,
-                  "_rangeMax": 149
+                  "_rangeMax": 100
                 },
-                "speed": {
-                  "_value": 2.8,
-                  "_rangeMin": 0.1,
-                  "_rangeMax": 10
-                },
+                "speed": 1.0,
                 "reverse": false,
                 "playback_mode": "repeat"
               }
@@ -200,7 +196,11 @@
                 ]
               },
               "parameters": {
-                "position_x": 0.0,
+                "position_x": {
+                  "_value": 0,
+                  "_rangeMin": -2000,
+                  "_rangeMax": 2000
+                },
                 "position_y": 0.0,
                 "scale_xy": 100.0,
                 "rotation": 0.0,
@@ -212,7 +212,8 @@
                 "anchor_x": 50.0,
                 "anchor_y": 50.0,
                 "anchor_z": 50.0
-              }
+              },
+              "enabled": true
             }
           ],
           "layers": []

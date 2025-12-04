@@ -425,6 +425,20 @@ body {
     background: linear-gradient(90deg, rgba(255, 193, 7, 0.05) 0%, var(--bg-secondary) 20%);
 }
 
+.effect-item.effect-disabled {
+    opacity: 0.5;
+    border-left: 3px solid #6c757d;
+}
+
+.effect-item.effect-disabled .effect-header {
+    background: rgba(108, 117, 125, 0.1);
+}
+
+.effect-item.effect-disabled .effect-title span {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
 .effect-header {
     padding: 0.75rem;
     display: flex;
@@ -438,11 +452,76 @@ body {
     background: var(--bg-tertiary);
 }
 
+.effect-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.effect-actions .btn-icon {
+    flex-shrink: 0;
+    min-width: 32px;
+    width: 32px;
+    height: 32px;
+    padding: 0 !important;
+}
+
 .effect-title {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     font-weight: 500;
+}
+
+/* Toggle Switch for Enable/Disable */
+.effect-enable-switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+    margin-left: 8px;
+}
+
+.effect-enable-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.effect-enable-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #6c757d;
+    transition: 0.3s;
+    border-radius: 20px;
+}
+
+.effect-enable-slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+.effect-enable-switch input:checked + .effect-enable-slider {
+    background-color: #28a745;
+}
+
+.effect-enable-switch input:checked + .effect-enable-slider:before {
+    transform: translateX(16px);
+}
+
+.effect-enable-switch:hover .effect-enable-slider {
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 }
 
 .effect-toggle {

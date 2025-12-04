@@ -982,6 +982,7 @@ class Player:
                 'plugin_id': effect['id'],  # Frontend erwartet 'plugin_id'
                 'name': plugin_instance.METADATA.get('name', effect['id']),
                 'version': plugin_instance.METADATA.get('version', '1.0.0'),
+                'enabled': effect.get('enabled', True),  # Export enabled state
                 'parameters': current_parameters,  # Aktuelle Werte
                 'metadata': {
                     **metadata,
@@ -1037,6 +1038,44 @@ class Player:
             logger.error(f"❌ Fehler beim Update von Effect {index} Parameter: {e}")
             return False, str(e)
     
+    def toggle_effect_enabled(self, index, chain_type='video'):
+        """
+        Toggles the enabled/disabled state of an effect in the chain.
+        When disabled, the effect is skipped during processing but parameters are preserved.
+        
+        Args:
+            index: Index of the effect
+            chain_type: 'video' or 'artnet'
+        
+        Returns:
+            tuple: (success: bool, enabled: bool, message: str)
+        """
+        try:
+            # Select correct chain
+            if chain_type == 'artnet':
+                chain = self.artnet_effect_chain
+            else:
+                chain = self.video_effect_chain
+            
+            if index < 0 or index >= len(chain):
+                return False, False, f"Invalid index {index}"
+            
+            effect = chain[index]
+            
+            # Toggle enabled state (default is enabled if not set)
+            current_state = effect.get('enabled', True)
+            new_state = not current_state
+            effect['enabled'] = new_state
+            
+            plugin_id = effect['id']
+            logger.info(f"Effect '{plugin_id}' at index {index} is now {'enabled' if new_state else 'disabled'}")
+            
+            return True, new_state, f"Effect {'enabled' if new_state else 'disabled'}"
+            
+        except Exception as e:
+            logger.error(f"❌ Error toggling effect {index}: {e}")
+            return False, False, str(e)
+    
     def apply_effects(self, frame, chain_type='video'):
         """
         Wendet alle Effects in der gewählten Chain auf das Frame an.
@@ -1089,6 +1128,10 @@ class Player:
                     self._last_effect_log = True
                 
                 for effect_data in clip_effects:
+                    # Skip disabled effects (parameters are preserved)
+                    if not effect_data.get('enabled', True):
+                        continue
+                    
                     try:
                         # Instance ist garantiert vorhanden (pre-instantiated im Cache)
                         plugin_instance = effect_data['instance']
@@ -1124,6 +1167,10 @@ class Player:
         
         if effect_chain:
             for effect in effect_chain:
+                # Skip disabled effects (parameters are preserved)
+                if not effect.get('enabled', True):
+                    continue
+                
                 try:
                     plugin_instance = effect['instance']
                     processed_frame = plugin_instance.process_frame(processed_frame)
@@ -1539,6 +1586,10 @@ class Player:
             Prozessiertes Frame
         """
         for effect in layer.effects:
+            # Skip disabled effects (parameters are preserved)
+            if not effect.get('enabled', True):
+                continue
+            
             try:
                 instance = effect['instance']
                 frame = instance.process_frame(frame)
