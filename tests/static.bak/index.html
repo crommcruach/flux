@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flux - Video Art-Net Controller</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="css/styles.css" rel="stylesheet">
+  <link href="css/triple-slider.css" rel="stylesheet">
+</head>
+
+<body>
+  <script src="js/menu-loader.js"></script>
+  <script src="js/modal-loader.js"></script>
+
+  <div class="app-container">
+    <!-- Sub-Header für Canvas-Settings -->
+    <div class="canvas-settings-bar d-flex align-items-center justify-content-between px-2" style="gap: 1rem; background: var(--panel-bg); border-bottom: 1px solid var(--border-color); padding: 0.5rem 1rem; grid-column: 2; overflow: visible; position: relative;">
+      <!-- Projektname Input -->
+      <input type="text" id="projectName" class="form-control form-control-sm" placeholder="Projektname"
+        value="Mein Projekt" style="width: 150px;">
+
+      <!-- Projekt Dropdown -->
+      <div class="dropdown">
+        <button class="btn btn-light btn-sm dropdown-toggle" type="button" id="projektDropdown" data-bs-toggle="dropdown"
+          aria-expanded="false">
+          Projekt
+        </button>
+        <ul class="dropdown-menu" aria-labelledby="projektDropdown">
+          <li><a class="dropdown-item" href="#" onclick="saveProjectToServer()">💾 Speichern auf Server</a></li>
+          <li><a class="dropdown-item" href="#" onclick="showProjectManager()">📂 Laden vom Server</a></li>
+          <li><hr class="dropdown-divider"></li>
+          <li><a class="dropdown-item" href="#" onclick="saveProject()">⬇️ Lokal herunterladen</a></li>
+          <li><a class="dropdown-item" href="#" onclick="document.getElementById('projectFileInput').click()">📁 Lokale Datei laden</a></li>
+        </ul>
+        <input type="file" id="projectFileInput" class="form-control form-control-sm" accept=".json"
+          style="display: none;">
+      </div>
+
+      <!-- Canvas Size -->
+      <div class="d-flex align-items-center" style="gap: 0.5rem;">
+        <label style="margin: 0; white-space: nowrap;">Canvas:</label>
+        <select id="canvasSize" class="form-select form-select-sm" style="width: 140px;">
+          <option value="1024x768">1024 × 768</option>
+          <option value="1280x720">1280 × 720</option>
+          <option value="1920x1080">1920 × 1080</option>
+          <option value="2560x1440">2560 × 1440</option>
+          <option value="3840x2160">3840 × 2160</option>
+          <option value="custom">Benutzerdefiniert...</option>
+        </select>
+        <input type="number" id="customWidth" class="form-control form-control-sm" placeholder="Breite"
+          style="width: 80px; display: none;" min="100" max="10000">
+        <input type="number" id="customHeight" class="form-control form-control-sm" placeholder="Höhe"
+          style="width: 80px; display: none;" min="100" max="10000">
+        <button id="customApply" class="btn btn-primary btn-sm" style="display: none;"
+          onclick="applyCustomCanvasSize()">✓</button>
+      </div>
+
+      <!-- Background Image -->
+      <div class="d-flex align-items-center" style="gap: 0.5rem;">
+        <label style="margin: 0; white-space: nowrap;">Hintergrund:</label>
+        <input type="file" id="bgImageInput" class="form-control form-control-sm" accept="image/*" style="width: 200px;">
+        <button class="btn btn-secondary btn-sm" onclick="clearBackgroundImage()"
+          title="Bild entfernen" style="width: 28px; min-width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center;">🗑️</button>
+      </div>
+    </div>
+    <!-- Toolbar (links) -->
+    <div class="toolbar">
+      <div class="toolbar-section">
+        <label class="form-label">Formen</label>
+        <div class="shape-grid">
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="addShape('rect')" title="Quadrat">&#8414;</button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="addShape('circle')" title="Kreis">&#9711;</button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="addShape('triangle')" title="Dreieck">△</button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="addShape('polygon')" title="Polygon">⬡</button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="addShape('line')" title="Linie">\</button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="addShape('arc')" title="Bogen"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-bezier" viewBox="0 0 16 16">
+  <path fill-rule="evenodd" d="M0 10.5A1.5 1.5 0 0 1 1.5 9h1A1.5 1.5 0 0 1 4 10.5v1A1.5 1.5 0 0 1 2.5 13h-1A1.5 1.5 0 0 1 0 11.5zm1.5-.5a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5zm10.5.5A1.5 1.5 0 0 1 13.5 9h1a1.5 1.5 0 0 1 1.5 1.5v1a1.5 1.5 0 0 1-1.5 1.5h-1a1.5 1.5 0 0 1-1.5-1.5zm1.5-.5a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5zM6 4.5A1.5 1.5 0 0 1 7.5 3h1A1.5 1.5 0 0 1 10 4.5v1A1.5 1.5 0 0 1 8.5 7h-1A1.5 1.5 0 0 1 6 5.5zM7.5 4a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5z"/>
+  <path d="M6 4.5H1.866a1 1 0 1 0 0 1h2.668A6.52 6.52 0 0 0 1.814 9H2.5q.186 0 .358.043a5.52 5.52 0 0 1 3.185-3.185A1.5 1.5 0 0 1 6 5.5zm3.957 1.358A1.5 1.5 0 0 0 10 5.5v-1h4.134a1 1 0 1 1 0 1h-2.668a6.52 6.52 0 0 1 2.72 3.5H13.5q-.185 0-.358.043a5.52 5.52 0 0 0-3.185-3.185"/>
+</svg></button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="addShape('matrix')" title="Matrix">⊞</button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="addShape('star')" title="Stern">★</button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="toggleTextTool()" title="Text"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-alphabet" viewBox="0 0 16 16">
+  <path d="M2.204 11.078c.767 0 1.201-.356 1.406-.737h.059V11h1.216V7.519c0-1.314-.947-1.783-2.11-1.783C1.355 5.736.75 6.42.69 7.27h1.216c.064-.323.313-.552.84-.552s.864.249.864.771v.464H2.346C1.145 7.953.5 8.568.5 9.496c0 .977.693 1.582 1.704 1.582m.42-.947c-.44 0-.845-.235-.845-.718 0-.395.269-.684.84-.684h.991v.538c0 .503-.444.864-.986.864m5.593.937c1.216 0 1.948-.869 1.948-2.31v-.702c0-1.44-.727-2.305-1.929-2.305-.742 0-1.328.347-1.499.889h-.063V3.983h-1.29V11h1.27v-.791h.064c.21.532.776.86 1.499.86Zm-.43-1.025c-.66 0-1.113-.518-1.113-1.28V8.12c0-.825.42-1.343 1.098-1.343.684 0 1.075.518 1.075 1.416v.45c0 .888-.386 1.401-1.06 1.401Zm2.834-1.328c0 1.47.87 2.378 2.305 2.378 1.416 0 2.139-.777 2.158-1.763h-1.186c-.06.425-.313.732-.933.732-.66 0-1.05-.512-1.05-1.352v-.625c0-.81.371-1.328 1.045-1.328.635 0 .879.425.918.776h1.187c-.02-.986-.787-1.806-2.14-1.806-1.41 0-2.304.918-2.304 2.338z"/>
+</svg></button>
+          <button class="btn btn-primary btn-shape btn-sm toolbar-shape-btn" onclick="toggleFreehandDrawing()" id="freehandBtn" title="Freihand">&#9998;</button>
+        </div>
+      </div>
+
+      <div class="toolbar-section" id="textSection" style="display: none;">
+        <label for="textInput" class="form-label">Text</label>
+        <input id="textInput" type="text" class="form-control form-control-sm" placeholder="Dein Text..."
+          maxlength="50">
+        <label for="letterSize" class="form-label mt-2">Buchstabengröße</label>
+        <input id="letterSize" type="number" class="form-control form-control-sm" min="10" max="500" value="100">
+        <label for="letterSpacing" class="form-label mt-2">Abstand</label>
+        <input id="letterSpacing" type="number" class="form-control form-control-sm" min="0" max="100" value="20">
+        <label for="letterPoints" class="form-label mt-2">Punkte pro Buchstabe</label>
+        <input id="letterPoints" type="number" class="form-control form-control-sm" min="5" max="100" value="20">
+        <button class="btn btn-success btn-sm w-100 mt-2" onclick="addTextToCanvas()" title="Text hinzufügen">✓</button>
+      </div>
+
+      <div class="toolbar-section">
+        <label for="pointCount" class="form-label">Punkte</label>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <input id="pointCount" type="range" class="form-range" min="2" max="512" value="30" step="1" style="flex: 1;">
+          <input id="pointCountNumber" type="number" class="form-control form-control-sm" min="2" max="512" value="30"
+            style="width: 70px;">
+        </div>
+      </div>
+
+      <div class="toolbar-section" id="matrixSection" style="display: none;">
+        <label for="matrixRows" class="form-label">Matrix Reihen</label>
+        <input id="matrixRows" type="number" class="form-control form-control-sm" min="1" max="128" value="4">
+        <label for="matrixCols" class="form-label mt-2">Matrix Spalten</label>
+        <input id="matrixCols" type="number" class="form-control form-control-sm" min="1" max="128" value="4">
+        <label for="matrixPattern" class="form-label mt-2">Nummerierungsmuster</label>
+        <select id="matrixPattern" class="form-select form-select-sm">
+          <option value="zigzag-left">Zickzack (links start)</option>
+          <option value="zigzag-right">Zickzack (rechts start)</option>
+          <option value="zigzag-top">Zickzack (oben start)</option>
+          <option value="zigzag-bottom">Zickzack (unten start)</option>
+          <option value="raster">Raster (normal)</option>
+        </select>
+      </div>
+
+      <div class="toolbar-section" id="starSection" style="display: none;">
+        <label for="starSpikes" class="form-label">Stern Zacken</label>
+        <input id="starSpikes" type="number" class="form-control form-control-sm" min="2" max="32" value="5">
+      </div>
+
+      <div class="toolbar-section" id="polygonSection" style="display: none;">
+        <label for="polygonSides" class="form-label">Polygon Seiten</label>
+        <input id="polygonSides" type="number" class="form-control form-control-sm" min="3" max="12" value="6">
+      </div>
+
+      <div class="toolbar-section" id="arcSection" style="display: none;">
+        <label for="arcControls" class="form-label">Bogen Kontrollpunkte</label>
+        <input id="arcControls" type="number" class="form-control form-control-sm" min="1" max="3" value="1">
+      </div>
+
+      <div class="toolbar-section">
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="showConnectionLines" checked>
+          <label class="form-check-label" for="showConnectionLines">Verbindungslinien</label>
+        </div>
+      </div>
+
+      <div class="toolbar-section">
+        <label class="form-label">Snapping</label>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="snapToGrid" checked>
+          <label class="form-check-label" for="snapToGrid">Grid Snapping</label>
+        </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="showGrid" checked>
+          <label class="form-check-label" for="showGrid">Grid anzeigen</label>
+        </div>
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <label for="gridSize" class="form-label mb-0" style="white-space: nowrap;">Grid:</label>
+          <select id="gridSize" class="form-select form-select-sm">
+            <option value="5">5px</option>
+            <option value="10" selected>10px</option>
+            <option value="20">20px</option>
+            <option value="50">50px</option>
+            <option value="100">100px</option>
+          </select>
+        </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="snapToObjects" checked>
+          <label class="form-check-label" for="snapToObjects">Objekt Snapping</label>
+        </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="allowOutOfBounds">
+          <label class="form-check-label" for="allowOutOfBounds">Über Canvas hinaus</label>
+        </div>
+      </div>
+
+      <div class="toolbar-section">
+        <button class="btn btn-info btn-sm toolbar-shape-btn" onclick="selectAllShapes()" title="Alle auswählen"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-check-all" viewBox="0 0 16 16">
+  <path d="M8.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L2.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093L8.95 4.992zm-.92 5.14.92.92a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 1 0-1.091-1.028L9.477 9.417l-.485-.486z"/>
+</svg></button>
+        <button class="btn btn-success btn-sm toolbar-shape-btn" onclick="groupSelectedShapes()" title="Gruppieren"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-circle-square" viewBox="0 0 16 16">
+  <path d="M0 6a6 6 0 1 1 12 0A6 6 0 0 1 0 6"/>
+  <path d="M12.93 5h1.57a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-1.57a7 7 0 0 1-1-.22v1.79A1.5 1.5 0 0 0 5.5 16h9a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 4h-1.79q.145.486.22 1"/>
+</svg></button>
+        <button class="btn btn-secondary btn-sm toolbar-shape-btn" onclick="ungroupSelectedShapes()" title="Gruppe auflösen"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-back" viewBox="0 0 16 16">
+  <path d="M0 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1z"/>
+</svg></button>
+        <button class="btn btn-primary btn-sm toolbar-shape-btn" onclick="duplicateSelectedShape()" title="Duplizieren"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-copy" viewBox="0 0 16 16">
+  <path fill-rule="evenodd" d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1z"/>
+</svg></button>
+        <button class="btn btn-warning btn-sm toolbar-shape-btn" onclick="resetSelectedShape()" title="Zurücksetzen"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-x-square" viewBox="0 0 16 16">
+  <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
+  <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>
+</svg></button>
+        <button class="btn btn-info btn-sm toolbar-shape-btn" onclick="fitToCanvas()" title="Fit to Canvas"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrows-fullscreen" viewBox="0 0 16 16">
+  <path fill-rule="evenodd" d="M5.828 10.172a.5.5 0 0 0-.707 0l-4.096 4.096V11.5a.5.5 0 0 0-1 0v3.975a.5.5 0 0 0 .5.5H4.5a.5.5 0 0 0 0-1H1.732l4.096-4.096a.5.5 0 0 0 0-.707m4.344 0a.5.5 0 0 1 .707 0l4.096 4.096V11.5a.5.5 0 1 1 1 0v3.975a.5.5 0 0 1-.5.5H11.5a.5.5 0 0 1 0-1h2.768l-4.096-4.096a.5.5 0 0 1 0-.707m0-4.344a.5.5 0 0 0 .707 0l4.096-4.096V4.5a.5.5 0 1 0 1 0V.525a.5.5 0 0 0-.5-.5H11.5a.5.5 0 0 0 0 1h2.768l-4.096 4.096a.5.5 0 0 0 0 .707m-4.344 0a.5.5 0 0 1-.707 0L1.025 1.732V4.5a.5.5 0 0 1-1 0V.525a.5.5 0 0 1 .5-.5H4.5a.5.5 0 0 1 0 1H1.732l4.096 4.096a.5.5 0 0 1 0 .707"/>
+</svg></button>
+        <button class="btn btn-danger btn-sm toolbar-shape-btn" onclick="deleteSelectedShape()" title="Löschen"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-trash" viewBox="0 0 16 16">
+  <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
+  <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
+</svg></button>
+
+      </div>
+    </div>
+
+    <!-- Canvas (Mitte) -->
+    <div class="canvas-wrapper" id="canvasWrapper">
+      <div class="canvas-container" id="canvasContainer">
+        <canvas id="canvas" width="1024" height="768"></canvas>
+      </div>
+    </div>
+    <!-- Zoom Controls (positioned over canvas-wrapper) -->
+    <div id="zoomControls">
+      <button class="btn btn-sm btn-outline-secondary zoom-btn" onclick="zoomIn()" title="Vergrößern">+</button>
+      <div id="zoomLevel">100%</div>
+      <button class="btn btn-sm btn-outline-secondary zoom-btn" onclick="zoomOut()" title="Verkleinern">−</button>
+      <button class="btn btn-sm btn-outline-secondary zoom-btn zoom-reset" onclick="resetZoom()"
+        title="Zurücksetzen">1:1</button>
+    </div>
+
+    <!-- Sidebar (rechts) -->
+    <div class="sidebar">
+      <h3>Objektliste</h3>
+      <div id="objectList"></div>
+      <div id="projectStats" class="project-stats">
+        <div class="stats-title">📊 Projekt-Statistiken</div>
+        <div class="stats-row">
+          <span class="stats-label">Pixel gesamt:</span>
+          <span class="stats-value" id="statsPixels">0</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Kanäle (RGB):</span>
+          <span class="stats-value" id="statsChannels">0</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Universen:</span>
+          <span class="stats-value" id="statsUniverses">0</span>
+        </div>
+        <div class="stats-note" id="statsNote"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context Menu -->
+  <div id="contextMenu" class="context-menu" style="display: none;">
+    <div class="context-menu-item" data-action="duplicate">
+      <span class="context-menu-icon">📑</span>
+      <span>Duplizieren</span>
+      <span class="context-menu-shortcut">Strg+D</span>
+    </div>
+    <div class="context-menu-item" data-action="delete">
+      <span class="context-menu-icon">🗑️</span>
+      <span>Löschen</span>
+      <span class="context-menu-shortcut">Entf</span>
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" data-action="group">
+      <span class="context-menu-icon">📦</span>
+      <span>Gruppieren</span>
+    </div>
+    <div class="context-menu-item" data-action="ungroup">
+      <span class="context-menu-icon">📤</span>
+      <span>Gruppierung aufheben</span>
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" data-action="selectAll">
+      <span class="context-menu-icon">☑️</span>
+      <span>Alle auswählen</span>
+      <span class="context-menu-shortcut">Strg+A</span>
+    </div>
+    <div class="context-menu-item" data-action="reset">
+      <span class="context-menu-icon">🔄</span>
+      <span>Zurücksetzen</span>
+    </div>
+  </div>
+
+  <!-- Toast Component -->
+  <script src="js/toast-loader.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="js/stroke-font.js"></script>
+  <script src="js/triple-slider.js"></script>
+  <script type="module" src="js/editor.js"></script>
+</body>
+
+</html>

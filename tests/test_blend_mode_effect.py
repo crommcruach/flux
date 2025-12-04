@@ -3,7 +3,7 @@ Test Blend Mode Effect Plugin
 """
 import numpy as np
 import pytest
-from src.plugins.effects.blend_mode import BlendModeEffect
+from plugins.effects.blend_mode import BlendModeEffect
 
 
 class TestBlendModeEffect:

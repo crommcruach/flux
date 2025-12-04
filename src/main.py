@@ -6,6 +6,16 @@ import json
 import sys
 import time
 import logging
+
+# Add project root to Python path for plugins/ access
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# CRITICAL: Set FFmpeg options BEFORE any cv2 imports
+# This prevents HAP codec threading assertion errors
+os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'threads;1'
+
 from modules import DMXController, RestAPI, PlayerManager
 from modules.player import Player
 from modules.frame_source import VideoSource

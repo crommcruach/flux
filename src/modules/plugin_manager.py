@@ -37,7 +37,7 @@ class PluginManager:
             if Path('plugins').exists():
                 plugins_dir = 'plugins'
             else:
-                plugins_dir = 'src/plugins'
+                plugins_dir = 'plugins'
         
         self.plugins_dir = Path(plugins_dir)
         self.registry: Dict[str, Type[PluginBase]] = {}  # ID -> Plugin Class
@@ -125,7 +125,7 @@ class PluginManager:
         
         Args:
             plugin_id: Plugin-ID aus METADATA
-            config: Konfiguration (Parameter-Werte)
+            config: Konfiguration (Parameter-Werte, kann range metadata enthalten)
             
         Returns:
             Plugin-Instanz oder None wenn nicht gefunden
@@ -136,8 +136,10 @@ class PluginManager:
         
         try:
             plugin_class = self.registry[plugin_id]
+            # Extract actual values from config if range metadata is present
+            cleaned_config = self._extract_parameter_values(config) if config else None
             # Erstelle NEUE Instanz (nicht cachen, da Effekte mehrfach verwendbar)
-            instance = plugin_class(config=config)
+            instance = plugin_class(config=cleaned_config)
             logger.debug(f"Plugin '{plugin_id}' erfolgreich geladen")
             return instance
         except Exception as e:
@@ -145,6 +147,32 @@ class PluginManager:
             logger.error(f"Fehler beim Laden von Plugin '{plugin_id}': {e}")
             traceback.print_exc()
             return None
+    
+    def _extract_parameter_values(self, config: Dict) -> Dict:
+        """
+        Extrahiert tatsächliche Werte aus Config mit range metadata.
+        
+        Triple-Slider speichert Parameter als:
+        {'param': {'_value': 5.0, '_rangeMin': 0, '_rangeMax': 10}}
+        
+        Diese Funktion extrahiert nur den eigentlichen Wert:
+        {'param': 5.0}
+        
+        Args:
+            config: Config dict mit möglicherweise verschachtelten Parametern
+            
+        Returns:
+            Config dict mit extrahierten Werten
+        """
+        cleaned = {}
+        for key, value in config.items():
+            if isinstance(value, dict) and '_value' in value:
+                # Extract actual value from range metadata
+                cleaned[key] = value['_value']
+            else:
+                # Keep as is
+                cleaned[key] = value
+        return cleaned
     
     def get_plugin(self, plugin_id: str) -> Optional[PluginBase]:
         """

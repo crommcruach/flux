@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triple Slider Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/triple-slider.css">
+    <style>
+        body {
+            padding: 40px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .test-section {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 1px solid #444;
+        }
+        .value-display {
+            font-family: 'Courier New', monospace;
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .controls {
+            margin-top: 20px;
+        }
+        .controls button {
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        h2 {
+            color: #4caf50;
+            margin-bottom: 20px;
+        }
+        h3 {
+            color: #8bc34a;
+            font-size: 1.2rem;
+            margin-top: 20px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1 class="mb-4">🎚️ Triple-Handle Slider Test Suite</h1>
+
+    <!-- Test 1: Basic Float Slider -->
+    <div class="test-section">
+        <h2>Test 1: Basic Float Slider (0-100, step 0.1)</h2>
+        <div id="slider1"></div>
+        <div class="value-display">
+            <strong>Current Value:</strong> <span id="value1">50.0</span><br>
+            <strong>Range:</strong> <span id="range1">0 - 100</span>
+        </div>
+        <div class="controls">
+            <button class="btn btn-sm btn-primary" onclick="testSetValue1(25.5)">Set to 25.5</button>
+            <button class="btn btn-sm btn-primary" onclick="testSetValue1(75.3)">Set to 75.3</button>
+            <button class="btn btn-sm btn-warning" onclick="testSetRange1(20, 80)">Limit Range 20-80</button>
+            <button class="btn btn-sm btn-danger" onclick="testSetRange1(0, 100)">Reset Range</button>
+        </div>
+    </div>
+
+    <!-- Test 2: Integer Slider -->
+    <div class="test-section">
+        <h2>Test 2: Integer Slider (0-255, step 1)</h2>
+        <div id="slider2"></div>
+        <div class="value-display">
+            <strong>Current Value:</strong> <span id="value2">128</span><br>
+            <strong>Range:</strong> <span id="range2">0 - 255</span>
+        </div>
+        <div class="controls">
+            <button class="btn btn-sm btn-primary" onclick="testSetValue2(50)">Set to 50</button>
+            <button class="btn btn-sm btn-primary" onclick="testSetValue2(200)">Set to 200</button>
+            <button class="btn btn-sm btn-warning" onclick="testSetRange2(64, 192)">Limit Range 64-192</button>
+            <button class="btn btn-sm btn-danger" onclick="testSetRange2(0, 255)">Reset Range</button>
+        </div>
+    </div>
+
+    <!-- Test 3: Small Range Slider -->
+    <div class="test-section">
+        <h2>Test 3: Small Range Slider (-1.0 to 1.0, step 0.01)</h2>
+        <div id="slider3"></div>
+        <div class="value-display">
+            <strong>Current Value:</strong> <span id="value3">0.00</span><br>
+            <strong>Range:</strong> <span id="range3">-1.00 - 1.00</span>
+        </div>
+        <div class="controls">
+            <button class="btn btn-sm btn-primary" onclick="testSetValue3(-0.5)">Set to -0.5</button>
+            <button class="btn btn-sm btn-primary" onclick="testSetValue3(0.75)">Set to 0.75</button>
+            <button class="btn btn-sm btn-warning" onclick="testSetRange3(-0.5, 0.5)">Limit Range -0.5 to 0.5</button>
+            <button class="btn btn-sm btn-danger" onclick="testSetRange3(-1, 1)">Reset Range</button>
+        </div>
+    </div>
+
+    <!-- Test 4: Value-Only Slider (no range handles) -->
+    <div class="test-section">
+        <h2>Test 4: Value-Only Slider (no range handles)</h2>
+        <div id="slider4"></div>
+        <div class="value-display">
+            <strong>Current Value:</strong> <span id="value4">50</span>
+        </div>
+        <div class="controls">
+            <button class="btn btn-sm btn-primary" onclick="testSetValue4(0)">Set to 0</button>
+            <button class="btn btn-sm btn-primary" onclick="testSetValue4(100)">Set to 100</button>
+        </div>
+    </div>
+
+    <!-- Test 5: Effect Parameter Simulation -->
+    <div class="test-section">
+        <h2>Test 5: Simulated Effect Parameter</h2>
+        <div class="parameter-control">
+            <div class="parameter-label">
+                <label>Blur Strength</label>
+                <span class="parameter-value" id="effect-value">2.5</span>
+            </div>
+            <div id="slider5"></div>
+        </div>
+        <div class="value-display">
+            <strong>Callback Triggered:</strong> <span id="effect-callback">0 times</span>
+        </div>
+    </div>
+
+    <!-- Test 6: Stress Test - Multiple Sliders -->
+    <div class="test-section">
+        <h2>Test 6: Multiple Sliders (Performance Test)</h2>
+        <div id="multiple-sliders"></div>
+        <div class="controls">
+            <button class="btn btn-sm btn-success" onclick="createMultipleSliders(10)">Create 10 Sliders</button>
+            <button class="btn btn-sm btn-warning" onclick="createMultipleSliders(50)">Create 50 Sliders</button>
+            <button class="btn btn-sm btn-danger" onclick="clearMultipleSliders()">Clear All</button>
+        </div>
+    </div>
+
+    <!-- Info Panel -->
+    <div class="test-section">
+        <h2>📝 Testing Checklist</h2>
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item bg-dark text-light">✅ Drag Min Handle (▼) - Should restrict lower bound</li>
+            <li class="list-group-item bg-dark text-light">✅ Drag Max Handle (▼) - Should restrict upper bound</li>
+            <li class="list-group-item bg-dark text-light">✅ Drag Value Handle (|) - Should stay within range</li>
+            <li class="list-group-item bg-dark text-light">✅ Range Highlight - Should show colored bar between min/max</li>
+            <li class="list-group-item bg-dark text-light">✅ Hover Effects - Handles should scale up on hover</li>
+            <li class="list-group-item bg-dark text-light">✅ Step Snapping - Values should snap to step increments</li>
+            <li class="list-group-item bg-dark text-light">✅ Value Clamping - Value auto-adjusts when range changes</li>
+            <li class="list-group-item bg-dark text-light">✅ API Methods - setValue/setRange should work correctly</li>
+            <li class="list-group-item bg-dark text-light">✅ Callbacks - onChange should fire on value change</li>
+            <li class="list-group-item bg-dark text-light">✅ Performance - Multiple sliders should be smooth</li>
+        </ul>
+    </div>
+</div>
+
+<script src="js/triple-slider.js"></script>
+<script>
+    let callbackCount = 0;
+
+    // Test 1: Basic Float Slider
+    const slider1 = initTripleSlider('slider1', {
+        min: 0,
+        max: 100,
+        value: 50,
+        step: 0.1,
+        decimals: 1,
+        showRangeHandles: true,
+        onChange: (val) => {
+            document.getElementById('value1').textContent = val.toFixed(1);
+        },
+        onRangeChange: (min, max) => {
+            document.getElementById('range1').textContent = `${min.toFixed(1)} - ${max.toFixed(1)}`;
+        }
+    });
+
+    function testSetValue1(val) {
+        slider1.setValue(val);
+    }
+
+    function testSetRange1(min, max) {
+        slider1.setRange(min, max);
+        const range = slider1.getRange();
+        document.getElementById('range1').textContent = `${range.min.toFixed(1)} - ${range.max.toFixed(1)}`;
+    }
+
+    // Test 2: Integer Slider
+    const slider2 = initTripleSlider('slider2', {
+        min: 0,
+        max: 255,
+        value: 128,
+        step: 1,
+        decimals: 0,
+        showRangeHandles: true,
+        onChange: (val) => {
+            document.getElementById('value2').textContent = Math.round(val);
+        },
+        onRangeChange: (min, max) => {
+            document.getElementById('range2').textContent = `${Math.round(min)} - ${Math.round(max)}`;
+        }
+    });
+
+    function testSetValue2(val) {
+        slider2.setValue(val);
+    }
+
+    function testSetRange2(min, max) {
+        slider2.setRange(min, max);
+        const range = slider2.getRange();
+        document.getElementById('range2').textContent = `${Math.round(range.min)} - ${Math.round(range.max)}`;
+    }
+
+    // Test 3: Small Range Slider
+    const slider3 = initTripleSlider('slider3', {
+        min: -1,
+        max: 1,
+        value: 0,
+        step: 0.01,
+        decimals: 2,
+        showRangeHandles: true,
+        onChange: (val) => {
+            document.getElementById('value3').textContent = val.toFixed(2);
+        },
+        onRangeChange: (min, max) => {
+            document.getElementById('range3').textContent = `${min.toFixed(2)} - ${max.toFixed(2)}`;
+        }
+    });
+
+    function testSetValue3(val) {
+        slider3.setValue(val);
+    }
+
+    function testSetRange3(min, max) {
+        slider3.setRange(min, max);
+        const range = slider3.getRange();
+        document.getElementById('range3').textContent = `${range.min.toFixed(2)} - ${range.max.toFixed(2)}`;
+    }
+
+    // Test 4: Value-Only Slider
+    const slider4 = initTripleSlider('slider4', {
+        min: 0,
+        max: 100,
+        value: 50,
+        step: 1,
+        decimals: 0,
+        showRangeHandles: false,
+        onChange: (val) => {
+            document.getElementById('value4').textContent = Math.round(val);
+        }
+    });
+
+    function testSetValue4(val) {
+        slider4.setValue(val);
+    }
+
+    // Test 5: Effect Parameter Simulation
+    const slider5 = initTripleSlider('slider5', {
+        min: 0,
+        max: 10,
+        value: 2.5,
+        rangeMin: 0,
+        rangeMax: 5,
+        step: 0.1,
+        decimals: 1,
+        showRangeHandles: true,
+        onChange: (val) => {
+            document.getElementById('effect-value').textContent = val.toFixed(1);
+            callbackCount++;
+            document.getElementById('effect-callback').textContent = `${callbackCount} times`;
+        },
+        onRangeChange: (min, max) => {
+            console.log(`Range changed: ${min} - ${max}`);
+        }
+    });
+
+    // Test 6: Multiple Sliders
+    let multiSliders = [];
+
+    function createMultipleSliders(count) {
+        clearMultipleSliders();
+        const container = document.getElementById('multiple-sliders');
+        
+        for (let i = 0; i < count; i++) {
+            const div = document.createElement('div');
+            div.style.marginBottom = '10px';
+            div.innerHTML = `
+                <small class="text-muted">Slider ${i + 1}</small>
+                <div id="multi-slider-${i}"></div>
+            `;
+            container.appendChild(div);
+
+            const slider = initTripleSlider(`multi-slider-${i}`, {
+                min: 0,
+                max: 100,
+                value: Math.random() * 100,
+                step: 1,
+                decimals: 0,
+                showRangeHandles: true,
+                onChange: (val) => {
+                    // console.log(`Slider ${i}: ${val}`);
+                }
+            });
+            multiSliders.push(slider);
+        }
+    }
+
+    function clearMultipleSliders() {
+        multiSliders.forEach(s => s.destroy());
+        multiSliders = [];
+        document.getElementById('multiple-sliders').innerHTML = '';
+    }
+
+    console.log('✅ Triple Slider Test Suite loaded successfully');
+    console.log('Global slider instances:', window.tripleSliders);
+</script>
+
+</body>
+</html>

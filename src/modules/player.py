@@ -1095,10 +1095,13 @@ class Player:
                         
                         # Update parameters from effect_data EVERY frame (parameters may have changed via API)
                         for param_name, param_value in effect_data['parameters'].items():
+                            # Extract actual value if it's a range metadata dict
+                            if isinstance(param_value, dict) and '_value' in param_value:
+                                param_value = param_value['_value']
                             setattr(plugin_instance, param_name, param_value)
                         
-                        # Process frame
-                        processed_frame = plugin_instance.process_frame(processed_frame)
+                        # Process frame (pass source for Transport plugin)
+                        processed_frame = plugin_instance.process_frame(processed_frame, source=self.source, player=self)
                         
                         if processed_frame is None:
                             logger.error(f"❌ [{self.player_name}] Clip effect '{effect_data['plugin_id']}' returned None")

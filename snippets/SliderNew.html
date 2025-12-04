@@ -1,0 +1,144 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Triple-Handle Slider with | Marker</title>
+<style>
+  body { font-family: Arial, sans-serif; }
+  .slider-container {
+    width: 400px;
+    margin: 30px auto;
+  }
+  .slider {
+    position: relative;
+    width: 100%;
+    height: 10px;
+    background: #ddd;
+    border-radius: 5px;
+    margin: 40px 0;
+  }
+  .range-highlight {
+    position: absolute;
+    top: 50%;
+    height: 10px;
+    background: #4caf50;
+    transform: translateY(-50%);
+    border-radius: 5px;
+  }
+  .handle {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -60%);
+    cursor: pointer;
+    user-select: none;
+  }
+  /* Min/Max as ▼ */
+  .handle.min::before,
+  .handle.max::before {
+    content: "▼";
+    font-size: 18px;
+    color: #333;
+  }
+  /* Value as | */
+  .handle.value::before {
+    content: "|";
+    font-size: 20px;
+    color: red;
+    font-weight: bold;
+  }
+  .values {
+    text-align: center;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+
+<h2>Slider Example</h2>
+<div class="slider-container" id="slider1">
+  <div class="slider">
+    <div class="range-highlight"></div>
+    <div class="handle min"></div>
+    <div class="handle max"></div>
+    <div class="handle value"></div>
+  </div>
+  <div class="values">Min: <span class="min-val">20</span> | Max: <span class="max-val">80</span> | Value: <span class="val">50</span></div>
+</div>
+
+<script>
+function initTripleSlider(containerId, startMin, startMax, startVal) {
+  const container = document.getElementById(containerId);
+  const slider = container.querySelector('.slider');
+  const minHandle = container.querySelector('.handle.min');
+  const maxHandle = container.querySelector('.handle.max');
+  const valueHandle = container.querySelector('.handle.value');
+  const rangeHighlight = container.querySelector('.range-highlight');
+  const minValEl = container.querySelector('.min-val');
+  const maxValEl = container.querySelector('.max-val');
+  const valEl = container.querySelector('.val');
+
+  let min = startMin, max = startMax, val = startVal;
+  let sliderWidth = slider.clientWidth;
+
+  function percentToPx(p) { return (p / 100) * sliderWidth; }
+  function pxToPercent(px) {
+    const clamped = Math.min(Math.max(px, 0), sliderWidth);
+    return Math.round((clamped / sliderWidth) * 100);
+  }
+
+  function updateUI() {
+    const minPos = percentToPx(min);
+    const maxPos = percentToPx(max);
+    const valPos = percentToPx(val);
+
+    minHandle.style.left = `${minPos}px`;
+    maxHandle.style.left = `${maxPos}px`;
+    valueHandle.style.left = `${valPos}px`;
+
+    rangeHighlight.style.left = `${minPos}px`;
+    rangeHighlight.style.width = `${maxPos - minPos}px`;
+
+    minValEl.textContent = min;
+    maxValEl.textContent = max;
+    valEl.textContent = val;
+  }
+
+  function dragHandle(handle, type) {
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault();
+      document.onmousemove = e => move(e.clientX);
+      document.onmouseup = () => document.onmousemove = null;
+    });
+    function move(clientX) {
+      const rect = slider.getBoundingClientRect();
+      const p = pxToPercent(clientX - rect.left);
+      if (type === 'min') {
+        if (p >= max) return;
+        min = p;
+        if (val < min) val = min;
+      } else if (type === 'max') {
+        if (p <= min) return;
+        max = p;
+        if (val > max) val = max;
+      } else if (type === 'value') {
+        if (p < min) { val = min; updateUI(); return; }
+        if (p > max) { val = max; updateUI(); return; }
+        val = p;
+      }
+      updateUI();
+    }
+  }
+
+  dragHandle(minHandle, 'min');
+  dragHandle(maxHandle, 'max');
+  dragHandle(valueHandle, 'value');
+
+  updateUI();
+}
+
+initTripleSlider('slider1', 20, 80, 50);
+</script>
+
+</body>
+</html>

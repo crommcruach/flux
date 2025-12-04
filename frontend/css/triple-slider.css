@@ -1,0 +1,93 @@
+/**
+ * Triple-Handle Slider Styles
+ * Matches the design from SliderNew.html
+ */
+
+.triple-slider {
+    width: 100%;
+    padding: 20px 0;
+}
+
+.slider-track {
+    position: relative;
+    width: 100%;
+    height: 6px;
+    background: var(--bs-secondary-bg, #ddd);
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.range-highlight {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: var(--bs-primary, #4caf50);
+    border-radius: 3px;
+    pointer-events: none;
+    transition: left 0.1s ease, width 0.1s ease;
+}
+
+.triple-slider .handle {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    cursor: grab;
+    user-select: none;
+    font-size: 16px;
+    line-height: 1;
+    transition: transform 0.1s ease;
+    z-index: 10;
+}
+
+.triple-slider .handle:active {
+    cursor: grabbing;
+    transform: translate(-50%, -50%) scale(1.2);
+}
+
+/* Min/Max handles: ▼ triangles */
+.triple-slider .handle-min,
+.triple-slider .handle-max {
+    color: var(--bs-body-color, #333);
+    font-weight: bold;
+}
+
+/* Value handle: | pipe */
+.triple-slider .handle-value {
+    color: var(--bs-danger, #dc3545);
+    font-weight: bold;
+    font-size: 20px;
+    z-index: 11; /* Above range handles */
+}
+
+/* Hover effects */
+.triple-slider .handle:hover {
+    transform: translate(-50%, -50%) scale(1.3);
+    filter: brightness(1.2);
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .slider-track {
+        background: #444;
+    }
+    
+    .triple-slider .handle-min,
+    .triple-slider .handle-max {
+        color: #eee;
+    }
+}
+
+/* Parameter control integration */
+.parameter-control .triple-slider {
+    margin-top: 5px;
+}
+
+/* Disabled state */
+.triple-slider.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.triple-slider.disabled .handle {
+    cursor: not-allowed;
+}

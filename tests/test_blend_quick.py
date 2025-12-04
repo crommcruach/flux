@@ -2,7 +2,7 @@
 import sys
 sys.path.insert(0, '.')
 
-from src.plugins.effects.blend_mode import BlendModeEffect
+from plugins.effects.blend_mode import BlendModeEffect
 import numpy as np
 
 print('🔧 Testing Blend Mode Effect Plugin...')

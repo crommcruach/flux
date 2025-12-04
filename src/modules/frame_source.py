@@ -73,13 +73,13 @@ class VideoSource(FrameSource):
         self.cap = None
         self._lock = threading.Lock()  # Thread-Safety für FFmpeg
         
-        # Clip trimming and playback control
+        # DEPRECATED: Clip trimming and playback control - Use Transport Effect Plugin instead
         self.clip_id = clip_id
         self.in_point = None  # Start frame (None = video start)
         self.out_point = None  # End frame (None = video end)
         self.reverse = False  # Reverse playback
         
-        # Load trim settings from ClipRegistry if clip_id provided
+        # DEPRECATED: Load trim settings from ClipRegistry if clip_id provided
         if self.clip_id:
             from .clip_registry import get_clip_registry
             clip_registry = get_clip_registry()
@@ -191,20 +191,19 @@ class VideoSource(FrameSource):
             logger.error(f"Video nicht gefunden: {self.video_path}")
             return False
         
-        self.cap = cv2.VideoCapture(self.video_path)
+        # Force FFmpeg backend for HAP codec support
+        # MSMF doesn't support HAP, so we must use FFmpeg
+        logger.debug(f"Opening video with FFmpeg backend: {self.video_path}")
+        self.cap = cv2.VideoCapture(self.video_path, cv2.CAP_FFMPEG)
         
         if not self.cap.isOpened():
             logger.error(f"Video konnte nicht geöffnet werden: {self.video_path}")
+            logger.error(f"  Path: {self.video_path}")
+            logger.error(f"  File exists: {os.path.exists(self.video_path)}")
+            logger.error(f"  Tried backend: CAP_FFMPEG")
             return False
         
-        # Hardware-Beschleunigung
-        try:
-            self.cap.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
-            hw_accel = self.cap.get(cv2.CAP_PROP_HW_ACCELERATION)
-            if hw_accel > 0:
-                logger.debug(f"  ✓ Hardware-Beschleunigung aktiv (Type: {int(hw_accel)})")
-        except Exception as e:
-            logger.debug(f"  ⚠ Hardware-Beschleunigung nicht verfügbar: {e}")
+        logger.debug(f"  ✓ Video opened successfully with FFmpeg backend")
         
         # Video-Informationen
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
@@ -234,7 +233,6 @@ class VideoSource(FrameSource):
     
     def get_next_frame(self):
         """Gibt nächstes Video-Frame zurück."""
-        # Performance-Optimierung: Kein Lock für sequentielle Reads (thread-safe)
         if not self.cap or not self.cap.isOpened():
             return None, 0
         
@@ -260,12 +258,11 @@ class VideoSource(FrameSource):
             if actual_frame < effective_in:
                 return None, 0  # End of trimmed clip (in reverse)
         
-        # Seek to the frame we want to read (Lock nur für seek - non-sequential access)
+        # CRITICAL: Lock BOTH seek and read for HAP codec thread-safety
+        # HAP codec has internal threading that can cause race conditions
         with self._lock:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame)
-        
-        # Read frame ohne Lock (FFmpeg sequential read ist thread-safe)
-        ret, frame = self.cap.read()
+            ret, frame = self.cap.read()
         
         if not ret:
             return None, 0  # End of video
@@ -288,7 +285,10 @@ class VideoSource(FrameSource):
         return frame, delay
     
     def reload_trim_settings(self):
-        """Lädt Trim-Einstellungen aus ClipRegistry neu."""
+        """
+        DEPRECATED: Use Transport Effect Plugin instead.
+        Lädt Trim-Einstellungen aus ClipRegistry neu.
+        """
         if self.clip_id:
             from .clip_registry import get_clip_registry
             clip_registry = get_clip_registry()

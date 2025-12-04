@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flux - Art-Net Control</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/triple-slider.css">
+</head>
+
+<body>
+    <script src="js/menu-loader.js"></script>
+
+    <!-- Art-Net Control Container -->
+    <div class="control-grid" style="margin-top: 2rem;">
+        <!-- Art-Net Steuerung -->
+        <div class="control-panel">
+            <h2>Art-Net Steuerung</h2>
+            
+            <div class="button-group" style="margin-bottom: 1.5rem;">
+                <button class="btn btn-secondary" onclick="blackout()">⚫ Blackout</button>
+                <button class="btn btn-success" onclick="resumeVideo()">▶️ Video fortsetzen</button>
+            </div>
+            
+            <div class="slider-group" style="margin-bottom: 1.5rem;">
+                <label>Helligkeit: <span class="slider-value" id="artnetBrightnessValue">100%</span></label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="range" min="0" max="100" value="100" class="slider" id="artnetBrightnessSlider" oninput="updateArtnetBrightnessSlider(this.value)" onchange="updateArtnetBrightness(this.value)" style="flex: 1;">
+                    <input type="number" min="0" max="100" value="100" id="artnetBrightnessInput" onchange="updateArtnetBrightness(this.value)" style="width: 70px; padding: 5px; text-align: center; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg); color: var(--text-color);">
+                </div>
+            </div>
+            
+            <div class="input-group">
+                <label>FPS Limit:</label>
+                <div style="display: flex; gap: 8px; margin-top: 0.5rem;">
+                    <input type="number" id="fpsInput" placeholder="30" min="1" max="60" class="form-control" style="flex: 1;">
+                    <button class="btn btn-info" onclick="setFPS()">Setzen</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Testmuster -->
+        <div class="control-panel">
+            <h2>Testmuster</h2>
+            <div class="test-colors">
+                <button class="color-btn" style="background: red; color: white;" onclick="testPattern('red')">Rot</button>
+                <button class="color-btn" style="background: green; color: white;" onclick="testPattern('green')">Grün</button>
+                <button class="color-btn" style="background: blue; color: white;" onclick="testPattern('blue')">Blau</button>
+                <button class="color-btn" style="background: white; color: black;" onclick="testPattern('white')">Weiß</button>
+                <button class="color-btn" style="background: yellow; color: black;" onclick="testPattern('yellow')">Gelb</button>
+                <button class="color-btn" style="background: cyan; color: black;" onclick="testPattern('cyan')">Cyan</button>
+                <button class="color-btn" style="background: magenta; color: white;" onclick="testPattern('magenta')">Magenta</button>
+                <button class="color-btn" style="background: linear-gradient(90deg, red, yellow, green, cyan, blue, magenta); color: white; font-weight: bold;" onclick="testPattern('gradient')">Gradient</button>
+            </div>
+        </div>
+        
+        <!-- Aufzeichnung & Replay -->
+        <div class="control-panel">
+            <h2>Aufzeichnung & Replay</h2>
+            
+            <div style="margin-bottom: 2rem;">
+                <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem;">Aufzeichnung</h3>
+                <input type="text" id="recordingName" class="form-control" placeholder="Name der Aufzeichnung" style="margin-bottom: 0.75rem;">
+                <div class="button-group">
+                    <button class="btn btn-primary" onclick="startRecording()">⏺️ Start</button>
+                    <button class="btn btn-danger" onclick="stopRecording()">⏹️ Stop</button>
+                </div>
+            </div>
+            
+            <div>
+                <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem;">Replay</h3>
+                <button class="btn btn-info" style="width: 100%; margin-bottom: 0.75rem;" onclick="loadRecordings()">🔄 Aufzeichnungen laden</button>
+                <select id="recordingSelect" class="form-select" style="margin-bottom: 0.75rem;">
+                    <option value="">-- Wähle Aufzeichnung --</option>
+                </select>
+                <div class="button-group">
+                    <button class="btn btn-success" onclick="startReplay()">▶️ Abspielen</button>
+                    <button class="btn btn-warning" onclick="stopReplay()">⏹️ Stoppen</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Punkte-Liste -->
+        <div class="control-panel">
+            <h2>Punkte-Liste</h2>
+            <button class="btn btn-info" style="width: 100%; margin-bottom: 0.75rem;" onclick="loadPointsList()">🔄 Listen laden</button>
+            <select id="pointsSelect" class="form-select" style="margin-bottom: 0.75rem;">
+                <option value="">-- Wähle Punkte-Liste --</option>
+            </select>
+            
+            <!-- Vorschau-Bild -->
+            <div style="margin-bottom: 0.75rem; text-align: center; background: #000; border-radius: 4px; padding: 0.5rem; min-height: 100px; display: flex; align-items: center; justify-content: center;">
+                <img id="pointsPreview" style="max-width: 100%; max-height: 200px; display: none; border-radius: 4px;" alt="Punkte-Vorschau">
+            </div>
+            
+            <button class="btn btn-primary" style="width: 100%;" onclick="switchPoints()">✨ Wechseln</button>
+            <div style="margin-top: 0.75rem; padding: 0.5rem; background: var(--info-bg); border: 1px solid var(--info-border); border-radius: 4px; font-size: 0.85rem; color: var(--info-text);">
+                <strong>⚠️ Hinweis:</strong> Wechsel stoppt Video/Script und passt Canvas-Größe + Art-Net Universen an.
+            </div>
+        </div>
+        
+        <!-- Information -->
+        <div class="control-panel">
+            <h2>System Information</h2>
+            <div class="button-group" style="margin-bottom: 1rem;">
+                <button class="btn btn-success" onclick="startInfoUpdates()">▶️ Auto-Update</button>
+                <button class="btn btn-warning" onclick="stopInfoUpdates()">⏹️ Stop</button>
+            </div>
+            <div class="info-display" id="infoDisplay">
+                <div style="color: var(--text-secondary); font-style: italic;">Klicke auf "Auto-Update" für Live-Daten</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DMX Monitor (volle Breite) -->
+    <div class="control-panel" style="margin-top: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h2 style="margin: 0;">DMX Monitor - Universe <span id="dmxUniverseNum">0</span></h2>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <label style="margin: 0;">Universe:</label>
+                <select id="universeSelect" onchange="switchUniverse(this.value)" class="form-select" style="width: auto; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg); color: var(--text-color);">
+                    <option value="0">0</option>
+                </select>
+            </div>
+        </div>
+        <div id="dmxGrid" class="dmx-grid"></div>
+    </div>
+
+    <!-- Toast Component -->
+    <script src="js/toast-loader.js"></script>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="js/triple-slider.js"></script>
+    <script type="module" src="js/artnet.js"></script>
+</body>
+
+</html>

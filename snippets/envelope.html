@@ -1,0 +1,147 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { font-family: Arial; }
+  canvas { border: 1px solid #ccc; cursor: crosshair; }
+  table { border-collapse: collapse; margin-top: 10px; }
+  td, th { border: 1px solid #ccc; padding: 4px; }
+</style>
+</head>
+<body>
+<h3>Envelope Editor with Interpolation</h3>
+<select id="style">
+  <option value="linear">Linear</option>
+  <option value="saw">Saw</option>
+  <option value="curved">Curved</option>
+</select>
+<select id="accuracy">
+  <option value="10">10 points</option>
+  <option value="20">20 points</option>
+  <option value="50">50 points</option>
+  <option value="100">100 points</option>
+</select>
+<button id="generate">Generate Table</button>
+<br>
+<canvas id="envelope" width="600" height="300"></canvas>
+<div id="tableContainer"></div>
+
+<script>
+const canvas = document.getElementById('envelope');
+const ctx = canvas.getContext('2d');
+const styleSelect = document.getElementById('style');
+const accuracySelect = document.getElementById('accuracy');
+const tableContainer = document.getElementById('tableContainer');
+let points = [{x:50,y:150},{x:200,y:50},{x:400,y:200}];
+let draggingPoint = null;
+
+function drawEnvelope() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  const style = styleSelect.value;
+  if(style === 'linear'){
+    for(let i=1;i<points.length;i++){
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+  } else if(style === 'saw'){
+    for(let i=1;i<points.length;i++){
+      ctx.lineTo(points[i].x, points[i-1].y);
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+  } else if(style === 'curved'){
+    for(let i=1;i<points.length;i++){
+      const midX = (points[i-1].x + points[i].x)/2;
+      ctx.quadraticCurveTo(midX, points[i-1].y, points[i].x, points[i].y);
+    }
+  }
+  ctx.strokeStyle = '#007bff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  points.forEach(p=>{
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,6,0,Math.PI*2);
+    ctx.fillStyle='red';
+    ctx.fill();
+  });
+}
+
+canvas.addEventListener('mousedown', e=>{
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  draggingPoint = points.find(p=>Math.abs(p.x-x)<8 && Math.abs(p.y-y)<8);
+  if(!draggingPoint){
+    points.push({x,y});
+    points.sort((a,b)=>a.x-b.x);
+    drawEnvelope();
+  }
+});
+
+canvas.addEventListener('mousemove', e=>{
+  if(draggingPoint){
+    const rect = canvas.getBoundingClientRect();
+    draggingPoint.x = e.clientX - rect.left;
+    draggingPoint.y = Math.max(0, Math.min(255, e.clientY - rect.top));
+    drawEnvelope();
+  }
+});
+
+canvas.addEventListener('mouseup', ()=> draggingPoint=null);
+styleSelect.addEventListener('change', drawEnvelope);
+
+document.getElementById('generate').addEventListener('click', ()=>{
+  const samples = parseInt(accuracySelect.value);
+  const style = styleSelect.value;
+  const minX = points[0].x;
+  const maxX = points[points.length-1].x;
+  const step = (maxX - minX)/(samples-1);
+  let result = [];
+  for(let i=0;i<samples;i++){
+    const x = minX + i*step;
+    let y;
+    if(style==='linear'){
+      y = interpolateLinear(x);
+    } else if(style==='saw'){
+      y = interpolateSaw(x);
+    } else {
+      y = interpolateLinear(x); // simplified for curved
+    }
+    result.push({time:x.toFixed(1), amplitude:y.toFixed(1)});
+  }
+  renderTable(result);
+});
+
+function interpolateLinear(x){
+  for(let i=0;i<points.length-1;i++){
+    if(x>=points[i].x && x<=points[i+1].x){
+      const t = (x - points[i].x)/(points[i+1].x - points[i].x);
+      return points[i].y + t*(points[i+1].y - points[i].y);
+    }
+  }
+  return points[points.length-1].y;
+}
+
+function interpolateSaw(x){
+  for(let i=0;i<points.length-1;i++){
+    if(x>=points[i].x && x<=points[i+1].x){
+      return points[i+1].y; // step
+    }
+  }
+  return points[points.length-1].y;
+}
+
+function renderTable(data){
+  let html = '<table><tr><th>Time</th><th>Amplitude</th></tr>';
+  data.forEach(row=>{
+    html += `<tr><td>${row.time}</td><td>${row.amplitude}</td></tr>`;
+  });
+  html += '</table>';
+  tableContainer.innerHTML = html;
+}
+
+drawEnvelope();
+</script>
+</body>
+</html>

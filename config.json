@@ -69,6 +69,19 @@
     ],
     "clips": [
       {
+        "plugin_id": "transport",
+        "params": {
+          "transport_position": {
+            "_value": 1,
+            "_rangeMin": 0,
+            "_rangeMax": 100
+          },
+          "speed": 1.0,
+          "reverse": false,
+          "playback_mode": "repeat"
+        }
+      },
+      {
         "plugin_id": "transform",
         "params": {
           "position_x": 0.0,

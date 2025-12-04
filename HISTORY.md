@@ -1,6 +1,77 @@
 # Py_artnet - Version History
 
-## v2.3 - Unified API & Plugin System (2025-11-26 - 2025-12-02)
+## v2.3 - Unified API & Plugin System (2025-11-26 - 2025-12-04)
+
+### v2.3.6 - Triple-Handle Slider UI System (2025-12-04)
+- ✓ **Triple-Handle Slider Component** - Universal Numeric Parameter Control
+  - Reusable JavaScript class (triple-slider.js ~200 lines)
+  - 3 draggable handles: Min range (▼), Max range (▼), Value (|)
+  - Features: Auto-clamping, step snapping, range restrictions, callbacks
+  - Dark mode styling (triple-slider.css ~80 lines)
+  - Bootstrap 5 variable integration
+  - Global registry: window.tripleSliders for instance management
+  - Public API: initTripleSlider(), getTripleSlider(), setValue(), getValue(), setRange(), getRange()
+- ✓ **Comprehensive Test Suite** - 6 Test Scenarios
+  - Test page: triple-slider-test.html (~400 lines)
+  - Scenarios: Float, Integer, Small Range, Value-Only, Effect Parameters, Performance Test
+  - Validation checklist: Drag, clamp, step snap, API methods, callbacks
+  - User approved: "looks good go on"
+- ✓ **Full Application Integration** - Replaced All Standard Range Sliders
+  - HTML templates: Added CSS + JS includes (player, effects, artnet, index)
+  - effects.js: FLOAT/INT rendering replaced with triple-slider (line 248-268)
+  - player.js: Parameter rendering replaced with triple-slider (2 locations)
+    - Location 1: renderParameterControl() FLOAT/INT case (line 3002-3030)
+    - Location 2: Generator parameters (line 993-1011)
+  - Right-click reset: resetParameterToDefaultTriple() helper functions
+  - Automatic initialization via setTimeout() after DOM update
+  - Seamless integration: All effect and player parameters now use triple-slider
+- ✓ **Range Persistence System** - Min/Max Range Saved with Parameters
+  - Frontend: updateParameter() sends rangeMin/rangeMax alongside value
+  - Backend: Parameters stored as {_value, _rangeMin, _rangeMax} object
+  - Plugin loading: _extract_parameter_values() extracts actual values
+  - Session state: Range metadata persisted across page reloads
+  - Snapshot support: Range restrictions saved in project files
+  - Restore behavior: Sliders initialize with saved range values
+  - onRangeChange callback: Automatically saves when user adjusts range handles
+- ✓ **Documentation** - Complete Integration Guide
+  - TRIPLE_SLIDER_INTEGRATION.md (~250 lines)
+  - TRIPLE_SLIDER_COMPLETED.md - Implementation completion report
+  - Step-by-step integration plan with code snippets
+  - API documentation with usage examples
+  - Estimated integration time: ~2-3h (completed)
+
+### v2.3.5 - HAP Codec & Universal Video Converter (2025-12-02)
+- ✓ **HAP Codec Decoder** - Hardware-beschleunigtes Video-Decoding
+  - HAP Varianten: HAP (DXT1), HAP Alpha (DXT5), HAP Q (BC7)
+  - FFmpeg Integration: libavcodec HAP Support
+  - Automatische HAP-Format-Erkennung
+  - Fallback auf Standard-Codecs
+  - Performance-Messung
+- ✓ **Universal Video Converter** - FFmpeg-basierte Batch-Konvertierung
+  - Input-Formate: AVI, MP4, MOV, GIF, PNG-Sequences
+  - Output-Profile: HAP (Performance), H.264 (Hardware-Encoding), H.264 NVENC (GPU)
+  - Batch-Processing: Ganze Ordner konvertieren mit glob patterns (recursive)
+  - Resize Modes: none, fit, fill, stretch, auto
+  - Loop-Optimierung: Nahtlose Loops mit FFmpeg fade filters
+  - Separate HTML-Page: Eigenständige Converter-UI (converter.html)
+  - FFmpeg-Wrapper mit Progress-Tracking
+  - REST API Endpoints: status, formats, info, convert, batch, upload, canvas-size
+  - Web-UI mit separater HTML-Page und Dark Mode
+- ✓ **Converter UI Implementation** - Standalone Video Converter Page
+  - File Browser Integration (FilesTab component mit tree/list view)
+  - Drag & Drop Zone (from file browser + from file system)
+  - Local File Upload (browse button + drag & drop support)
+  - Dual-Mode Selection: Browser Mode (drag & drop) vs Pattern Mode (glob)
+  - Multi-file Sequential Conversion mit progress tracking
+  - Canvas Size Integration (loads from config.json, fallback 60x300)
+  - Output Directory Selection
+  - Format Selection Cards (HAP, HAP Alpha, HAP Q, H.264, H.264 NVENC)
+  - Conversion Options (Resize Mode, Optimize Loop, Target Size)
+  - Progress Bar & Queue Display
+  - Results Summary (success/failed counts, compression ratio)
+  - Consistent Styling (matches app design with CSS variables)
+  - Search Filter für File Browser (works in both tree and list view)
+  - Auto-expand folders when searching in tree view
 
 ### v2.3.4 - Effect Library Expansion (2025-12-02)
 - ✓ **60+ neue Effect-Plugins implementiert** - Massive Erweiterung der Effect-Bibliothek

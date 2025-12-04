@@ -1,0 +1,1369 @@
+/* ========================================
+   PLAYER PAGE STYLES
+   Specific styles for the player interface
+   ======================================== */
+
+/* Body Override for Player Page */
+body {
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+}
+
+/* ========================================
+   MAIN LAYOUT
+   ======================================== */
+
+.app-layout {
+    display: flex;
+    flex-direction: column;
+    height: 95vh;
+    max-height: 95vh;
+}
+
+/* ========================================
+   PLAYLIST MANAGEMENT BAR
+   ======================================== */
+
+.playlist-management-bar {
+    padding: 0.5rem 1rem;
+    background: var(--panel-bg);
+    border-bottom: 2px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+    height: 50px;
+}
+
+.playlist-management-bar-title {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.playlist-management-bar-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.playlist-management-bar-actions button {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    font-size: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ========================================
+   PLAYER SECTION (Video & Art-Net)
+   ======================================== */
+
+.player-section {
+    display: grid;
+    grid-template-columns: 260px 40px 1fr;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid var(--border-color);
+    background: var(--panel-bg);
+    flex-shrink: 0;
+    max-height: 190px;
+    overflow: visible;
+    position: relative;
+    z-index: auto;
+}
+
+/* Preview Box */
+.preview-box {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.preview-video {
+    width: 100%;
+    height: 140px;
+    background: #000;
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.preview-video img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Player Controls */
+.player-controls {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+}
+
+.player-controls button {
+    width: 20px;
+    height: 20px;
+    font-size: 0.65rem;
+    padding: 0;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: unset;
+}
+
+/* ========================================
+   PLAYLIST AREA
+   ======================================== */
+
+.playlist-area {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    overflow: hidden;
+    min-height: 0;
+    position: relative;
+    z-index: auto;
+}
+
+.playlist-header {
+    font-weight: 600;
+    font-size: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.playlist-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding: 0.4rem 0;
+    scroll-behavior: smooth;
+}
+
+.playlist-items-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.playlist-scroll::-webkit-scrollbar {
+    height: 8px;
+}
+
+.playlist-scroll::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 4px;
+}
+
+.playlist-scroll::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.playlist-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-color);
+}
+
+.playlist-scroll.drag-over {
+    background: var(--bg-tertiary);
+    border: 2px dashed var(--accent-color);
+}
+
+/* ========================================
+   PLAYLIST ITEMS
+   ======================================== */
+
+.playlist-item {
+    flex-shrink: 0;
+    width: 120px;
+    height: 70px;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    text-align: center;
+    padding: 0.4rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.playlist-item:hover {
+    border-color: var(--accent-color);
+    transform: translateY(-2px);
+}
+
+.playlist-item.active {
+    border-color: var(--success-dot);
+    background: var(--bg-tertiary);
+}
+
+.playlist-item.drag-over {
+    border-color: var(--accent-color);
+    border-style: dashed;
+    transform: scale(1.05);
+}
+
+.playlist-item[draggable="true"] {
+    cursor: grab;
+}
+
+.playlist-item[draggable="true"]:active {
+    cursor: grabbing;
+}
+
+.playlist-item-name {
+    position: relative;
+    z-index: 1;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    word-break: break-word;
+    pointer-events: none;
+}
+
+.playlist-item-remove {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(220, 53, 69, 0.9);
+    color: white;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    padding: 0;
+    pointer-events: auto;
+    z-index: 10;
+}
+
+.playlist-item:hover .playlist-item-remove {
+    display: flex;
+}
+
+.playlist-item-remove:hover {
+    background: rgb(220, 53, 69);
+    transform: scale(1.1);
+}
+
+/* Drop zones between playlist items */
+.drop-zone {
+    min-height: 20px;
+    margin: 0;
+    border-radius: 4px;
+    transition: all 0.15s;
+    background: rgba(52, 152, 219, 0.05);
+    border: 1px dashed rgba(52, 152, 219, 0.15);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: copy;
+}
+
+.drop-zone::after {
+    content: '';
+    pointer-events: none;
+}
+
+.drop-zone.drag-over {
+    min-height: 40px;
+    background: rgba(52, 152, 219, 0.25);
+    border: 2px dashed var(--accent-color);
+}
+
+.drop-zone.drag-over::after {
+    content: '⬇ Drop hier';
+    font-size: 0.75rem;
+    color: var(--accent-color);
+    font-weight: bold;
+}
+
+/* ========================================
+   BOTTOM SECTION - Tabs + FX Controls
+   ======================================== */
+
+.bottom-section {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 220px 0.8fr 0.8fr 1fr 1fr;
+    gap: 1rem;
+    padding: 1rem;
+    overflow: hidden;
+}
+
+/* ========================================
+   TABS PANEL
+   ======================================== */
+
+.tabs-panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.tabs-header {
+    display: flex;
+    border-bottom: 2px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 0.75rem;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 500;
+}
+
+.tab-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    color: var(--accent-color);
+    background: var(--bg-secondary);
+    border-bottom: 2px solid var(--accent-color);
+}
+
+.tab-content {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.tab-pane {
+    display: none;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+/* ========================================
+   FX CONTROL PANELS
+   ======================================== */
+
+.fx-panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.fx-panel-header {
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border-bottom: 2px solid var(--border-color);
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.fx-panel-header button {
+    width: 40px !important;
+    height: 40px;
+    padding: 0;
+    flex-shrink: 0;
+    min-width: 40px;
+    max-width: 40px;
+}
+
+.fx-panel-body {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+}
+
+/* ========================================
+   EFFECT ITEMS (Collapsible)
+   ======================================== */
+
+.effect-item {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+}
+
+.effect-item.system-plugin {
+    border-left: 3px solid #ffc107;
+    background: linear-gradient(90deg, rgba(255, 193, 7, 0.05) 0%, var(--bg-secondary) 20%);
+}
+
+.effect-header {
+    padding: 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.effect-header:hover {
+    background: var(--bg-tertiary);
+}
+
+.effect-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 500;
+}
+
+.effect-toggle {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.effect-body {
+    padding: 0.75rem;
+    border-top: 1px solid var(--border-color);
+    display: none;
+}
+
+.effect-item.expanded .effect-body {
+    display: block;
+}
+
+.effect-item.expanded .effect-toggle::before {
+    content: '▼';
+}
+
+.effect-item:not(.expanded) .effect-toggle::before {
+    content: '▶';
+}
+
+.effect-param {
+    margin-bottom: 0.75rem;
+}
+
+.effect-param:last-child {
+    margin-bottom: 0;
+}
+
+.effect-param label {
+    display: block;
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+    color: var(--text-secondary);
+}
+
+.effect-param input,
+.effect-param select {
+    width: 100%;
+}
+
+/* ========================================
+   DRAGGABLE CARDS (Shared styles for effects/generators/files)
+   ======================================== */
+
+.draggable-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    cursor: grab;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.draggable-card:hover {
+    border-color: var(--accent-color);
+    transform: translateX(4px);
+}
+
+.draggable-card:active {
+    cursor: grabbing;
+    opacity: 0.7;
+}
+
+.draggable-card-title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    color: var(--text-primary);
+}
+
+.draggable-card-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+/* Effect-specific cards - extends draggable-card */
+.effect-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    cursor: grab;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.effect-card:hover {
+    border-color: var(--accent-color);
+    transform: translateX(4px);
+}
+
+.effect-card:active {
+    cursor: grabbing;
+    opacity: 0.7;
+}
+
+.effect-card-title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    color: var(--text-primary);
+}
+
+.effect-card-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+/* Generator-specific cards - extends draggable-card */
+.generator-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    cursor: grab;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.generator-card:hover {
+    border-color: #ffd700;
+    transform: translateX(4px);
+}
+
+.generator-card:active {
+    cursor: grabbing;
+    opacity: 0.7;
+}
+
+.generator-card-title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    color: var(--text-primary);
+}
+
+.generator-card-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+/* ========================================
+   EMPTY STATE
+   ======================================== */
+
+.empty-state {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--text-secondary);
+}
+
+.empty-state-icon {
+    font-size: 3rem;
+    opacity: 0.3;
+    margin-bottom: 1rem;
+}
+
+.empty-state h6 {
+    margin: 0.5rem 0 0.25rem;
+    color: var(--text-primary);
+}
+
+.empty-state p {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.empty-state-hint {
+    font-size: 0.85rem;
+    margin: 0.5rem;
+}
+
+/* Empty state variations */
+.empty-state.drop-zone {
+    width: 100%;
+    padding: 2rem;
+    text-align: center;
+    min-height: 150px;
+}
+
+.empty-state-icon-large {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state-title {
+    margin: 0.5rem 0;
+}
+
+.empty-state-subtitle {
+    color: var(--text-secondary);
+}
+
+.empty-state-secondary {
+    font-size: 0.75rem;
+    margin: 0.5rem;
+    color: var(--text-secondary);
+}
+
+/* ========================================
+   TRANSITION MENU
+   ======================================== */
+
+.transition-menu {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 10000;
+}
+
+.transition-toggle {
+    width: 40px;
+    height: 140px;
+    background: linear-gradient(180deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.transition-toggle:hover {
+    background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary-color) 100%);
+    box-shadow: 0 0 15px rgba(0, 123, 255, 0.5);
+}
+
+.transition-icon {
+    font-size: 1.5rem;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+}
+
+.transition-panel {
+    position: absolute;
+    left: 50px;
+    top: 0;
+    width: 280px;
+    background: var(--panel-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    z-index: 99999;
+    display: none;
+}
+
+.transition-panel.active {
+    display: block;
+}
+
+.transition-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 6px 6px 0 0;
+    font-weight: 600;
+}
+
+.btn-close-transition {
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.btn-close-transition:hover {
+    opacity: 1;
+}
+
+.transition-body {
+    padding: 1rem;
+}
+
+.transition-settings {
+    margin-top: 0.5rem;
+}
+
+.transition-settings.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* ========================================
+   GENERATOR PARAMETERS SECTION
+   ======================================== */
+
+.generator-params-section .effect-params {
+    display: none;
+}
+
+.generator-params-section.expanded .effect-params {
+    display: block;
+}
+
+.generator-params-section .expand-icon {
+    transition: transform 0.2s;
+}
+
+.generator-params-section.expanded .expand-icon {
+    transform: rotate(180deg);
+}
+
+/* ========================================
+   LAYER MANAGEMENT COMPONENTS
+   ======================================== */
+
+.layer-stack-inline {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    width: 100%;
+}
+
+.layer-stack-header {
+    padding: 0.4rem 0.5rem;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+}
+
+.layer-stack-header button {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+    height: 22px;
+    min-width: 45px;
+}
+
+.layer-stack-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+/* Layer Cards */
+.layer-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.4rem;
+    cursor: grab;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.layer-card:hover {
+    border-color: var(--accent-color);
+    border-left-color: var(--accent-color);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.layer-card.dragging {
+    opacity: 0.5;
+    cursor: grabbing;
+    transform: scale(1.05);
+}
+
+.layer-card.drag-over {
+    border-top: 2px solid var(--accent-color);
+}
+
+.layer-card.base-layer {
+    border-left: 3px solid #ffd700;
+    background: linear-gradient(90deg, rgba(255, 215, 0, 0.1) 0%, var(--bg-secondary) 10%);
+}
+
+.layer-card.selected {
+    border-color: var(--primary-color);
+    background: linear-gradient(90deg, rgba(0, 123, 255, 0.15) 0%, var(--bg-secondary) 20%);
+}
+
+.layer-card.disabled {
+    opacity: 0.5;
+}
+
+.layer-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.layer-drag-handle {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    cursor: grab;
+    user-select: none;
+    line-height: 1;
+}
+
+.layer-card:active .layer-drag-handle {
+    cursor: grabbing;
+}
+
+.layer-id {
+    color: var(--text-primary);
+}
+
+.layer-badge {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.35rem;
+    background: #ffd700;
+    color: #000;
+    border-radius: 3px;
+    font-weight: 700;
+    margin-left: auto;
+}
+
+.layer-remove {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 0.7rem;
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: unset;
+}
+
+/* Layer Config Controls */
+.layer-config {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+}
+
+.blend-mode-select {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.4rem;
+    height: 24px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-primary);
+}
+
+.opacity-control {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex: 1;
+}
+
+.opacity-slider {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border-color);
+    border-radius: 2px;
+    outline: none;
+}
+
+.opacity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: var(--accent-color);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.opacity-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: var(--accent-color);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+.opacity-value {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    min-width: 30px;
+    text-align: right;
+}
+
+.layer-toggle {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font-size: 0.8rem;
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: unset;
+    transition: all 0.2s;
+}
+
+.layer-toggle.enabled {
+    background: var(--success-color, #28a745);
+    border-color: var(--success-color, #28a745);
+}
+
+.layer-toggle.disabled {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    opacity: 0.6;
+}
+
+.layer-source {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0.2rem 0;
+}
+
+/* ========================================
+   FILE BROWSER COMPONENTS
+   ======================================== */
+
+.file-tree,
+.file-browser-tree {
+    user-select: none;
+}
+
+.file-item,
+.file-browser-item {
+    margin: 2px 0;
+}
+
+.file-item-content,
+.file-browser-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.file-item-content:hover,
+.file-browser-content:hover {
+    background: var(--bg-secondary);
+}
+
+.file-browser-content.selected {
+    background: var(--primary-color);
+    color: #fff;
+}
+
+.file-item-content.folder,
+.file-browser-content.folder {
+    font-weight: 500;
+}
+
+.file-item-content.video,
+.file-browser-content.file.video {
+    cursor: grab;
+}
+
+.file-item-content.video:active,
+.file-browser-content.file.video:active {
+    cursor: grabbing;
+}
+
+.file-icon,
+.folder-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-size {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.folder-toggle {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+}
+
+.folder-children {
+    overflow: hidden;
+    transition: all 0.2s;
+}
+
+/* File Parameter Input */
+.file-input-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.file-input-wrapper input {
+    flex: 1;
+}
+
+.file-input-wrapper .btn-browse {
+    flex-shrink: 0;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+}
+
+/* File Browser Modal */
+.file-browser-modal .modal-body {
+    padding: 0.5rem;
+}
+
+.file-browser-modal .file-browser-tree {
+    min-height: 200px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+/* ========================================
+   UTILITY CLASSES
+   ======================================== */
+
+.btn-icon {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.form-label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    color: var(--text-secondary);
+}
+
+/* ========================================
+   DRAG & DROP STATES
+   ======================================== */
+
+/* Dragging States */
+.dragging {
+    opacity: 0.5;
+}
+
+.drag-handle-grabbing {
+    cursor: grabbing !important;
+}
+
+/* Drop Target Highlighting */
+.drop-target {
+    background: var(--bg-tertiary) !important;
+}
+
+.drop-target-bordered {
+    background: var(--bg-tertiary) !important;
+    border: 2px dashed var(--accent-color) !important;
+}
+
+/* ========================================
+   GENERATOR PARAMETERS
+   ======================================== */
+
+.generator-params-section {
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+}
+
+.generator-params-section .effect-header {
+    cursor: pointer;
+    padding: 0.75rem;
+    background: var(--bg-tertiary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.generator-params-section .effect-header > div:first-child {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.generator-params-section .effect-header .param-icon {
+    font-size: 1.2rem;
+}
+
+.generator-params-section .effect-params {
+    padding: 0.5rem;
+}
+
+.param-control {
+    margin-bottom: 1rem;
+    padding: 0.5rem;
+}
+
+.param-control label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-weight: 500;
+}
+
+.param-control small {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+}
+
+.param-control-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.param-control-row input[type="range"] {
+    flex: 1;
+}
+
+.param-control-row .param-value {
+    min-width: 50px;
+    text-align: right;
+}
+
+.param-control label.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+/* ========================================
+   LAYER CARDS
+   ======================================== */
+
+.layer-card {
+    margin-bottom: 0.5rem;
+    padding: 0.5rem;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+}
+
+.layer-card.base-layer {
+    border: 2px solid var(--accent-color);
+}
+
+.layer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+}
+
+.layer-drag-handle {
+    cursor: grab;
+    user-select: none;
+    margin-right: 0.3rem;
+}
+
+.layer-remove {
+    padding: 0.1rem 0.4rem;
+    font-size: 0.8rem;
+}
+
+.layer-lock-icon {
+    font-size: 0.7rem;
+    color: var(--accent-color);
+}
+
+.layer-source {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+}
+
+.layer-config {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.layer-config .blend-mode-select {
+    flex: 1;
+    padding: 0.2rem;
+    font-size: 0.8rem;
+}
+
+.layer-config .opacity-slider {
+    width: 80px;
+}
+
+.layer-config .opacity-value {
+    font-size: 0.75rem;
+    min-width: 35px;
+}
+
+/* Layer Stack Container */
+.layer-stack-container {
+    padding: 0.5rem;
+}
+
+/* Layer Panel Title */
+.layer-panel-title-small {
+    color: var(--text-secondary);
+    font-weight: normal;
+}
+
+/* ========================================
+   FILE/FOLDER BROWSER
+   ======================================== */
+
+.folder-children {
+    display: none;
+}
+
+.folder-children.expanded {
+    display: block;
+}
+
+/* Large icon for empty states */
+.large-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+/* ========================================
+   MODAL LIST ITEMS
+   ======================================== */
+
+.modal-list-item {
+    background: var(--bg-tertiary, #333);
+    color: var(--text-primary, #e0e0e0);
+    border: 1px solid var(--border-color, #444);
+    margin-bottom: 0.5rem;
+    border-radius: 4px;
+    padding: 0;
+}
+
+.modal-list-item .btn-main {
+    background: none;
+    border: none;
+    color: inherit;
+}
+
+.modal-list-item .btn-delete {
+    border-radius: 0 4px 4px 0;
+    min-width: 60px;
+}
+
+/* ========================================
+   TRIM RANGE SLIDER (ion.rangeSlider)
+   ======================================== */
+
+.trim-controls-section .irs {
+    font-family: inherit;
+}
+
+.trim-controls-section .irs--round .irs-bar,
+.trim-controls-section .irs--round .irs-from,
+.trim-controls-section .irs--round .irs-to,
+.trim-controls-section .irs--round .irs-single {
+    background: var(--accent-color, #0d6efd);
+}
+
+.trim-controls-section .irs--round .irs-handle {
+    border-color: var(--accent-color, #0d6efd);
+    cursor: grab;
+}
+
+.trim-controls-section .irs--round .irs-handle:active {
+    cursor: grabbing;
+}
+
+.trim-controls-section .irs--round .irs-line {
+    background: var(--border-color, #555);
+}
+
+.trim-controls-section .irs--round .irs-grid-text {
+    color: var(--text-secondary, #888);
+    font-size: 0.75rem;
+}
+
+.effect-toggle {
+    font-size: 0.8rem;
+    transition: transform 0.2s;
+}

@@ -1,0 +1,127 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Circular Slider 25×25</title>
+<style>
+  body { font-family: system-ui, Arial; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+  .wrap { text-align:center; }
+  .val { margin-top:8px; font-size:12px; }
+  svg { width:25px; height:25px; touch-action:none; }
+  /* Improve knob visibility at small size */
+  .track { stroke:#c9c9c9; stroke-width:3; }
+  .progress { stroke:#007bff; stroke-width:3; stroke-linecap:round; }
+  .knob { fill:#007bff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <svg id="slider" viewBox="0 0 25 25" aria-label="Circular slider" role="slider">
+    <!-- Track circle -->
+    <circle class="track" cx="12.5" cy="12.5" r="10" fill="none"/>
+    <!-- Progress arc -->
+    <path id="progressArc" class="progress" d="" fill="none"/>
+    <!-- Knob (small circle) -->
+    <circle id="knob" class="knob" cx="22.5" cy="12.5" r="3"/>
+  </svg>
+  <div class="val" id="value">Value: 0%</div>
+</div>
+
+<script>
+(function(){
+  const svg = document.getElementById('slider');
+  const valueEl = document.getElementById('value');
+  const knob = document.getElementById('knob');
+  const arc = document.getElementById('progressArc');
+
+  const cx = 12.5, cy = 12.5, r = 10; // circle geometry for 25×25 viewBox
+  let angle = -Math.PI; // start at 0% (leftmost point)
+
+  // Map angle (-π .. +π) to percent 0..100
+  function angleToPercent(a){
+    return Math.round(((a + Math.PI) / (2 * Math.PI)) * 255);
+  }
+  // Map percent 0..100 back to angle (-π .. +π)
+  function percentToAngle(p){
+    return (p/100) * 2 * Math.PI - Math.PI;
+  }
+
+  function setKnobPosition(a){
+    const kx = cx + r * Math.cos(a);
+    const ky = cy + r * Math.sin(a);
+    knob.setAttribute('cx', kx.toFixed(2));
+    knob.setAttribute('cy', ky.toFixed(2));
+  }
+
+  function setArc(a){
+    // Arc from start (-π) to current angle a
+    const x1 = cx + r * Math.cos(-Math.PI);
+    const y1 = cy + r * Math.sin(-Math.PI);
+    const x2 = cx + r * Math.cos(a);
+    const y2 = cy + r * Math.sin(a);
+    const largeArcFlag = (a - (-Math.PI)) > Math.PI ? 1 : 0;
+    // Sweep clockwise
+    const d = `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${largeArcFlag} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+    arc.setAttribute('d', d);
+  }
+
+  function render(){
+    setKnobPosition(angle);
+    setArc(angle);
+    valueEl.textContent = `Value: ${angleToPercent(angle)}%`;
+  }
+
+  function updateFromClient(x, y){
+    // Convert client coords to SVG coords
+    const pt = svg.createSVGPoint();
+    pt.x = x; pt.y = y;
+    const ctm = svg.getScreenCTM().inverse();
+    const loc = pt.matrixTransform(ctm);
+    // Compute angle relative to center
+    angle = Math.atan2(loc.y - cy, loc.x - cx);
+    render();
+  }
+
+  // Mouse events
+  let dragging = false;
+  svg.addEventListener('mousedown', (e)=>{ dragging = true; updateFromClient(e.clientX, e.clientY); });
+  window.addEventListener('mousemove', (e)=>{ if(dragging) updateFromClient(e.clientX, e.clientY); });
+  window.addEventListener('mouseup', ()=> dragging = false);
+
+  // Touch events
+  svg.addEventListener('touchstart', (e)=>{
+    dragging = true;
+    const t = e.touches[0];
+    updateFromClient(t.clientX, t.clientY);
+    e.preventDefault();
+  }, {passive:false});
+  svg.addEventListener('touchmove', (e)=>{
+    if(!dragging) return;
+    const t = e.touches[0];
+    updateFromClient(t.clientX, t.clientY);
+    e.preventDefault();
+  }, {passive:false});
+  svg.addEventListener('touchend', ()=> dragging = false);
+
+  // Keyboard accessibility (left/right to adjust)
+  svg.setAttribute('tabindex', '0');
+  svg.addEventListener('keydown', (e)=>{
+    const step = 5; // percent step
+    let p = angleToPercent(angle);
+    if(e.key === 'ArrowRight' || e.key === 'ArrowUp') p = Math.min(100, p + step);
+    if(e.key === 'ArrowLeft'  || e.key === 'ArrowDown') p = Math.max(0,   p - step);
+    angle = percentToAngle(p);
+    render();
+  });
+
+  // Initialize
+  render();
+
+  // Example: how to read value programmatically
+  // const currentValuePercent = angleToPercent(angle);
+  // const currentValue255 = Math.round(currentValuePercent * 2.55);
+})();
+</script>
+</body>
+</html>

@@ -89,27 +89,47 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-## ⚡ PRIORITÄT 2 - Mittel-Komplex, Hoch-Wert (~14-24h)
+## ⚡ PRIORITÄT 2 - Mittel-Komplex, Hoch-Wert (~8-12h)
 **Mittlerer Aufwand, hoher Performance-Gewinn**
 
-### 2.1 ⚡ WebSocket Command Channel (~4-6h)
+### 2.1 ⚡ WebSocket Command Channel (~4-6h) 🔥 PRIORITY
 
-- [ ] **Zeitkritische Commands über WebSocket:**
+- [ ] **Zeitkritische Commands über WebSocket (Hybrid-Ansatz):**
   - **Problem mit REST:** 10-50ms Latenz pro Request
-  - **WebSocket-Vorteile:** <5ms Latenz, Persistent Connection
+  - **WebSocket-Vorteile:** 2-5ms Latenz (LAN), Persistent Connection
+  - **Architektur-Entscheidung:**
+    - ✅ **WebSocket für Commands** (sofortiger Mehrwert)
+    - ⏸️ **WebRTC für Video** später optional (nur bei CPU-Problemen)
   - **Zeitkritische Commands:**
     - Playback: play, pause, stop, seek
     - Parameter: brightness, speed, effect_param
     - Blackout: sofortiger Blackout-Toggle
   - **Features:**
+    - Auto-Reconnect bei Verbindungsabbruch
+    - Event-basiert (einfach erweiterbar)
+    - Broadcast an alle Clients (Multi-User)
     - Command-Queue mit Priority-System
     - Batch-Commands
     - MessagePack Support (optional)
   - **Implementierung:**
-    - Phase 1: WebSocket Command Handler (~2h)
-    - Phase 2: Command-Queue & Priority (~1h)
-    - Phase 3: MessagePack Support (~1h)
-    - Phase 4: Client-Library (~1h)
+    - Phase 1: Flask-SocketIO Integration (~1h)
+    - Phase 2: WebSocket Command Handler (~2h)
+    - Phase 3: Command-Queue & Priority (~1h)
+    - Phase 4: Client-Library (JavaScript) (~1h)
+    - Phase 5: MessagePack Support (optional) (~1h)
+  - **Latenz-Verbesserung:**
+    - REST: 10-50ms → WebSocket: 2-5ms (LAN)
+    - Responsiveness-Gewinn: 5-25x schneller
+
+**Code-Beispiel:**
+```javascript
+// Vorher (REST): 15-50ms Latenz
+await fetch('/api/player/video/play', {method: 'POST'});
+
+// Nachher (WebSocket): 2-5ms Latenz
+socket.emit('player.play', {player_id: 'video'});
+socket.on('player.status', (data) => console.log(data));
+```
 
 ---
 
@@ -149,15 +169,23 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 2.3 ⚡ Preview Stream Optimierung (~6-10h)
+## 🔧 PRIORITÄT 3 - Mittel-Komplex, Mittel-Wert (~39-57h)
+**Mittlerer Aufwand, mittlere Business-Priorität**
 
-- [ ] **WebRTC statt MJPEG:**
-  - **Problem aktuell:** MJPEG = hohe CPU-Last, hohe Bandbreite
+### 3.1 🎥 WebRTC Video Preview (Optional) (~6-10h)
+
+- [ ] **Hardware-beschleunigtes Video-Streaming (nur bei Bedarf):**
+  - **Wann implementieren:**
+    - ✅ CPU-Last durch MJPEG-Encoding zum Problem wird (>60% CPU)
+    - ✅ Remote-Zugriff benötigt wird (außerhalb LAN)
+    - ✅ Mehr als 3 Clients gleichzeitig Preview schauen
+    - ❌ **NICHT jetzt** - MJPEG funktioniert aktuell ausreichend
+  - **Problem aktuell:** MJPEG = hohe CPU-Last (40-60% CPU), hohe Bandbreite (2-5 Mbps)
   - **Lösung: WebRTC:**
     - Hardware-beschleunigtes H.264-Encoding (GPU)
     - ~10x weniger CPU-Last vs. MJPEG
     - ~5x weniger Bandbreite (0.2-1 Mbps)
-    - Ultra-niedrige Latenz (<100ms)
+    - Ultra-niedrige Latenz (<100ms End-to-End)
   - **Features:**
     - Multi-Quality: Low (480p), Medium (720p), High (1080p)
     - Adaptive FPS: 10-30 FPS je nach CPU-Last
@@ -165,17 +193,15 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
     - Bandwidth-Limiter: Max. Bitrate konfigurierbar
   - **Implementierung:**
     - Phase 1: Adaptive FPS & Quality (~2h)
-    - Phase 2: WebRTC Integration (~2h)
-    - Phase 3: Connection-Limit & Bandwidth-Limiter (~1h)
-    - Phase 4: UI (Quality-Selector, Stats) (~1h)
+    - Phase 2: WebRTC Signaling über WebSocket (~2h)
+    - Phase 3: aiortc/WebRTC Media Server (~2h)
+    - Phase 4: Connection-Limit & Bandwidth-Limiter (~1h)
+    - Phase 5: UI (Quality-Selector, Stats) (~1h)
   - **Performance-Ziel:**
-    - MJPEG: ~40-60% CPU, 2-5 Mbps
-    - WebRTC: ~5-10% CPU, 0.2-1 Mbps
+    - Vorher (MJPEG): ~40-60% CPU, 2-5 Mbps
+    - Nachher (WebRTC): ~5-10% CPU, 0.2-1 Mbps
 
----
-
-## 🔧 PRIORITÄT 3 - Mittel-Komplex, Mittel-Wert (~33-51h)
-**Mittlerer Aufwand, mittlere Business-Priorität**
+**Hinweis:** Low-Priority - Erst implementieren wenn MJPEG Probleme macht!
 
 ---
 
@@ -203,48 +229,117 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 3.3 🎬 HAP Codec Support & Video Converter ✅ COMPLETED (~12h)
+---
 
-- [x] **HAP Codec Decoder (4-5h):** ✅ COMPLETED (2025-12-02)
-  - ✅ HAP Varianten: HAP (DXT1), HAP Alpha (DXT5), HAP Q (BC7)
-  - ✅ FFmpeg Integration: libavcodec HAP Support
-  - ✅ Automatische HAP-Format-Erkennung
-  - ✅ Fallback auf Standard-Codecs
-  - ✅ Performance-Messung
+## 🚀 PRIORITÄT 4 - Hoch-Komplex, Hoch-Wert (~48-76h)
+**Hoher Aufwand, strategisch wichtig**
 
-- [x] **Universal Video Converter (4-7h):** ✅ COMPLETED (2025-12-02)
-  - ✅ Input-Formate: AVI, MP4, MOV, GIF, PNG-Sequences
-  - ✅ Output-Profile: HAP (Performance), H.264 (Hardware-Encoding), H.264 NVENC (GPU)
-  - ✅ Batch-Processing: Ganze Ordner konvertieren mit glob patterns (recursive)
-  - ✅ Resize Modes: none, fit, fill, stretch, auto
-  - ✅ Loop-Optimierung: Nahtlose Loops mit FFmpeg fade filters
-  - ✅ Separate HTML-Page: Eigenständige Converter-UI (converter.html)
-  - ✅ FFmpeg-Wrapper mit Progress-Tracking
-  - ✅ REST API Endpoints: status, formats, info, convert, batch, upload, canvas-size
-  - ✅ Web-UI mit separater HTML-Page und Dark Mode
+### 4.1 🔮 Neue Frame Sources (~12-20h)
 
-- [x] **Converter UI Implementation (3h):** ✅ COMPLETED (2025-12-02)
-  - ✅ File Browser Integration (FilesTab component mit tree/list view)
-  - ✅ Drag & Drop Zone (from file browser + from file system)
-  - ✅ Local File Upload (browse button + drag & drop support)
-  - ✅ Dual-Mode Selection: Browser Mode (drag & drop) vs Pattern Mode (glob)
-  - ✅ Multi-file Sequential Conversion mit progress tracking
-  - ✅ Canvas Size Integration (loads from config.json, fallback 60x300)
-  - ✅ Output Directory Selection
-  - ✅ Format Selection Cards (HAP, HAP Alpha, HAP Q, H.264, H.264 NVENC)
-  - ✅ Conversion Options (Resize Mode, Optimize Loop, Target Size)
-  - ✅ Progress Bar & Queue Display
-  - ✅ Results Summary (success/failed counts, compression ratio)
-  - ✅ Consistent Styling (matches app design with CSS variables)
-  - ✅ Search Filter für File Browser (works in both tree and list view)
-  - ✅ Auto-expand folders when searching in tree view
+- [ ] **ShaderToy Source (8-12h):**
+  - ModernGL/PyOpenGL Integration
+  - GLSL Shader Support (Shadertoy-kompatibel)
+  - Uniform Variables (iTime, iResolution, iMouse)
+
+- [x] **LiveStream Source (2-5h):** ✅ COMPLETED
+  - RTSP/HTTP/HLS/RTMP Stream Support
+  - FFmpeg Integration via OpenCV
+  - YouTube URL Support (yt-dlp)
 
 ---
 
-## 🚀 PRIORITÄT 4 - Hoch-Komplex, Hoch-Wert (~24-40h)
-**Hoher Aufwand, strategisch wichtig**
+### 4.2 🎥 Projection Mapping Support (~16-24h)
 
-### 4.1 🎥 Multi-Video-Routing per Art-Net-Objekt (~40-54h)
+- [ ] **Projection Mapping System (16-24h):**
+  - **Grundidee:** Video-Content auf reale Objekte projizieren mit Warp & Blend
+  - **Projektor-Kalibrierung:**
+    - Corner-Pin: 4-Punkt-Perspektiven-Korrektur
+    - Mesh-Warping: Grid-basierte Verzerrung (z.B. für gekrümmte Flächen)
+    - Auto-Alignment: Marker-Detection für automatische Kalibrierung
+    - Multi-Projektor-Setup: Overlap-Bereiche definieren
+  - **Edge-Blending:**
+    - Soft-Edge-Overlap: Sanfter Übergang zwischen Projektoren
+    - Brightness-Matching: Angleichung der Helligkeit in Overlap-Bereichen
+    - Color-Matching: Farbkalibrierung zwischen Projektoren
+    - Feather-Width: Konfigurierbare Blending-Zone (0-20% Overlap)
+  - **Projection Zones:**
+    - Zone-Definition: Mehrere Projektions-Bereiche pro Projektor
+    - Content-Mapping: Verschiedene Videos pro Zone
+    - Layer-Support: Mehrere Layer pro Zone mit Compositing
+    - Mask-Support: Alpha-Masken für Zone-Grenzen
+  - **Beamer-Stacking:**
+    - Brightness-Boost: Mehrere Projektoren auf gleiche Fläche
+    - HDR-Simulation: Stacking für höheren Kontrast
+    - Sync-Modes: Frame-Lock zwischen gestackten Projektoren
+    - Alignment-Tools: Pixel-genaue Ausrichtung
+  - **Visualisierung & Setup:**
+    - Separate HTML-Page: `projection-mapper.html`
+    - Live-Preview mit Warping
+    - Test-Pattern-Generator (Grid, Circles, Checkerboard)
+    - Export/Import von Projection-Setups
+  - **Implementierung:**
+    - Phase 1: Corner-Pin & Mesh-Warp Engine (~3h)
+    - Phase 2: Edge-Blending Algorithm (~3h)
+    - Phase 3: Multi-Projektor-Routing (~2h)
+    - Phase 4: Beamer-Stacking Support (~2h)
+    - Phase 5: Projection Zone Management (~3h)
+    - Phase 6: UI (Mapping-Editor, Test-Patterns) (~4h)
+    - Phase 7: API-Endpoints (Setup CRUD) (~2h)
+
+**Use-Cases:**
+- Gebäude-Projektionen (Facade-Mapping)
+- Theater & Bühnen-Projektionen
+- Event-Installationen mit Multi-Projektor-Setups
+- Museum-Installationen (Objekt-Projektionen)
+- Immersive Environments (360° Projektionen)
+
+**Config-Beispiel:**
+```json
+{
+  "projection_mapping": {
+    "projectors": [
+      {
+        "id": "proj_left",
+        "output": "strip_1",
+        "corner_pin": [[0,0], [1920,0], [1920,1080], [0,1080]],
+        "mesh_warp": "grid_5x5_curved.json",
+        "brightness": 1.0,
+        "zones": [
+          {
+            "id": "zone_left_wall",
+            "content_rect": {"x": 0, "y": 0, "width": 1920, "height": 1080},
+            "mask": "wall_mask.png"
+          }
+        ]
+      },
+      {
+        "id": "proj_right",
+        "output": "strip_2",
+        "corner_pin": [[0,0], [1920,0], [1920,1080], [0,1080]],
+        "edge_blend": {
+          "enabled": true,
+          "overlap_left": {"width": 200, "feather": 0.5},
+          "brightness_match": 0.95
+        }
+      },
+      {
+        "id": "proj_center_stacked",
+        "output": "strip_3",
+        "stacking": {
+          "enabled": true,
+          "stack_with": "proj_center_base",
+          "sync_mode": "frame_lock",
+          "brightness_boost": 1.8
+        }
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 4.3 🎥 Multi-Video-Routing per Art-Net-Objekt (~20-28h)
 
 - [ ] **Grundidee:** Mehrere Videos gleichzeitig, jedes LED-Objekt bekommt eigenes Video
 - [ ] **Architektur:**
@@ -350,17 +445,74 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 4.2 🔮 Neue Frame Sources (~12-20h)
+### 4.4 🖥️ Video Wall Slicing Support (~8-12h)
 
-- [ ] **ShaderToy Source (8-12h):**
-  - ModernGL/PyOpenGL Integration
-  - GLSL Shader Support (Shadertoy-kompatibel)
-  - Uniform Variables (iTime, iResolution, iMouse)
+- [ ] **Multi-Display Video Slicing (8-12h):**
+  - **Grundidee:** Ein Video auf mehrere Displays/LED-Matrizen aufteilen
+  - **Slice Configuration:**
+    - Definition von Slice-Bereichen (x, y, width, height)
+    - Zuweisung von Slices zu LED-Objekten/Displays
+    - Grid-basierte Slice-Definition (z.B. 3x2 Grid = 6 Displays)
+    - Custom Slice-Bereiche für unregelmäßige Layouts
+  - **Slice Transform Plugin:**
+    - Neuer Effect-Plugin-Typ: `slice_transform`
+    - Parameter: `slice_id`, `x_offset`, `y_offset`, `width`, `height`
+    - Anwendbar auf Player-Level oder Layer-Level
+    - Unterstützt Multi-Layer-Compositing (jeder Layer kann gesliced werden)
+  - **Slice Routing:**
+    - Mapping: Slice → LED-Objekt/Universe-Range
+    - Multi-Player-Support: Verschiedene Slices an verschiedene Player
+    - Overlap-Detection: Warnung bei überlappenden Slices
+  - **Slice Map Visualisierung:**
+    - Separate HTML-Page: `slice-mapper.html`
+    - Visual Grid-Editor mit Drag & Drop
+    - Live-Preview aller Slices
+    - Export/Import von Slice-Konfigurationen
+  - **Implementierung:**
+    - Phase 1: Slice Configuration Schema (~1h)
+    - Phase 2: Slice Transform Plugin (~2h)
+    - Phase 3: Slice Routing Engine (~2h)
+    - Phase 4: API-Endpoints (Slice CRUD) (~1h)
+    - Phase 5: Slice Map Visualisierung (~3h)
+    - Phase 6: Live-Preview Integration (~1h)
 
-- [x] **LiveStream Source (2-5h):** ✅ COMPLETED
-  - RTSP/HTTP/HLS/RTMP Stream Support
-  - FFmpeg Integration via OpenCV
-  - YouTube URL Support (yt-dlp)
+**Use-Cases:**
+- LED-Matrix-Wände (z.B. 6x 60x300 Pixel = 180x300 Video Wall)
+- Multi-Display-Setups (3x2 Monitore als eine große Fläche)
+
+**Config-Beispiel:**
+```json
+{
+  "video_wall": {
+    "slices": [
+      {
+        "id": "slice_top_left",
+        "source_rect": {"x": 0, "y": 0, "width": 60, "height": 150},
+        "target": "strip_1",
+        "universes": [1, 2]
+      },
+      {
+        "id": "slice_top_right",
+        "source_rect": {"x": 60, "y": 0, "width": 60, "height": 150},
+        "target": "strip_2",
+        "universes": [3, 4]
+      },
+      {
+        "id": "slice_bottom_left",
+        "source_rect": {"x": 0, "y": 150, "width": 60, "height": 150},
+        "target": "strip_3",
+        "universes": [5, 6]
+      },
+      {
+        "id": "slice_bottom_right",
+        "source_rect": {"x": 60, "y": 150, "width": 60, "height": 150},
+        "target": "strip_4",
+        "universes": [7, 8]
+      }
+    ]
+  }
+}
+```
 
 ---
 
@@ -460,32 +612,50 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
   - Legacy-onclick-Handler (`window.playVideo`, etc.) entfernen und durch generische Event-Handler ersetzen
   - **Ziel:** Neuer Player nur durch Hinzufügen in `playerConfigs` möglich, ohne Code-Änderungen
 
-- [ ] **Playlist Playback Refactoring (~4-6h):**
-  - Überarbeitung Loop/Autoplay/Play-Funktionen
-  - Clip-Add-Handling vereinheitlichen
-  - Auto-Start beim ersten Clip konsistent implementieren
-  - State-Management zwischen Frontend/Backend synchronisieren
-  - **Hinweis:** Aktuell inkonsistentes Verhalten - tiefergehende Überarbeitung nötig
+- [x] **Playlist Playback Refactoring (~4-6h):** ✅ COMPLETED
+  - ✅ Überarbeitung Loop/Autoplay/Play-Funktionen
+  - ✅ Clip-Add-Handling vereinheitlichen
+  - ✅ Auto-Start beim ersten Clip konsistent implementieren
+  - ✅ State-Management zwischen Frontend/Backend synchronisieren
+  - **Note:** Implemented with session_state.py persistence, autoplay/loop toggles, and consistent clip handling
 
-- [ ] **player.js Performance-Optimierung (~8-12h):**
-  - **Event-Handler-Leak beheben (Kritisch):**
-    - Event-Delegation statt mehrfacher addEventListener
-    - Memory-Leak bei jedem Playlist-Render
+- [ ] **player.js Performance-Optimierung (~6-10h):**
+  - **Event-Handler-Leak beheben (Kritisch):** ⚠️ **NOCH OFFEN**
+    - Memory-Leak bei jedem Playlist-Render (addEventListener wird mehrfach ohne Cleanup aufgerufen)
+    - Event-Delegation statt mehrfacher addEventListener in renderPlaylist()
+    - Betroffen: ~15-20 Event-Listener pro Playlist-Item (click, dblclick, dragstart, dragend)
     - Geschätzte Einsparung: 40-60% Memory
-  - **Generator-Map für O(1) Lookups (Kritisch):**
-    - Map statt Array.find() in Hover-Events
-    - Reduziert CPU-Last bei Hover um 5-10%
-  - **Unified Update-Loop (Wichtig):**
-    - 2 separate setInterval zu einem kombinieren
-    - Halbiert Polling-Last (~10-15% CPU)
-  - **DOM-Query-Caching (Mittel):**
-    - Wiederholte querySelectorAll() cachen
+  - **Generator-Map für O(1) Lookups (Kritisch):** ⚠️ **NOCH OFFEN**
+    - 7x Array.find() Aufrufe in Hot-Paths (z.B. availableGenerators.find())
+    - Map-basierte Lookups würden CPU-Last bei Hover um 5-10% reduzieren
+  - **Unified Update-Loop (Wichtig):** ⚠️ **NOCH OFFEN**
+    - 3 separate setInterval (2000ms, 500ms, 500ms) laufen parallel
+    - Sollten zu einem intelligenten Update-Loop kombiniert werden
+    - Geschätzte Einsparung: ~10-15% CPU durch koordiniertes Polling
+  - **DOM-Query-Caching (Mittel):** ⚠️ **NOCH OFFEN**
+    - Wiederholte querySelectorAll() in Loops (z.B. '.playlist-item', '.drop-zone')
     - Einsparung: 3-8% CPU
   - **setTimeout-Cleanup (Mittel):**
-    - Verschachtelte setTimeout durch requestAnimationFrame
+    - Verschachtelte setTimeout durch requestAnimationFrame ersetzen
     - Besseres Timing, 2-5% CPU
-  - **Gesamt-Potenzial:** 35-68% CPU, 49-80% Memory
+  - ✅ **Bereits implementiert:**
+    - Fast-poll für Live-Parameter (500ms updateClipEffectLiveParameters) ohne Re-Rendering
+    - Separate Update-Intervalle für Video/Art-Net/Clip-Effects
+  - **Gesamt-Potenzial:** ~30-60% CPU, 40-60% Memory
   - **Dokumentation:** `PERFORMANCE_IMPROVEMENTS_PLAYER.md`
+
+- [x] **Projekt-Struktur Refactoring (~2-3h):** ✅ COMPLETED (2025-12-04)
+  - ✅ `src/plugins/` → `plugins/` (nach Root verschoben)
+  - ✅ `src/static/` → `frontend/` (nach Root verschoben + umbenannt)
+  - **Vorteile:**
+    - Klare Trennung: Backend (`src/`) vs Frontend (`frontend/`) vs Plugins (`plugins/`)
+    - Bessere Übersicht: Plugins sind Top-Level (wie Config)
+    - Standard-Konvention: Viele Projekte nutzen `frontend/` statt `static/`
+  - **Durchgeführte Änderungen:**
+    - Plugin-Verzeichnis: `plugin_manager.py` nutzt jetzt `plugins/`
+    - Flask static_folder: `rest_api.py` zeigt auf `../frontend`
+    - Test-Imports: `test_blend_*.py` nutzen `from plugins.effects`
+    - Alle Plugin-Dateien nutzen bereits `from plugins import` (keine Änderung nötig)
 
 - [ ] Unit Tests erweitern (Player, FrameSource, API)
 - [ ] API-Authentifizierung (Basic Auth/Token)
@@ -521,12 +691,12 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 | Priorität | Aufwand | Nutzen | Summe Stunden |
 |-----------|---------|--------|---------------|
 | **P1** | Niedrig | Hoch | ~22-34h |
-| **P2** | Mittel | Hoch | ~14-24h |
-| **P3** | Mittel | Mittel | ~21-39h (✅ 12h completed) |
-| **P4** | Hoch | Hoch | ~24-40h |
+| **P2** | Mittel | Hoch | ~8-12h |
+| **P3** | Mittel | Mittel | ~16-31h |
+| **P4** | Hoch | Hoch | ~48-76h |
 | **P5** | Niedrig | Niedrig | ~14-21h |
 | **P6** | Sehr Hoch | Mittel | ~64-86h |
-| **GESAMT** | | | **~159-244h** |
+| **GESAMT** | | | **~159-250h** |
 
 ---
 
@@ -541,21 +711,19 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### Phase 2: Performance (P2) - ~14-24h
-1. WebSocket Command Channel
+### Phase 2: Performance (P2) - ~8-12h 🔥 PRIORITY
+1. **WebSocket Command Channel** (sofort umsetzen!)
 2. Multi-Network-Adapter Support
-3. Preview Stream Optimierung (WebRTC)
 
-**Ziel:** Production-ready Performance & Latenz-Optimierung
+**Ziel:** Production-ready Performance & Ultra-niedrige Command-Latenz (2-5ms)
 
 ---
 
-### Phase 3: Content (P3) - ~33-51h
-1. Effect-Bibliothek erweitern (~30 neue Effekte)
-2. Audio-Reactive Support
-3. HAP Codec & Video Converter
+### Phase 3: Content (P3) - ~16-31h
+1. Audio-Reactive Support
+2. WebRTC Video Preview (optional - nur bei CPU-Problemen)
 
-**Ziel:** Umfangreiche Effect-Library & bessere Video-Performance
+**Ziel:** Audio-Reactive Effects & Optional Video-Streaming-Optimierung
 
 ---
 
@@ -606,7 +774,7 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
   - Right-Click Reset to Full Range
   - Backend as Source of Truth für Clip IDs
   - Live-Apply bei aktiver Wiedergabe
-- **HAP Codec & Universal Video Converter** (v2.3.4):
+- **HAP Codec & Universal Video Converter** (v2.3.5):
   - FFmpeg-based video converter mit HAP codec support
   - Multiple output formats: HAP, HAP Alpha, HAP Q, H.264, H.264 NVENC
   - Batch processing mit glob patterns (recursive support)

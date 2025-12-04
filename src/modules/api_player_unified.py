@@ -292,16 +292,27 @@ def register_unified_routes(app, player_manager, config):
     
     @app.route('/api/player/<player_id>/clip/<clip_id>/effects', methods=['GET'])
     def get_clip_effects(player_id, clip_id):
-        """Gibt alle Effekte eines Clips zurück."""
+        """Gibt alle Effekte eines Clips zurück mit Live-Parametern von aktiven Instanzen."""
         try:
             effects = clip_registry.get_clip_effects(clip_id)
             
-            # Filter out non-serializable data (instances)
+            # Filter out non-serializable data and update with live parameters
             serializable_effects = []
             for effect in effects:
                 effect_copy = effect.copy()
-                if 'instance' in effect_copy:
+                
+                # Get live parameters from instance if available
+                if 'instance' in effect and effect['instance'] is not None:
+                    try:
+                        live_params = effect['instance'].get_parameters()
+                        if live_params:
+                            effect_copy['parameters'] = live_params
+                    except Exception as e:
+                        logger.warning(f"Could not get live parameters from {effect.get('plugin_id')}: {e}")
+                    
+                    # Remove instance from response
                     del effect_copy['instance']
+                
                 serializable_effects.append(effect_copy)
             
             return jsonify({
@@ -454,6 +465,8 @@ def register_unified_routes(app, player_manager, config):
             data = request.get_json()
             param_name = data.get('name')
             param_value = data.get('value')
+            range_min = data.get('rangeMin')
+            range_max = data.get('rangeMax')
             
             if not param_name:
                 return jsonify({"success": False, "error": "Missing parameter name"}), 400
@@ -464,7 +477,22 @@ def register_unified_routes(app, player_manager, config):
                 return jsonify({"success": False, "error": "Invalid effect index"}), 400
             
             effect = effects[index]
-            effect['parameters'][param_name] = param_value
+            
+            # Store parameter with range metadata if provided (for persistence)
+            if range_min is not None and range_max is not None:
+                param_data = {
+                    '_value': param_value,
+                    '_rangeMin': range_min,
+                    '_rangeMax': range_max
+                }
+                effect['parameters'][param_name] = param_data
+            else:
+                param_data = param_value
+                effect['parameters'][param_name] = param_value
+            
+            # Update plugin instance with complete data (including range metadata for triple-sliders)
+            if 'instance' in effect and effect['instance']:
+                effect['instance'].update_parameter(param_name, param_data)
             
             # B3: Invalidate cache so player detects parameter change
             clip_registry._invalidate_cache(clip_id)
@@ -627,6 +655,8 @@ def register_unified_routes(app, player_manager, config):
             data = request.get_json()
             param_name = data.get('name')
             value = data.get('value')
+            range_min = data.get('rangeMin')
+            range_max = data.get('rangeMax')
             
             if param_name is None or value is None:
                 return jsonify({"success": False, "error": "name and value required"}), 400
@@ -642,8 +672,18 @@ def register_unified_routes(app, player_manager, config):
                 return jsonify({"success": False, "error": "Invalid index"}), 400
             
             effect = chain[index]
+            # Plugin instance always gets the actual value, not the metadata wrapper
             effect['instance'].update_parameter(param_name, value)
-            effect['config'][param_name] = value
+            
+            # Store parameter with range metadata if provided (for UI persistence)
+            if range_min is not None and range_max is not None:
+                effect['config'][param_name] = {
+                    '_value': value,
+                    '_rangeMin': range_min,
+                    '_rangeMax': range_max
+                }
+            else:
+                effect['config'][param_name] = value
             
             logger.info(f"✅ Parameter '{param_name}' von Effect {index} auf {value} gesetzt ({player_id})")
             

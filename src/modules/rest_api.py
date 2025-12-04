@@ -51,7 +51,8 @@ class RestAPI:
         self.console_log = deque(maxlen=console_maxlen)
         
         # Flask App erstellen - static_folder muss absoluter Pfad sein
-        static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static')
+        # Pfad: src/modules -> src -> root -> frontend
+        static_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'frontend')
         self.app = Flask(__name__, static_folder=static_path, static_url_path='')
         secret_key = self.config.get('api', {}).get('secret_key', 'flux_secret_key_2025')
         self.app.config['SECRET_KEY'] = secret_key

@@ -1,6 +1,16 @@
 """
 API Endpoints for Clip Trimming & Playback Control
 Provides trim in/out points and reverse playback control.
+
+DEPRECATED: This API is deprecated in favor of the Transport Effect Plugin.
+Use the "Transport" effect from the effects panel for:
+- Trimming (in/out points)
+- Speed control (0.1x - 10x)
+- Reverse playback
+- Playback modes (repeat, play_once, bounce, random)
+- Real-time position tracking
+
+This API is kept for backwards compatibility but will be removed in a future version.
 """
 from flask import Blueprint, request, jsonify
 import logging
