@@ -88,6 +88,7 @@ const playerConfigs = {
         loopBtnId: 'videoLoopBtn',
         files: [],
         currentFile: null,
+        currentItemId: null,
         autoplay: true,
         loop: true,
         transitionConfig: {
@@ -106,6 +107,7 @@ const playerConfigs = {
         loopBtnId: 'artnetLoopBtn',
         files: [],
         currentFile: null,
+        currentItemId: null,
         autoplay: true,
         loop: true,
         transitionConfig: {
@@ -117,20 +119,10 @@ const playerConfigs = {
     }
 };
 
-// Legacy global variables for backwards compatibility
-let videoAutoplay = true;
-let videoLoop = true;
-let artnetAutoplay = true;
-let artnetLoop = true;
-
 // Clip FX State (NEW: UUID-based)
 let selectedClipId = null;  // UUID from clip registry
 let selectedClipPath = null;  // Original path (for display)
 let selectedClipPlayerType = null;  // 'video' or 'artnet'
-
-// Active Item Tracking (for "active" border)
-let currentVideoItemId = null;  // UUID of currently playing video item
-let currentArtnetItemId = null;  // UUID of currently playing artnet item
 
 // Transition State (legacy - now in playerConfigs)
 let videoTransitionConfig = playerConfigs.video.transitionConfig;
@@ -190,7 +182,7 @@ async function init() {
         let needsUpdate = false;
         
         for (const playerId of ['video', 'artnet']) {
-            const files = playerId === 'video' ? videoFiles : artnetFiles;
+            const files = playerConfigs[playerId].files;
             for (let i = 0; i < files.length; i++) {
                 const id = files[i].id;
                 const isFloatId = (typeof id === 'number') || 
@@ -261,9 +253,9 @@ async function init() {
         
         // Playlist update every 500ms (only if autoplay active)
         if (now - lastPlaylistUpdate >= PLAYLIST_UPDATE_INTERVAL) {
-            if (videoAutoplay || artnetAutoplay) {
-                await updateCurrentVideoFromPlayer();
-                await updateCurrentArtnetFromPlayer();
+            if (playerConfigs.video.autoplay || playerConfigs.artnet.autoplay) {
+                await updateCurrentFromPlayer('video');
+                await updateCurrentFromPlayer('artnet');
             }
             lastPlaylistUpdate = now;
         }
@@ -285,7 +277,7 @@ function updatePlaylistButtonStates() {
     const videoLoopBtn = document.getElementById('videoLoopBtn');
     
     if (videoAutoplayBtn) {
-        if (videoAutoplay) {
+        if (playerConfigs.video.autoplay) {
             videoAutoplayBtn.classList.remove('btn-outline-primary');
             videoAutoplayBtn.classList.add('btn-primary');
         } else {
@@ -295,7 +287,7 @@ function updatePlaylistButtonStates() {
     }
     
     if (videoLoopBtn) {
-        if (videoLoop) {
+        if (playerConfigs.video.loop) {
             videoLoopBtn.classList.remove('btn-outline-primary');
             videoLoopBtn.classList.add('btn-primary');
         } else {
@@ -309,7 +301,7 @@ function updatePlaylistButtonStates() {
     const artnetLoopBtn = document.getElementById('artnetLoopBtn');
     
     if (artnetAutoplayBtn) {
-        if (artnetAutoplay) {
+        if (playerConfigs.artnet.autoplay) {
             artnetAutoplayBtn.classList.remove('btn-outline-primary');
             artnetAutoplayBtn.classList.add('btn-primary');
         } else {
@@ -319,7 +311,7 @@ function updatePlaylistButtonStates() {
     }
     
     if (artnetLoopBtn) {
-        if (artnetLoop) {
+        if (playerConfigs.artnet.loop) {
             artnetLoopBtn.classList.remove('btn-outline-primary');
             artnetLoopBtn.classList.add('btn-primary');
         } else {
@@ -329,25 +321,35 @@ function updatePlaylistButtonStates() {
     }
 }
 
-// Update current video from player status
-async function updateCurrentVideoFromPlayer() {
+// ========================================
+// GENERIC UPDATE FUNCTIONS (Phase 3)
+// ========================================
+
+/**
+ * Generic update function - polls player status and updates UI
+ * @param {string} playerId - Player ID ('video' or 'artnet')
+ */
+async function updateCurrentFromPlayer(playerId) {
+    const config = playerConfigs[playerId];
+    if (!config) return;
+    
     try {
-        const response = await fetch(`${API_BASE}/api/player/video/status`);
+        const response = await fetch(`${API_BASE}${config.apiBase}/status`);
         const data = await response.json();
         
         if (data.success) {
-            // Normalisiere Pfad (entferne führende Slashes/Backslashes)
+            // Normalize path (remove leading slashes/backslashes)
             const newVideo = data.current_video ? data.current_video.replace(/^[\\\/]+/, '') : null;
-            const normalizedCurrent = currentVideo ? currentVideo.replace(/^[\\\/]+/, '') : null;
+            const normalizedCurrent = config.currentFile ? config.currentFile.replace(/^[\\\/]+/, '') : null;
             
-            // Update currentVideoItemId from backend (important for active border)
+            // Update currentItemId from backend (important for active border)
             const newClipId = data.clip_id || null;
-            const clipIdChanged = currentVideoItemId !== newClipId;
+            const clipIdChanged = config.currentItemId !== newClipId;
             
             if (normalizedCurrent !== newVideo || clipIdChanged) {
-                currentVideo = newVideo;
-                currentVideoItemId = newClipId;  // Update active item ID
-                renderPlaylist('video');
+                config.currentFile = newVideo;
+                config.currentItemId = newClipId;  // Update active item ID
+                renderPlaylist(playerId);
             }
         }
     } catch (error) {
@@ -355,30 +357,18 @@ async function updateCurrentVideoFromPlayer() {
     }
 }
 
-// Update current Art-Net video from player status
+// ========================================
+// LEGACY UPDATE FUNCTIONS
+// ========================================
+
+// LEGACY: Wrapper for backward compatibility - use updateCurrentFromPlayer() instead
+async function updateCurrentVideoFromPlayer() {
+    await updateCurrentFromPlayer('video');
+}
+
+// LEGACY: Wrapper for backward compatibility - use updateCurrentFromPlayer() instead
 async function updateCurrentArtnetFromPlayer() {
-    try {
-        const response = await fetch(`${API_BASE}/api/player/artnet/status`);
-        const data = await response.json();
-        
-        if (data.success) {
-            // Normalisiere Pfad (entferne führende Slashes/Backslashes)
-            const newVideo = data.current_video ? data.current_video.replace(/^[\\\/]+/, '') : null;
-            const normalizedCurrent = currentArtnet ? currentArtnet.replace(/^[\\\/]+/, '') : null;
-            
-            // Update currentArtnetItemId from backend (important for active border)
-            const newClipId = data.clip_id || null;
-            const clipIdChanged = currentArtnetItemId !== newClipId;
-            
-            if (normalizedCurrent !== newVideo || clipIdChanged) {
-                currentArtnet = newVideo;
-                currentArtnetItemId = newClipId;  // Update active item ID
-                renderPlaylist('artnet');
-            }
-        }
-    } catch (error) {
-        // Silent fail - don't spam console
-    }
+    await updateCurrentFromPlayer('artnet');
 }
 
 // ========================================
@@ -709,9 +699,9 @@ function setupPlaylistContainerDropHandlers() {
                     generator_id: generatorId,
                     parameters: {}
                 };
-                videoFiles.push(newGenerator);
+                playerConfigs.video.files.push(newGenerator);
                 // Autoload first generator
-                if (videoFiles.length === 1) {
+                if (playerConfigs.video.files.length === 1) {
                     loadGeneratorClip(generatorId, 'video', newGenerator.id, newGenerator.parameters);
                 }
                 renderPlaylist('video');
@@ -749,10 +739,10 @@ function setupPlaylistContainerDropHandlers() {
                         type: 'video'
                     };
                 }
-                videoFiles.push(newItem);
+                playerConfigs.video.files.push(newItem);
                 
                 // Auto-load and auto-play first item
-                if (videoFiles.length === 1) {
+                if (playerConfigs.video.files.length === 1) {
                     if (fileType === 'image') {
                         loadGeneratorClip('static_picture', 'video', newItem.id, newItem.parameters);
                     } else {
@@ -841,7 +831,7 @@ function setupPlaylistContainerDropHandlers() {
                     generator_id: generatorId,
                     parameters: {}
                 };
-                artnetFiles.push(newGenerator);
+                playerConfigs.artnet.files.push(newGenerator);
                 renderPlaylist('artnet');
                 updateArtnetPlaylist();
                 debug.log('✅ Added generator to artnet playlist');
@@ -877,10 +867,10 @@ function setupPlaylistContainerDropHandlers() {
                         type: 'video'
                     };
                 }
-                artnetFiles.push(newItem);
+                playerConfigs.artnet.files.push(newItem);
                 
                 // Auto-load and auto-play first item
-                if (artnetFiles.length === 1) {
+                if (playerConfigs.artnet.files.length === 1) {
                     if (fileType === 'image') {
                         loadGeneratorClip('static_picture', 'artnet', newItem.id, newItem.parameters);
                     } else {
@@ -951,9 +941,9 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video', cli
             
             // Update active item ID based on player type
             if (playerType === 'video') {
-                currentVideoItemId = clipId || data.clip_id;
+                playerConfigs.video.currentItemId = clipId || data.clip_id;
             } else if (playerType === 'artnet') {
-                currentArtnetItemId = clipId || data.clip_id;
+                playerConfigs.artnet.currentItemId = clipId || data.clip_id;
             }
             
             // Store generator metadata for parameter display
@@ -962,15 +952,15 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video', cli
             window.currentGeneratorMeta = generator;
             
             // Update parameters in playlist object so they persist
-            const playlist = playerType === 'video' ? videoFiles : artnetFiles;
+            const playlist = playerConfigs[playerType].files;
             const playlistItem = playlist.find(item => item.id === selectedClipId);
             if (playlistItem && playlistItem.type === 'generator') {
                 playlistItem.parameters = finalParams;
                 debug.log('💾 Saved generator parameters to playlist item:', finalParams);
             }
             
-            // Set currentVideo for playlist highlighting (normalize path like loadVideoFile does)
-            currentVideo = `generator:${generatorId}`.replace(/^[\\\/]+/, '');
+            // Set currentFile for playlist highlighting (normalize path like loadVideoFile does)
+            playerConfigs[playerType].currentFile = `generator:${generatorId}`.replace(/^[\\\/]+/, '');
             renderPlaylist(playerType);
             
             showToast(`✅ Generator loaded: ${generator.name}`, 'success');
@@ -1283,7 +1273,7 @@ window.updateGeneratorParameter = async function(paramName, value) {
             // Update the generator in the playlist with new parameters (only current instance by clip ID)
             if (selectedClipId && selectedClipPlayerType) {
                 const playerType = selectedClipPlayerType;
-                const playlistArray = playerType === 'video' ? videoFiles : artnetFiles;
+                const playlistArray = playerConfigs[playerType].files;
                 
                 // Find THIS specific generator instance by clip ID
                 const playlistItem = playlistArray.find(item => item.id === selectedClipId);
@@ -1327,12 +1317,6 @@ window.openVideoFullscreen = function() {
 // ========================================
 // GENERIC PLAYLIST MANAGEMENT
 // ========================================
-
-// Legacy global variables (for backwards compatibility)
-let videoFiles = [];
-let currentVideo = null;
-let artnetFiles = [];
-let currentArtnet = null;
 
 async function loadPlaylist(playerId) {
     const config = playerConfigs[playerId];
@@ -1419,31 +1403,11 @@ async function loadPlaylist(playerId) {
                 }
             }
             
-            // Sync legacy variables
-            if (playerId === 'video') {
-                videoFiles = config.files;
-                currentVideo = config.currentFile;
-                videoAutoplay = config.autoplay;
-                videoLoop = config.loop;
-            } else if (playerId === 'artnet') {
-                artnetFiles = config.files;
-                currentArtnet = config.currentFile;
-                artnetAutoplay = config.autoplay;
-                artnetLoop = config.loop;
-            }
+            // Legacy sync removed - playerConfigs is now source of truth
         } else {
             // Start with empty playlist - keep default autoplay/loop settings
             config.files = [];
-            if (playerId === 'video') {
-                videoFiles = [];
-                videoAutoplay = config.autoplay;
-                videoLoop = config.loop;
-            }
-            if (playerId === 'artnet') {
-                artnetFiles = [];
-                artnetAutoplay = config.autoplay;
-                artnetLoop = config.loop;
-            }
+            // Legacy sync removed - playerConfigs is now source of truth
             
             // Update UI buttons for defaults
             const autoplayBtn = document.getElementById(config.autoplayBtnId);
@@ -1486,16 +1450,7 @@ async function loadPlaylist(playerId) {
     } catch (error) {
         console.error(`❌ Failed to load ${playerId} playlist:`, error);
         config.files = [];
-        if (playerId === 'video') {
-            videoFiles = [];
-            videoAutoplay = config.autoplay;
-            videoLoop = config.loop;
-        }
-        if (playerId === 'artnet') {
-            artnetFiles = [];
-            artnetAutoplay = config.autoplay;
-            artnetLoop = config.loop;
-        }
+        // Legacy sync removed - playerConfigs is now source of truth
     }
     
     renderPlaylist(playerId);
@@ -1515,13 +1470,13 @@ function renderPlaylistGeneric(playlistId) {
     const config = {
         video: {
             containerId: 'videoPlaylist',
-            files: videoFiles,
-            currentItemId: currentVideoItemId,
+            files: playerConfigs.video.files,
+            currentItemId: playerConfigs.video.currentItemId,
             updateFunc: () => updateVideoPlaylist(),
             removeFunc: (index) => `removeFromVideoPlaylist(${index})`,
             loadFunc: async (item) => {
                 // Load clip and play (called on double-click)
-                currentVideoItemId = item.id;
+                playerConfigs.video.currentItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'video', item.id, item.parameters);
                 } else {
@@ -1534,13 +1489,13 @@ function renderPlaylistGeneric(playlistId) {
         },
         artnet: {
             containerId: 'artnetPlaylist',
-            files: artnetFiles,
-            currentItemId: currentArtnetItemId,
+            files: playerConfigs.artnet.files,
+            currentItemId: playerConfigs.artnet.currentItemId,
             updateFunc: () => updateArtnetPlaylist(),
             removeFunc: (index) => `removeFromArtnetPlaylist(${index})`,
             loadFunc: async (item) => {
                 // Load clip and play (called on double-click)
-                currentArtnetItemId = item.id;
+                playerConfigs.artnet.currentItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'artnet', item.id, item.parameters);
                 } else {
@@ -1993,15 +1948,33 @@ function renderArtnetPlaylist() {
     renderPlaylistGeneric('artnet');
 }
 
-// Load video file WITHOUT adding to playlist (used for playlist clicks)
-window.loadVideoFile = async function(videoPath, clipId = null) {
+// ========================================
+// GENERIC FILE LOADING (Phase 2)
+// ========================================
+
+/**
+ * Generic file loader - works for any player (video, artnet, etc.)
+ * @param {string} playerId - Player ID ('video' or 'artnet')
+ * @param {string} filePath - Path to the file to load
+ * @param {string|null} clipId - UUID for the clip (optional, will be generated if null)
+ * @param {boolean} addToPlaylist - If true, add to playlist; if false, just load
+ */
+window.loadFile = async function(playerId, filePath, clipId = null, addToPlaylist = false) {
+    const config = playerConfigs[playerId];
+    if (!config) {
+        console.error(`❌ Unknown player: ${playerId}`);
+        return;
+    }
+    
     try {
-        // NEW: Use unified API
-        const response = await fetch(`${API_BASE}/api/player/video/clip/load`, {
+        debug.log(`📂 Loading file for ${config.name}: ${filePath} (addToPlaylist: ${addToPlaylist})`);
+        
+        // Call backend API to load the file
+        const response = await fetch(`${API_BASE}${config.apiBase}/clip/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                path: videoPath,
+                path: filePath,
                 clip_id: clipId  // Frontend-provided UUID
             })
         });
@@ -2009,67 +1982,73 @@ window.loadVideoFile = async function(videoPath, clipId = null) {
         const data = await response.json();
         
         if (data.success) {
-            currentVideo = videoPath.replace(/^[\\\/]+/, '');
+            // Update current file
+            config.currentFile = filePath.replace(/^[\\\/]+/, '');
             
-            // NEW: Store clip ID and path - use frontend clipId (UUID) instead of backend response
+            // Store clip ID and path - use frontend clipId (UUID) instead of backend response
             selectedClipId = clipId || data.clip_id;
-            currentVideoItemId = clipId || data.clip_id;  // Update active item ID
-            debug.log(`🆔 Video clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
-            selectedClipPath = videoPath;
-            selectedClipPlayerType = 'video';
+            config.currentItemId = clipId || data.clip_id;  // Update active item ID
+            debug.log(`🆔 ${config.name} clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
+            selectedClipPath = filePath;
+            selectedClipPlayerType = playerId;
             
-            renderPlaylist('video');
+            // Add to playlist if requested
+            if (addToPlaylist) {
+                const filename = filePath.split('/').pop();
+                const folder = filePath.includes('/') ? filePath.split('/')[0] : 'root';
+                const newItem = {
+                    id: clipId || data.clip_id,
+                    path: filePath,
+                    name: filename,
+                    folder: folder,
+                    type: 'video'
+                };
+                
+                config.files.push(newItem);
+                debug.log(`➕ Added to ${config.name} playlist:`, newItem);
+                
+                // Update backend playlist
+                await updatePlaylist(playerId);
+            }
             
-            // Clear generator state (this is a regular video)
+            // Render playlist to update UI
+            renderPlaylist(playerId);
+            
+            // Clear generator state (this is a regular video file)
             window.currentGeneratorId = null;
             window.currentGeneratorParams = null;
             window.currentGeneratorMeta = null;
             
-            debug.log('✅ Video loaded with Clip-ID:', selectedClipId);
+            debug.log(`✅ ${config.name} file loaded with Clip-ID:`, selectedClipId);
             await refreshClipEffects();
+            
+            if (addToPlaylist) {
+                showToast(`✅ Added to ${config.name} playlist`, 'success');
+            }
         } else {
-            showToast(`Failed to load video: ${data.error}`, 'error');
+            showToast(`❌ Failed to load file: ${data.error}`, 'error');
         }
     } catch (error) {
-        console.error('❌ Error loading video:', error);
-        showToast('Error loading video', 'error');
+        console.error(`❌ Error loading file for ${config.name}:`, error);
+        showToast(`❌ Error loading file`, 'error');
     }
 };
 
+// ========================================
+// LEGACY FILE LOADING FUNCTIONS
+// ========================================
+
+// Load video file WITHOUT adding to playlist (used for playlist clicks)
+// LEGACY: Wrapper for backward compatibility - use loadFile() instead
+window.loadVideoFile = async function(videoPath, clipId = null) {
+    await loadFile('video', videoPath, clipId, false);
+};
+
 // Load video and ADD to playlist (used for file browser drops)
+// LEGACY: Wrapper for backward compatibility - use loadFile() instead
 window.loadVideo = async function(videoPath) {
-    try {
-        const response = await fetch(`${API_BASE}/api/player/video/clip/load`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: videoPath })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            currentVideo = videoPath.replace(/^[\\\/]+/, '');
-            
-            // Always add to playlist (allow duplicates)
-            const filename = videoPath.split('/').pop();
-            const folder = videoPath.includes('/') ? videoPath.split('/')[0] : 'root';
-            videoFiles.push({
-                filename: filename,
-                path: videoPath,
-                folder: folder,
-                name: filename,
-                id: crypto.randomUUID() // Unique ID for each entry
-            });
-            
-            renderPlaylist('video');
-            debug.log('✅ Video loaded:', videoPath);
-        } else {
-            showToast(`Failed to load video: ${data.message}`, 'error');
-        }
-    } catch (error) {
-        console.error('❌ Error loading video:', error);
-        showToast('Error loading video', 'error');
-    }
+    const clipId = crypto.randomUUID();
+    await loadFile('video', videoPath, clipId, true);
 };
 
 window.refreshVideoPlaylist = async function() {
@@ -2077,10 +2056,10 @@ window.refreshVideoPlaylist = async function() {
 };
 
 window.removeFromVideoPlaylist = async function(index) {
-    const video = videoFiles[index];
-    const wasCurrentlyPlaying = (currentVideo === video.path);
+    const video = playerConfigs.video.files[index];
+    const wasCurrentlyPlaying = (playerConfigs.video.currentFile === video.path);
     
-    videoFiles.splice(index, 1);
+    playerConfigs.video.files.splice(index, 1);
     
     // If removed video was current, load next or stop
     if (wasCurrentlyPlaying) {
@@ -2092,10 +2071,10 @@ window.removeFromVideoPlaylist = async function(index) {
         window.currentGeneratorMeta = null;
         
         // Check if there are more clips in playlist
-        if (videoFiles.length > 0) {
+        if (playerConfigs.video.files.length > 0) {
             // Load next clip (stay at same index, or go to previous if was last)
-            const nextIndex = Math.min(index, videoFiles.length - 1);
-            const nextItem = videoFiles[nextIndex];
+            const nextIndex = Math.min(index, playerConfigs.video.files.length - 1);
+            const nextItem = playerConfigs.video.files[nextIndex];
             
             debug.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
             
@@ -2162,14 +2141,7 @@ async function next(playerId) {
         
         if (data.success) {
             config.currentFile = data.video;
-            if (playerId === 'video') {
-                currentVideo = data.video;
-                currentVideoItemId = data.clip_id || null;
-            }
-            if (playerId === 'artnet') {
-                currentArtnet = data.video;
-                currentArtnetItemId = data.clip_id || null;
-            }
+            config.currentItemId = data.clip_id || null;
             renderPlaylist(playerId);
             debug.log(`⏭️ Next ${config.name}:`, data.video);
         } else {
@@ -2190,14 +2162,7 @@ async function previous(playerId) {
         
         if (data.success) {
             config.currentFile = data.video;
-            if (playerId === 'video') {
-                currentVideo = data.video;
-                currentVideoItemId = data.clip_id || null;
-            }
-            if (playerId === 'artnet') {
-                currentArtnet = data.video;
-                currentArtnetItemId = data.clip_id || null;
-            }
+            config.currentItemId = data.clip_id || null;
             renderPlaylist(playerId);
             debug.log(`⏮️ Previous ${config.name}:`, data.video);
         } else {
@@ -2231,10 +2196,6 @@ async function toggleAutoplay(playerId) {
         btn.classList.add('btn-outline-primary');
         showToast(`${config.name} Autoplay deaktiviert`, 'info');
     }
-    
-    // Sync legacy variables
-    if (playerId === 'video') videoAutoplay = config.autoplay;
-    if (playerId === 'artnet') artnetAutoplay = config.autoplay;
     
     // Update Player ZUERST - damit autoplay flag gesetzt ist
     await updatePlaylist(playerId);
@@ -2275,10 +2236,6 @@ async function toggleLoop(playerId) {
         showToast(`${config.name} Loop deaktiviert`, 'info');
     }
     
-    // Sync legacy variables
-    if (playerId === 'video') videoLoop = config.loop;
-    if (playerId === 'artnet') artnetLoop = config.loop;
-    
     // Update Player
     await updatePlaylist(playerId);
 }
@@ -2287,8 +2244,8 @@ async function updatePlaylist(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
-    // Get files array (use legacy for backwards compat)
-    const files = playerId === 'video' ? videoFiles : artnetFiles;
+    // Get files array from playerConfigs
+    const files = config.files;
     
     try {
         const response = await fetch(`${API_BASE}${config.apiBase}/playlist/set`, {
@@ -2325,79 +2282,16 @@ async function updateArtnetPlaylist() { await updatePlaylist('artnet'); }
 // ========================================
 
 // Load Art-Net video file WITHOUT adding to playlist (used for playlist clicks)
+// LEGACY: Wrapper for backward compatibility - use loadFile() instead
 window.loadArtnetFile = async function(videoPath, clipId = null) {
-    try {
-        // NEW: Use unified API
-        const response = await fetch(`${API_BASE}/api/player/artnet/clip/load`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                path: videoPath,
-                clip_id: clipId  // Frontend-provided UUID
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            currentArtnet = videoPath.replace(/^[\\\/]+/, '');
-            renderPlaylist('artnet');
-            
-            // NEW: Store clip ID and path - use frontend clipId (UUID) instead of backend response
-            selectedClipId = clipId || data.clip_id;
-            debug.log(`🆔 Artnet clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
-            selectedClipPath = videoPath;
-            selectedClipPlayerType = 'artnet';
-            
-            // Clear generator state (this is a regular video)
-            window.currentGeneratorId = null;
-            window.currentGeneratorParams = null;
-            window.currentGeneratorMeta = null;
-            
-            debug.log('✅ Art-Net video loaded with Clip-ID:', selectedClipId);
-            await refreshClipEffects();
-        } else {
-            showToast(`Failed to load Art-Net video: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('❌ Error loading Art-Net video:', error);
-        showToast('Error loading Art-Net video', 'error');
-    }
+    await loadFile('artnet', videoPath, clipId, false);
 };
 
 // Load Art-Net video and ADD to playlist (used for file browser drops)
+// LEGACY: Wrapper for backward compatibility - use loadFile() instead
 window.loadArtnetVideo = async function(videoPath) {
-    try {
-        const response = await fetch(`${API_BASE}/api/player/artnet/clip/load`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: videoPath })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            currentArtnet = videoPath.replace(/^[\\\/]+/, '');
-            
-            // Always add to playlist (allow duplicates)
-            const filename = videoPath.split('/').pop();
-            const folder = videoPath.includes('/') ? videoPath.split('/')[0] : 'root';
-            artnetFiles.push({
-                filename: filename,
-                path: videoPath,
-                folder: folder,
-                name: filename,
-                id: crypto.randomUUID() // Unique ID for each entry
-            });
-            
-            renderPlaylist('artnet');
-        } else {
-            showToast(`Failed to load Art-Net video: ${data.message}`, 'error');
-        }
-    } catch (error) {
-        console.error('❌ Error loading Art-Net video:', error);
-        showToast('Error loading Art-Net video', 'error');
-    }
+    const clipId = crypto.randomUUID();
+    await loadFile('artnet', videoPath, clipId, true);
 };
 
 window.refreshArtnetPlaylist = async function() {
@@ -2405,14 +2299,14 @@ window.refreshArtnetPlaylist = async function() {
 };
 
 window.removeFromArtnetPlaylist = async function(index) {
-    const video = artnetFiles[index];
-    const wasCurrentlyPlaying = (currentArtnet === video.path);
+    const video = playerConfigs.artnet.files[index];
+    const wasCurrentlyPlaying = (playerConfigs.artnet.currentFile === video.path);
     
-    artnetFiles.splice(index, 1);
+    playerConfigs.artnet.files.splice(index, 1);
     
     // If removed video was current, load next or stop
     if (wasCurrentlyPlaying) {
-        currentArtnet = null;
+        playerConfigs.artnet.currentFile = null;
         selectedClipId = null;
         selectedClipPath = null;
         window.currentGeneratorId = null;
@@ -2420,10 +2314,10 @@ window.removeFromArtnetPlaylist = async function(index) {
         window.currentGeneratorMeta = null;
         
         // Check if there are more clips in playlist
-        if (artnetFiles.length > 0) {
+        if (playerConfigs.artnet.files.length > 0) {
             // Load next clip (stay at same index, or go to previous if was last)
-            const nextIndex = Math.min(index, artnetFiles.length - 1);
-            const nextItem = artnetFiles[nextIndex];
+            const nextIndex = Math.min(index, playerConfigs.artnet.files.length - 1);
+            const nextItem = playerConfigs.artnet.files[nextIndex];
             
             debug.log(`⏭️ Auto-loading next clip after removal: ${nextItem.name}`);
             
@@ -3956,8 +3850,8 @@ window.savePlaylists = async function() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name,
-                video_playlist: videoFiles,
-                artnet_playlist: artnetFiles
+                video_playlist: playerConfigs.video.files,
+                artnet_playlist: playerConfigs.artnet.files
             })
         });
         
@@ -4114,16 +4008,16 @@ window.selectPlaylist = async function(playlistName) {
         
         if (loadData.success) {
             // Load both playlists
-            videoFiles = loadData.video_playlist || [];
-            artnetFiles = loadData.artnet_playlist || [];
+            playerConfigs.video.files = loadData.video_playlist || [];
+            playerConfigs.artnet.files = loadData.artnet_playlist || [];
             
-            debug.log('🎯 Video files:', videoFiles.length);
-            debug.log('🎯 Art-Net files:', artnetFiles.length);
+            debug.log('🎯 Video files:', playerConfigs.video.files.length);
+            debug.log('🎯 Art-Net files:', playerConfigs.artnet.files.length);
             
             renderPlaylist('video');
             renderPlaylist('artnet');
             
-            showToast(`Playlists "${playlistName}" loaded (Video: ${videoFiles.length}, Art-Net: ${artnetFiles.length})`, 'success');
+            showToast(`Playlists "${playlistName}" loaded (Video: ${playerConfigs.video.files.length}, Art-Net: ${playerConfigs.artnet.files.length})`, 'success');
             
             // Close modal
             playlistModal?.hide();
@@ -4529,8 +4423,8 @@ async function loadClipLayers(clipId) {
             // Re-render playlist to update badge (only if clip has overlay layers)
             if (layers.length > 1) {  // Only if has overlay layers (Layer 0 is always present)
                 // Find which playlist this clip belongs to
-                const inVideo = videoFiles.some(f => f.id === clipId);
-                const inArtnet = artnetFiles.some(f => f.id === clipId);
+                const inVideo = playerConfigs.video.files.some(f => f.id === clipId);
+                const inArtnet = playerConfigs.artnet.files.some(f => f.id === clipId);
                 
                 if (inVideo) {
                     renderPlaylist('video');
@@ -4558,7 +4452,7 @@ function renderSelectedClipLayers() {
     // If only Layer 0 exists (no overlay layers), show empty state
     if (layers.length === 0 || layers.length === 1) {
         // Update header with playlist info
-        const playlist = selectedClipPlayerType === 'video' ? videoFiles : artnetFiles;
+        const playlist = playerConfigs[selectedClipPlayerType].files;
         const clipIndex = playlist.findIndex(item => item.id === selectedClipId);
         const position = clipIndex >= 0 ? clipIndex + 1 : '?';
         const playlistName = selectedClipPlayerType === 'video' ? 'Video' : 'Art-Net';
@@ -4631,7 +4525,7 @@ function renderSelectedClipLayers() {
     }).join('');
     
     // Update panel header with playlist info
-    const playlist = selectedClipPlayerType === 'video' ? videoFiles : artnetFiles;
+    const playlist = playerConfigs[selectedClipPlayerType].files;
     const clipIndex = playlist.findIndex(item => item.id === selectedClipId);
     const position = clipIndex >= 0 ? clipIndex + 1 : '?';
     const playlistName = selectedClipPlayerType === 'video' ? 'Video' : 'Art-Net';
