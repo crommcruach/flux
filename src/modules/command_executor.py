@@ -551,32 +551,11 @@ class CommandExecutor:
             return CommandResult(False, "Fehler beim Laden des Videos")
     
     def _handle_script_load(self, script_name):
-        """Load a script."""
-        from .frame_source import ScriptSource
+        """Load a script - DEPRECATED: Use generators instead."""
+        logger.warning(f"Script loading deprecated: {script_name} - use generator plugins instead")
         
-        if not script_name.endswith('.py'):
-            script_name += '.py'
-        
-        # Create ScriptSource
-        script_source = ScriptSource(
-            script_name,
-            self.player.canvas_width,
-            self.player.canvas_height,
-            self.config
-        )
-        
-        # Switch source
-        success = self.player.switch_source(script_source)
-        
-        if success:
-            info = self.player.get_info()
-            desc = info.get('description', '')
-            msg = f"Script geladen: {info.get('name', script_name)}"
-            if desc:
-                msg += f"\n{desc}"
-            return CommandResult(True, msg, {"script": script_name, "info": info})
-        else:
-            return CommandResult(False, f"Fehler beim Laden des Scripts: {script_name}")
+        msg = f"Script loading deprecated - use generators instead"
+        return CommandResult(False, msg)
     
     # === System Commands ===
     

@@ -224,27 +224,8 @@ class DMXController:
                 script_name = self.script_cache[script_slot]
                 logger.info(f"[DMX] Script-Slot → Slot {script_slot}, Script: {script_name}")
                 
-                # Lade Script mit ScriptSource
-                try:
-                    from ..frame_source import ScriptSource
-                    
-                    # Erstelle neue ScriptSource
-                    script_source = ScriptSource(
-                        script_name,
-                        self.player.canvas_width,
-                        self.player.canvas_height,
-                        self.config
-                    )
-                    
-                    # Wechsle Source (unified Player bleibt bestehen)
-                    success = self.player.switch_source(script_source)
-                    
-                    if success:
-                        logger.info(f"[DMX] Script geladen: {script_name}")
-                    else:
-                        logger.error(f"[DMX] Fehler beim Laden des Scripts: {script_name}")
-                except Exception as e:
-                    logger.error(f"[DMX] Fehler beim Laden des Scripts: {e}")
+                # ScriptSource removed - use generator plugins instead
+                logger.warning(f"[DMX] Script loading deprecated - use generators instead: {script_name}")
             elif script_slot > 0:
                 logger.debug(f"[DMX] Script-Slot {script_slot} nicht gefunden")
         

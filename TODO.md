@@ -23,37 +23,149 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 **Aktueller Stand:** ~60% generalisiert (Backend 99%, Frontend 60%)
 
-- [ ] **Phase 1: Legacy Variables migrieren (2h):**
+- [x] **Phase 1: Legacy Variables migrieren (2h):** ✅ COMPLETED
   - `videoFiles/artnetFiles` → `playerConfigs[playerId].files`
   - `currentVideoFile/currentArtnetFile` → `playerConfigs[playerId].currentFile`
   - `videoAutoplay/artnetAutoplay` → `playerConfigs[playerId].autoplay`
   - `videoLoop/artnetLoop` → `playerConfigs[playerId].loop`
   - ~15 Funktionen betroffen (loadVideoFile, loadArtnetFile, etc.)
 
-- [ ] **Phase 2: Load-Funktionen generalisieren (2-3h):**
+- [x] **Phase 2: Load-Funktionen generalisieren (2-3h):** ✅ COMPLETED
   - `loadVideoFile()` + `loadArtnetFile()` → `loadFile(playerId, file)`
   - `window.loadVideoFile` + `window.loadArtnetFile` → `window.loadFile`
   - Entfernt ~100 Zeilen Code-Duplikation
 
-- [ ] **Phase 3: Player Wrappers entfernen (2h):**
+- [x] **Phase 3: Player Wrappers entfernen (2h):** ✅ COMPLETED
   - `toggleVideoPlay()`, `nextVideoClip()` etc. → `togglePlay(playerId)`, `nextClip(playerId)`
   - Window-Wrapper durch direkte generische Calls ersetzen
 
-- [ ] **Phase 4: Backend-Hotfix (15min):**
+- [x] **Phase 4: Backend-Hotfix (15min):** ✅ COMPLETED
   - `default_effects.py` Zeilen 115-118: Hardcoded player_type checks entfernen
   - Verwende `player.player_type` statt `isinstance()` checks
+
+- [x] **Phase 5: Testing & Bugfixes:** ✅ COMPLETED
+  - Fixed orphaned function call references
+  - Exposed player control functions to window object
+  - Fixed async/await syntax in drop handlers
+  - Implemented transport loop detection for autoplay
+  - Fixed Art-Net autoplay race conditions
+  - All bugs resolved, both players fully functional
+
+- [x] **Phase 6: v2.3.7 Legacy Code Cleanup (~6-8h):** ✅ COMPLETED (2025-12-05)
+  - ✅ Removed deprecated trim/reverse functions from player.js (~300 lines)
+  - ✅ Deleted 4 deprecated backend modules (~500 lines): api_clip_trim.py, api_artnet_effects_deprecated.py, api_effects_deprecated.py, api_videos_deprecated.py
+  - ✅ Removed deprecated ClipRegistry methods: set_clip_trim(), set_clip_reverse(), get_clip_playback_info()
+  - ✅ Removed trim/reverse logic from VideoSource (in_point, out_point, reverse properties)
+  - ✅ Removed ScriptSource class completely (~100 lines) and all references from 9 modules
+  - ✅ Migrated ScriptSource → GeneratorSource with deprecation warnings
+  - ✅ Removed legacy API fallbacks from playerConfigs
+  - ✅ Removed deprecated layer management functions: updateLayerStackVisibility(), selectLayer()
+  - ✅ Fixed all syntax errors introduced during cleanup (4 errors)
+  - **Total Impact:** ~1000 lines of dead code removed, Transport Effect Plugin now single source of truth
 
 **Vorteile:**
 - Neue Player in 5min hinzufügen (nur `playerConfigs` Entry)
 - -200 Zeilen Code (keine Duplikation)
 - Konsistentes Verhalten über alle Player
 - Wartbarkeit massiv verbessert
+- Cleaner codebase ohne deprecated legacy code (~1000 lines removed)
 
 **Siehe:** [UNIFIED_PLAYLISTS.md](docs/UNIFIED_PLAYLISTS.md) für Details
 
 ---
 
-### 1.1 🎯 Playlist Master/Slave Synchronization (~8-14h) 🆕
+### 1.1 🎛️ Dynamic Playlists via config.json (~8-12h) 🆕
+
+**Ziel:** Neue Playlists (Audio, DMX, OSC, MIDI, etc.) über config.json hinzufügen, ohne Code zu ändern.
+
+- [ ] **Config Schema Definition (2h):**
+  - Definiere `playlists` Array in config.json
+  - Schema pro Playlist: `{id, name, type, icon, apiBase, features}`
+  - Beispiel-Types: video, artnet, audio, dmx, osc, midi
+  - Features-Flags: autoplay, loop, transitions, preview, effects
+
+- [ ] **Backend Dynamic Registration (2-3h):**
+  - PlayerManager liest `playlists` aus config.json
+  - Dynamisches Registrieren von Playern: `for playlist in config['playlists']: register_player(playlist['id'])`
+  - Player-Type-Factory: Je nach type verschiedene Player-Klassen instantiieren
+  - API-Routes automatisch für alle konfigurierten Player verfügbar
+
+- [ ] **Frontend Dynamic playerConfigs (2-3h):**
+  - Neuer API-Endpoint: `GET /api/player/configs` → Gibt alle Player-Configs zurück
+  - Frontend: Fetch playerConfigs from API statt hardcoded
+  - playerConfigs dynamisch aus API-Response generieren
+  - Backward-compatibility: Fallback auf hardcoded configs wenn API fehlt
+
+- [ ] **Dynamic UI Generation (2-3h):**
+  - HTML-Template für Player-Section (Mustache/Handlebars oder JS Template Literals)
+  - JavaScript generiert player-sections basierend auf playerConfigs
+  - Icon-Mapping: video=📹, artnet=💡, audio=🔊, dmx=🎚️, osc=🎛️, midi=🎹
+  - Container-IDs dynamisch: `${playerId}Playlist`, `${playerId}Preview`, etc.
+
+- [ ] **Auto-Initialize (1h):**
+  - Loop über alle playerConfigs: `for (let playerId in playerConfigs) { await loadPlaylist(playerId); }`
+  - Event-Listeners automatisch für alle Player registrieren
+  - Drop-Zones für alle Player generieren
+
+**Config-Beispiel (config.json):**
+```json
+{
+  "playlists": [
+    {
+      "id": "video",
+      "name": "Video",
+      "type": "video",
+      "icon": "📹",
+      "apiBase": "/api/player/video",
+      "features": {
+        "autoplay": true,
+        "loop": true,
+        "transitions": true,
+        "preview": true,
+        "effects": true
+      }
+    },
+    {
+      "id": "artnet",
+      "name": "Art-Net",
+      "type": "artnet",
+      "icon": "💡",
+      "apiBase": "/api/player/artnet",
+      "features": {
+        "autoplay": true,
+        "loop": true,
+        "transitions": true,
+        "preview": true,
+        "effects": true
+      }
+    },
+    {
+      "id": "audio",
+      "name": "Audio",
+      "type": "audio",
+      "icon": "🔊",
+      "apiBase": "/api/player/audio",
+      "features": {
+        "autoplay": true,
+        "loop": true,
+        "transitions": false,
+        "preview": false,
+        "effects": true
+      }
+    }
+  ]
+}
+```
+
+**Vorteile:**
+- Neue Player in 5min hinzufügen (nur config.json Entry, kein Code!)
+- Skalierbar auf beliebig viele Player (Audio, DMX, OSC, MIDI, etc.)
+- Konsistente API für alle Player-Typen
+- Frontend/Backend vollständig entkoppelt
+
+---
+
+### 1.2 🎯 Playlist Master/Slave Synchronization (~8-14h) 🆕
 
 - [ ] **Master/Slave Toggle UI (2h):**
   - Toggle-Button in Playlist-Header (Video & Art-Net)

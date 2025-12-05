@@ -91,8 +91,9 @@ class TransportEffect(PluginBase):
         
         # Internal state
         self._virtual_frame = float(self.current_position)
-        self._bounce_direction = 1  # 1 = forward, -1 = backward
+        self._bounce_direction = 1  # 1 forward, -1 backward
         self._has_played_once = False
+        self.loop_completed = False  # Flag when clip reaches end and loops
         
         # Frame source reference (wird bei process_frame gesetzt)
         self._frame_source = None
@@ -211,10 +212,17 @@ class TransportEffect(PluginBase):
         # Mode-spezifische Logik
         if self.playback_mode == 'repeat':
             # Loop zwischen in_point und out_point
+            loop_detected = False
             while self._virtual_frame > self.out_point:
                 self._virtual_frame -= clip_length
+                loop_detected = True
             while self._virtual_frame < self.in_point:
                 self._virtual_frame += clip_length
+                loop_detected = True
+            
+            # Signalisiere Loop-Completion an Player (für Playlist-Autoplay)
+            if loop_detected:
+                self.loop_completed = True
         
         elif self.playback_mode == 'play_once':
             # Spiele einmal und stoppe

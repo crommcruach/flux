@@ -7,6 +7,7 @@ import { showToast } from './common.js';
 import { EffectsTab } from './components/effects-tab.js';
 import { SourcesTab } from './components/sources-tab.js';
 import { FilesTab } from './components/files-tab.js';
+import { debug, loadDebugConfig } from './logger.js';
 
 const API_BASE = '';
 let availableEffects = [];
@@ -22,54 +23,6 @@ let effectsMap = new Map();
 let generatorsMap = new Map();
 
 // ========================================
-// DEBUG LOGGING SYSTEM
-// ========================================
-
-let DEBUG_LOGGING = true; // Default: enabled
-let VERBOSE_LOGGING = false; // Default: disabled (very noisy logs)
-
-// Debug logger wrapper functions
-const debug = {
-    log: (...args) => { if (DEBUG_LOGGING) console.log(...args); },
-    verbose: (...args) => { if (VERBOSE_LOGGING) console.log(...args); }, // Extra verbose logs
-    info: (...args) => { if (DEBUG_LOGGING) console.info(...args); },
-    warn: (...args) => { if (DEBUG_LOGGING) console.warn(...args); },
-    error: (...args) => console.error(...args), // Errors always shown
-    group: (...args) => { if (DEBUG_LOGGING) console.group(...args); },
-    groupEnd: () => { if (DEBUG_LOGGING) console.groupEnd(); },
-    table: (...args) => { if (DEBUG_LOGGING) console.table(...args); }
-};
-
-// Load debug setting from config
-async function loadDebugConfig() {
-    try {
-        const response = await fetch(`${API_BASE}/api/config`);
-        const config = await response.json();
-        DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
-        VERBOSE_LOGGING = config.frontend?.verbose_logging ?? false;
-        console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
-        if (VERBOSE_LOGGING) console.log(`🔬 Verbose logging: ENABLED`);
-    } catch (error) {
-        console.error('❌ Failed to load debug config, using default (enabled):', error);
-        DEBUG_LOGGING = true;
-        VERBOSE_LOGGING = false;
-    }
-}
-
-// Runtime toggle functions (accessible from browser console)
-window.toggleDebug = function(enable) {
-    DEBUG_LOGGING = enable ?? !DEBUG_LOGGING;
-    console.log(`🐛 Debug logging ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
-    return DEBUG_LOGGING;
-};
-
-window.toggleVerbose = function(enable) {
-    VERBOSE_LOGGING = enable ?? !VERBOSE_LOGGING;
-    console.log(`🔬 Verbose logging ${VERBOSE_LOGGING ? 'ENABLED' : 'DISABLED'}`);
-    return VERBOSE_LOGGING;
-};
-
-// ========================================
 // GENERIC PLAYER CONFIGURATION
 // ========================================
 
@@ -78,11 +31,6 @@ const playerConfigs = {
         id: 'video',
         name: 'Video',
         apiBase: '/api/player/video',
-        legacyApi: {
-            play: '/api/play',
-            pause: '/api/pause',
-            stop: '/api/stop'
-        },
         playlistContainerId: 'videoPlaylist',
         autoplayBtnId: 'videoAutoplayBtn',
         loopBtnId: 'videoLoopBtn',
@@ -124,10 +72,6 @@ let selectedClipId = null;  // UUID from clip registry
 let selectedClipPath = null;  // Original path (for display)
 let selectedClipPlayerType = null;  // 'video' or 'artnet'
 
-// Transition State (legacy - now in playerConfigs)
-let videoTransitionConfig = playerConfigs.video.transitionConfig;
-let artnetTransitionConfig = playerConfigs.artnet.transitionConfig;
-
 // ========================================
 // INITIALIZATION
 // ========================================
@@ -166,7 +110,7 @@ async function initializeTabComponents() {
 async function init() {
     try {
         // Load debug configuration first
-        await loadDebugConfig();
+        await loadDebugConfig(API_BASE);
         
         // Initialize tab components (includes search functionality)
         await initializeTabComponents();
@@ -207,8 +151,8 @@ async function init() {
         // If any IDs were migrated, update backend playlists
         if (needsUpdate) {
             debug.log('🔄 Updating backend playlists with new UUIDs...');
-            await updateVideoPlaylist();
-            await updateArtnetPlaylist();
+            await updatePlaylist('video');
+            await updatePlaylist('artnet');
         } else {
             debug.log('✅ All playlist items have valid UUIDs, no migration needed');
         }
@@ -636,7 +580,7 @@ function setupPlaylistContainerDropHandlers() {
         };
         
         // Delay execution to allow child handlers to set flag first
-        setTimeout(() => {
+        setTimeout(async () => {
             debug.log('⏰ VIDEO Container setTimeout executing', {
                 handledFlag: e._handledByDropZone,
                 emptyStateExists: !!videoContainer.querySelector('.empty-state.drop-zone'),
@@ -686,12 +630,20 @@ function setupPlaylistContainerDropHandlers() {
                     parameters: {}
                 };
                 playerConfigs.video.files.push(newGenerator);
+                
+                // Update playlist to backend first (so backend knows autoplay setting)
+                renderPlaylist('video');
+                await updatePlaylist('video');
+                
                 // Autoload first generator
                 if (playerConfigs.video.files.length === 1) {
-                    loadGeneratorClip(generatorId, 'video', newGenerator.id, newGenerator.parameters);
+                    await loadGeneratorClip(generatorId, 'video', newGenerator.id, newGenerator.parameters);
+                    // Backend should auto-play if autoplay is enabled, but ensure it's playing
+                    if (playerConfigs.video.autoplay) {
+                        await play('video');
+                        debug.log('▶️ Ensured video generator playback after drop');
+                    }
                 }
-                renderPlaylist('video');
-                updateVideoPlaylist();
                 debug.log('✅ Added generator to video playlist');
                 return;
             }
@@ -727,17 +679,23 @@ function setupPlaylistContainerDropHandlers() {
                 }
                 playerConfigs.video.files.push(newItem);
                 
+                // Update playlist to backend first (so backend knows autoplay setting)
+                renderPlaylist('video');
+                await updatePlaylist('video');
+                
                 // Auto-load and auto-play first item
                 if (playerConfigs.video.files.length === 1) {
                     if (fileType === 'image') {
-                        loadGeneratorClip('static_picture', 'video', newItem.id, newItem.parameters);
+                        await loadGeneratorClip('static_picture', 'video', newItem.id, newItem.parameters);
                     } else {
-                        loadFile('video', filePath, newItem.id, false);
+                        await loadFile('video', filePath, newItem.id, false);
+                    }
+                    // Backend should auto-play if autoplay is enabled, but ensure it's playing
+                    if (playerConfigs.video.autoplay) {
+                        await play('video');
+                        debug.log('▶️ Ensured video playback after drop');
                     }
                 }
-                
-                renderPlaylist('video');
-                updateVideoPlaylist();
                 debug.log(`✅ Added ${fileType === 'image' ? 'image as generator' : 'video file'} ${fileName} to video playlist`);
             }
         }, 0); // Delayed to let child handlers set flag first
@@ -768,7 +726,7 @@ function setupPlaylistContainerDropHandlers() {
         };
         
         // Delay execution to allow child handlers to set flag first
-        setTimeout(() => {
+        setTimeout(async () => {
             debug.log('⏰ ARTNET Container setTimeout executing', {
                 handledFlag: e._handledByDropZone,
                 emptyStateExists: !!artnetContainer.querySelector('.empty-state.drop-zone'),
@@ -818,8 +776,20 @@ function setupPlaylistContainerDropHandlers() {
                     parameters: {}
                 };
                 playerConfigs.artnet.files.push(newGenerator);
+                
+                // Update playlist to backend first (so backend knows autoplay setting)
                 renderPlaylist('artnet');
-                updateArtnetPlaylist();
+                await updatePlaylist('artnet');
+                
+                // Autoload first generator
+                if (playerConfigs.artnet.files.length === 1) {
+                    await loadGeneratorClip(generatorId, 'artnet', newGenerator.id, newGenerator.parameters);
+                    // Backend should auto-play if autoplay is enabled, but ensure it's playing
+                    if (playerConfigs.artnet.autoplay) {
+                        await play('artnet');
+                        debug.log('▶️ Ensured artnet generator playback after drop');
+                    }
+                }
                 debug.log('✅ Added generator to artnet playlist');
                 return;
             }
@@ -855,17 +825,23 @@ function setupPlaylistContainerDropHandlers() {
                 }
                 playerConfigs.artnet.files.push(newItem);
                 
+                // Update playlist to backend first (so backend knows autoplay setting)
+                renderPlaylist('artnet');
+                await updatePlaylist('artnet');
+                
                 // Auto-load and auto-play first item
                 if (playerConfigs.artnet.files.length === 1) {
                     if (fileType === 'image') {
-                        loadGeneratorClip('static_picture', 'artnet', newItem.id, newItem.parameters);
+                        await loadGeneratorClip('static_picture', 'artnet', newItem.id, newItem.parameters);
                     } else {
-                        loadFile('artnet', filePath, newItem.id, false);
+                        await loadFile('artnet', filePath, newItem.id, false);
+                    }
+                    // Backend should auto-play if autoplay is enabled, but ensure it's playing
+                    if (playerConfigs.artnet.autoplay) {
+                        await play('artnet');
+                        debug.log('▶️ Ensured artnet playback after drop');
                     }
                 }
-                
-                renderPlaylist('artnet');
-                updateArtnetPlaylist();
                 debug.log(`✅ Added ${fileType === 'image' ? 'image as generator' : 'video file'} ${fileName} to artnet playlist`);
             }
         }, 0); // Delayed to let child handlers set flag first
@@ -1319,15 +1295,9 @@ async function loadPlaylist(playerId) {
         if (data.success && data.playlist) {
             // Restore playlist (detect generators)
             config.files = data.playlist.map((path, idx) => {
-                // Handle both string paths (legacy) and object entries (new)
+                // Handle both string paths and object entries
                 let actualPath = typeof path === 'string' ? path : path.path;
                 let savedId = (typeof path === 'object' && path.id) ? path.id : null;
-                
-                // MIGRATION: Convert old float IDs to new UUIDs
-                if (savedId && typeof savedId === 'number') {
-                    debug.warn(`⚠️ Converting old float ID (${savedId}) to UUID`);
-                    savedId = null; // Force generation of new UUID
-                }
                 
                 if (!actualPath) {
                     debug.warn(`Empty path in ${playerId} playlist at index`, idx);
@@ -1388,12 +1358,9 @@ async function loadPlaylist(playerId) {
                     loopBtn.classList.add('btn-outline-primary');
                 }
             }
-            
-            // Legacy sync removed - playerConfigs is now source of truth
         } else {
             // Start with empty playlist - keep default autoplay/loop settings
             config.files = [];
-            // Legacy sync removed - playerConfigs is now source of truth
             
             // Update UI buttons for defaults
             const autoplayBtn = document.getElementById(config.autoplayBtnId);
@@ -1436,7 +1403,6 @@ async function loadPlaylist(playerId) {
     } catch (error) {
         console.error(`❌ Failed to load ${playerId} playlist:`, error);
         config.files = [];
-        // Legacy sync removed - playerConfigs is now source of truth
     }
     
     renderPlaylist(playerId);
@@ -1458,7 +1424,7 @@ function renderPlaylistGeneric(playlistId) {
             containerId: 'videoPlaylist',
             files: playerConfigs.video.files,
             currentItemId: playerConfigs.video.currentItemId,
-            updateFunc: () => updateVideoPlaylist(),
+            updateFunc: () => updatePlaylist('video'),
             removeFunc: (index) => `removeFromVideoPlaylist(${index})`,
             loadFunc: async (item) => {
                 // Load clip and play (called on double-click)
@@ -1477,7 +1443,7 @@ function renderPlaylistGeneric(playlistId) {
             containerId: 'artnetPlaylist',
             files: playerConfigs.artnet.files,
             currentItemId: playerConfigs.artnet.currentItemId,
-            updateFunc: () => updateArtnetPlaylist(),
+            updateFunc: () => updatePlaylist('artnet'),
             removeFunc: (index) => `removeFromArtnetPlaylist(${index})`,
             loadFunc: async (item) => {
                 // Load clip and play (called on double-click)
@@ -1643,7 +1609,6 @@ function renderPlaylistGeneric(playlistId) {
         </div>
     `;
     
-    // Add event handlers (TODO: Extract to separate function)
     attachPlaylistItemHandlers(container, playlistId, files, cfg);
     attachPlaylistDropZoneHandlers(container, playlistId, files, cfg);
 }
@@ -2046,38 +2011,35 @@ window.removeFromVideoPlaylist = async function(index) {
     renderPlaylist('video');
     
     // Update server with new playlist
-    await updateVideoPlaylist();
+    await updatePlaylist('video');
 };
 
 // ========================================
 // GENERIC PLAYER CONTROLS
 // ========================================
 
-async function play(playerId) {
+window.play = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
-    const endpoint = config.legacyApi?.play || `${config.apiBase}/play`;
-    await fetch(`${API_BASE}${endpoint}`, { method: 'POST' });
-}
+    await fetch(`${API_BASE}${config.apiBase}/play`, { method: 'POST' });
+};
 
-async function pause(playerId) {
+window.pause = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
-    const endpoint = config.legacyApi?.pause || `${config.apiBase}/pause`;
-    await fetch(`${API_BASE}${endpoint}`, { method: 'POST' });
-}
+    await fetch(`${API_BASE}${config.apiBase}/pause`, { method: 'POST' });
+};
 
-async function stop(playerId) {
+window.stop = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
-    const endpoint = config.legacyApi?.stop || `${config.apiBase}/stop`;
-    await fetch(`${API_BASE}${endpoint}`, { method: 'POST' });
-}
+    await fetch(`${API_BASE}${config.apiBase}/stop`, { method: 'POST' });
+};
 
-async function next(playerId) {
+window.next = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
@@ -2098,7 +2060,7 @@ async function next(playerId) {
     }
 }
 
-async function previous(playerId) {
+window.previous = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
@@ -2117,9 +2079,9 @@ async function previous(playerId) {
     } catch (error) {
         console.error(`❌ Error loading previous ${config.name}:`, error);
     }
-}
+};
 
-async function toggleAutoplay(playerId) {
+window.toggleAutoplay = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
@@ -2155,9 +2117,9 @@ async function toggleAutoplay(playerId) {
             debug.log(`🎬 ${config.name} Autoplay: Starte erstes Video`);
         }
     }
-}
+};
 
-async function toggleLoop(playerId) {
+window.toggleLoop = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
@@ -2176,7 +2138,7 @@ async function toggleLoop(playerId) {
     
     // Update Player
     await updatePlaylist(playerId);
-}
+};
 
 async function updatePlaylist(playerId) {
     const config = playerConfigs[playerId];
@@ -2257,7 +2219,7 @@ window.removeFromArtnetPlaylist = async function(index) {
     renderPlaylist('artnet');
     
     // Update server with new playlist
-    await updateArtnetPlaylist();
+    await updatePlaylist('artnet');
 };
 
 function startArtnetPreviewStream() {
@@ -2586,8 +2548,6 @@ async function refreshClipEffects() {
             }
             clipEffects = effects;
             renderClipEffects();
-            // Load trim settings after rendering
-            await loadTrimSettings();
         }
     } catch (error) {
         console.error('❌ Error refreshing clip effects:', error);
@@ -2672,34 +2632,6 @@ function renderClipEffects() {
     // Build HTML: Trim Controls + Generator Parameters (if any) + Effects
     let html = '';
     
-    // DEPRECATED: Old trim controls replaced by Transport Effect Plugin
-    // Use the "Transport" effect from the effects panel instead.
-    // This provides: trimming, speed control, reverse, bounce/random modes
-    /* DEPRECATED - Remove in future version
-    if (selectedClipId && !window.currentGeneratorId) {
-        html += `
-            <div class="trim-controls-section" style="margin-bottom: 1rem;">
-                <div class="effect-item-header" onclick="toggleTrimSection(event)" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <span class="effect-toggle">▶</span>
-                        <span style="font-weight: 600;">✂️ Clip Trimming</span>
-                    </div>
-                </div>
-                <div class="trim-body" style="display: none; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-left: 3px solid var(--accent-color); border-radius: 0 0 6px 6px; margin-top: -1px;">
-                    <div class="form-group mb-3">
-                        <label class="form-label" style="font-size: 0.85rem; margin-bottom: 0.75rem;">Trim Range (Frames):</label>
-                        <input type="text" id="trimRangeSlider" name="trim_range" value="" style="display: none;"/>
-                    </div>
-                    <div class="form-check form-switch" style="margin-top: 1rem;">
-                        <input class="form-check-input" type="checkbox" id="reversePlayback" onchange="toggleReverse(this.checked)">
-                        <label class="form-check-label" for="reversePlayback">⏪ Reverse Playback</label>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    */
-    
     // Add generator parameters section
     html += renderGeneratorParametersSection();
     
@@ -2776,236 +2708,6 @@ window.clearClipEffects = async function() {
     } catch (error) {
         console.error('❌ Error clearing clip effects:', error);
         showToast('Error clearing clip effects', 'error');
-    }
-};
-
-// ========================================
-// CLIP TRIMMING MANAGEMENT
-// ========================================
-
-// Load current trim settings from backend
-// DEPRECATED: Use Transport Effect Plugin instead
-// This function loads old trim settings - replaced by Transport effect
-async function loadTrimSettings() {
-    console.log('🔍 loadTrimSettings called:', { selectedClipId, hasGenerator: !!window.currentGeneratorId });
-    if (!selectedClipId || window.currentGeneratorId) {
-        console.log('⏭️ Skipping loadTrimSettings (no clip or is generator)');
-        return;
-    }
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/playback`);
-        const data = await response.json();
-        console.log('📊 Trim settings response:', data);
-        
-        if (data.success) {
-            const sliderInput = document.getElementById('trimRangeSlider');
-            const reverseCheckbox = document.getElementById('reversePlayback');
-            
-            console.log('🎛️ Trim elements found:', { slider: !!sliderInput, reverseCheckbox: !!reverseCheckbox });
-            
-            if (sliderInput && data.total_frames !== null && data.total_frames !== undefined) {
-                const maxFrames = data.total_frames - 1;
-                const fromFrame = data.in_point !== null ? data.in_point : 0;
-                const toFrame = data.out_point !== null ? data.out_point : maxFrames;
-                
-                // Set data attributes for slider initialization
-                sliderInput.setAttribute('data-max', maxFrames);
-                sliderInput.setAttribute('data-from', fromFrame);
-                sliderInput.setAttribute('data-to', toFrame);
-                
-                console.log(`✏️ Slider config: from=${fromFrame}, to=${toFrame}, max=${maxFrames}`);
-                
-                // Initialize or update slider
-                setupTrimRangeSliders();
-            }
-            
-            if (reverseCheckbox) {
-                reverseCheckbox.checked = data.reverse || false;
-                console.log(`✏️ Set reverse checkbox: ${reverseCheckbox.checked}`);
-            }
-        }
-    } catch (error) {
-        console.error('Error loading trim settings:', error);
-    }
-}
-
-// DEPRECATED: Use Transport Effect Plugin instead
-// Reload clip settings for active clip
-async function reloadClipSettings() {
-    if (!selectedClipId) return;
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/reload`, {
-            method: 'POST'
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            if (data.reloaded) {
-                showToast('✅ Trim settings applied to playback', 'success');
-                debug.log('✅ Clip settings reloaded for active playback');
-            } else {
-                showToast('💾 Settings saved (load clip to see changes)', 'info');
-                debug.log('Settings saved - clip not currently playing');
-            }
-        }
-    } catch (error) {
-        console.error('Error reloading clip settings:', error);
-        showToast('⚠️ Failed to reload settings', 'error');
-    }
-}
-
-// DEPRECATED: Use Transport Effect Plugin instead
-// Toggle trim section expand/collapse
-window.toggleTrimSection = function(event) {
-    event.stopPropagation();
-    const header = event.currentTarget;
-    const section = header.closest('.trim-controls-section');
-    const body = section.querySelector('.trim-body');
-    const toggle = header.querySelector('.effect-toggle');
-    
-    if (body.style.display === 'none') {
-        body.style.display = 'block';
-        toggle.textContent = '▼';
-    } else {
-        body.style.display = 'none';
-        toggle.textContent = '▶';
-    }
-};
-
-// Global variable to store slider instance
-let trimSliderInstance = null;
-
-// DEPRECATED: Use Transport Effect Plugin instead
-// Setup trim range slider with ion.rangeSlider
-function setupTrimRangeSliders() {
-    const sliderInput = document.getElementById('trimRangeSlider');
-    
-    if (!sliderInput) return;
-    
-    // Destroy existing instance if it exists
-    if (trimSliderInstance) {
-        try {
-            $(sliderInput).data("ionRangeSlider").destroy();
-        } catch (e) {
-            // Ignore if already destroyed
-        }
-    }
-    
-    // Get current values from backend (will be set by loadTrimSettings)
-    const maxFrames = parseInt(sliderInput.getAttribute('data-max')) || 100;
-    const fromFrame = parseInt(sliderInput.getAttribute('data-from')) || 0;
-    const toFrame = parseInt(sliderInput.getAttribute('data-to')) || maxFrames;
-    
-    // Initialize ion.rangeSlider
-    $(sliderInput).ionRangeSlider({
-        skin: "round",
-        type: "double",
-        min: 0,
-        max: maxFrames,
-        from: fromFrame,
-        to: toFrame,
-        grid: true,
-        grid_num: 10,
-        hide_min_max: false,
-        hide_from_to: false,
-        prefix: "Frame ",
-        onFinish: function (data) {
-            // Called when user releases slider
-            updateTrimPointsFromSlider(data.from, data.to);
-        }
-    });
-    
-    // Store instance
-    trimSliderInstance = $(sliderInput).data("ionRangeSlider");
-    
-    // Add right-click to reset slider to full range
-    $('.irs').on('contextmenu', function(e) {
-        e.preventDefault();
-        if (trimSliderInstance) {
-            trimSliderInstance.update({
-                from: 0,
-                to: maxFrames
-            });
-            // Trigger update to backend
-            updateTrimPointsFromSlider(0, maxFrames);
-        }
-    });
-}
-
-// Update trim points from slider values
-async function updateTrimPointsFromSlider(inPoint, outPoint) {
-    if (!selectedClipId) return;
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/trim`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ in_point: inPoint, out_point: outPoint })
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            showToast('Trim points updated', 'success');
-            await reloadClipSettings();
-        } else {
-            showToast(data.error || 'Error updating trim', 'error');
-        }
-    } catch (error) {
-        console.error('Error updating trim:', error);
-        showToast('Error updating trim', 'error');
-    }
-}
-
-
-
-// Toggle reverse playback
-window.toggleReverse = async function(enabled) {
-    if (!selectedClipId) return;
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/reverse`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: enabled })
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            showToast(`Reverse playback ${enabled ? 'enabled' : 'disabled'}`, 'success');
-            // Reload settings for active clip
-            await reloadClipSettings();
-        } else {
-            showToast(data.error || 'Error toggling reverse', 'error');
-        }
-    } catch (error) {
-        console.error('Error toggling reverse:', error);
-        showToast('Error toggling reverse', 'error');
-    }
-};
-
-// Reset trim to full clip
-window.resetTrim = async function() {
-    if (!selectedClipId) return;
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/reset-trim`, {
-            method: 'POST'
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            showToast('Trim reset to full clip', 'success');
-            await loadTrimSettings();
-            // Reload settings for active clip
-            await reloadClipSettings();
-        } else {
-            showToast(data.error || 'Error resetting trim', 'error');
-        }
-    } catch (error) {
-        console.error('Error resetting trim:', error);
-        showToast('Error resetting trim', 'error');
     }
 };
 
@@ -4694,26 +4396,6 @@ window.updateClipLayerOpacity = async function(clipId, layerId, opacity) {
         }
     }, 300); // Wait 300ms after user stops dragging
 };
-
-/**
- * Update layer stack visibility based on layer count
- * OLD: Now using clip-based layers
- */
-function updateLayerStackVisibility(playerId) {
-    // No longer applicable - layers are per-clip now
-    debug.log(`Layer stack for ${playerId}: Using clip-based layers`);
-}
-
-/**
- * Select a layer (for clip loading)
- * OLD: Now using clip-based layers
- */
-window.selectLayer = function(playerId, layerId) {
-    // No longer applicable - layers are per-clip now
-    debug.log(`⚠️ selectLayer() is deprecated - use clip-based layer management`);
-};
-
-// NOTE: Old player-level layer modal removed - now using clip-based layers with file browser modal
 
 /**
  * Remove a layer

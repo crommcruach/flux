@@ -774,85 +774,31 @@ def register_script_routes(app, player_manager, config):
             "count": len(scripts)
         })
     
-    @app.route('/api/load_script', methods=['POST'])
-    def load_script():
-        """Lädt und startet ein Script."""
-        import sys
-        import io
-        from ..frame_source import ScriptSource
+    # ScriptSource removed - use GeneratorSource with generator plugins instead
+    
+    @app.route('/api/load_generator', methods=['POST'])
+    def load_generator():
+        """Lädt und startet einen Generator."""
         from ..logger import get_logger
         
         logger = get_logger(__name__)
         
         data = request.get_json()
-        script_name = data.get('script')
+        generator_id = data.get('generator_id')
         
-        if not script_name:
+        if not generator_id:
             return jsonify({
                 "status": "error",
-                "message": "Kein Script-Name angegeben"
+                "message": "Kein Generator-ID angegeben"
             }), 400
         
-        if not script_name.endswith('.py'):
-            script_name += '.py'
+        # TODO: Implement generator loading via GeneratorSource
+        logger.warning(f"Generator loading not yet implemented: {generator_id}")
         
-        # Umleite stdout/stderr um print() während Script-Start zu verhindern
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        
-        try:
-            sys.stdout = io.StringIO()
-            sys.stderr = io.StringIO()
-            
-            current_player = player_manager.player
-            
-            # Erstelle neue ScriptSource
-            script_source = ScriptSource(
-                script_name,
-                current_player.canvas_width,
-                current_player.canvas_height,
-                config
-            )
-            
-            # Wechsle Source (unified Player bleibt bestehen)
-            success = current_player.switch_source(script_source)
-            
-            if not success:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
-                return jsonify({
-                    "status": "error",
-                    "message": "Fehler beim Laden des Scripts"
-                }), 500
-            
-            # Warte kurz damit Thread initialisiert
-            import time
-            time.sleep(0.1)
-            
-            # Info
-            info = current_player.get_info()
-            
-            # WICHTIG: stdout/stderr VOR return wiederherstellen!
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-            
-            return jsonify({
-                "status": "success",
-                "message": f"Script geladen: {info.get('name', script_name)}",
-                "info": info
-            })
-            
-        except Exception as e:
-            import traceback
-            # Stelle stdout/stderr wieder her vor dem return
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-            logger.error(traceback.format_exc())
-            return jsonify({
-                "status": "error",
-                "message": str(e),
-                "traceback": traceback.format_exc()
-            }), 500
+        return jsonify({
+            "status": "error",
+            "message": "Generator loading not yet implemented - use web UI Sources tab"
+        }), 501
 
 
 def register_console_command_routes(app, player, dmx_controller, rest_api, video_dir, data_dir, config):

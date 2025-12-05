@@ -11,7 +11,7 @@ from collections import deque
 from .logger import get_logger
 from .artnet_manager import ArtNetManager
 from .points_loader import PointsLoader
-from .frame_source import VideoSource, ScriptSource
+from .frame_source import VideoSource
 from .plugin_manager import get_plugin_manager
 from .layer import Layer
 from .constants import (
@@ -37,7 +37,7 @@ class Player:
         Initialisiert Player mit Frame-Quelle.
         
         Args:
-            frame_source: FrameSource-Instanz (VideoSource, ScriptSource, etc.)
+            frame_source: FrameSource-Instanz (VideoSource, GeneratorSource, etc.)
             points_json_path: Pfad zur Points-JSON-Datei
             target_ip: Art-Net Ziel-IP
             start_universe: Start-Universum für Art-Net
@@ -178,7 +178,7 @@ class Player:
     
     @property
     def script_name(self):
-        """Script-Name (falls ScriptSource)."""
+        """Script-Name (deprecated - use generator_id instead)."""
         return getattr(self.source, 'script_name', None)
     
     def switch_source(self, new_source):
@@ -366,6 +366,38 @@ class Player:
         
         logger.debug("Wiedergabe neu gestartet (vom ersten Frame)")
     
+    def _check_transport_loop_completion(self):
+        """
+        Prüft ob der Transport-Effekt einen Loop abgeschlossen hat.
+        Returns True wenn Loop completed, False sonst.
+        """
+        if not self.clip_registry or not hasattr(self, 'current_clip_id') or not self.current_clip_id:
+            return False
+        
+        try:
+            # Hole clip effects aus dem Cache (performance optimization)
+            if hasattr(self, '_cached_clip_effects') and self._cached_clip_effects:
+                clip_effects = self._cached_clip_effects
+            else:
+                return False
+            
+            # Finde Transport-Effekt
+            for effect_data in clip_effects:
+                if effect_data.get('plugin_id') == 'transport' and 'instance' in effect_data:
+                    transport_instance = effect_data['instance']
+                    
+                    # Check loop_completed flag
+                    if hasattr(transport_instance, 'loop_completed') and transport_instance.loop_completed:
+                        # Reset flag for next loop detection
+                        transport_instance.loop_completed = False
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Error checking transport loop completion: {e}")
+            return False
+    
     def _play_loop(self):
         """Haupt-Wiedergabeschleife (läuft in separatem Thread)."""
         self.is_running = True
@@ -405,8 +437,33 @@ class Player:
             
             loop_start = time.time()
             
+            # DEBUG: Log every 100 frames to monitor playback
+            if self.current_frame % 100 == 0 and self.current_frame > 0:
+                logger.debug(f"[{self.player_name}] Playing: frame {self.current_frame}, max_loops={self.max_loops}, current_loop={self.current_loop}")
+            
+            # ========== TRANSPORT LOOP DETECTION ==========
+            # Check if transport effect signaled loop completion (für Playlist-Autoplay)
+            transport_loop_completed = self._check_transport_loop_completion()
+            should_autoadvance = False
+            
+            if transport_loop_completed:
+                self.current_loop += 1
+                logger.info(f"🔁 [{self.player_name}] Transport loop completed: current_loop={self.current_loop}, max_loops={self.max_loops}")
+                
+                # Check if we should advance to next clip in playlist
+                if self.max_loops > 0 and self.current_loop >= self.max_loops:
+                    logger.info(f"📋 [{self.player_name}] max_loops reached ({self.current_loop}/{self.max_loops})")
+                    
+                    # Prüfe Playlist-Autoplay
+                    if self.autoplay and len(self.playlist) > 0:
+                        # Skip frame reading and trigger autoplay
+                        should_autoadvance = True
+                        frame = None
+                        source_delay = 0
+                        logger.debug(f"⏭️ [{self.player_name}] Triggering autoplay - skip frame reading")
+            
             # ========== MULTI-LAYER COMPOSITING ==========
-            if self.layers and len(self.layers) > 0:
+            if not should_autoadvance and self.layers and len(self.layers) > 0:
                 # Master Frame (Layer 0 bestimmt Timing und Länge)
                 frame, source_delay = self.layers[0].source.get_next_frame()
                 
@@ -443,7 +500,7 @@ class Player:
                     # Frame ist jetzt das finale composited Frame
                     # Weiter mit existing logic (brightness, effects, etc.)
                 
-            else:
+            elif not should_autoadvance:
                 # Fallback: Single-Source Mode (Backward Compatibility)
                 frame, source_delay = self.source.get_next_frame()
             
@@ -451,9 +508,12 @@ class Player:
             
             if frame is None:
                 # Ende der Source (Video-Loop oder Fehler)
-                self.current_loop += 1
+                # ACHTUNG: current_loop wurde bereits im Transport-Loop-Check erhöht!
+                # Nur erhöhen wenn kein Transport-Loop (z.B. bei echtem Frame=None von Source)
+                if not transport_loop_completed:
+                    self.current_loop += 1
                 
-                logger.debug(f"🎬 [{self.player_name}] Frame=None: autoplay={self.autoplay}, playlist_len={len(self.playlist)}, current_index={self.playlist_index}")
+                logger.info(f"🎬 [{self.player_name}] Frame=None (clip ended): current_loop={self.current_loop}, max_loops={self.max_loops}, autoplay={self.autoplay}, playlist_len={len(self.playlist)}, playlist_index={self.playlist_index}, transport_triggered={transport_loop_completed}")
                 
                 # Prüfe Playlist-Autoplay
                 if self.autoplay and len(self.playlist) > 0:
@@ -1379,7 +1439,7 @@ class Player:
         # Hole Layer-Definitionen
         layer_defs = clip_data.get('layers', [])
         
-        from modules.frame_source import VideoSource, GeneratorSource, ScriptSource
+        from modules.frame_source import VideoSource, GeneratorSource
         
         # ALWAYS create Layer 0 from the clip itself (base layer)
         abs_path = clip_data['absolute_path']
@@ -1393,8 +1453,6 @@ class Player:
             # Get generator parameters from clip metadata if available
             gen_params = clip_data.get('metadata', {}).get('generator_params', {})
             base_source = GeneratorSource(gen_id, gen_params, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
-        elif abs_path.endswith('.py'):
-            base_source = ScriptSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
         
         if base_source and base_source.initialize():
             from modules.player import Layer
@@ -1428,8 +1486,6 @@ class Player:
                     # Get generator parameters from layer definition if available
                     gen_params = layer_def.get('parameters', {})
                     source = GeneratorSource(source_path, gen_params, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
-                elif source_type == 'script':
-                    source = ScriptSource(source_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
                 
                 if source and source.initialize():
                     from modules.player import Layer

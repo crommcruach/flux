@@ -1,6 +1,58 @@
 # Py_artnet - Version History
 
-## v2.3 - Unified API & Plugin System (2025-11-26 - 2025-12-04)
+## v2.3 - Unified API & Plugin System (2025-11-26 - 2025-12-05)
+
+### v2.3.7 - Legacy Code Cleanup & ScriptSource Removal (2025-12-05)
+- ✓ **Deprecated Trim/Reverse Functions Removed** - Transport Effect Plugin is now standard
+  - Frontend cleanup: Removed ~300 lines of deprecated code from player.js
+  - Functions removed: loadTrimSettings(), reloadClipSettings(), toggleTrimSection(), setupTrimRangeSliders(), updateTrimPointsFromSlider(), toggleReverse(), resetTrim()
+  - Commented HTML removed: Old trim controls UI section (~30 lines)
+  - trimSliderInstance variable removed
+- ✓ **Deprecated Backend Modules Deleted** - 4 files removed, ~500 lines eliminated
+  - api_artnet_effects_deprecated.py (163 lines) - replaced by unified player API
+  - api_effects_deprecated.py (204 lines) - replaced by unified player API
+  - api_clip_trim.py (244 lines) - replaced by Transport Effect Plugin
+  - api_videos_deprecated.py - deprecated video API
+  - rest_api.py: Removed imports and registration calls
+- ✓ **Deprecated ClipRegistry Methods Removed** - Trim/reverse functionality consolidated
+  - set_clip_trim() method removed (~25 lines)
+  - set_clip_reverse() method removed (~20 lines)
+  - get_clip_playback_info() method removed (~25 lines)
+  - All trim/reverse logic now handled by Transport Effect Plugin
+- ✓ **VideoSource Trim/Reverse Code Removed** - frame_source.py cleanup
+  - Removed deprecated trim/reverse properties (in_point, out_point, reverse)
+  - Removed ClipRegistry loading logic from __init__ (~25 lines)
+  - Removed trim boundary checking from get_next_frame() (~20 lines)
+  - Removed reload_trim_settings() method (~25 lines)
+  - Simplified reset() method (removed trim logic)
+- ✓ **Legacy API Fallbacks Removed** - Cleaner playerConfigs
+  - legacyApi object removed from playerConfigs (video player)
+  - play/pause/stop functions simplified (no more fallback endpoints)
+  - Legacy sync comments removed (3 occurrences)
+  - "MIGRATION: Convert old float IDs" comment simplified
+  - "Transition State (legacy)" comment removed
+- ✓ **ScriptSource Completely Removed** - ~200 lines legacy code eliminated
+  - frame_source.py: ScriptSource class removed (~100 lines)
+  - api_routes.py: /api/load_script endpoint → generator placeholder
+  - rest_api.py: ScriptSource import & isinstance checks removed
+  - rest_api.py: Console command 'script:' removed
+  - cli_handler.py: _handle_load_script() → deprecation warning
+  - dmx_controller.py: ScriptSource loading → warning log
+  - command_executor.py: _handle_script_load() → deprecation warning
+  - player.py: ScriptSource import removed, .py file layer creation removed
+  - __init__.py: ScriptSource → GeneratorSource in exports
+  - layer.py: ScriptSource removed from docstring
+- ✓ **Deprecated Function Cleanup** - Old layer management functions removed
+  - updateLayerStackVisibility() removed - replaced by clip-based layers
+  - selectLayer() removed - replaced by clip-based layers
+  - "TODO: Extract to separate function" comment removed
+- ✓ **Total Impact** - Massive codebase cleanup
+  - ~1000 lines of dead code removed
+  - 4 deprecated files deleted
+  - ~20 deprecated functions/methods eliminated
+  - No errors introduced - all changes validated
+  - Transport Effect Plugin is now the single source of truth for trim/reverse/speed control
+  - GeneratorSource with generator plugins replaces all ScriptSource usage
 
 ### v2.3.6 - Triple-Handle Slider UI System (2025-12-04)
 - ✓ **Triple-Handle Slider Component** - Universal Numeric Parameter Control

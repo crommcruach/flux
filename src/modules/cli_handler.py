@@ -882,51 +882,18 @@ class CLIHandler:
         logger.info(f"{'='*60}")
         logger.info(f"\nInsgesamt {len(scripts)} Script(s)")
         logger.info("Verwendung: script:<name>  (z.B. script:rainbow_wave)")
+        logger.warning("⚠️ Script loading is deprecated - use generator plugins instead")
     
     def _handle_load_script(self, command):
-        """Lädt und startet ein Script."""
-        from .frame_source import ScriptSource
+        """Lädt und startet ein Script - DEPRECATED."""
+        logger.warning("⚠️ Script loading is deprecated - use generator plugins instead")
+        logger.info("Use generators from the Sources tab in the web UI instead")
         
-        # Extrahiere Script-Namen
-        script_name = command.split(':', 1)[1].strip()
-        if not script_name.endswith('.py'):
-            script_name += '.py'
+        # Tracking für next/back
+        self.current_script_name = None
+        self.current_video_path = None
         
-        try:
-            # Erstelle neue ScriptSource
-            script_source = ScriptSource(
-                script_name,
-                self.player.canvas_width,
-                self.player.canvas_height,
-                self.config
-            )
-            
-            # Wechsle Source (unified Player bleibt bestehen)
-            success = self.player.switch_source(script_source)
-            
-            if not success:
-                logger.error(f"Fehler beim Laden des Scripts: {script_name}")
-                return (True, None)
-            
-            # Zeige Info
-            info = self.player.get_info()
-            logger.info(f"\n✓ Script geladen: {info.get('name', script_name)}")
-            if 'description' in info:
-                logger.info(f"  {info['description']}")
-            if 'parameters' in info:
-                logger.info(f"  Parameter: {', '.join(info['parameters'].keys())}")
-            
-            # Tracking für next/back
-            self.current_script_name = script_name
-            self.current_video_path = None
-            
-            return (True, None)
-            
-        except Exception as e:
-            logger.error(f"Fehler beim Laden des Scripts: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return (True, None)
+        return (True, None)
     
     def _handle_open(self):
         """Öffnet Web-Interface im Browser (undokumentiert)."""

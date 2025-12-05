@@ -17,7 +17,7 @@ class Layer:
     Einzelne Layer-Ebene für Multi-Layer Compositing.
     
     Ein Layer besteht aus:
-    - Frame-Quelle (VideoSource, GeneratorSource, ScriptSource)
+    - Frame-Quelle (VideoSource, GeneratorSource)
     - Layer-spezifische Effekte
     - Compositing-Einstellungen (Blend Mode, Opacity)
     - Metadaten (Clip-ID, enabled-Status)

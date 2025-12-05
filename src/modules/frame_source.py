@@ -74,33 +74,7 @@ class VideoSource(FrameSource):
         self.source_type = 'video'  # Marker für Transport-Effekt
         self.cap = None
         self._lock = threading.Lock()  # Thread-Safety für FFmpeg
-        
-        # ⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
-        # DEPRECATED: Clip trimming and playback control - Use Transport Effect Plugin instead
-        # TODO: Remove trim/reverse properties and ClipRegistry loading after Transport plugin migration complete
         self.clip_id = clip_id
-        self.in_point = None  # Start frame (None = video start)
-        self.out_point = None  # End frame (None = video end)
-        self.reverse = False  # Reverse playback
-        
-        # DEPRECATED: Load trim settings from ClipRegistry if clip_id provided
-        if self.clip_id:
-            from .clip_registry import get_clip_registry
-            clip_registry = get_clip_registry()
-            playback_info = clip_registry.get_clip_playback_info(self.clip_id)
-            if playback_info:
-                self.in_point = playback_info.get('in_point')
-                self.out_point = playback_info.get('out_point')
-                self.reverse = playback_info.get('reverse', False)
-                # Set current_frame to in_point if trimming is active
-                if self.in_point is not None:
-                    self.current_frame = self.in_point
-                if self.in_point is not None or self.out_point is not None or self.reverse:
-                    logger.info(f"✂️ VideoSource trim settings loaded from ClipRegistry: clip_id={self.clip_id}, in={self.in_point}, out={self.out_point}, reverse={self.reverse}, start_frame={self.current_frame}")
-                else:
-                    logger.info(f"📹 VideoSource initialized with clip_id={self.clip_id} (no trim settings)")
-            else:
-                logger.warning(f"⚠️ VideoSource clip_id={self.clip_id} but no playback_info found in ClipRegistry")
         
         # GIF Support
         self.is_gif = self._is_gif_file(video_path)
@@ -240,32 +214,10 @@ class VideoSource(FrameSource):
         if not self.cap or not self.cap.isOpened():
             return None, 0
         
-        # Check trim boundaries BEFORE reading frame
-        effective_in = self.in_point if self.in_point is not None else 0
-        effective_out = self.out_point if self.out_point is not None else self.total_frames - 1
-        
-        # Determine which frame to read
-        if not self.reverse:
-            # Forward playback
-            actual_frame = self.current_frame
-            
-            # Check if we've reached out_point
-            if actual_frame > effective_out:
-                return None, 0  # End of trimmed clip
-        else:
-            # Reverse playback: play from out_point down to in_point
-            # current_frame counts up (0, 1, 2...) but we read backwards
-            playback_position = self.current_frame - effective_in
-            actual_frame = effective_out - playback_position
-            
-            # Check if we've gone before in_point
-            if actual_frame < effective_in:
-                return None, 0  # End of trimmed clip (in reverse)
-        
         # CRITICAL: Lock BOTH seek and read for HAP codec thread-safety
         # HAP codec has internal threading that can cause race conditions
         with self._lock:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame)
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
             ret, frame = self.cap.read()
         
         if not ret:
@@ -288,41 +240,13 @@ class VideoSource(FrameSource):
         self.current_frame += 1
         return frame, delay
     
-    def reload_trim_settings(self):
-        """
-        DEPRECATED: Use Transport Effect Plugin instead.
-        Lädt Trim-Einstellungen aus ClipRegistry neu.
-        """
-        if self.clip_id:
-            from .clip_registry import get_clip_registry
-            clip_registry = get_clip_registry()
-            playback_info = clip_registry.get_clip_playback_info(self.clip_id)
-            old_current = self.current_frame
-            logger.info(f"reload_trim_settings: clip_id={self.clip_id}, current_frame={old_current}, playback_info={playback_info}")
-            if playback_info:
-                self.in_point = playback_info.get('in_point')
-                self.out_point = playback_info.get('out_point')
-                self.reverse = playback_info.get('reverse', False)
-                logger.info(f"✅ VideoSource trim settings reloaded: in={self.in_point}, out={self.out_point}, reverse={self.reverse}")
-                # Reset to appropriate starting position
-                self.reset()
-                logger.info(f"🔄 VideoSource reset: current_frame {old_current} → {self.current_frame}")
-                return True
-            else:
-                logger.warning(f"⚠️ No playback_info found for clip_id={self.clip_id}")
-        else:
-            logger.warning(f"⚠️ VideoSource has no clip_id set")
-        return False
-    
     def reset(self):
-        """Setzt Video auf Anfang zurück (oder in_point wenn trimmed)."""
-        # Start at in_point if trimming is active, otherwise frame 0
-        start_frame = self.in_point if self.in_point is not None else 0
-        self.current_frame = start_frame
+        """Setzt Video auf Anfang zurück."""
+        self.current_frame = 0
         
         with self._lock:  # Lock für seek-Operation (non-sequential access)
             if self.cap and self.cap.isOpened():
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     
     def cleanup(self):
         """Gibt Video-Ressourcen frei."""
@@ -334,101 +258,6 @@ class VideoSource(FrameSource):
     def get_source_name(self):
         """Gibt Video-Dateinamen zurück."""
         return os.path.basename(self.video_path) if self.video_path else "Unknown Video"
-
-
-class ScriptSource(FrameSource):
-    """
-    ⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
-    DEPRECATED: Python-Script als Frame-Quelle (prozedural generiert).
-    Use GeneratorSource with generator plugins instead.
-    
-    TODO: Remove ScriptSource class and all references after GeneratorSource migration complete.
-    References found in:
-    - api_routes.py (register_script_routes)
-    - cli_handler.py (load_script command)
-    - dmx_controller.py (script loading)
-    - rest_api.py (is_script check)
-    - __init__.py (export)
-    """
-    
-    def __init__(self, script_name, canvas_width, canvas_height, config=None):
-        super().__init__(canvas_width, canvas_height, config)
-        self.script_name = script_name
-        self.source_path = script_name  # Generischer Pfad für load_points()
-        self.source_type = 'script'  # Marker für Transport-Effekt
-        self.script_gen = None
-        self.start_time = 0
-        self.is_infinite = True  # Scripts laufen unendlich
-        
-        # Lade Script-Generator
-        scripts_dir = config.get('paths', {}).get('scripts_dir', 'scripts') if config else 'scripts'
-        self.script_gen = ScriptGenerator(scripts_dir)
-    
-    def initialize(self):
-        """Initialisiert Script-Generator."""
-        if not self.script_gen.load_script(self.script_name):
-            logger.error(f"Script konnte nicht geladen werden: {self.script_name}")
-            return False
-        
-        self.start_time = time.time()
-        
-        logger.debug(f"ScriptSource initialisiert:")
-        logger.debug(f"  Script: {self.script_name}")
-        logger.debug(f"  Canvas: {self.canvas_width}x{self.canvas_height}")
-        
-        return True
-    
-    def get_next_frame(self):
-        """Generiert nächstes Frame."""
-        if not self.script_gen:
-            return None, 0
-        
-        current_time = time.time() - self.start_time
-        
-        frame = self.script_gen.generate_frame(
-            width=self.canvas_width,
-            height=self.canvas_height,
-            fps=self.fps,
-            frame_number=self.current_frame,
-            time=current_time
-        )
-        
-        if frame is None:
-            logger.warning("Fehler beim Generieren des Frames")
-            return None, 1.0 / self.fps
-        
-        # Frame ist bereits RGB
-        delay = 1.0 / self.fps
-        self.current_frame += 1
-        
-        return frame, delay
-    
-    def reset(self):
-        """Setzt Script zurück."""
-        self.current_frame = 0
-        self.start_time = time.time()
-        
-        if self.script_gen:
-            self.script_gen.reset()
-    
-    def cleanup(self):
-        """Cleanup für Script."""
-        # Script-Generator hat keine speziellen Cleanup-Anforderungen
-        pass
-    
-    def get_source_name(self):
-        """Gibt Script-Namen zurück."""
-        return self.script_name
-    
-    def get_info(self):
-        """Erweiterte Info mit Script-Details."""
-        info = super().get_info()
-        
-        if self.script_gen:
-            script_info = self.script_gen.get_info()
-            info.update(script_info)
-        
-        return info
 
 
 class GeneratorSource(FrameSource):

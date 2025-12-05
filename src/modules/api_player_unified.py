@@ -128,8 +128,23 @@ def register_unified_routes(app, player_manager, config):
                 # Load clip layers from registry
                 player.load_clip_layers(clip_id, clip_registry, video_dir)
                 
+                # Set max_loops if generator is in playlist
+                gen_path = f"generator:{generator_id}"
+                if hasattr(player, 'playlist') and player.playlist is not None:
+                    try:
+                        player.playlist_index = player.playlist.index(gen_path)
+                        player.max_loops = 1 if player.autoplay else 0
+                        logger.debug(f"🔁 [{player_id}] Generator in playlist: max_loops={player.max_loops} (autoplay={player.autoplay})")
+                    except ValueError:
+                        # Generator not in playlist yet - still set max_loops for autoplay
+                        player.max_loops = 1 if player.autoplay else 0
+                        logger.debug(f"🔁 [{player_id}] Generator not in playlist (yet): max_loops={player.max_loops} (autoplay={player.autoplay})")
+                
                 # Start playback if was playing OR autoplay is enabled
                 if was_playing or player.autoplay:
+                    # Stop first to ensure clean restart with new clip
+                    if player.is_playing:
+                        player.stop()
                     player.play()
                     logger.info(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
                 
@@ -221,14 +236,23 @@ def register_unified_routes(app, player_manager, config):
                 player.load_clip_layers(clip_id, clip_registry, video_dir)
                 
                 # Update playlist index if applicable
-                if hasattr(player, 'playlist') and player.playlist:
+                if hasattr(player, 'playlist') and player.playlist is not None:
                     try:
                         player.playlist_index = player.playlist.index(absolute_path)
+                        # Set max_loops based on autoplay (if clip is in playlist)
+                        player.max_loops = 1 if player.autoplay else 0
+                        logger.debug(f"🔁 [{player_id}] Clip in playlist: max_loops={player.max_loops} (autoplay={player.autoplay})")
                     except ValueError:
                         player.playlist_index = -1
+                        # Clip not in playlist yet - still set max_loops for autoplay
+                        player.max_loops = 1 if player.autoplay else 0
+                        logger.debug(f"🔁 [{player_id}] Clip not in playlist (yet): max_loops={player.max_loops} (autoplay={player.autoplay})")
                 
                 # Start playback if was playing OR autoplay is enabled
                 if was_playing or player.autoplay:
+                    # Stop first to ensure clean restart with new clip
+                    if player.is_playing:
+                        player.stop()
                     player.play()
                     logger.info(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
                 
@@ -1004,6 +1028,9 @@ def register_unified_routes(app, player_manager, config):
             
             player.current_clip_id = clip_id
             
+            # Load clip layers
+            player.load_clip_layers(clip_id, clip_registry, video_dir)
+            
             if was_playing:
                 player.play()
         
@@ -1104,9 +1131,12 @@ def register_unified_routes(app, player_manager, config):
                         metadata={}
                     )
                 player.playlist_ids[prev_video_path] = clip_id
-            
+        
             player.current_clip_id = clip_id
             
+            # Load clip layers
+            player.load_clip_layers(clip_id, clip_registry, video_dir)
+        
             if was_playing:
                 player.play()
         
@@ -1292,10 +1322,12 @@ def register_unified_routes(app, player_manager, config):
                     player.playlist_index = -1
                     logger.debug(f"📋 [{player_id}] Current video not in playlist")
             
-            # Wenn aktuelles Video in Playlist ist: setze Endlosschleife
+            # Wenn aktuelles Video in Playlist ist
             if current_video_in_playlist:
-                player.max_loops = 0  # 0 = Endlosschleife
-                logger.debug(f"🔁 [{player_id}] Video in Endlosschleife gesetzt (max_loops=0)")
+                # Wenn autoplay aktiv: max_loops=1 damit Clip 1x spielt und dann zum nächsten wechselt
+                # Sonst: max_loops=0 (Endlosschleife, manuelle Navigation mit Next/Previous)
+                player.max_loops = 1 if autoplay else 0
+                logger.debug(f"🔁 [{player_id}] Video in Playlist: max_loops={player.max_loops} (autoplay={autoplay})")
                 
                 # Starte automatisch wenn nicht schon läuft
                 if not player.is_playing:

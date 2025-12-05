@@ -100,10 +100,10 @@ python src/main.py
 - `points switch <name>` - Punkte-Liste wechseln
 - `points reload` - Aktuelle Liste neu laden
 
-### Script Generator
-- `scripts list` - Alle verfügbaren Scripts anzeigen
-- `script:<name>` - Script laden und starten (z.B. `script:rainbow_wave`)
-- `load script:<name>` - Alternatives Format zum Laden
+### Generator Plugins (replaces legacy Script Generator)
+- See [PLUGIN_SYSTEM.md](docs/PLUGIN_SYSTEM.md) for generator plugin development
+- Legacy script commands (`script:`, `load script:`) now show deprecation warnings
+- Use generator plugins instead for procedural content generation
 
 ### Einstellungen
 - `brightness <0-100>` - Helligkeit setzen
@@ -163,10 +163,10 @@ python src/main.py
 
 **Compositing-Reihenfolge:** Layer 0 (Base) → Layer 1 → Layer 2 → ... (bottom to top)
 
-### Script Generator
-- `GET /api/scripts` - Liste aller Scripts
-- `POST /api/load_script` - Body: `{"script": "rainbow_wave"}`
-- `GET /api/script/info/<name>` - Script-Metadaten
+### Generator Plugins (legacy script endpoints deprecated)
+- `GET /api/scripts` - Liste aller Scripts (deprecated, use generator plugins)
+- `POST /api/load_generator` - Load generator plugin (replaces /api/load_script)
+- See [PLUGIN_SYSTEM.md](docs/PLUGIN_SYSTEM.md) for generator plugin API
 
 ### Art-Net
 - `POST /api/blackout` - Blackout aktivieren
@@ -214,7 +214,7 @@ Py_artnet/
 │   ├── main.py                    # Haupteinstiegspunkt
 │   ├── modules/
 │   │   ├── player.py              # Unified Media Player with Layer Support
-│   │   ├── frame_source.py        # Frame Source Abstraction (VideoSource, ScriptSource)
+│   │   ├── frame_source.py        # Frame Source Abstraction (VideoSource, GeneratorSource)
 │   │   ├── clip_registry.py       # UUID-based Clip Management with Layers
 │   │   ├── api_clip_layers.py     # Layer Management API
 │   │   ├── video_converter.py     # FFmpeg Video Converter (HAP, H.264)
@@ -345,66 +345,67 @@ Das System unterstützt animated GIFs mit folgenden Features:
   - `gif_transparency_bg`: RGB-Werte für Transparenz-Hintergrund (Standard: [0,0,0])
   - `gif_respect_frame_timing`: Variable Frame-Delays aktivieren (Standard: true)
 
-## Prozedural generierte Grafiken (Scripts)
+## Generator Plugins (v2.3.7+)
 
-Neben Video-Dateien können auch Python-Scripts als Videoquellen verwendet werden. Diese generieren Frames prozedural in Echtzeit und laufen endlos.
+> **⚠️ DEPRECATED:** Legacy Script Generator (ScriptSource) has been replaced by the Generator Plugin system in v2.3.7.
+> 
+> Old script loading commands (`script:`, `load script:`, `/api/load_script`) now return deprecation warnings.
+> 
+> **Migration:** Use generator plugins instead. See [PLUGIN_SYSTEM.md](docs/PLUGIN_SYSTEM.md) for details.
 
-### Features
-- **Infinite Content**: Scripts laufen ohne Wiederholung
-- **Python-basiert**: Volle Flexibilität mit NumPy, Math, etc.
-- **Hot-Loading**: Scripts können zur Laufzeit gewechselt werden
-- **Standard-Controls**: Brightness, Speed, etc. funktionieren mit Scripts
+Prozedural content generation is now handled by generator plugins, which provide:
+- **Plugin Architecture**: Standardized plugin system with metadata, parameters, and lifecycle hooks
+- **Effect Chaining**: Generators can be combined with effect plugins for complex visuals
+- **Dynamic Loading**: Hot-swap generators at runtime
+- **Parameter Control**: Real-time parameter adjustment via API
+- **Better Integration**: Full support for unified player API and effect pipeline
 
-### Verwendung
+### Migration from Scripts to Generators
 
-**CLI:**
+**Old (Deprecated):**
 ```bash
-> scripts list              # Alle verfügbaren Scripts anzeigen
-> script:rainbow_wave       # Script laden und starten
-> script:plasma             # Anderes Script laden
+> scripts list              # DEPRECATED
+> script:rainbow_wave       # DEPRECATED
+POST /api/load_script       # DEPRECATED
 ```
 
-**API:**
+**New (Generator Plugins):**
 ```bash
-GET  /api/scripts           # Liste aller Scripts
-POST /api/load_script       # Body: {"script": "rainbow_wave"}
+GET  /api/plugins/generators                    # List all generator plugins
+POST /api/player/video/load_generator          # Load generator plugin
+POST /api/player/video/effects/params          # Adjust generator parameters
 ```
 
-### Eigene Scripts erstellen
+### Creating Generator Plugins
 
-Scripts liegen im `scripts/` Ordner und müssen folgende Struktur haben:
+Generator plugins follow the standardized plugin architecture. Create a new plugin in `src/plugins/generators/`:
 
 ```python
+from plugins.plugin_base import PluginBase, PluginMetadata, PluginParameter
 import numpy as np
 
-METADATA = {
-    'name': 'My Script',
-    'description': 'Does something cool',
-    'parameters': {
-        'speed': 1.0
-    }
-}
-
-def generate_frame(frame_number, width, height, time, fps):
-    """
-    Generiert einen Frame als NumPy-Array.
+class MyGeneratorPlugin(PluginBase):
+    def __init__(self):
+        super().__init__(
+            metadata=PluginMetadata(
+                name="My Generator",
+                category="generator",
+                description="Generates procedural content",
+                version="1.0.0"
+            ),
+            parameters=[
+                PluginParameter("speed", float, 1.0, 0.1, 5.0)
+            ]
+        )
     
-    Args:
-        frame_number: Frame-Index (0, 1, 2, ...)
-        width: Canvas-Breite
-        height: Canvas-Höhe
-        time: Zeit in Sekunden seit Start
-        fps: Ziel-FPS
-    
-    Returns:
-        np.array: RGB-Array mit shape (height, width, 3), dtype=uint8
-    """
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
-    # ... generiere Grafik ...
-    return frame
+    def process_frame(self, frame_data, frame_number, **kwargs):
+        height, width = self.height, self.width
+        output = np.zeros((height, width, 3), dtype=np.uint8)
+        # ... generate graphics ...
+        return output
 ```
 
-Siehe `scripts/README.md` für detaillierte Dokumentation und Beispiele.
+See [PLUGIN_SYSTEM.md](docs/PLUGIN_SYSTEM.md) and [NEW_PLUGINS.md](docs/NEW_PLUGINS.md) for detailed documentation.
 
 ## Hardware-Beschleunigung
 
