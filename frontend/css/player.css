@@ -1279,6 +1279,11 @@ body {
     flex: 1;
 }
 
+.param-control-row .triple-slider-container {
+    flex: 1;
+    min-width: 0; /* Allow shrinking */
+}
+
 .param-control-row .param-value {
     min-width: 50px;
     text-align: right;

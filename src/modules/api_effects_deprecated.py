@@ -1,5 +1,11 @@
 """
 REST API Endpoints für Effect Chain Management
+
+⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
+DEPRECATED: This file is replaced by api_player_unified.py
+Use /api/player/<player_id>/effects/* endpoints instead.
+
+TODO: Remove this file after verifying no dependencies remain.
 """
 from flask import request, jsonify
 from .logger import get_logger

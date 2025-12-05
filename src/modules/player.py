@@ -61,6 +61,8 @@ class Player:
         self.layers = []  # List of Layer objects
         self.layer_counter = 0  # For generating unique layer IDs
         
+        # ⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
+        # TODO: Remove _legacy_source after all code uses layers[0].source instead
         # Legacy single source (for backward compatibility via @property)
         self._legacy_source = frame_source
         
@@ -1619,6 +1621,8 @@ class Player:
         
         return blend
     
+    # ⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
+    # TODO: Remove source property after all code uses layers[0].source directly
     # Backward Compatibility: source Property
     @property
     def source(self):

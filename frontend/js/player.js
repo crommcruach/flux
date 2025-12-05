@@ -26,10 +26,12 @@ let generatorsMap = new Map();
 // ========================================
 
 let DEBUG_LOGGING = true; // Default: enabled
+let VERBOSE_LOGGING = false; // Default: disabled (very noisy logs)
 
 // Debug logger wrapper functions
 const debug = {
     log: (...args) => { if (DEBUG_LOGGING) console.log(...args); },
+    verbose: (...args) => { if (VERBOSE_LOGGING) console.log(...args); }, // Extra verbose logs
     info: (...args) => { if (DEBUG_LOGGING) console.info(...args); },
     warn: (...args) => { if (DEBUG_LOGGING) console.warn(...args); },
     error: (...args) => console.error(...args), // Errors always shown
@@ -44,18 +46,27 @@ async function loadDebugConfig() {
         const response = await fetch(`${API_BASE}/api/config`);
         const config = await response.json();
         DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
+        VERBOSE_LOGGING = config.frontend?.verbose_logging ?? false;
         console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+        if (VERBOSE_LOGGING) console.log(`🔬 Verbose logging: ENABLED`);
     } catch (error) {
         console.error('❌ Failed to load debug config, using default (enabled):', error);
         DEBUG_LOGGING = true;
+        VERBOSE_LOGGING = false;
     }
 }
 
-// Runtime toggle function (accessible from browser console)
+// Runtime toggle functions (accessible from browser console)
 window.toggleDebug = function(enable) {
     DEBUG_LOGGING = enable ?? !DEBUG_LOGGING;
     console.log(`🐛 Debug logging ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
     return DEBUG_LOGGING;
+};
+
+window.toggleVerbose = function(enable) {
+    VERBOSE_LOGGING = enable ?? !VERBOSE_LOGGING;
+    console.log(`🔬 Verbose logging ${VERBOSE_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+    return VERBOSE_LOGGING;
 };
 
 // ========================================
@@ -1058,25 +1069,41 @@ function renderGeneratorParametersSection() {
             `;
             // Initialize triple-slider after DOM is updated
             setTimeout(() => {
-                initTripleSlider(genControlId, {
-                    min: param.min,
-                    max: param.max,
-                    value: genActualValue,
-                    step: step,
-                    showRange: true,
-                    rangeMin: genSavedRangeMin,
-                    rangeMax: genSavedRangeMax,
-                    onChange: (newValue) => {
-                        updateGeneratorParameter(param.name, newValue);
-                    },
-                    onRangeChange: (rangeMin, rangeMax) => {
-                        // Range changed - trigger update to save range
-                        const slider = getTripleSlider(genControlId);
-                        if (slider) {
-                            updateGeneratorParameter(param.name, slider.getValue());
-                        }
+                // FIX: Check if slider exists AND if its DOM container is still in document
+                const existingSlider = getTripleSlider(genControlId);
+                const containerInDOM = document.getElementById(genControlId);
+                
+                if (existingSlider && containerInDOM && existingSlider.container === containerInDOM) {
+                    // Slider exists with valid DOM - update it
+                    existingSlider.updateValues(genActualValue, genSavedRangeMin, genSavedRangeMax);
+                    existingSlider.updateUI();
+                } else {
+                    // Slider doesn't exist OR DOM was replaced - recreate
+                    if (existingSlider) {
+                        debug.verbose(`🔄 Generator triple-slider DOM replaced for ${genControlId}, recreating slider`);
+                        existingSlider.destroy();
                     }
-                });
+                    
+                    initTripleSlider(genControlId, {
+                        min: param.min,
+                        max: param.max,
+                        value: genActualValue,
+                        step: step,
+                        showRangeHandles: true,
+                        rangeMin: genSavedRangeMin,
+                        rangeMax: genSavedRangeMax,
+                        onChange: (newValue) => {
+                            updateGeneratorParameter(param.name, newValue);
+                        },
+                        onRangeChange: (rangeMin, rangeMax) => {
+                            // Range changed - trigger update to save range
+                            const slider = getTripleSlider(genControlId);
+                            if (slider) {
+                                updateGeneratorParameter(param.name, slider.getValue());
+                            }
+                        }
+                    });
+                }
             }, 0);
         } else if (param.type === 'bool') {
             html += `
@@ -1100,6 +1127,91 @@ function renderGeneratorParametersSection() {
         
         html += `</div>`;
     });
+    
+    // Add Playback Control Section
+    html += `
+        <div class="param-control playback-controls-header" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+            <label style="font-weight: 600; color: var(--accent-color);">
+                ⏯️ Playback Controls
+            </label>
+        </div>
+    `;
+    
+    // Speed Control
+    const speedControlId = 'gen-playback-speed';
+    const currentSpeed = window.currentGeneratorParams?.speed ?? 1.0;
+    html += `
+        <div class="param-control">
+            <label>Speed</label>
+            <small>Playback speed multiplier</small>
+            <div class="param-control-row">
+                <div id="${speedControlId}" class="triple-slider-container" 
+                     data-default="1.0"
+                     oncontextmenu="resetGeneratorParameterToDefaultTriple(event, 'speed', 1.0, '${speedControlId}')"></div>
+                <span id="gen-param-speed-value" class="param-value">
+                    ${currentSpeed}x
+                </span>
+            </div>
+        </div>
+    `;
+    setTimeout(() => {
+        const existingSlider = getTripleSlider(speedControlId);
+        const containerInDOM = document.getElementById(speedControlId);
+        
+        if (existingSlider && containerInDOM && existingSlider.container === containerInDOM) {
+            existingSlider.updateValues(currentSpeed, 0.1, 10.0);
+            existingSlider.updateUI();
+        } else {
+            if (existingSlider) {
+                existingSlider.destroy();
+            }
+            
+            initTripleSlider(speedControlId, {
+                min: 0.1,
+                max: 10.0,
+                value: currentSpeed,
+                step: 0.1,
+                showRangeHandles: true,
+                rangeMin: 0.1,
+                rangeMax: 10.0,
+                onChange: (newValue) => {
+                    document.getElementById('gen-param-speed-value').textContent = newValue.toFixed(1) + 'x';
+                    updateGeneratorParameter('speed', newValue);
+                }
+            });
+        }
+    }, 0);
+    
+    // Reverse Checkbox
+    const currentReverse = window.currentGeneratorParams?.reverse ?? false;
+    html += `
+        <div class="param-control">
+            <label class="checkbox-label">
+                <input type="checkbox" 
+                       id="gen-param-reverse"
+                       ${currentReverse ? 'checked' : ''}
+                       onchange="updateGeneratorParameter('reverse', this.checked)">
+                <span>⏪ Reverse Playback</span>
+            </label>
+        </div>
+    `;
+    
+    // Playback Mode Dropdown
+    const currentMode = window.currentGeneratorParams?.playback_mode ?? 'repeat';
+    html += `
+        <div class="param-control">
+            <label for="gen-param-playback-mode">Playback Mode</label>
+            <select 
+                class="form-select form-select-sm" 
+                id="gen-param-playback-mode"
+                onchange="updateGeneratorParameter('playback_mode', this.value)">
+                <option value="repeat" ${currentMode === 'repeat' ? 'selected' : ''}>🔁 Repeat (Loop)</option>
+                <option value="play_once" ${currentMode === 'play_once' ? 'selected' : ''}>▶️ Play Once</option>
+                <option value="bounce" ${currentMode === 'bounce' ? 'selected' : ''}>↔️ Bounce (Ping-Pong)</option>
+                <option value="random" ${currentMode === 'random' ? 'selected' : ''}>🎲 Random</option>
+            </select>
+        </div>
+    `;
     
     html += `
             </div>
@@ -2598,6 +2710,13 @@ window.addEffectToClip = async function(pluginId) {
         return;
     }
     
+    // Prevent adding Transport effect to generator clips
+    if (pluginId === 'transport' && window.currentGeneratorId) {
+        showToast('⚠️ Transport effect not available for generator clips', 'warning');
+        debug.log('❌ Blocked Transport effect on generator clip');
+        return;
+    }
+    
     try {
         // NEW: Unified API endpoint
         const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/add`;
@@ -2649,7 +2768,15 @@ async function refreshClipEffects() {
         const data = await response.json();
         
         if (data.success) {
-            clipEffects = data.effects || [];
+            // Filter out Transport effect for generator clips
+            let effects = data.effects || [];
+            if (window.currentGeneratorId) {
+                effects = effects.filter(effect => effect.plugin_id !== 'transport');
+                if ((data.effects || []).length !== effects.length) {
+                    debug.log('🚫 Filtered out Transport effect from generator clip display');
+                }
+            }
+            clipEffects = effects;
             renderClipEffects();
             // Load trim settings after rendering
             await loadTrimSettings();
@@ -3088,12 +3215,12 @@ function renderEffectItem(effect, index, player) {
         debug.warn(`⚠️ Effect "${metadata.name || effect.plugin_id}" has no parameters:`, effect);
     }
     
-    // Debug transform specifically
+    // Debug transform specifically (verbose only)
     if (effect.plugin_id === 'transform') {
-        console.log(`🔍 Transform metadata.parameters (schema):`, parameters);
-        console.log(`🔍 Transform effect.parameters (values):`, effect.parameters);
+        debug.verbose(`🔍 Transform metadata.parameters (schema):`, parameters);
+        debug.verbose(`🔍 Transform effect.parameters (values):`, effect.parameters);
         parameters.forEach(param => {
-            console.log(`  - ${param.name}: type=${param.type}, min=${param.min}, max=${param.max}, value=${effect.parameters[param.name]}`);
+            debug.verbose(`  - ${param.name}: type=${param.type}, min=${param.min}, max=${param.max}, value=${effect.parameters[param.name]}`);
         });
     }
     
@@ -3355,10 +3482,13 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
                     }
                 };
                 
-                // Check if slider already exists
+                // FIX: Check if slider exists AND if its DOM container is still in document
+                // If container was replaced by innerHTML, destroy old instance
                 const existingSlider = getTripleSlider(controlId);
-                if (existingSlider) {
-                    // Update existing slider values without triggering onChange
+                const containerInDOM = document.getElementById(controlId);
+                
+                if (existingSlider && containerInDOM && existingSlider.container === containerInDOM) {
+                    // Slider exists with valid DOM reference - update it
                     existingSlider.updateValues(intActualValue, intSavedRangeMin, intSavedRangeMax);
                     existingSlider.config.displayFormat = displayFormat;
                     existingSlider.config.fps = fps;
@@ -3367,6 +3497,12 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
                     // Update external display
                     updateDisplayValue(intActualValue);
                 } else {
+                    // Slider doesn't exist OR DOM was replaced - destroy old and create new
+                    if (existingSlider) {
+                        debug.verbose(`🔄 Triple-slider DOM replaced for ${controlId}, recreating slider`);
+                        existingSlider.destroy();
+                    }
+                    
                     // Create new slider
                     initTripleSlider(controlId, {
                         min: intMin,
@@ -3483,20 +3619,36 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
                 `;
                 // Initialize slider
                 setTimeout(() => {
-                    initTripleSlider(controlId, {
-                        min: fallbackMin,
-                        max: fallbackMax,
-                        value: fallbackValue,
-                        step: fallbackStep,
-                        showRangeHandles: true,
-                        rangeMin: fallbackMin,
-                        rangeMax: fallbackMax,
-                        onChange: (newValue) => {
-                            const finalValue = fallbackDecimals === 0 ? Math.round(newValue) : newValue;
-                            document.getElementById(`${controlId}_value`).textContent = fallbackDecimals === 0 ? Math.round(finalValue) : finalValue.toFixed(fallbackDecimals);
-                            updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`);
+                    // FIX: Check if slider exists AND if its DOM container is still in document
+                    const existingSlider = getTripleSlider(controlId);
+                    const containerInDOM = document.getElementById(controlId);
+                    
+                    if (existingSlider && containerInDOM && existingSlider.container === containerInDOM) {
+                        // Slider exists with valid DOM - update it
+                        existingSlider.updateValues(fallbackValue, fallbackMin, fallbackMax);
+                        existingSlider.updateUI();
+                    } else {
+                        // Slider doesn't exist OR DOM was replaced - recreate
+                        if (existingSlider) {
+                            debug.verbose(`🔄 Triple-slider DOM replaced for ${controlId}, recreating slider`);
+                            existingSlider.destroy();
                         }
-                    });
+                        
+                        initTripleSlider(controlId, {
+                            min: fallbackMin,
+                            max: fallbackMax,
+                            value: fallbackValue,
+                            step: fallbackStep,
+                            showRangeHandles: true,
+                            rangeMin: fallbackMin,
+                            rangeMax: fallbackMax,
+                            onChange: (newValue) => {
+                                const finalValue = fallbackDecimals === 0 ? Math.round(newValue) : newValue;
+                                document.getElementById(`${controlId}_value`).textContent = fallbackDecimals === 0 ? Math.round(finalValue) : finalValue.toFixed(fallbackDecimals);
+                                updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`);
+                            }
+                        });
+                    }
                 }, 0);
             } else {
                 control = `<p class="text-muted">${param.label || param.name}: ${value}</p>`;

@@ -441,7 +441,9 @@ class ClipRegistry:
     
     def set_clip_trim(self, clip_id: str, in_point: Optional[int], out_point: Optional[int]) -> bool:
         """
+        ⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
         DEPRECATED: Use Transport Effect Plugin instead.
+        TODO: Remove this method after api_clip_trim.py is removed.
         
         Setzt In/Out Points für Clip-Trimming.
         
@@ -466,7 +468,9 @@ class ClipRegistry:
     
     def set_clip_reverse(self, clip_id: str, enabled: bool) -> bool:
         """
+        ⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
         DEPRECATED: Use Transport Effect Plugin instead.
+        TODO: Remove this method after api_clip_trim.py is removed.
         
         Aktiviert/deaktiviert Rückwärts-Wiedergabe für Clip.
         
@@ -489,7 +493,9 @@ class ClipRegistry:
     
     def get_clip_playback_info(self, clip_id: str) -> Optional[Dict]:
         """
+        ⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
         DEPRECATED: Use Transport Effect Plugin instead.
+        TODO: Remove this method after api_clip_trim.py is removed.
         
         Holt Playback-Informationen für Clip (trim, reverse, etc.).
         

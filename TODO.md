@@ -14,10 +14,101 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-## 🔥 PRIORITÄT 1 - Quick Wins (~22-34h)
+## 🔥 PRIORITÄT 1 - Quick Wins (~43-66h)
 **Niedriger Aufwand, hoher Nutzen - sofort umsetzbar**
 
-### 1.0 🔌 Plugin-System erweitern (~8-12h)
+### 1.0 🎨 Unified Playlist System - Player/Playlist Generalisierung (~7-10h) 🆕
+
+**Ziel:** 100% generalisiertes Player-System - neue Player durch `playerConfigs` hinzufügen, ohne Code-Änderungen.
+
+**Aktueller Stand:** ~60% generalisiert (Backend 99%, Frontend 60%)
+
+- [ ] **Phase 1: Legacy Variables migrieren (2h):**
+  - `videoFiles/artnetFiles` → `playerConfigs[playerId].files`
+  - `currentVideoFile/currentArtnetFile` → `playerConfigs[playerId].currentFile`
+  - `videoAutoplay/artnetAutoplay` → `playerConfigs[playerId].autoplay`
+  - `videoLoop/artnetLoop` → `playerConfigs[playerId].loop`
+  - ~15 Funktionen betroffen (loadVideoFile, loadArtnetFile, etc.)
+
+- [ ] **Phase 2: Load-Funktionen generalisieren (2-3h):**
+  - `loadVideoFile()` + `loadArtnetFile()` → `loadFile(playerId, file)`
+  - `window.loadVideoFile` + `window.loadArtnetFile` → `window.loadFile`
+  - Entfernt ~100 Zeilen Code-Duplikation
+
+- [ ] **Phase 3: Player Wrappers entfernen (2h):**
+  - `toggleVideoPlay()`, `nextVideoClip()` etc. → `togglePlay(playerId)`, `nextClip(playerId)`
+  - Window-Wrapper durch direkte generische Calls ersetzen
+
+- [ ] **Phase 4: Backend-Hotfix (15min):**
+  - `default_effects.py` Zeilen 115-118: Hardcoded player_type checks entfernen
+  - Verwende `player.player_type` statt `isinstance()` checks
+
+**Vorteile:**
+- Neue Player in 5min hinzufügen (nur `playerConfigs` Entry)
+- -200 Zeilen Code (keine Duplikation)
+- Konsistentes Verhalten über alle Player
+- Wartbarkeit massiv verbessert
+
+**Siehe:** [UNIFIED_PLAYLISTS.md](docs/UNIFIED_PLAYLISTS.md) für Details
+
+---
+
+### 1.1 🎯 Playlist Master/Slave Synchronization (~8-14h) 🆕
+
+- [ ] **Master/Slave Toggle UI (2h):**
+  - Toggle-Button in Playlist-Header (Video & Art-Net)
+  - Master-Indicator (👑 Icon) für aktive Master-Playlist
+  - Nur eine Playlist kann Master sein (Toggle schaltet andere aus)
+  - Visuelles Feedback: Master (grün/golden), Slave (grau/normal)
+
+- [ ] **Synchronization Engine (4-6h):**
+  - Event-System: Master emittiert `clip_changed` Events mit Clip-Index
+  - Slave-Listener: Reagiert auf Master-Events und wechselt zum gleichen Clip-Index
+  - Initial Sync: Wenn Master aktiviert → Alle Slaves springen zu Master-Clip-Index
+  - Transition-Preservation: Slaves verwenden ihre eigenen Transition-Settings
+  - Edge-Case Handling:
+    - Slave hat weniger Clips als Master → Clip-Index Modulo (Loop)
+    - Master deaktiviert → Slaves werden autonom
+    - Playlist leer → Keine Sync-Aktion
+
+- [ ] **Backend Implementation (3-4h):**
+  - `PlayerManager`: Master/Slave State Management
+  - `set_master_playlist(player_id)` → Setzt Master, alle anderen zu Slaves
+  - `sync_slaves_to_master()` → Synchronisiert alle Slaves zum Master-Clip
+  - Event-Dispatcher für Clip-Wechsel (Observer Pattern)
+  - Persistence: Master-State in session_state.json
+
+- [ ] **REST API (1-2h):**
+  - POST `/api/player/{player_id}/set_master` → Aktiviert Master-Mode
+  - GET `/api/player/sync_status` → Gibt Master/Slave Status zurück
+  - Unified API: Master-State in Player-Status integrieren
+
+- [ ] **Frontend Integration (2h):**
+  - Master-Toggle-Button in Playlist-Controls (neben Autoplay/Loop)
+  - Master/Slave Status-Anzeige (Icon + Farbe)
+  - API-Calls für Toggle-Actions
+  - Visual Feedback bei Sync-Aktionen (kurzer Highlight-Effekt)
+
+**Funktionsweise:**
+```
+MASTER (Video Playlist):     [Clip1] [Clip2] [Clip3] [Clip4] ← Master aktiviert
+                                                      ↓ Clip 4 aktiv
+SLAVE (Art-Net Playlist):    [Clip1] [Clip2] [Clip3] [Clip4] → Springt zu Clip 4
+                                                      ↑ Sync!
+
+Master → Clip 5:             [Clip5] wird geladen
+Slave:                       → Wechselt auch zu Clip 5 (sofort, mit eigener Transition)
+```
+
+**Vorteile:**
+- Synchrone Shows mit mehreren Outputs (Video + Art-Net)
+- Verschiedene Clips auf verschiedenen Ausgängen, aber synchroner Ablauf
+- Master/Slave kann jederzeit gewechselt werden
+- Jede Playlist behält ihre eigenen Effekte/Transitions
+
+---
+
+### 1.2 🔌 Plugin-System erweitern (~8-12h)
 
 - [ ] **Layer-Effekte über Clip FX Tab (8-12h):**
   - API-Endpoints für Layer-Effekte (POST/PATCH/DELETE `/api/clips/<clip_id>/layers/<layer_id>/effects`)
@@ -29,7 +120,105 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 1.1 🎬 Playlist-Sequenzer (~8-12h)
+### 1.3 ⚡ WebSocket Command Channel - Zeitkritische Commands (~6-8h) 🔥
+
+**Problem:** Polling-Intervalle (250-3000ms) verursachen Latenz bei zeitkritischen Operationen.
+
+**Lösung:** Hybrid-Ansatz - REST für Daten-Operations, WebSocket für Commands & Live-Updates.
+
+#### Endpoints nach Mehrwert (absteigend):
+
+**🔥 TIER 1 - Maximaler Mehrwert (Command Latency: ~50ms → ~2-5ms)**
+
+- [ ] **Effect Parameter Updates (Live-Controls):**
+  - `PUT /api/player/{id}/effects/{index}/parameter` → `ws://effect.param.update`
+  - Aktuell: 500ms Polling für Live-Parameter (Brightness, Hue, etc.)
+  - Mit WS: Instant bidirektionales Feedback (<5ms)
+  - **Mehrwert: 100x schneller, 10x weniger Server-Load**
+
+- [ ] **Layer Opacity/Blend Mode Updates:**
+  - `PATCH /api/player/{id}/layers/{layer_id}` → `ws://layer.update`
+  - Aktuell: HTTP Request pro Slider-Change (50-200ms Latency)
+  - Mit WS: Real-time slider sync (<5ms)
+  - **Mehrwert: Smooth UI, keine Lag-Spikes**
+
+- [ ] **Transport Controls (Play/Pause/Stop/Next/Prev):**
+  - `POST /api/player/{id}/play|pause|stop|next|previous` → `ws://player.command`
+  - Aktuell: 20-100ms HTTP Round-Trip
+  - Mit WS: <5ms Command Execution
+  - **Mehrwert: Instant Response, MIDI/OSC-ready**
+
+**🟡 TIER 2 - Hoher Mehrwert (Status Polling: 2000ms → Event-driven)**
+
+- [ ] **Player Status Broadcast:**
+  - `GET /api/player/{id}/status` → `ws://player.status` (Push statt Poll)
+  - Aktuell: 2s Polling-Intervall (status_broadcast_interval)
+  - Mit WS: Event-driven Updates bei Änderungen
+  - **Mehrwert: 90% weniger Requests, instant UI-Updates**
+
+- [ ] **Effect Chain Updates:**
+  - `GET /api/player/{id}/effects` → `ws://effects.changed`
+  - Aktuell: 2s Polling für Effect-List-Refresh
+  - Mit WS: Nur bei Add/Remove/Reorder Events
+  - **Mehrwert: 95% weniger Traffic**
+
+- [ ] **Clip Progress Updates:**
+  - `GET /api/player/{id}/status` (current_frame) → `ws://clip.progress`
+  - Aktuell: 2s Polling für Trim-Slider-Sync
+  - Mit WS: Real-time Progress (10-30 FPS)
+  - **Mehrwert: Smooth Progress-Bars**
+
+**🟢 TIER 3 - Mittlerer Mehrwert (Optimierung statt Latenz)**
+
+- [ ] **Playlist Updates:**
+  - `GET /api/player/{id}/playlist` → `ws://playlist.changed`
+  - Aktuell: 500ms Polling bei Autoplay (nur aktiv wenn autoplay enabled)
+  - Mit WS: Event bei Clip-Wechsel
+  - **Mehrwert: 80% weniger Requests bei Autoplay**
+
+- [ ] **Console/Log Streaming:**
+  - `GET /api/logs` → `ws://logs.stream`
+  - Aktuell: 3s Polling + throttled fetch
+  - Mit WS: Real-time Log-Streaming
+  - **Mehrwert: Live-Debugging, keine Polling-Delay**
+
+**❌ NICHT WebSocket (bleiben REST):**
+- File Operations (Upload, Convert, List) - zu große Payloads
+- Configuration Changes - selten, keine Latenz-Kritik
+- Playlist Save/Load - Daten-Operations, kein Live-Update
+- Plugin/Generator Discovery - Einmalig beim Laden
+
+#### Implementation Plan:
+
+1. **Backend WebSocket Server (2h):**
+   - Flask-SocketIO bereits vorhanden (rest_api.py:285)
+   - Neue Namespaces: `/player`, `/effects`, `/layers`
+   - Event-Emitter in Player-Klasse integrieren
+
+2. **Frontend WebSocket Client (2h):**
+   - `common.js` Socket.IO Connection erweitern
+   - Event-Listener für Commands (Tier 1)
+   - Auto-Reconnect & Fallback zu REST
+
+3. **Hybrid Routing Layer (1h):**
+   - `isSocketConnected()` Check vor Command
+   - Fallback: WS failed → REST Request
+   - Progressive Enhancement
+
+4. **Testing & Rollout (1-2h):**
+   - Latency Benchmarks (vorher/nachher)
+   - Concurrent User Tests
+   - Graceful Degradation Tests
+
+**Expected Results:**
+- Command Latency: 50-100ms → 2-5ms (**20-50x schneller**)
+- Server Load: -85% bei Status/Effect-Requests
+- UI Responsiveness: Instant Feedback für alle Controls
+- Production-Ready: MIDI/OSC Controller Support möglich
+
+---
+
+### 1.4 🎬 Playlist-Sequenzer (~8-12h)
 
 - [ ] **Show-Editor UI (4h):**
   - Liste von Clips mit Drag & Drop
@@ -63,7 +252,107 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 1.3 🎹 MIDI-over-Ethernet Support (~6-10h)
+### 1.5 🎛️ Dynamische Parameter Sequenzen (~6-10h) 🆕
+
+- [ ] **Automatisierte Parameter-Modulation über verschiedene Sequenz-Typen:**
+  - **Grundidee:** Parameter können zeitbasierte Sequenzen abspielen statt statischer Werte
+  - **UI-Konzept:**
+    ```
+    ⚙️ Parameter [Blur Strength: 5.0] |--▼----|-------▼--|
+     └ Sequenz-Modus: [Dropdown ▼]
+          ⊙ Manual (statisch)
+          ⊙ Audio Reactive
+          ⊙ Timeline
+          ⊙ Envelope
+          ⊙ LFO (Low-Frequency Oscillator)
+    ```
+
+- [ ] **Sequenz-Typen (6-8h):**
+  
+  - **Audio Reactive (2h):**
+    - Bind Parameter an Audio-Feature (RMS, Peak, Bass, Mid, Treble, BPM)
+    - Range-Mapping: Audio-Level (0-1) → Parameter-Range (min-max)
+    - Smoothing-Filter: Attack/Release für sanfte Übergänge
+    - Threshold: Nur triggern wenn Audio über Schwellwert
+    - UI: Spektrum-Visualisierung + Live-Wert-Anzeige
+  
+  - **Timeline (2h):**
+    - Keyframe-basierte Timeline (Zeit → Wert Paare)
+    - Linear/Bezier/Step Interpolation zwischen Keyframes
+    - Loop-Modes: Once, Loop, Ping-Pong
+    - Sync mit Clip-Time oder Global-Time
+    - UI: Mini-Timeline-Editor mit Keyframe-Punkten
+  
+  - **Envelope (1-2h):**
+    - ADSR (Attack, Decay, Sustain, Release) Envelope
+    - Trigger-Modes: On-Load, On-Beat, Manual
+    - Duration & Curve-Shape pro Phase
+    - UI: Visual ADSR-Curve mit Drag-Handles
+  
+  - **LFO (1-2h):**
+    - Waveforms: Sine, Triangle, Square, Sawtooth, Random
+    - Frequency (Hz) & Amplitude Control
+    - Phase-Offset für mehrere LFOs sync
+    - UI: Live-Waveform-Preview
+
+- [ ] **Backend Implementation (2-3h):**
+  - `ParameterSequencer` Klasse mit Sequenz-Engine
+  - `SequencePlayer` pro Parameter-Binding
+  - Integration in Effect-Pipeline (Parameter-Update-Loop)
+  - Persistence: Sequenz-Config in Effect-Metadata
+  - API: CRUD für Parameter-Sequenzen
+
+- [ ] **REST API (1h):**
+  - POST `/api/effects/{effect_id}/params/{param_name}/sequence` → Bind Sequenz
+  - GET `/api/effects/{effect_id}/params/{param_name}/sequence` → Get Sequenz-Config
+  - DELETE `/api/effects/{effect_id}/params/{param_name}/sequence` → Unbind (zurück zu Manual)
+  - PUT `/api/effects/{effect_id}/params/{param_name}/sequence` → Update Sequenz-Settings
+
+- [ ] **Frontend UI (2-3h):**
+  - Sequenz-Button neben jedem Parameter (⚙️ Icon)
+  - Modal/Sidebar für Sequenz-Editor
+  - Type-Selector (Dropdown: Manual/Audio/Timeline/Envelope/LFO)
+  - Type-spezifische Controls (Range-Mapper, Timeline-Editor, ADSR-Curve)
+  - Live-Preview: Zeigt aktuellen modulierten Wert in Echtzeit
+  - Visual Feedback: Parameter-Name wird farbig wenn Sequenz aktiv
+
+**Use-Cases:**
+- Audio-reactive Blur/Brightness (pulst mit Musik)
+- Timeline-basierte Color-Shifts für exakte Timing-Kontrolle
+- ADSR-Envelope für Impact-Effekte (z.B. Flash bei Beat)
+- LFO für organische Bewegungen (z.B. wabernde Transforms)
+
+**Config-Beispiel:**
+```json
+{
+  "effect_id": "blur_01",
+  "parameter_sequences": {
+    "strength": {
+      "type": "audio_reactive",
+      "audio_feature": "bass",
+      "range": {"min": 0.0, "max": 10.0},
+      "smoothing": {"attack": 0.1, "release": 0.3}
+    },
+    "brightness": {
+      "type": "lfo",
+      "waveform": "sine",
+      "frequency": 0.5,
+      "amplitude": 0.3,
+      "offset": 0.7
+    }
+  }
+}
+```
+
+**Vorteile:**
+- Lebendige, dynamische Effekte statt statischer Parameter
+- Musik-synchrone Visuals ohne manuelle Automation
+- Wiederverwendbare Sequenz-Presets
+- Echtzeit-Modulation ohne Performance-Impact
+
+---
+
+### 1.6 🎹 MIDI-over-Ethernet Support (~6-10h)
 
 - [ ] **MIDI Control via Ethernet (minimale Latenz) (6-10h):**
   - **Grundidee:** MIDI-Signale über Ethernet statt USB für <5ms Latenz
@@ -89,8 +378,8 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-## ⚡ PRIORITÄT 2 - Mittel-Komplex, Hoch-Wert (~8-12h)
-**Mittlerer Aufwand, hoher Performance-Gewinn**
+## ⚡ PRIORITÄT 2 - Mittel-Komplex, Hoch-Wert (~48-72h)
+**Mittlerer bis hoher Aufwand, hoher Performance-Gewinn & Skalierbarkeit**
 
 ### 2.1 ⚡ WebSocket Command Channel (~4-6h) 🔥 PRIORITY
 
@@ -133,7 +422,115 @@ socket.on('player.status', (data) => console.log(data));
 
 ---
 
-### 2.2 🌐 Multi-Network-Adapter Support (~4-6h)
+### 2.2 🖥️ Multi-Video Render Cluster (~40-60h)
+
+- [ ] **Synchronisierte Multi-Server-Architektur für skalierbare Video-Ausgabe:**
+  - **Grundidee:** Mehrere Render-Nodes (PCs/Server) für parallele Video-Displays
+  - **Architektur Pattern:** Master-Slave Cluster mit WebSocket Command Sync
+  
+- [ ] **Core Features:**
+  - **Cluster Manager (8-12h):**
+    - Node Discovery (mDNS/Broadcast)
+    - Health Checks & Auto-Failover
+    - Leader Election (Raft-ähnlich)
+    - Cluster Status Dashboard
+  
+  - **Command Sync Engine (10-15h):**
+    - WebSocket Command Broadcast (Master → Slaves)
+    - Timestamp-ordered Render Queue
+    - Command Deduplication & Validation
+    - Retry Logic & Acknowledgments
+  
+  - **State Replication (8-12h):**
+    - Full State Snapshot (on Node Join)
+    - Delta Updates (incremental sync)
+    - MVCC (Multi-Version Concurrency Control)
+    - Conflict Resolution
+  
+  - **Render Synchronization (8-12h):**
+    - NTP Time Sync Integration (±1ms accuracy)
+    - Frame Target Calculation (`target_time = base_time + frame_index * frame_duration`)
+    - VSync Lock Mode (GPU waits on VSync for <1ms jitter)
+    - Drift Monitoring & Correction
+  
+  - **Monitoring & Debugging (6-9h):**
+    - Cluster Dashboard (Node Status, Network Lag, Frame Drift)
+    - Performance Metrics (FPS per Node, Sync Jitter)
+    - Command History & Replay
+    - Network Topology Visualization
+
+- [ ] **Technical Details:**
+  - **Sync Mechanism:**
+    ```python
+    # Master broadcasts command:
+    {
+      "type": "render.frame",
+      "timestamp": 1733404800.500,  # NTP-synchronized time
+      "frame_index": 1234,
+      "player_state": {...},
+      "effect_params": {...},
+      "vsync_lock": true  # GPU waits on VSync
+    }
+    # Slaves execute at exact timestamp
+    ```
+  
+  - **Latency Budget:**
+    - WebSocket Broadcast: 2-10ms (LAN)
+    - NTP Sync Accuracy: ±1ms
+    - VSync Jitter: <1ms (hardware-accelerated)
+    - **Total System Jitter: <11ms** (acceptable for live shows)
+  
+  - **Video Output Scaling:**
+    - Modern GPU: 4-8 HDMI/DP outputs per card
+    - 4 Render Nodes × 4 Outputs = **16 synchronized displays**
+    - 10 Render Nodes × 8 Outputs = **80 synchronized displays**
+  
+  - **Advantages over Art-Net Clustering:**
+    - ✅ VSync hardware sync (<1ms jitter vs Art-Net 44Hz limitations)
+    - ✅ Zero network overhead for frame data (each node renders locally)
+    - ✅ Higher resolution (4K per display vs 512 DMX channels)
+    - ✅ Simpler implementation (GPU driver handles sync)
+
+- [ ] **Use Cases:**
+  - Massive video walls (16-64+ synchronized displays)
+  - Multi-projector mapping with edge blending
+  - Immersive environments (360° projections, domes)
+  - Mixed output (video displays + Art-Net LED strips hybrid)
+  - Corporate installations (distributed campus displays)
+
+- [ ] **Configuration Example:**
+  ```json
+  {
+    "cluster": {
+      "mode": "master",  // or "slave"
+      "master_address": "192.168.1.100:5001",
+      "node_id": "render_node_1",
+      "sync": {
+        "ntp_server": "pool.ntp.org",
+        "vsync_lock": true,
+        "max_drift_ms": 5
+      },
+      "outputs": [
+        {"id": "HDMI-1", "resolution": "1920x1080", "position": [0, 0]},
+        {"id": "HDMI-2", "resolution": "1920x1080", "position": [1920, 0]},
+        {"id": "DP-1", "resolution": "3840x2160", "position": [3840, 0]}
+      ]
+    }
+  }
+  ```
+
+- [ ] **Implementation Phases:**
+  - Phase 1: Cluster Manager & Node Discovery (8-12h)
+  - Phase 2: Command Sync Engine (10-15h)
+  - Phase 3: State Replication (8-12h)
+  - Phase 4: Render Sync & NTP Integration (8-12h)
+  - Phase 5: Monitoring Dashboard (6-9h)
+
+**Rationale:** Strategisch wichtig für große Installationen. Video-Clustering ist BESSER als Art-Net-Clustering aufgrund Hardware-Sync, null Netzwerk-Overhead für Frames, und höhere Auflösung. Kommt nach P1 (Basis-Features) und P2 (Master/Slave für einzelne Instanz).
+
+---
+
+### 2.3 🌐 Multi-Network-Adapter Support (~4-6h)
 
 - [ ] **Separate Netzwerk-Interfaces:**
   - **Grundidee:** Control-Traffic (API) getrennt von Art-Net-Output
@@ -341,7 +738,7 @@ socket.on('player.status', (data) => console.log(data));
 
 ### 4.3 🎥 Multi-Video-Routing per Art-Net-Objekt (~20-28h)
 
-- [ ] **Grundidee:** Mehrere Videos gleichzeitig, jedes LED-Objekt bekommt eigenes Video
+- [ ] **Grundidee:** Mehrere Videos gleichzeitig, jedes LED-Objekt bekommt eigenes Video/Generator
 - [ ] **Architektur:**
   - Mehrere Player-Instanzen parallel (Video1, Video2, Video3)
   - LED-Objekte definieren (Name, Universe-Range, Pixel-Count)
@@ -690,32 +1087,41 @@ socket.on('player.status', (data) => console.log(data));
 
 | Priorität | Aufwand | Nutzen | Summe Stunden |
 |-----------|---------|--------|---------------|
-| **P1** | Niedrig | Hoch | ~22-34h |
-| **P2** | Mittel | Hoch | ~8-12h |
+| **P1** | Niedrig | Hoch | ~45-69h (+7-10h Unified +2-3h Presets +6-8h WS) |
+| **P2** | Mittel-Hoch | Sehr Hoch | ~48-72h (+40-60h Multi-Video Cluster) |
 | **P3** | Mittel | Mittel | ~16-31h |
 | **P4** | Hoch | Hoch | ~48-76h |
-| **P5** | Niedrig | Niedrig | ~14-21h |
+| **P5** | Niedrig | Niedrig | ~12-18h (Presets → P1 verschoben) |
 | **P6** | Sehr Hoch | Mittel | ~64-86h |
-| **GESAMT** | | | **~159-250h** |
+| **GESAMT** | | | **~233-352h** (+40-60h Multi-Video Cluster)
 
 ---
 
 ## 🎯 Empfohlene Umsetzungs-Reihenfolge
 
-### Phase 1: Foundation (P1) - ~22-34h
-1. Plugin-System erweitern (Layer-Effekte)
-2. Playlist-Sequenzer
-3. MIDI-over-Ethernet Support
+### Phase 1: Foundation & Performance (P1) - ~45-69h 🔥 PRIORITY
+1. **Unified Playlist System (7-10h)** ← Zuerst! (Basis für alles weitere, -200 Zeilen Code)
+2. Master/Slave Playlist Sync (8-14h)
+3. Plugin-System erweitern - Layer-Effekte (8-12h)
+4. Preset System für Effect Parameters (2-3h)
+5. **WebSocket Command Channel (6-8h)** ← Performance-Boost! (20-50x schnellere Commands)
+6. Playlist-Sequenzer (8-12h)
+7. MIDI-over-Ethernet Support (6-10h)
 
-**Ziel:** Vollständige Show-Control mit Effects & Transitions
+**Ziel:** Saubere Code-Basis → Vollständige Show-Control → Production-ready Performance
+
+**Warum diese Reihenfolge?**
+- **Unified Playlist zuerst:** Bereinigt Code-Basis, macht alle weiteren Features einfacher
+- **Master/Slave danach:** Baut auf sauberem Playlist-System auf
+- **Layer-Effekte + Presets:** Vervollständigt Plugin-System vor Performance-Optimierung
+- **WebSocket am Ende:** Optimiert dann das bereits funktionierende System (85% weniger Server-Load)
 
 ---
 
-### Phase 2: Performance (P2) - ~8-12h 🔥 PRIORITY
-1. **WebSocket Command Channel** (sofort umsetzen!)
-2. Multi-Network-Adapter Support
+### Phase 2: Multi-Network (P2) - ~8-12h
+1. Multi-Network-Adapter Support
 
-**Ziel:** Production-ready Performance & Ultra-niedrige Command-Latenz (2-5ms)
+**Ziel:** Multi-Universe Art-Net auf verschiedenen Netzwerk-Interfaces
 
 ---
 
@@ -736,10 +1142,9 @@ socket.on('player.status', (data) => console.log(data));
 ---
 
 ### Phase 5+: Polish & Future (P5+P6) - ~78-107h
-1. Effect Presets (Optional)
-2. GUI-Optimierungen
-3. Maintenance & Tests
-4. Optional: Timeline-Sequenzer
+1. GUI-Optimierungen
+2. Maintenance & Tests
+3. Optional: Timeline-Sequenzer
 
 **Ziel:** Production-Polishing & Langzeit-Features
 

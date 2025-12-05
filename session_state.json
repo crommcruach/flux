@@ -1,12 +1,18 @@
 {
-  "last_updated": "2025-12-04T16:22:23.843532",
+  "last_updated": "2025-12-05T08:33:48.370951",
   "players": {
     "video": {
       "playlist": [
         {
-          "path": "video\\testbild.mp4",
-          "id": "58c46ce2-c1f9-47f7-b501-d288977926a2",
-          "type": "video",
+          "path": "generator:checkerboard",
+          "id": "d38df8a8-0835-42f1-83a3-0eb9638616f5",
+          "type": "generator",
+          "generator_id": "checkerboard",
+          "parameters": {
+            "columns": 8,
+            "rows": 8,
+            "duration": 10
+          },
           "effects": [
             {
               "plugin_id": "transport",
@@ -67,7 +73,11 @@
                   "_rangeMin": 0,
                   "_rangeMax": 100
                 },
-                "speed": 1.0,
+                "speed": {
+                  "_value": 3.4,
+                  "_rangeMin": 0.1,
+                  "_rangeMax": 10
+                },
                 "reverse": false,
                 "playback_mode": "repeat"
               }
@@ -196,11 +206,7 @@
                 ]
               },
               "parameters": {
-                "position_x": {
-                  "_value": 0,
-                  "_rangeMin": -2000,
-                  "_rangeMax": 2000
-                },
+                "position_x": 0.0,
                 "position_y": 0.0,
                 "scale_xy": 100.0,
                 "rotation": 0.0,
@@ -212,8 +218,7 @@
                 "anchor_x": 50.0,
                 "anchor_y": 50.0,
                 "anchor_z": 50.0
-              },
-              "enabled": true
+              }
             }
           ],
           "layers": []
@@ -230,6 +235,21 @@
             "position_y": 0.0,
             "scale_xy": 100.0,
             "rotation": 0.0
+          }
+        },
+        {
+          "plugin_id": "colorize",
+          "parameters": {
+            "hue": {
+              "_value": 139,
+              "_rangeMin": 0,
+              "_rangeMax": 180
+            },
+            "saturation": {
+              "_value": 160,
+              "_rangeMin": 0,
+              "_rangeMax": 255
+            }
           }
         }
       ]

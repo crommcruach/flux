@@ -2,6 +2,7 @@
 API Endpoints for Clip Trimming & Playback Control
 Provides trim in/out points and reverse playback control.
 
+⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
 DEPRECATED: This API is deprecated in favor of the Transport Effect Plugin.
 Use the "Transport" effect from the effects panel for:
 - Trimming (in/out points)

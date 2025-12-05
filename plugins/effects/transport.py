@@ -260,6 +260,13 @@ class TransportEffect(PluginBase):
                 logger.warning("Transport: No frame source found in kwargs")
                 return frame
             
+            # FIX: Skip Transport effect für Generator-Clips
+            # Generatoren haben keine frame-basierte Navigation
+            source_type = getattr(frame_source, 'source_type', None)
+            if source_type == 'generator':
+                logger.debug("Transport: Skipping for generator clip")
+                return frame
+            
             # Initialisiere beim ersten Frame
             self._initialize_state(frame_source)
             

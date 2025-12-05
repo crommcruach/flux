@@ -1,5 +1,11 @@
 """
 API Art-Net Effects - Separate Effect Chain für Art-Net Ausgabe
+
+⚠️ DEAD CODE - REMOVE IN FUTURE VERSION ⚠️
+DEPRECATED: This file is replaced by api_player_unified.py
+Use /api/player/artnet/effects/* endpoints instead.
+
+TODO: Remove this file after verifying no dependencies remain.
 """
 from flask import jsonify, request
 from .logger import get_logger
