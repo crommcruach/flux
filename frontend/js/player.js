@@ -175,8 +175,8 @@ async function init() {
         await loadAvailableGenerators();
         await loadAvailableBlendModes();
         // initializeSearchFilters(); // DISABLED: Tab components now handle their own search
-        await loadVideoPlaylist();
-        await loadArtnetPlaylist();
+        await loadPlaylist('video');
+        await loadPlaylist('artnet');
         
         // MIGRATION: Check and fix any Float IDs in loaded playlists
         let needsUpdate = false;
@@ -355,20 +355,6 @@ async function updateCurrentFromPlayer(playerId) {
     } catch (error) {
         // Silent fail - don't spam console
     }
-}
-
-// ========================================
-// LEGACY UPDATE FUNCTIONS
-// ========================================
-
-// LEGACY: Wrapper for backward compatibility - use updateCurrentFromPlayer() instead
-async function updateCurrentVideoFromPlayer() {
-    await updateCurrentFromPlayer('video');
-}
-
-// LEGACY: Wrapper for backward compatibility - use updateCurrentFromPlayer() instead
-async function updateCurrentArtnetFromPlayer() {
-    await updateCurrentFromPlayer('artnet');
 }
 
 // ========================================
@@ -746,7 +732,7 @@ function setupPlaylistContainerDropHandlers() {
                     if (fileType === 'image') {
                         loadGeneratorClip('static_picture', 'video', newItem.id, newItem.parameters);
                     } else {
-                        loadVideoFile(filePath, newItem.id);
+                        loadFile('video', filePath, newItem.id, false);
                     }
                 }
                 
@@ -874,7 +860,7 @@ function setupPlaylistContainerDropHandlers() {
                     if (fileType === 'image') {
                         loadGeneratorClip('static_picture', 'artnet', newItem.id, newItem.parameters);
                     } else {
-                        loadArtnetFile(filePath, newItem.id);
+                        loadFile('artnet', filePath, newItem.id, false);
                     }
                 }
                 
@@ -1480,7 +1466,7 @@ function renderPlaylistGeneric(playlistId) {
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'video', item.id, item.parameters);
                 } else {
-                    await loadVideoFile(item.path, item.id);
+                    await loadFile('video', item.path, item.id, false);
                 }
                 // Note: loadClipLayers() is only called on Ctrl+Click, not on double-click
             },
@@ -1499,7 +1485,7 @@ function renderPlaylistGeneric(playlistId) {
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'artnet', item.id, item.parameters);
                 } else {
-                    await loadArtnetFile(item.path, item.id);
+                    await loadFile('artnet', item.path, item.id, false);
                 }
                 // Note: loadClipLayers() is only called on Ctrl+Click, not on double-click
             },
@@ -1614,10 +1600,8 @@ function renderPlaylistGeneric(playlistId) {
                         setTimeout(() => {
                             if (fileType === 'image') {
                                 loadGeneratorClip('static_picture', playlistType, newItem.id, newItem.parameters);
-                            } else if (playlistType === 'video') {
-                                loadVideoFile(filePath, newItem.id);
-                            } else if (playlistType === 'artnet') {
-                                loadArtnetFile(filePath, newItem.id);
+                            } else {
+                                loadFile(playlistType, filePath, newItem.id, false);
                             }
                         }, 50);
                     }
@@ -1889,10 +1873,8 @@ function attachPlaylistDropZoneHandlers(container, playlistId, files, cfg) {
                 setTimeout(() => {
                     if (fileType === 'image') {
                         loadGeneratorClip('static_picture', playlistId, newItem.id, newItem.parameters);
-                    } else if (playlistId === 'video') {
-                        loadVideoFile(filePath, newItem.id);
-                    } else if (playlistId === 'artnet') {
-                        loadArtnetFile(filePath, newItem.id);
+                    } else {
+                        loadFile(playlistId, filePath, newItem.id, false);
                     }
                 }, 100);
             }
@@ -1927,25 +1909,6 @@ function attachPlaylistDropZoneHandlers(container, playlistId, files, cfg) {
         { event: 'dragleave', handler: dragleaveHandler },
         { event: 'drop', handler: dropHandler }
     ];
-}
-
-// Legacy wrapper functions
-async function loadVideoPlaylist() {
-    await loadPlaylist('video');
-}
-
-async function loadArtnetPlaylist() {
-    await loadPlaylist('artnet');
-}
-
-// Legacy wrapper - calls generic implementation
-function renderVideoPlaylist() {
-    renderPlaylistGeneric('video');
-}
-
-// Legacy wrapper - calls generic implementation  
-function renderArtnetPlaylist() {
-    renderPlaylistGeneric('artnet');
 }
 
 // ========================================
@@ -2034,25 +1997,8 @@ window.loadFile = async function(playerId, filePath, clipId = null, addToPlaylis
     }
 };
 
-// ========================================
-// LEGACY FILE LOADING FUNCTIONS
-// ========================================
-
-// Load video file WITHOUT adding to playlist (used for playlist clicks)
-// LEGACY: Wrapper for backward compatibility - use loadFile() instead
-window.loadVideoFile = async function(videoPath, clipId = null) {
-    await loadFile('video', videoPath, clipId, false);
-};
-
-// Load video and ADD to playlist (used for file browser drops)
-// LEGACY: Wrapper for backward compatibility - use loadFile() instead
-window.loadVideo = async function(videoPath) {
-    const clipId = crypto.randomUUID();
-    await loadFile('video', videoPath, clipId, true);
-};
-
 window.refreshVideoPlaylist = async function() {
-    await loadVideoPlaylist();
+    await loadPlaylist('video');
 };
 
 window.removeFromVideoPlaylist = async function(index) {
@@ -2081,7 +2027,7 @@ window.removeFromVideoPlaylist = async function(index) {
             if (nextItem.type === 'generator' && nextItem.generator_id) {
                 await loadGeneratorClip(nextItem.generator_id, 'video', nextItem.id, nextItem.parameters);
             } else {
-                await loadVideoFile(nextItem.path, nextItem.id);
+                await loadFile('video', nextItem.path, nextItem.id, false);
             }
         } else {
             // No more clips - stop player and show black screen
@@ -2173,13 +2119,6 @@ async function previous(playerId) {
     }
 }
 
-// Legacy wrapper functions for HTML onclick handlers
-window.playVideo = async function() { await play('video'); };
-window.pauseVideo = async function() { await pause('video'); };
-window.stopVideo = async function() { await stop('video'); };
-window.nextVideo = async function() { await next('video'); };
-window.previousVideo = async function() { await previous('video'); };
-
 async function toggleAutoplay(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
@@ -2210,8 +2149,7 @@ async function toggleAutoplay(playerId) {
             if (firstFile.type === 'generator' && firstFile.generator_id) {
                 await loadGeneratorClip(firstFile.generator_id, playerId, firstFile.id, firstFile.parameters);
             } else {
-                if (playerId === 'video') await loadVideoFile(firstFile.path, firstFile.id);
-                if (playerId === 'artnet') await loadArtnetFile(firstFile.path, firstFile.id);
+                await loadFile(playerId, firstFile.path, firstFile.id, false);
             }
             await play(playerId);
             debug.log(`🎬 ${config.name} Autoplay: Starte erstes Video`);
@@ -2270,32 +2208,8 @@ async function updatePlaylist(playerId) {
     }
 }
 
-// Legacy wrapper functions
-window.toggleVideoAutoplay = async function() { await toggleAutoplay('video'); };
-window.toggleVideoLoop = async function() { await toggleLoop('video'); };
-async function updateVideoPlaylist() { await updatePlaylist('video'); }
-async function updateArtnetPlaylist() { await updatePlaylist('artnet'); }
-
-
-// ========================================
-// ART-NET PLAYLIST RENDERING (LEGACY - uses generic load functions)
-// ========================================
-
-// Load Art-Net video file WITHOUT adding to playlist (used for playlist clicks)
-// LEGACY: Wrapper for backward compatibility - use loadFile() instead
-window.loadArtnetFile = async function(videoPath, clipId = null) {
-    await loadFile('artnet', videoPath, clipId, false);
-};
-
-// Load Art-Net video and ADD to playlist (used for file browser drops)
-// LEGACY: Wrapper for backward compatibility - use loadFile() instead
-window.loadArtnetVideo = async function(videoPath) {
-    const clipId = crypto.randomUUID();
-    await loadFile('artnet', videoPath, clipId, true);
-};
-
 window.refreshArtnetPlaylist = async function() {
-    await loadArtnetPlaylist();
+    await loadPlaylist('artnet');
 };
 
 window.removeFromArtnetPlaylist = async function(index) {
@@ -2324,7 +2238,7 @@ window.removeFromArtnetPlaylist = async function(index) {
             if (nextItem.type === 'generator' && nextItem.generator_id) {
                 await loadGeneratorClip(nextItem.generator_id, 'artnet', nextItem.id, nextItem.parameters);
             } else {
-                await loadArtnetFile(nextItem.path, nextItem.id);
+                await loadFile('artnet', nextItem.path, nextItem.id, false);
             }
         } else {
             // No more clips - stop player and show black screen
