@@ -241,6 +241,10 @@ def main():
     player_manager = PlayerManager(player, artnet_player)
     logger.info("PlayerManager initialisiert mit Video Player und Art-Net Player")
     
+    # Set PlayerManager reference in players (for Master/Slave sync)
+    player.player_manager = player_manager
+    artnet_player.player_manager = player_manager
+    
     # Default Effects Manager initialisieren und anwenden
     # WICHTIG: Nach Player-Initialisierung, damit PluginManager bereits geladen ist
     try:

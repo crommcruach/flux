@@ -94,9 +94,11 @@ class Player:
         self.playlist = []  # Liste von Video-Pfaden
         self.playlist_index = -1  # Aktueller Index in der Playlist
         self.playlist_params = {}  # Dict: generator_id -> parameters (for autoplay)
-        self.playlist_ids = {}  # Map: path → UUID (für Clip-Effekt-Binding)
+        self.playlist_ids = []  # List of UUIDs matching playlist order (same index)
         self.autoplay = True  # Automatisch nächstes Video abspielen
         self.loop_playlist = True  # Playlist wiederholen
+        self.current_clip_index = 0  # Track current position in playlist (for Master/Slave sync)
+        self.player_manager = None  # Reference to PlayerManager (for Master/Slave sync)
         
         # Effect Chains für Plugins (getrennt für Video-Preview und Art-Net)
         self.video_effect_chain = []  # Video-Preview FX (nicht zu Art-Net)
@@ -231,6 +233,151 @@ class Player:
                 self.pause()
         
         return True
+    
+    # Master/Slave Sync Methods
+    
+    def get_current_clip_index(self) -> int:
+        """
+        Returns current clip index in playlist.
+        
+        Returns:
+            Current clip index (0-based)
+        """
+        return self.current_clip_index
+    
+    def load_clip_by_index(self, index: int, notify_manager: bool = True) -> bool:
+        """
+        Loads clip at specific index in playlist.
+        
+        Args:
+            index: Position in playlist (0-based)
+            notify_manager: If True, notifies PlayerManager about clip change (default: True)
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.playlist or index < 0 or index >= len(self.playlist):
+            logger.warning(f"[{self.player_name}] Invalid clip index: {index} (playlist size: {len(self.playlist) if self.playlist else 0})")
+            return False
+        
+        clip_item = self.playlist[index]
+        self.current_clip_index = index
+        self.playlist_index = index
+        
+        logger.info(f"[{self.player_name}] Loading clip at index {index}, current state: playing={self.is_playing}, paused={self.is_paused}")
+        
+        # Save playback state
+        was_playing = self.is_playing
+        was_paused = self.is_paused
+        
+        logger.debug(f"[{self.player_name}] Saved state: was_playing={was_playing}, was_paused={was_paused}")
+        
+        # Stop playback if running
+        if was_playing:
+            logger.debug(f"[{self.player_name}] Stopping player before clip switch...")
+            self.stop()
+        
+        # Wait for thread to finish (max 3 seconds)
+        if self.thread is not None and self.thread.is_alive():
+            self.thread.join(timeout=3.0)
+            if self.thread.is_alive():
+                logger.warning(f"[{self.player_name}] Thread could not be stopped when switching clips!")
+        
+        try:
+            from .frame_source import VideoSource, GeneratorSource
+            
+            # Check if it's a generator (string format: 'generator:generator_id')
+            if clip_item.startswith('generator:'):
+                generator_id = clip_item.replace('generator:', '')
+                
+                # Get parameters
+                parameters = None
+                if generator_id in self.playlist_params:
+                    parameters = self.playlist_params[generator_id].copy()
+                else:
+                    # Fallback to defaults
+                    from .plugin_manager import get_plugin_manager
+                    pm = get_plugin_manager()
+                    param_list = pm.get_plugin_parameters(generator_id)
+                    parameters = {p['name']: p['default'] for p in param_list}
+                
+                # Auto-set playback_mode based on autoplay and slave status
+                # If autoplay is enabled and not in slave mode, use play_once to advance through playlist
+                is_slave = (self.player_manager and 
+                           self.player_manager.master_playlist is not None and 
+                           not self.player_manager.is_master(self.player_id))
+                
+                if self.autoplay and not is_slave and 'playback_mode' not in parameters:
+                    parameters['playback_mode'] = 'play_once'
+                    logger.debug(f"🔄 [{self.player_name}] Auto-set playback_mode=play_once (autoplay=True, slave={is_slave})")
+                elif is_slave and 'playback_mode' not in parameters:
+                    parameters['playback_mode'] = 'repeat'
+                    logger.debug(f"🔁 [{self.player_name}] Auto-set playback_mode=repeat (slave mode)")
+                
+                new_source = GeneratorSource(generator_id, parameters, self.canvas_width, self.canvas_height, self.config)
+            else:
+                # Video file
+                # Look up clip_id from playlist_ids list at same index
+                clip_id = None
+                if isinstance(self.playlist_ids, list) and index < len(self.playlist_ids):
+                    clip_id = self.playlist_ids[index]
+                new_source = VideoSource(clip_item, self.canvas_width, self.canvas_height, self.config, clip_id=clip_id)
+            
+            # Initialize new source
+            if not new_source.initialize():
+                logger.error(f"❌ [{self.player_name}] Failed to initialize clip: {clip_item}")
+                return False
+            
+            # Cleanup old source and replace (after thread stopped)
+            if self.layers:
+                # Multi-Layer: Replace Layer 0 source
+                if self.layers[0].source:
+                    self.layers[0].source.cleanup()
+                self.layers[0].source = new_source
+            else:
+                # Single-Source: Legacy behavior
+                if self.source:
+                    self.source.cleanup()
+                self.source = new_source
+            
+            self.current_loop = 0
+            
+            logger.info(f"✅ [{self.player_name}] Loaded clip at index {index}")
+            
+            # Restart playback if it was playing before
+            if was_playing:
+                logger.info(f"[{self.player_name}] Restarting playback (was_playing={was_playing})...")
+                
+                # Registriere als aktiver Player NUR wenn Art-Net enabled ist
+                if self.enable_artnet:
+                    with player_lock._global_player_lock:
+                        player_lock._active_player = self
+                        logger.debug(f"[{self.player_name}] Registered as active Art-Net player")
+                
+                # Reaktiviere ArtNet (wurde bei stop() deaktiviert)
+                if self.artnet_manager:
+                    self.artnet_manager.is_active = True
+                    self.artnet_manager.resume_video_mode()
+                
+                self.is_playing = True
+                self.is_running = True
+                new_source.reset()
+                self.thread = threading.Thread(target=self._play_loop, daemon=True)
+                self.thread.start()
+                logger.info(f"[{self.player_name}] Playback restarted, thread alive={self.thread.is_alive()}")
+                
+                if was_paused:
+                    self.pause()
+            
+            # Notify PlayerManager about clip change (for Master/Slave sync)
+            if notify_manager and self.player_manager:
+                self.player_manager.on_clip_changed(self.player_id, index)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ [{self.player_name}] Error loading clip at index {index}: {e}")
+            return False
     
     def play(self):
         """Intelligente Play-Funktion: startet oder setzt fort je nach Status."""
@@ -515,7 +662,24 @@ class Player:
                 
                 logger.info(f"🎬 [{self.player_name}] Frame=None (clip ended): current_loop={self.current_loop}, max_loops={self.max_loops}, autoplay={self.autoplay}, playlist_len={len(self.playlist)}, playlist_index={self.playlist_index}, transport_triggered={transport_loop_completed}")
                 
-                # Prüfe Playlist-Autoplay
+                # Check if this player is a slave - if so, DON'T autoplay to next clip
+                # Slaves should loop their current clip until master tells them to switch
+                # Only consider as slave if there IS a master AND this player is not the master
+                is_slave = (self.player_manager and 
+                           self.player_manager.master_playlist is not None and 
+                           not self.player_manager.is_master(self.player_id))
+                
+                # If slave: loop current clip, don't advance
+                if is_slave:
+                    logger.debug(f"🔄 [{self.player_name}] Slave mode: Looping current clip (index {self.playlist_index})")
+                    # Reset source to beginning for loop
+                    current_source = self.layers[0].source if self.layers else self.source
+                    if current_source and hasattr(current_source, 'seek'):
+                        current_source.seek(0)
+                    self.current_loop = 0
+                    continue
+                
+                # Prüfe Playlist-Autoplay (only if NOT a slave!)
                 if self.autoplay and len(self.playlist) > 0:
                     # Nächstes Video in Playlist laden
                     next_index = self.playlist_index + 1
@@ -546,7 +710,9 @@ class Player:
                             # 1. Check clip registry (stored parameters from playlist)
                             from .clip_registry import get_clip_registry
                             clip_registry = get_clip_registry()
-                            clip_id = self.playlist_ids.get(next_item_path)
+                            clip_id = None
+                            if isinstance(self.playlist_ids, list) and self.playlist_index < len(self.playlist_ids):
+                                clip_id = self.playlist_ids[self.playlist_index]
                             if clip_id and clip_id in clip_registry.clips:
                                 clip_meta = clip_registry.clips[clip_id].get('metadata', {})
                                 if clip_meta.get('parameters'):
@@ -574,13 +740,28 @@ class Player:
                                 parameters = {p['name']: p['default'] for p in param_list}
                                 logger.debug(f"🌟 [{self.player_name}] Using default parameters: {parameters}")
                             
+                            # Auto-set playback_mode based on autoplay and slave status
+                            # If autoplay is enabled and not in slave mode, use play_once to advance through playlist
+                            is_slave = (self.player_manager and 
+                                       self.player_manager.master_playlist is not None and 
+                                       not self.player_manager.is_master(self.player_id))
+                            
+                            if self.autoplay and not is_slave and 'playback_mode' not in parameters:
+                                parameters['playback_mode'] = 'play_once'
+                                logger.debug(f"🔄 [{self.player_name}] Auto-set playback_mode=play_once (autoplay=True, slave={is_slave})")
+                            elif is_slave and 'playback_mode' not in parameters:
+                                parameters['playback_mode'] = 'repeat'
+                                logger.debug(f"🔁 [{self.player_name}] Auto-set playback_mode=repeat (slave mode)")
+                            
                             new_source = GeneratorSource(generator_id, parameters, self.canvas_width, self.canvas_height, self.config)
                             logger.debug(f"🌟 [{self.player_name}] Loading generator: {generator_id}")
                         else:
-                            # Look up clip_id for this video to support trim/reverse
-                            clip_id = self.playlist_ids.get(next_item_path)
-                            logger.info(f"🔍 [{self.player_name}] Looking up clip_id: path='{next_item_path}', found={clip_id}")
-                            logger.debug(f"   playlist_ids keys: {list(self.playlist_ids.keys())}")
+                            # Look up clip_id from playlist_ids list at current index
+                            clip_id = None
+                            if isinstance(self.playlist_ids, list) and self.playlist_index < len(self.playlist_ids):
+                                clip_id = self.playlist_ids[self.playlist_index]
+                            logger.info(f"🔍 [{self.player_name}] Looking up clip_id: index={self.playlist_index}, found={clip_id}")
+                            logger.debug(f"   playlist_ids list length: {len(self.playlist_ids) if isinstance(self.playlist_ids, list) else 'N/A'}")
                             new_source = VideoSource(next_item_path, self.canvas_width, self.canvas_height, self.config, clip_id=clip_id)
                             logger.debug(f"🎬 [{self.player_name}] Loading video: {next_item_path} (clip_id={clip_id})")
                         
@@ -610,14 +791,21 @@ class Player:
                             self.source = new_source
                         
                         self.playlist_index = next_index
+                        self.current_clip_index = next_index
                         self.current_loop = 0
+                        
+                        # Notify PlayerManager about clip change (for Master/Slave sync)
+                        if self.player_manager:
+                            self.player_manager.on_clip_changed(self.player_id, next_index)
                         
                         # Register clip for effect management - USE EXISTING UUID FROM PLAYLIST!
                         from .clip_registry import get_clip_registry
                         clip_registry = get_clip_registry()
                         
-                        # First, check if we already have a UUID for this path
-                        clip_id = self.playlist_ids.get(next_item_path)
+                        # First, check if we already have a UUID at this index
+                        clip_id = None
+                        if isinstance(self.playlist_ids, list) and self.playlist_index < len(self.playlist_ids):
+                            clip_id = self.playlist_ids[self.playlist_index]
                         
                         if not clip_id:
                             # No UUID yet - register new clip
@@ -636,7 +824,14 @@ class Player:
                                     relative_path=relative_path,
                                     metadata={}
                                 )
-                            self.playlist_ids[next_item_path] = clip_id
+                            # Store UUID at same index as playlist item
+                            if self.playlist_index < len(self.playlist_ids):
+                                self.playlist_ids[self.playlist_index] = clip_id
+                            else:
+                                # Extend list if needed
+                                while len(self.playlist_ids) < self.playlist_index:
+                                    self.playlist_ids.append(None)
+                                self.playlist_ids.append(clip_id)
                         
                         # Only reload layers if switching to a different clip
                         # This prevents unnecessary layer rebuilds that cause opacity slider sync issues

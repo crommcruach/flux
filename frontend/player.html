@@ -55,8 +55,15 @@
             
             <!-- Playlist -->
             <div class="playlist-area">
-                <div class="playlist-header">
+                <div class="playlist-header" id="videoPlaylistHeader">
                     <span>📹 Video Playlist</span>
+                    <div class="master-toggle">
+                        <label class="master-switch">
+                            <input type="checkbox" id="videoMasterSwitch" onchange="toggleMasterPlaylist('video')">
+                            <span class="master-slider"></span>
+                        </label>
+                        <span class="master-label" id="videoMasterLabel">Master</span>
+                    </div>
                 </div>
                 <div class="playlist-scroll" id="videoPlaylist">
                     <div class="empty-state">
@@ -79,7 +86,7 @@
                     <button class="btn btn-success btn-sm" onclick="play('artnet')" title="Play / Restart">▶️</button>
                     <button class="btn btn-warning btn-sm" onclick="pause('artnet')">⏸️</button>
                     <button class="btn btn-danger btn-sm" onclick="stop('artnet')">⏹️</button>
-                    <button class="btn btn-secondary btn-sm" onclick="next('artnet')" title="Next Video">⏭️</button>
+                    <button class="btn btn-secondary btn-sm" onclick="next('artnet')" title="Next Generator">⏭️</button>
                     <button class="btn btn-outline-primary btn-sm" id="artnetAutoplayBtn" onclick="toggleAutoplay('artnet')" title="Autoplay">🔁</button>
                     <button class="btn btn-outline-primary btn-sm" id="artnetLoopBtn" onclick="toggleLoop('artnet')" title="Loop Playlist">🔂</button>
                 </div>
@@ -90,8 +97,15 @@
             
             <!-- Playlist -->
             <div class="playlist-area">
-                <div class="playlist-header">
-                    <span>💡 Art-Net Playlist</span>
+                <div class="playlist-header" id="artnetPlaylistHeader">
+                    <span>🎨 Art-Net Generator Playlist</span>
+                    <div class="master-toggle">
+                        <label class="master-switch">
+                            <input type="checkbox" id="artnetMasterSwitch" onchange="toggleMasterPlaylist('artnet')">
+                            <span class="master-slider"></span>
+                        </label>
+                        <span class="master-label" id="artnetMasterLabel">Master</span>
+                    </div>
                 </div>
                 <div class="playlist-scroll" id="artnetPlaylist">
                     <div class="empty-state">

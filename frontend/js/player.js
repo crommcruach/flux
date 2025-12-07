@@ -37,6 +37,7 @@ const playerConfigs = {
         files: [],
         currentFile: null,
         currentItemId: null,
+        currentClipIndex: -1,
         autoplay: true,
         loop: true,
         transitionConfig: {
@@ -56,6 +57,7 @@ const playerConfigs = {
         files: [],
         currentFile: null,
         currentItemId: null,
+        currentClipIndex: -1,
         autoplay: true,
         loop: true,
         transitionConfig: {
@@ -75,6 +77,9 @@ let selectedClipPlayerType = null;  // 'video' or 'artnet'
 // Layer Selection State (Layer-as-Clips Architecture)
 let selectedLayerId = null;  // null = no layer selected, 0/1/2/... = layer ID
 let selectedLayerClipId = null;  // clip_id of selected layer
+
+// Master/Slave Synchronization State
+let masterPlaylist = null;  // 'video' or 'artnet' or null
 
 // ========================================
 // INITIALIZATION
@@ -174,6 +179,9 @@ async function init() {
         setupLayerPanelDropZone(); // Set up layer panel drop zone once
         initializeTransitionMenus(); // Initialize transition menu components
         updatePlaylistButtonStates(); // Set initial button states
+        
+        // Initialize Master/Slave UI state from backend
+        await pollSyncStatus();
     } catch (error) {
         console.error('❌ Init failed:', error);
         throw error;
@@ -292,12 +300,40 @@ async function updateCurrentFromPlayer(playerId) {
             
             // Update currentItemId from backend (important for active border)
             const newClipId = data.clip_id || null;
+            const newClipIndex = data.current_clip_index !== undefined ? data.current_clip_index : -1;
             const clipIdChanged = config.currentItemId !== newClipId;
+            const clipIndexChanged = config.currentClipIndex !== newClipIndex;
             
-            if (normalizedCurrent !== newVideo || clipIdChanged) {
-                config.currentFile = newVideo;
-                config.currentItemId = newClipId;  // Update active item ID
+            // Check what changed before updating
+            const needsRender = normalizedCurrent !== newVideo || clipIdChanged || clipIndexChanged;
+            
+            // Debug logging for slave mode
+            if (clipIndexChanged) {
+                console.log(`🔄 [${playerId}] Clip index: ${config.currentClipIndex} → ${newClipIndex}`);
+            }
+            
+            // Always update these values
+            config.currentFile = newVideo;
+            config.currentItemId = newClipId;  // Update active item ID
+            config.currentClipIndex = newClipIndex;  // Update clip index for active border
+            
+            if (needsRender) {
+                if (clipIdChanged && newClipId) {
+                    debug.log(`🔄 [${playerId}] Current clip changed: ${newClipId.substring(0,8)}...`);
+                }
+                if (clipIndexChanged) {
+                    console.log(`✅ [${playerId}] Re-rendering playlist - index changed to ${newClipIndex}`);
+                }
                 renderPlaylist(playerId);
+            }
+            
+            // Update master state from backend (for Master/Slave sync)
+            if (data.master_playlist !== undefined) {
+                const oldMaster = masterPlaylist;
+                masterPlaylist = data.master_playlist;
+                if (oldMaster !== masterPlaylist) {
+                    updateMasterUI();
+                }
             }
         }
     } catch (error) {
@@ -1317,13 +1353,17 @@ async function loadPlaylist(playerId) {
                     // Performance: Use Map.get() instead of Array.find()
                     const generator = generatorsMap.get(generatorId);
                     const generatorName = generator ? generator.name : generatorId;
+                    const params = (typeof path === 'object' && path.parameters) ? path.parameters : {};
+                    if (Object.keys(params).length > 0) {
+                        debug.log(`📦 [${playerId}] Loaded generator ${generatorId} with saved parameters:`, params);
+                    }
                     return {
                         path: actualPath,
                         name: `🌟 ${generatorName}`,
                         id: savedId || crypto.randomUUID(), // Use saved UUID or generate new
                         type: 'generator',
                         generator_id: generatorId,
-                        parameters: (typeof path === 'object' && path.parameters) ? path.parameters : {}
+                        parameters: params
                     };
                 } else {
                     // Regular video item
@@ -1431,6 +1471,7 @@ function renderPlaylistGeneric(playlistId) {
             containerId: 'videoPlaylist',
             files: playerConfigs.video.files,
             currentItemId: playerConfigs.video.currentItemId,
+            currentClipIndex: playerConfigs.video.currentClipIndex,
             updateFunc: () => updatePlaylist('video'),
             removeFunc: (index) => `removeFromVideoPlaylist(${index})`,
             loadFunc: async (item) => {
@@ -1450,6 +1491,7 @@ function renderPlaylistGeneric(playlistId) {
             containerId: 'artnetPlaylist',
             files: playerConfigs.artnet.files,
             currentItemId: playerConfigs.artnet.currentItemId,
+            currentClipIndex: playerConfigs.artnet.currentClipIndex,
             updateFunc: () => updatePlaylist('artnet'),
             removeFunc: (index) => `removeFromArtnetPlaylist(${index})`,
             loadFunc: async (item) => {
@@ -1593,7 +1635,24 @@ function renderPlaylistGeneric(playlistId) {
     // Build HTML with playlist items in horizontal row (layers now managed per-clip)
     let itemsHtml = '';
     files.forEach((item, index) => {
-        const isActive = cfg.currentItemId && item.id === cfg.currentItemId;
+        // Use clip index ONLY for active state (most reliable for Master/Slave sync)
+        // Fallback to clip_id only if index is not available
+        const isActive = cfg.currentClipIndex >= 0 
+            ? (index === cfg.currentClipIndex)
+            : (cfg.currentItemId && item.id === cfg.currentItemId);
+        
+        // Debug: Show comparison values for ALL items when index changes
+        if (cfg.currentClipIndex >= 0) {
+            console.log(`🔍 [${playlistId}] item[${index}]: ${item.name.substring(0,20)} | index=${index} vs currentClipIndex=${cfg.currentClipIndex} | isActive=${isActive}`);
+        }
+        
+        // Debug duplicate active items
+        if (isActive) {
+            debug.log(`✅ [${playlistId}] Active clip: ${item.name} (id: ${item.id.substring(0,8)}...)`);
+        }
+        
+        // Debug tooltip with UUID and index
+        const debugTooltip = `Index: ${index}\nUUID: ${item.id}\nPath: ${item.path || 'N/A'}`;
         
         itemsHtml += `<div class="drop-zone" data-drop-index="${index}" data-playlist="${playlistId}"></div>`;
         itemsHtml += `
@@ -1601,7 +1660,8 @@ function renderPlaylistGeneric(playlistId) {
                  ${cfg.dataAttr}="${index}"
                  data-playlist="${playlistId}"
                  data-clip-id="${item.id}"
-                 draggable="true">
+                 draggable="true"
+                 title="${debugTooltip}">
                 <div class="playlist-item-name">${item.name} ${getLayerBadgeHtml(item.id)}</div>
                 <button class="playlist-item-remove" onclick="${cfg.removeFunc(index)}; event.stopPropagation();" title="Remove from playlist">×</button>
             </div>
@@ -1984,7 +2044,8 @@ window.removeFromVideoPlaylist = async function(index) {
     
     // If removed video was current, load next or stop
     if (wasCurrentlyPlaying) {
-        currentVideo = null;
+        playerConfigs.video.currentFile = null;
+        playerConfigs.video.currentItemId = null;
         selectedClipId = null;
         selectedClipPath = null;
         window.currentGeneratorId = null;
@@ -2150,6 +2211,96 @@ window.toggleLoop = async function(playerId) {
     await updatePlaylist(playerId);
 };
 
+// ========================================
+// MASTER/SLAVE SYNCHRONIZATION
+// ========================================
+
+window.toggleMasterPlaylist = async function(playerId) {
+    const checkbox = document.getElementById(`${playerId}MasterSwitch`);
+    const enabled = checkbox.checked;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/player/${playerId}/set_master`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            masterPlaylist = data.master_playlist;
+            updateMasterUI();
+            
+            const message = enabled ? 
+                `👑 ${playerId} is now Master` : 
+                '🔓 Master mode disabled';
+            showToast(message, 'success');
+            
+            debug.log(`Master/Slave status: master=${masterPlaylist}, slaves=${data.synced_slaves}`);
+        } else {
+            // Revert checkbox on error
+            checkbox.checked = !enabled;
+            showToast(`Failed to toggle master mode: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('❌ Error toggling master:', error);
+        checkbox.checked = !enabled;
+        showToast('Failed to toggle master mode', 'error');
+    }
+};
+
+function updateMasterUI() {
+    // Update toggle switch states and labels for both players
+    ['video', 'artnet'].forEach(playerId => {
+        const checkbox = document.getElementById(`${playerId}MasterSwitch`);
+        const label = document.getElementById(`${playerId}MasterLabel`);
+        if (!checkbox || !label) return;
+        
+        if (masterPlaylist === playerId) {
+            // This player is Master
+            checkbox.checked = true;
+            checkbox.disabled = false;
+            label.textContent = 'Master';
+            label.className = 'master-label is-master';
+        } else if (masterPlaylist && masterPlaylist !== playerId) {
+            // This player is Slave
+            checkbox.checked = false;
+            checkbox.disabled = true;
+            label.textContent = 'Slave';
+            label.className = 'master-label is-slave';
+        } else {
+            // No master, autonomous
+            checkbox.checked = false;
+            checkbox.disabled = false;
+            label.textContent = 'Master';
+            label.className = 'master-label';
+        }
+    });
+}
+
+// Poll sync status for real-time feedback (optional)
+async function pollSyncStatus() {
+    if (!masterPlaylist) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/player/sync_status`);
+        const data = await response.json();
+        
+        if (data.success && data.master_playlist !== masterPlaylist) {
+            // Master changed externally - update UI
+            masterPlaylist = data.master_playlist;
+            updateMasterUI();
+        }
+    } catch (error) {
+        // Silently fail - not critical
+        console.debug('Sync status poll failed:', error);
+    }
+}
+
+// Poll every 2 seconds when master is active
+setInterval(pollSyncStatus, 2000);
+
 async function updatePlaylist(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
@@ -2193,6 +2344,7 @@ window.removeFromArtnetPlaylist = async function(index) {
     // If removed video was current, load next or stop
     if (wasCurrentlyPlaying) {
         playerConfigs.artnet.currentFile = null;
+        playerConfigs.artnet.currentItemId = null;
         selectedClipId = null;
         selectedClipPath = null;
         window.currentGeneratorId = null;

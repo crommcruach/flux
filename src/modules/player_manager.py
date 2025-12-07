@@ -44,6 +44,9 @@ class PlayerManager:
             'artnet': self.artnet_player
         }
         
+        # Master/Slave Synchronization
+        self.master_playlist = None  # 'video' or 'artnet' or None
+        
         logger.debug(f"PlayerManager initialized (video_player: {player is not None}, artnet_player: {artnet_player is not None})")
     
     @property
@@ -142,3 +145,151 @@ class PlayerManager:
     def has_artnet_player(self):
         """Check if Art-Net player is set."""
         return self.artnet_player is not None
+    
+    # Master/Slave Synchronization Methods
+    
+    def set_master_playlist(self, player_id: str = None) -> bool:
+        """
+        Sets a playlist as Master, all others become Slaves.
+        
+        Args:
+            player_id: 'video' or 'artnet' or None (deactivates Master mode)
+        
+        Returns:
+            True if successful, False if invalid player_id
+        """
+        if player_id not in ['video', 'artnet', None]:
+            logger.warning(f"Invalid player_id for master: {player_id}")
+            return False
+        
+        old_master = self.master_playlist
+        self.master_playlist = player_id
+        
+        # DEBUG: Log stack trace to find who's calling this
+        import traceback
+        logger.info(f"👑 Master playlist: {old_master} → {player_id}")
+        if old_master != player_id:  # Only log stack on actual change
+            logger.info(f"📞 set_master_playlist called from:\n{''.join(traceback.format_stack()[:-1])}")
+        
+        # Initial Sync: When Master is activated, jump to index 0 and sync all players
+        if player_id is not None:
+            master_player = self.get_player(player_id)
+            if master_player and len(master_player.playlist) > 0:
+                was_playing = master_player.is_playing
+                logger.info(f"Master {player_id} activated - jumping to index 0 (was at index {master_player.current_clip_index})")
+                
+                # Force master to index 0 (notify_manager=False to avoid double-sync)
+                master_player.load_clip_by_index(0, notify_manager=False)
+                
+                # Restart playback if it was playing
+                if was_playing and not master_player.is_playing:
+                    master_player.start()
+                
+                # Now sync all slaves to master at index 0
+                logger.info(f"Syncing all slaves to master {player_id} at index 0")
+                self.sync_slaves_to_master()
+        
+        return True
+    
+    def get_master_playlist(self) -> str:
+        """
+        Get current master playlist ID.
+        
+        Returns:
+            'video', 'artnet', or None
+        """
+        return self.master_playlist
+    
+    def is_master(self, player_id: str) -> bool:
+        """
+        Check if player is currently master.
+        
+        Args:
+            player_id: Player identifier
+        
+        Returns:
+            True if player is master
+        """
+        return self.master_playlist == player_id
+    
+    def sync_slaves_to_master(self):
+        """
+        Synchronizes all Slave playlists to Master clip index.
+        Called when Master is activated or Master changes clip.
+        """
+        if not self.master_playlist:
+            logger.debug("No master playlist set, skipping sync")
+            return
+        
+        master_player = self.get_player(self.master_playlist)
+        if not master_player:
+            logger.warning(f"Master player '{self.master_playlist}' not found")
+            return
+        
+        master_clip_index = master_player.get_current_clip_index()
+        
+        logger.debug(f"🔄 Syncing slaves to master index {master_clip_index}")
+        
+        # Synchronize all Slaves
+        for player_id in self.get_all_player_ids():
+            if player_id == self.master_playlist:
+                continue
+            
+            slave_player = self.get_player(player_id)
+            if slave_player:
+                self._sync_slave_to_index(slave_player, master_clip_index)
+    
+    def _sync_slave_to_index(self, slave_player, clip_index: int):
+        """
+        Synchronizes single Slave to clip index.
+        
+        Edge-Cases:
+        - Slave has fewer clips than index → Slave is stopped (black screen)
+        - Clip-index invalid → No action
+        - Slave has empty playlist → No action
+        
+        Args:
+            slave_player: Slave player instance
+            clip_index: Target clip index
+        """
+        playlist = slave_player.playlist
+        if not playlist or len(playlist) == 0:
+            logger.debug(f"Slave {slave_player.player_name} has empty playlist, skipping sync")
+            return
+        
+        # If Slave doesn't have enough clips → Stop playback
+        if clip_index >= len(playlist):
+            slave_player.stop()
+            logger.info(f"⏹️ Slave {slave_player.player_name} stopped (index {clip_index} out of range, has {len(playlist)} clips)")
+            return
+        
+        # Load clip at index (this will restart playback if player was playing)
+        success = slave_player.load_clip_by_index(clip_index, notify_manager=False)
+        
+        if success:
+            logger.info(f"🔄 Slave {slave_player.player_name} synced to index {clip_index} (current_clip_index={slave_player.current_clip_index}, playlist_index={slave_player.playlist_index})")
+        else:
+            logger.warning(f"Failed to sync slave {slave_player.player_name} to index {clip_index}")
+    
+    def on_clip_changed(self, player_id: str, clip_index: int):
+        """
+        Event-Handler: Called when clip changes in any player.
+        If player is Master → Synchronize all Slaves.
+        
+        Args:
+            player_id: ID of player that changed clip
+            clip_index: New clip index
+        """
+        if player_id != self.master_playlist:
+            return  # Not Master, no sync action
+        
+        logger.debug(f"👑 Master {player_id} clip changed to index {clip_index}")
+        
+        # Synchronize all Slaves
+        for slave_id in self.get_all_player_ids():
+            if slave_id == self.master_playlist:
+                continue
+            
+            slave_player = self.get_player(slave_id)
+            if slave_player:
+                self._sync_slave_to_index(slave_player, clip_index)

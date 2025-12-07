@@ -85,11 +85,15 @@ def register_unified_routes(app, player_manager, config):
                             'effects': []
                         }
                     
-                    # Always update playlist_ids mapping
-                    if hasattr(player, 'playlist_ids'):
-                        player.playlist_ids[gen_path] = clip_id
-                    else:
-                        player.playlist_ids = {gen_path: clip_id}
+                    # Update playlist_ids list at current index (if in playlist)
+                    if hasattr(player, 'playlist') and gen_path in player.playlist:
+                        idx = player.playlist.index(gen_path)
+                        if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
+                            player.playlist_ids = []
+                        # Extend list if needed
+                        while len(player.playlist_ids) <= idx:
+                            player.playlist_ids.append(None)
+                        player.playlist_ids[idx] = clip_id
                     
                     # Store parameters for future access
                     if not hasattr(player, 'playlist_params'):
@@ -104,11 +108,14 @@ def register_unified_routes(app, player_manager, config):
                         relative_path=gen_path,
                         metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
                     )
-                    # Store in playlist_ids for future loops
-                    if hasattr(player, 'playlist_ids'):
-                        player.playlist_ids[gen_path] = clip_id
-                    else:
-                        player.playlist_ids = {gen_path: clip_id}
+                    # Store in playlist_ids list at current index (if in playlist)
+                    if hasattr(player, 'playlist') and gen_path in player.playlist:
+                        idx = player.playlist.index(gen_path)
+                        if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
+                            player.playlist_ids = []
+                        while len(player.playlist_ids) <= idx:
+                            player.playlist_ids.append(None)
+                        player.playlist_ids[idx] = clip_id
                     
                     # Store parameters for future access
                     if not hasattr(player, 'playlist_params'):
@@ -198,11 +205,14 @@ def register_unified_routes(app, player_manager, config):
                             'effects': []
                         }
                     
-                    # Always update playlist_ids mapping
-                    if hasattr(player, 'playlist_ids'):
-                        player.playlist_ids[absolute_path] = clip_id
-                    else:
-                        player.playlist_ids = {absolute_path: clip_id}
+                    # Update playlist_ids list at current index (if in playlist)
+                    if hasattr(player, 'playlist') and absolute_path in player.playlist:
+                        idx = player.playlist.index(absolute_path)
+                        if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
+                            player.playlist_ids = []
+                        while len(player.playlist_ids) <= idx:
+                            player.playlist_ids.append(None)
+                        player.playlist_ids[idx] = clip_id
                 else:
                     # Fallback: Generate new clip_id
                     clip_id = clip_registry.register_clip(
@@ -228,7 +238,14 @@ def register_unified_routes(app, player_manager, config):
                 
                 # Set current clip ID for effect management AND save to playlist_ids
                 player.current_clip_id = clip_id
-                player.playlist_ids[absolute_path] = clip_id  # Store UUID for future loops
+                # Store UUID in playlist_ids list at current index (if in playlist)
+                if hasattr(player, 'playlist') and absolute_path in player.playlist:
+                    idx = player.playlist.index(absolute_path)
+                    if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
+                        player.playlist_ids = []
+                    while len(player.playlist_ids) <= idx:
+                        player.playlist_ids.append(None)
+                    player.playlist_ids[idx] = clip_id
                 logger.info(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
                 logger.debug(f"   Player state: current_clip_id={player.current_clip_id}, source type={type(video_source).__name__}")
                 
@@ -941,7 +958,7 @@ def register_unified_routes(app, player_manager, config):
             # Get playlist with full metadata (for GUI reconstruction)
             playlist = []
             if hasattr(player, 'playlist'):
-                for path in player.playlist:
+                for idx, path in enumerate(player.playlist):
                     # Don't relativize generator paths
                     if path.startswith('generator:'):
                         rel_path = path
@@ -970,9 +987,9 @@ def register_unified_routes(app, player_manager, config):
                             'type': 'video'
                         }
                     
-                    # Add UUID if available in player.playlist_ids
-                    if hasattr(player, 'playlist_ids') and path in player.playlist_ids:
-                        playlist_item['id'] = player.playlist_ids[path]
+                    # Add UUID from playlist_ids list (now using index instead of path as key)
+                    if hasattr(player, 'playlist_ids') and isinstance(player.playlist_ids, list) and idx < len(player.playlist_ids):
+                        playlist_item['id'] = player.playlist_ids[idx]
                     
                     playlist.append(playlist_item)
             
@@ -986,9 +1003,12 @@ def register_unified_routes(app, player_manager, config):
                 "current_video": current_video,
                 "playlist": playlist,
                 "playlist_index": getattr(player, 'playlist_index', -1),
+                "current_clip_index": getattr(player, 'current_clip_index', 0),  # For Master/Slave sync
                 "autoplay": getattr(player, 'autoplay', False),
                 "loop": getattr(player, 'loop_playlist', False),
-                "max_loops": getattr(player, 'max_loops', 1)
+                "max_loops": getattr(player, 'max_loops', 1),
+                "is_master": player_manager.is_master(player_id),  # Master/Slave sync status
+                "master_playlist": player_manager.get_master_playlist()  # Current master (if any)
             }
             
             # Only include clip_id if it exists
@@ -1056,8 +1076,10 @@ def register_unified_routes(app, player_manager, config):
                 )
                 success = player.switch_source(generator_source)
             else:
-                # It's a video file - look up clip_id for trim/reverse support
-                clip_id = player.playlist_ids.get(next_video_path)
+                # It's a video file - look up clip_id from playlist_ids list
+                clip_id = None
+                if isinstance(player.playlist_ids, list) and next_index < len(player.playlist_ids):
+                    clip_id = player.playlist_ids[next_index]
                 video_source = VideoSource(next_video_path, player.canvas_width, player.canvas_height, config, clip_id=clip_id)
                 success = player.switch_source(video_source)
         
@@ -1067,8 +1089,10 @@ def register_unified_routes(app, player_manager, config):
             # Update playlist index
             player.playlist_index = next_index
             
-            # Set current_clip_id from playlist_ids (or register if missing)
-            clip_id = player.playlist_ids.get(next_video_path)
+            # Set current_clip_id from playlist_ids list (or register if missing)
+            clip_id = None
+            if isinstance(player.playlist_ids, list) and next_index < len(player.playlist_ids):
+                clip_id = player.playlist_ids[next_index]
             if not clip_id:
                 # Register new clip
                 if next_video_path.startswith('generator:'):
@@ -1162,8 +1186,10 @@ def register_unified_routes(app, player_manager, config):
                 )
                 success = player.switch_source(generator_source)
             else:
-                # It's a video file - look up clip_id for trim/reverse support
-                clip_id = player.playlist_ids.get(prev_video_path)
+                # It's a video file - look up clip_id from playlist_ids list
+                clip_id = None
+                if isinstance(player.playlist_ids, list) and prev_index < len(player.playlist_ids):
+                    clip_id = player.playlist_ids[prev_index]
                 video_source = VideoSource(prev_video_path, player.canvas_width, player.canvas_height, config, clip_id=clip_id)
                 success = player.switch_source(video_source)
         
@@ -1173,8 +1199,10 @@ def register_unified_routes(app, player_manager, config):
             # Update playlist index
             player.playlist_index = prev_index
             
-            # Set current_clip_id from playlist_ids (or register if missing)
-            clip_id = player.playlist_ids.get(prev_video_path)
+            # Set current_clip_id from playlist_ids list (or register if missing)
+            clip_id = None
+            if isinstance(player.playlist_ids, list) and prev_index < len(player.playlist_ids):
+                clip_id = player.playlist_ids[prev_index]
             if not clip_id:
                 # Register new clip
                 if prev_video_path.startswith('generator:'):
@@ -1290,7 +1318,7 @@ def register_unified_routes(app, player_manager, config):
             
             # Konvertiere relative Pfade zu absoluten und speichere UUIDs separat
             absolute_playlist = []
-            playlist_ids = {}  # Map: path -> uuid
+            playlist_ids = []  # List of UUIDs matching playlist order
             
             from datetime import datetime
             
@@ -1320,10 +1348,10 @@ def register_unified_routes(app, player_manager, config):
                 
                 absolute_playlist.append(absolute_path)
                 
-                # Speichere UUID-Mapping UND registriere Clip sofort
+                # Speichere UUID in list (same index as playlist) UND registriere Clip sofort
                 if item_id:
-                    playlist_ids[absolute_path] = item_id
-                    logger.debug(f"📝 Playlist mapping: {absolute_path} → {item_id}")
+                    playlist_ids.append(item_id)
+                    logger.debug(f"📝 Playlist[{len(playlist_ids)-1}]: {os.path.basename(absolute_path)} → {item_id}")
                     
                     # Registriere Clip in Registry wenn noch nicht vorhanden
                     if item_id not in clip_registry.clips:
@@ -1353,11 +1381,12 @@ def register_unified_routes(app, player_manager, config):
                     existing_id = clip_registry.find_clip_by_path(player_id, absolute_path)
                     if existing_id:
                         logger.debug(f"✓ Found existing clip for path: {existing_id} → {os.path.basename(absolute_path)}")
-                        playlist_ids[absolute_path] = existing_id
-                    # If no existing clip, it will be registered during autoplay
+                        playlist_ids.append(existing_id)
+                    else:
+                        playlist_ids.append(None)  # Will be generated during autoplay
             
             player.playlist = absolute_playlist
-            player.playlist_ids = playlist_ids  # Neue Property für UUID-Mapping
+            player.playlist_ids = playlist_ids  # List of UUIDs (same order as playlist)
             player.autoplay = autoplay
             player.loop_playlist = loop
             
@@ -1434,17 +1463,17 @@ def register_unified_routes(app, player_manager, config):
                         new_source = GeneratorSource(generator_id, parameters, canvas_width=player.canvas_width, canvas_height=player.canvas_height)
                     else:
                         from .frame_source import VideoSource
-                        # Look up clip_id for trim/reverse support
-                        first_clip_id = playlist_ids.get(first_item)
-                        logger.debug(f"   Looking up clip_id for '{first_item}': {first_clip_id}")
+                        # Look up clip_id from playlist_ids list (index 0)
+                        first_clip_id = playlist_ids[0] if len(playlist_ids) > 0 else None
+                        logger.debug(f"   Looking up clip_id for index 0: {first_clip_id}")
                         new_source = VideoSource(first_item, canvas_width=player.canvas_width, canvas_height=player.canvas_height, clip_id=first_clip_id)
                     
                     if new_source.initialize():
                         if hasattr(player, 'source') and player.source:
                             player.source.cleanup()
                         
-                        # Hole oder registriere Clip-ID für erstes Item
-                        first_clip_id = playlist_ids.get(first_item)
+                        # Hole oder registriere Clip-ID für erstes Item (index 0)
+                        first_clip_id = playlist_ids[0] if len(playlist_ids) > 0 else None
                         if not first_clip_id:
                             # Registriere Clip wenn noch keine ID vorhanden
                             if first_item.startswith('generator:'):
@@ -1641,5 +1670,129 @@ def register_unified_routes(app, player_manager, config):
         except Exception as e:
             logger.error(f"Error deleting playlist: {e}")
             return jsonify({"success": False, "message": str(e)}), 500
+    
+    # ========================================
+    # MASTER/SLAVE SYNCHRONIZATION
+    # ========================================
+    
+    @app.route('/api/player/<player_id>/set_master', methods=['POST'])
+    def set_master_playlist(player_id):
+        """
+        Activates/deactivates Master mode for a playlist.
+        When enabled, all other playlists become Slaves and follow this Master.
+        
+        Request Body:
+            {
+                "enabled": true  // false deactivates Master mode
+            }
+        
+        Response:
+            {
+                "success": true,
+                "master_playlist": "video",  // or "artnet" or null
+                "synced_slaves": ["artnet"],
+                "message": "Master playlist set to video"
+            }
+        """
+        try:
+            data = request.get_json()
+            enabled = data.get('enabled', True)
+            
+            # DEBUG: Log all API calls to set_master
+            import traceback
+            logger.info(f"🔥 API set_master called: player_id={player_id}, enabled={enabled}")
+            logger.info(f"🔥 Request data: {data}")
+            logger.info(f"🔥 Caller stack:\n{''.join(traceback.format_stack()[:-1])}")
+            
+            # Validate player_id
+            if player_id not in player_manager.get_all_player_ids():
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid player_id: {player_id}'
+                }), 400
+            
+            # Set or clear master
+            if enabled:
+                success = player_manager.set_master_playlist(player_id)
+            else:
+                success = player_manager.set_master_playlist(None)
+            
+            if not success:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to set master playlist'
+                }), 500
+            
+            # Build response
+            master_playlist = player_manager.get_master_playlist()
+            slaves = [pid for pid in player_manager.get_all_player_ids() 
+                     if pid != master_playlist]
+            
+            message = f"Master playlist set to {master_playlist}" if master_playlist else "Master mode disabled"
+            
+            return jsonify({
+                'success': True,
+                'master_playlist': master_playlist,
+                'synced_slaves': slaves,
+                'message': message
+            })
+            
+        except Exception as e:
+            logger.error(f"Error setting master playlist: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/player/sync_status', methods=['GET'])
+    def get_sync_status():
+        """
+        Gets current Master/Slave synchronization status.
+        
+        Response:
+            {
+                "success": true,
+                "master_playlist": "video",
+                "slaves": ["artnet"],
+                "master_clip_index": 4,
+                "slave_clip_indices": {
+                    "artnet": 4
+                }
+            }
+        """
+        try:
+            master_playlist = player_manager.get_master_playlist()
+            slaves = [pid for pid in player_manager.get_all_player_ids() 
+                     if pid != master_playlist]
+            
+            master_clip_index = None
+            slave_clip_indices = {}
+            
+            # Get master clip index
+            if master_playlist:
+                master_player = player_manager.get_player(master_playlist)
+                if master_player:
+                    master_clip_index = master_player.get_current_clip_index()
+            
+            # Get slave clip indices
+            for slave_id in slaves:
+                slave_player = player_manager.get_player(slave_id)
+                if slave_player:
+                    slave_clip_indices[slave_id] = slave_player.get_current_clip_index()
+            
+            return jsonify({
+                'success': True,
+                'master_playlist': master_playlist,
+                'slaves': slaves,
+                'master_clip_index': master_clip_index,
+                'slave_clip_indices': slave_clip_indices
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting sync status: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
     
     logger.info("✅ Unified Player API routes registered")

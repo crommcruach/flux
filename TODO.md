@@ -165,41 +165,47 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 1.2 🎯 Playlist Master/Slave Synchronization (~8-14h) 🆕
+### 1.2 🎯 Playlist Master/Slave Synchronization (~8-14h) 🚧 IN PROGRESS
 
-- [ ] **Master/Slave Toggle UI (2h):**
+**⚠️ KNOWN ISSUE:** Generator clips in playlists with autoplay+loop+master/slave mode not working correctly. Need deeper investigation of generator handling in autoplay loop and slave synchronization context.
+
+- [x] **Master/Slave Toggle UI (2h):** ✅ COMPLETED
   - Toggle-Button in Playlist-Header (Video & Art-Net)
   - Master-Indicator (👑 Icon) für aktive Master-Playlist
   - Nur eine Playlist kann Master sein (Toggle schaltet andere aus)
   - Visuelles Feedback: Master (grün/golden), Slave (grau/normal)
+  - CSS Styling mit Switch-Animation
 
-- [ ] **Synchronization Engine (4-6h):**
+- [x] **Synchronization Engine (4-6h):** ✅ COMPLETED
   - Event-System: Master emittiert `clip_changed` Events mit Clip-Index
   - Slave-Listener: Reagiert auf Master-Events und wechselt zum gleichen Clip-Index
   - Initial Sync: Wenn Master aktiviert → Alle Slaves springen zu Master-Clip-Index
   - Transition-Preservation: Slaves verwenden ihre eigenen Transition-Settings
   - Edge-Case Handling:
-    - Slave hat weniger Clips als Master → Clip-Index Modulo (Loop)
+    - Slave hat weniger Clips als Master → Slave stopped (black screen)
     - Master deaktiviert → Slaves werden autonom
     - Playlist leer → Keine Sync-Aktion
 
-- [ ] **Backend Implementation (3-4h):**
+- [x] **Backend Implementation (3-4h):** ✅ COMPLETED
   - `PlayerManager`: Master/Slave State Management
   - `set_master_playlist(player_id)` → Setzt Master, alle anderen zu Slaves
   - `sync_slaves_to_master()` → Synchronisiert alle Slaves zum Master-Clip
-  - Event-Dispatcher für Clip-Wechsel (Observer Pattern)
-  - Persistence: Master-State in session_state.json
+  - Event-Dispatcher für Clip-Wechsel (Observer Pattern via `on_clip_changed()`)
+  - `current_clip_index` tracking in Player
+  - `load_clip_by_index()` for direct index-based clip loading
 
-- [ ] **REST API (1-2h):**
+- [x] **REST API (1-2h):** ✅ COMPLETED
   - POST `/api/player/{player_id}/set_master` → Aktiviert Master-Mode
   - GET `/api/player/sync_status` → Gibt Master/Slave Status zurück
-  - Unified API: Master-State in Player-Status integrieren
+  - Unified API: Master-State in Player-Status integrieren (`is_master`, `master_playlist`, `current_clip_index`)
 
-- [ ] **Frontend Integration (2h):**
+- [x] **Frontend Integration (2h):** ✅ COMPLETED
   - Master-Toggle-Button in Playlist-Controls (neben Autoplay/Loop)
   - Master/Slave Status-Anzeige (Icon + Farbe)
   - API-Calls für Toggle-Actions
-  - Visual Feedback bei Sync-Aktionen (kurzer Highlight-Effekt)
+  - Visual Feedback bei Sync-Aktionen (grüner Rahmen auf aktiven Clip)
+  - `updateMasterUI()` für visuelles Feedback
+  - `pollSyncStatus()` für real-time Updates
 
 **Funktionsweise:**
 ```
@@ -220,15 +226,25 @@ Slave:                       → Wechselt auch zu Clip 5 (sofort, mit eigener Tr
 
 ---
 
-### 1.2 🔌 Plugin-System erweitern (~8-12h)
+### 1.2 🔌 Plugin-System erweitern (~8-12h) ✅ COMPLETED (2025-12-07)
 
-- [ ] **Layer-Effekte über Clip FX Tab (8-12h):**
-  - API-Endpoints für Layer-Effekte (POST/PATCH/DELETE `/api/clips/<clip_id>/layers/<layer_id>/effects`)
-  - Layer-Selection-Logik: Click auf Layer-Card → Layer ausgewählt (visuelles Feedback)
-  - Clip FX Tab erweitern: Dynamischer Titel ('Clip FX' vs 'Layer FX')
-  - API-Calls umleiten wenn Layer ausgewählt (zu Layer-Endpoints statt Clip-Endpoints)
-  - Drag & Drop von Effekten funktioniert für Clip UND Layer
-  - Backend: apply_layer_effects() Integration, Layer.effects Array populieren
+- [x] **Layer-Effekte über Clip FX Tab (8-12h):** ✅ COMPLETED
+  - ✅ API-Endpoints für Layer-Effekte (Unified API: `/api/player/{player_id}/clip/{clip_id}/effects`)
+  - ✅ Layer-Selection-Logik: Layer-as-Clips Architecture (jedes Layer hat eigene clip_id)
+  - ✅ Clip FX Tab: Zeigt Layer-Effekte wenn Layer ausgewählt (via selectedLayerClipId)
+  - ✅ API-Calls automatisch korrekt geroutet (targetClipId = selectedLayerClipId || selectedClipId)
+  - ✅ Drag & Drop von Effekten funktioniert für Clip UND Layer
+  - ✅ Backend: apply_layer_effects() vollständig integriert, Layer.effects Array populiert
+  - ✅ Live-Effekt-Instanzen: API gibt live Parameter von aktiven Layer-Instanzen zurück
+  - ✅ Unabhängige Layer-Effekte: Jedes Layer hat eigene Effekt-Instanzen (z.B. Transport, Transform)
+  - ✅ Parameter-Updates: Direkte Updates auf live Layer-Effekt-Instanzen (nicht Registry)
+  - ✅ Transport-Plugin: Timeline-Erkennung funktioniert pro Layer, Trim-Points persistieren
+  - ✅ Opacity-Persistence: Layer-Opacity bleibt erhalten über Transport-Loops
+  - **Key Fixes:**
+    - API findet aktive Layer by clip_id und updated live Effekt-Instanzen
+    - Transport prioritisiert layer.source über player.source für unabhängige Kontrolle
+    - Keine unnötigen Layer-Reloads mehr (nur bei Clip-Wechsel, nicht bei Parameter-Updates)
+    - Timeline auto-adjusts nur bei Default-Werten [0,100], respektiert User-Trim-Points
 
 ---
 
