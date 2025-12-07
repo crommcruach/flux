@@ -468,7 +468,7 @@ class Player:
                 frame, source_delay = self.layers[0].source.get_next_frame()
                 
                 if frame is not None:
-                    # Wende Layer 0 Effects an
+                    # Wende Layer 0 Effects an (Transport controls playback here)
                     frame = self.apply_layer_effects(self.layers[0], frame)
                     
                     # Composite Slave Layers (1-N)
@@ -638,12 +638,20 @@ class Player:
                                 )
                             self.playlist_ids[next_item_path] = clip_id
                         
-                        self.current_clip_id = clip_id
-                        
-                        # Load layers for new clip (wichtig: überschreibt alte Layer!)
-                        video_dir = self.config.get('paths', {}).get('video_dir', 'video')
-                        if not self.load_clip_layers(clip_id, clip_registry, video_dir):
-                            logger.warning(f"⚠️ [{self.player_name}] Could not load layers for clip {clip_id}, using single-source fallback")
+                        # Only reload layers if switching to a different clip
+                        # This prevents unnecessary layer rebuilds that cause opacity slider sync issues
+                        if self.current_clip_id != clip_id:
+                            self.current_clip_id = clip_id
+                            
+                            # Load layers for new clip
+                            video_dir = self.config.get('paths', {}).get('video_dir', 'video')
+                            if not self.load_clip_layers(clip_id, clip_registry, video_dir):
+                                logger.warning(f"⚠️ [{self.player_name}] Could not load layers for clip {clip_id}, using single-source fallback")
+                            logger.debug(f"🔄 [{self.player_name}] Layers reloaded for new clip {clip_id}")
+                        else:
+                            # Same clip - just reset the source, keep existing layer objects
+                            self.current_clip_id = clip_id
+                            logger.debug(f"🔁 [{self.player_name}] Same clip {clip_id}, reusing existing layers")
                         
                         item_name = generator_id if next_item_path.startswith('generator:') else os.path.basename(next_item_path)
                         logger.info(f"✅ [{self.player_name}] Nächstes Item geladen: {item_name} (clip_id={clip_id})")
@@ -1472,6 +1480,7 @@ class Player:
                 blend_mode = layer_def.get('blend_mode', 'normal')
                 opacity = layer_def.get('opacity', 1.0) * 100  # Convert to 0-100
                 enabled = layer_def.get('enabled', True)
+                layer_id = layer_def.get('layer_id', layer_counter)  # Use stored layer_id if available
                 
                 source = None
                 
@@ -1488,11 +1497,39 @@ class Player:
                     source = GeneratorSource(source_path, gen_params, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
                 
                 if source and source.initialize():
+                    # Check if layer already has a clip_id (Layer-as-Clips Architecture)
+                    layer_clip_id = layer_def.get('clip_id')
+                    
+                    # If no clip_id exists, register this layer as a clip
+                    if not layer_clip_id and self.clip_registry:
+                        layer_clip_id = self.clip_registry.register_clip(
+                            player_id=self.player_id,
+                            absolute_path=source_path,
+                            relative_path=source_path,
+                            metadata={
+                                'type': 'layer',
+                                'layer_of': clip_id,
+                                'layer_id': layer_id,
+                                'blend_mode': blend_mode,
+                                'opacity': opacity
+                            }
+                        )
+                        # Update the layer config with clip_id for persistence
+                        self.clip_registry.update_clip_layer(clip_id, layer_id, {'clip_id': layer_clip_id})
+                        logger.debug(f"📐 Layer {layer_id} registered as clip during load: {layer_clip_id}")
+                    
                     from modules.player import Layer
-                    new_layer = Layer(layer_counter, source, blend_mode, opacity, clip_id)
+                    new_layer = Layer(layer_id, source, blend_mode, opacity, layer_clip_id)
                     new_layer.enabled = enabled
                     new_layers.append(new_layer)
-                    layer_counter += 1
+                    
+                    logger.info(f"📐 Layer {layer_id} loaded: opacity={opacity}%, blend={blend_mode}, enabled={enabled}")
+                    
+                    # Load effects from registry
+                    if layer_clip_id:
+                        self.load_layer_effects_from_registry(new_layer)
+                    
+                    layer_counter = layer_id + 1  # Update counter
                 else:
                     logger.warning(f"⚠️ [{self.player_name}] Failed to create layer source: {source_type}:{source_path}")
         
@@ -1515,9 +1552,14 @@ class Player:
         """
         Fügt einen neuen Layer zum Stack hinzu.
         
+        Layer-as-Clips Architecture:
+        - Jeder Layer wird als eigenständiger Clip im ClipRegistry registriert
+        - Layer.clip_id ermöglicht Effekt-Management über bestehende Clip-API
+        - Metadata kennzeichnet Layer (type='layer', layer_of=base_clip_id)
+        
         Args:
             source: FrameSource-Instanz (VideoSource, GeneratorSource, etc.)
-            clip_id: Optional UUID aus ClipRegistry
+            clip_id: Base Clip UUID (Layer gehört zu diesem Clip)
             blend_mode: Blend-Modus ('normal', 'multiply', 'screen', etc.)
             opacity: Layer-Opazität 0-100%
         
@@ -1527,12 +1569,45 @@ class Player:
         layer_id = self.layer_counter
         self.layer_counter += 1
         
-        layer = Layer(layer_id, source, blend_mode, opacity, clip_id)
+        # Register layer as clip in ClipRegistry (Layer-as-Clips Architecture)
+        layer_clip_id = None
+        if self.clip_registry and clip_id:
+            # Determine source path for registration
+            source_path = ""
+            if hasattr(source, 'video_path'):
+                source_path = source.video_path
+            elif hasattr(source, 'generator_id'):
+                source_path = f"generator:{source.generator_id}"
+            
+            # Register layer as clip with metadata
+            layer_clip_id = self.clip_registry.register_clip(
+                player_id=self.player_id,
+                absolute_path=source_path,
+                relative_path=source_path,
+                metadata={
+                    'type': 'layer',
+                    'layer_of': clip_id,  # Base clip this layer belongs to
+                    'layer_id': layer_id,
+                    'blend_mode': blend_mode,
+                    'opacity': opacity
+                }
+            )
+            logger.debug(f"📐 Layer {layer_id} registered as clip: {layer_clip_id}")
+            
+            # Store clip_id in base clip's layer config for API access
+            self.clip_registry.update_clip_layer(clip_id, layer_id, {'clip_id': layer_clip_id})
+        
+        # Create layer with clip_id
+        layer = Layer(layer_id, source, blend_mode, opacity, layer_clip_id)
         self.layers.append(layer)
+        
+        # Load effects from registry if layer has clip_id
+        if layer_clip_id:
+            self.load_layer_effects_from_registry(layer)
         
         logger.info(
             f"✅ [{self.player_name}] Layer {layer_id} added: {source.get_source_name()} "
-            f"(blend={blend_mode}, opacity={opacity}%)"
+            f"(blend={blend_mode}, opacity={opacity}%, clip_id={layer_clip_id})"
         )
         
         return layer_id
@@ -1643,6 +1718,41 @@ class Player:
         Returns:
             Prozessiertes Frame
         """
+        # Log every 30 frames to avoid spam
+        if not hasattr(self, '_layer_effect_log_frame'):
+            self._layer_effect_log_frame = {}
+        
+        if layer.layer_id not in self._layer_effect_log_frame:
+            self._layer_effect_log_frame[layer.layer_id] = 0
+        
+        if self._layer_effect_log_frame[layer.layer_id] % 30 == 0:
+            logger.info(f"🎨 [{self.player_name}] Layer {layer.layer_id} has {len(layer.effects)} effects (clip_id={layer.clip_id})")
+            if layer.effects:
+                for i, eff in enumerate(layer.effects):
+                    logger.info(f"   [{i}] {eff.get('id')} - enabled: {eff.get('enabled', True)}")
+        
+        self._layer_effect_log_frame[layer.layer_id] += 1
+        
+        if layer.effects:
+            logger.debug(f"🎨 [{self.player_name}] Applying {len(layer.effects)} effects to Layer {layer.layer_id} (clip_id={layer.clip_id})")
+        
+        # Get latest parameters from registry (updated via API)
+        if self.clip_registry and layer.clip_id:
+            registry_effects = self.clip_registry.get_clip_effects(layer.clip_id)
+            
+            # Update parameters on instances from registry
+            for i, effect in enumerate(layer.effects):
+                if i < len(registry_effects):
+                    registry_params = registry_effects[i].get('parameters', {})
+                    instance = effect['instance']
+                    
+                    # Update each parameter on the instance
+                    for param_name, param_value in registry_params.items():
+                        # Extract actual value if it's a range metadata dict
+                        if isinstance(param_value, dict) and '_value' in param_value:
+                            param_value = param_value['_value']
+                        setattr(instance, param_name, param_value)
+        
         for effect in layer.effects:
             # Skip disabled effects (parameters are preserved)
             if not effect.get('enabled', True):
@@ -1650,11 +1760,110 @@ class Player:
             
             try:
                 instance = effect['instance']
-                frame = instance.process_frame(frame)
+                plugin_id = effect.get('id', 'unknown')
+                logger.debug(f"  ✓ Layer {layer.layer_id} effect: {plugin_id}")
+                # Pass layer's source for Transport plugin and player for context
+                frame = instance.process_frame(frame, source=layer.source, player=self)
             except Exception as e:
                 logger.error(f"❌ [{self.player_name}] Layer {layer.layer_id} effect error: {e}")
         
         return frame
+    
+    def load_layer_effects_from_registry(self, layer):
+        """
+        Lädt Layer-Effekte aus ClipRegistry und erstellt Plugin-Instanzen.
+        Wird beim Layer-Load aufgerufen (Layer-as-Clips Architecture).
+        
+        Args:
+            layer: Layer-Objekt mit clip_id
+        """
+        if not self.clip_registry or not layer.clip_id:
+            return
+        
+        clip_data = self.clip_registry.get_clip(layer.clip_id)
+        if not clip_data:
+            return
+        
+        effects = clip_data.get('effects', [])
+        if not effects:
+            return
+        
+        # Erstelle Plugin-Instanzen
+        layer.effects = []
+        logger.info(f"📦 [{self.player_name}] Loading {len(effects)} effects for Layer {layer.layer_id} from registry")
+        for effect_config in effects:
+            plugin_id = effect_config.get('plugin_id')
+            params = effect_config.get('params', {})
+            enabled = effect_config.get('enabled', True)
+            
+            logger.info(f"   Loading plugin '{plugin_id}' with params: {params}")
+            
+            # Load plugin instance (creates new instance with params)
+            plugin_instance = self.plugin_manager.load_plugin(plugin_id, params)
+            if not plugin_instance:
+                logger.warning(f"⚠️ [{self.player_name}] Plugin '{plugin_id}' not found for Layer {layer.layer_id}")
+                continue
+            
+            # Add to layer effects
+            try:
+                layer.effects.append({
+                    'id': plugin_id,
+                    'instance': plugin_instance,
+                    'config': params,
+                    'enabled': enabled
+                })
+            except Exception as e:
+                logger.error(f"❌ [{self.player_name}] Error loading effect '{plugin_id}' for Layer {layer.layer_id}: {e}")
+        
+        logger.info(f"✅ [{self.player_name}] Loaded {len(layer.effects)} effects for Layer {layer.layer_id}")
+    
+    def sync_layer_effects_to_registry(self, layer):
+        """
+        Synchronisiert Layer-Effekte zu ClipRegistry (für Session-State Persistenz).
+        Wird nach jedem add/remove/update von Layer-Effekten aufgerufen.
+        
+        Args:
+            layer: Layer-Objekt mit clip_id
+        """
+        if not self.clip_registry or not layer.clip_id:
+            return
+        
+        # Serialisiere Effekte (ohne Instanzen)
+        effect_configs = [
+            {
+                'plugin_id': effect['id'],
+                'params': effect.get('config', {}),
+                'enabled': effect.get('enabled', True)
+            }
+            for effect in layer.effects
+        ]
+        
+        # Update ClipRegistry
+        clip_data = self.clip_registry.get_clip(layer.clip_id)
+        if clip_data:
+            self.clip_registry.clips[layer.clip_id]['effects'] = effect_configs
+            logger.debug(f"✅ [{self.player_name}] Synced {len(effect_configs)} effects to registry: Layer {layer.layer_id}")
+    
+    def reload_all_layer_effects(self):
+        """
+        Reloads effects for all layers from ClipRegistry.
+        Called when layer effects are added/removed/updated via API.
+        """
+        logger.info(f"🔄 [{self.player_name}] reload_all_layer_effects called, layers={len(self.layers) if self.layers else 0}")
+        
+        if not self.layers:
+            logger.warning(f"⚠️ [{self.player_name}] No layers to reload effects for")
+            return
+        
+        for layer in self.layers:
+            logger.info(f"🔍 [{self.player_name}] Checking Layer {layer.layer_id}, clip_id={layer.clip_id}")
+            if layer.clip_id:
+                old_count = len(layer.effects)
+                self.load_layer_effects_from_registry(layer)
+                new_count = len(layer.effects)
+                logger.info(f"🔄 [{self.player_name}] Layer {layer.layer_id}: effects {old_count} → {new_count}")
+            else:
+                logger.warning(f"⚠️ [{self.player_name}] Layer {layer.layer_id} has no clip_id")
     
     def get_blend_plugin(self, blend_mode, opacity):
         """

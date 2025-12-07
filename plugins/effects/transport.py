@@ -135,14 +135,16 @@ class TransportEffect(PluginBase):
     
     def _get_frame_source(self, kwargs):
         """Extrahiert Frame Source aus kwargs."""
-        # Versuche frame_source aus verschiedenen Quellen zu holen
+        # WICHTIG: Priorisiere 'source' (Layer-Source) vor player.source
+        # Damit jeder Layer seinen eigenen Transport steuert
+        if 'source' in kwargs:
+            return kwargs['source']
+        
+        # Fallback: Player's main source (für Clip-Effekte)
         if 'player' in kwargs:
             player = kwargs['player']
             if hasattr(player, 'source'):
                 return player.source
-        
-        if 'source' in kwargs:
-            return kwargs['source']
         
         return None
     
@@ -151,31 +153,49 @@ class TransportEffect(PluginBase):
         if self._frame_source is None:
             self._frame_source = frame_source
             
+            # Debug: Log frame_source attributes
+            logger.info(f"Transport: Initializing with frame_source type={type(frame_source).__name__}")
+            logger.info(f"Transport: frame_source attributes: {dir(frame_source)}")
+            
             # Hole total_frames und FPS vom Source
             if hasattr(frame_source, 'total_frames'):
                 self._total_frames = frame_source.total_frames
                 logger.info(f"Transport: total_frames={self._total_frames}")
+            else:
+                logger.warning(f"Transport: frame_source has no 'total_frames' attribute!")
             
             if hasattr(frame_source, 'fps'):
                 self._fps = frame_source.fps
                 logger.info(f"Transport: fps={self._fps}")
+            else:
+                logger.warning(f"Transport: frame_source has no 'fps' attribute!")
             
-            # IMMER die Range auf die tatsächliche Clip-Länge setzen beim ersten Load
-            # Das überschreibt die gespeicherten Default-Werte aus config.json
+            # Auto-adjust range NUR wenn noch auf Default-Werten (0-100)
+            # Das erlaubt dem User, custom In/Out Points zu setzen die erhalten bleiben
             if self._total_frames:
-                # User hat noch nichts angepasst - setze auf volle Clip-Länge
                 old_in = self.in_point
                 old_out = self.out_point
                 
-                self.in_point = 0
-                self.out_point = self._total_frames - 1
-                
-                # Wenn Position außerhalb des neuen Bereichs, setze auf Start
-                if self.current_position > self.out_point:
-                    self.current_position = self.in_point
-                    self._virtual_frame = float(self.in_point)
-                
-                logger.info(f"Transport: Auto-adjusted range from [{old_in},{old_out}] to [0,{self.out_point}] based on clip length")
+                # Nur auto-adjusten wenn Range auf Default-Werten ist
+                # User-definierte Ranges werden beibehalten
+                if old_in == 0 and old_out == 100:
+                    self.in_point = 0
+                    self.out_point = self._total_frames - 1
+                    
+                    # Wenn Position außerhalb des neuen Bereichs, setze auf Start
+                    if self.current_position > self.out_point:
+                        self.current_position = self.in_point
+                        self._virtual_frame = float(self.in_point)
+                    
+                    logger.info(f"Transport: Auto-adjusted range from [{old_in},{old_out}] to [0,{self.out_point}] based on clip length")
+                else:
+                    # User hat custom Range gesetzt - beibehalten
+                    # Nur validieren dass Range innerhalb clip_length liegt
+                    if old_out >= self._total_frames:
+                        self.out_point = self._total_frames - 1
+                        logger.info(f"Transport: Clamped out_point from {old_out} to {self.out_point} (clip_length)")
+                    
+                    logger.info(f"Transport: Using custom range [{self.in_point},{self.out_point}], clip_length={self._total_frames}")
             else:
                 # Fallback wenn keine total_frames verfügbar
                 if self.out_point == 100:
@@ -187,6 +207,19 @@ class TransportEffect(PluginBase):
             if hasattr(frame_source, 'current_frame'):
                 frame_source.current_frame = int(self._virtual_frame)
                 logger.info(f"Transport: Set current_frame to {int(self._virtual_frame)}")
+            else:
+                logger.warning(f"Transport: frame_source has no 'current_frame' attribute!")
+            
+            # Update config with actual timeline range for persistence
+            # This ensures the frontend receives the correct range values
+            if hasattr(self, 'config') and self.config:
+                transport_data = {
+                    '_value': self.current_position,
+                    '_rangeMin': self.in_point,
+                    '_rangeMax': self.out_point
+                }
+                self.config['transport_position'] = transport_data
+                logger.info(f"Transport: Updated config with actual range: {transport_data}")
     
     def _calculate_next_frame(self):
         """Berechnet nächsten Frame basierend auf Speed, Direction und Mode."""
@@ -307,9 +340,13 @@ class TransportEffect(PluginBase):
                 new_in = value.get('_rangeMin', self.in_point)
                 new_out = value.get('_rangeMax', self.out_point)
                 
+                logger.info(f"🎚️ Transport update_parameter received: value={new_position}, min={new_in}, max={new_out}")
+                
                 # Update ranges
                 self.in_point = int(new_in)
                 self.out_point = int(new_out)
+                
+                logger.info(f"✅ Transport ranges updated: in_point={self.in_point}, out_point={self.out_point}")
                 
                 # Update position (user can drag position handle to jump)
                 new_pos_int = int(new_position)

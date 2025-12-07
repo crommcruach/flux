@@ -320,21 +320,41 @@ def register_unified_routes(app, player_manager, config):
         try:
             effects = clip_registry.get_clip_effects(clip_id)
             
+            # Check if this clip_id belongs to an active layer - if so, get live instances
+            player = player_manager.get_player(player_id)
+            active_layer_effects = None
+            if player and hasattr(player, 'layers'):
+                for layer in player.layers:
+                    if hasattr(layer, 'clip_id') and layer.clip_id == clip_id:
+                        # Found the active layer - use its live effect instances
+                        active_layer_effects = layer.effects
+                        logger.debug(f"Found active layer with clip_id {clip_id}, using live effect instances")
+                        break
+            
             # Filter out non-serializable data and update with live parameters
             serializable_effects = []
-            for effect in effects:
+            for i, effect in enumerate(effects):
                 effect_copy = effect.copy()
                 
+                # Prefer live parameters from active layer instances
+                live_instance = None
+                if active_layer_effects and i < len(active_layer_effects):
+                    live_instance = active_layer_effects[i].get('instance')
+                elif 'instance' in effect:
+                    live_instance = effect['instance']
+                
                 # Get live parameters from instance if available
-                if 'instance' in effect and effect['instance'] is not None:
+                if live_instance is not None:
                     try:
-                        live_params = effect['instance'].get_parameters()
+                        live_params = live_instance.get_parameters()
                         if live_params:
                             effect_copy['parameters'] = live_params
+                            logger.debug(f"Got live parameters for {effect.get('plugin_id')}: {live_params}")
                     except Exception as e:
                         logger.warning(f"Could not get live parameters from {effect.get('plugin_id')}: {e}")
-                    
-                    # Remove instance from response
+                
+                # Remove instance from response
+                if 'instance' in effect_copy:
                     del effect_copy['instance']
                 
                 serializable_effects.append(effect_copy)
@@ -447,6 +467,18 @@ def register_unified_routes(app, player_manager, config):
             
             logger.info(f"✅ Effect '{plugin_id}' added to clip {clip_id} ({player_id})")
             
+            # Reload layer effects if this is a layer clip
+            clip_data = clip_registry.get_clip(clip_id)
+            logger.info(f"🔍 Checking if {clip_id} is a layer clip: metadata={clip_data.get('metadata') if clip_data else None}")
+            if clip_data and clip_data.get('metadata', {}).get('type') == 'layer':
+                # This is a layer - reload all layer effects
+                logger.info(f"🎯 Detected layer clip! Reloading effects for player {player_id}")
+                if player and hasattr(player, 'reload_all_layer_effects'):
+                    player.reload_all_layer_effects()
+                    logger.info(f"🔄 Reloaded layer effects for player {player_id}")
+                else:
+                    logger.warning(f"⚠️ Player {player_id} doesn't have reload_all_layer_effects method")
+            
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
@@ -470,6 +502,14 @@ def register_unified_routes(app, player_manager, config):
                 return jsonify({"success": False, "error": "Failed to remove effect"}), 500
             
             logger.info(f"🗑️ Effect removed from clip {clip_id} at index {index}")
+            
+            # Reload layer effects if this is a layer clip
+            clip_data = clip_registry.get_clip(clip_id)
+            if clip_data and clip_data.get('metadata', {}).get('type') == 'layer':
+                player = player_manager.get_player(player_id)
+                if player and hasattr(player, 'reload_all_layer_effects'):
+                    player.reload_all_layer_effects()
+                    logger.debug(f"🔄 Reloaded layer effects for player {player_id}")
             
             # Auto-save session state
             session_state = get_session_state()
@@ -510,18 +550,40 @@ def register_unified_routes(app, player_manager, config):
                     '_rangeMax': range_max
                 }
                 effect['parameters'][param_name] = param_data
+                logger.info(f"🎚️ API received triple-slider: {param_name}={param_value}, range=[{range_min}, {range_max}]")
             else:
                 param_data = param_value
                 effect['parameters'][param_name] = param_value
             
-            # Update plugin instance with complete data (including range metadata for triple-sliders)
-            if 'instance' in effect and effect['instance']:
+            # Update LIVE plugin instance in active layer (not registry instance!)
+            player = player_manager.get_player(player_id)
+            updated_live = False
+            
+            if player and hasattr(player, 'layers'):
+                for layer in player.layers:
+                    if hasattr(layer, 'clip_id') and layer.clip_id == clip_id:
+                        # Found the active layer - update its live effect instance
+                        if index < len(layer.effects):
+                            live_effect = layer.effects[index]
+                            if 'instance' in live_effect and live_effect['instance']:
+                                live_effect['instance'].update_parameter(param_name, param_data)
+                                updated_live = True
+                                logger.info(f"✅ Updated LIVE layer effect instance: Layer {layer.layer_id}, effect {index}, {param_name}")
+                                break
+            
+            # Fallback: Update registry instance (for non-layer clips)
+            if not updated_live and 'instance' in effect and effect['instance']:
                 effect['instance'].update_parameter(param_name, param_data)
+                logger.info(f"✅ Updated registry effect instance: {clip_id}[{index}].{param_name}")
             
             # B3: Invalidate cache so player detects parameter change
             clip_registry._invalidate_cache(clip_id)
             
             logger.debug(f"🔧 Clip effect parameter updated: {clip_id}[{index}].{param_name} = {param_value}")
+            
+            # DON'T reload layer effects - we just updated the live instance!
+            # Reloading would recreate all plugins from registry and lose runtime state.
+            # Only reload when adding/removing/toggling effects, not when updating parameters.
             
             # Auto-save session state
             session_state = get_session_state()

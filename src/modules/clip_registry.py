@@ -367,7 +367,13 @@ class ClipRegistry:
             logger.warning(f"Layer {layer_id} not found in clip {clip_id}")
             return False
         
+        old_opacity = layer.get('opacity', 'N/A')
         layer.update(updates)
+        new_opacity = layer.get('opacity', 'N/A')
+        
+        if 'opacity' in updates:
+            logger.info(f"💾 Layer {layer_id} opacity updated in registry: {old_opacity} → {new_opacity}")
+        
         logger.debug(f"Layer {layer_id} von Clip {clip_id} aktualisiert: {updates}")
         return True
     

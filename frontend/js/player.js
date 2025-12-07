@@ -72,6 +72,10 @@ let selectedClipId = null;  // UUID from clip registry
 let selectedClipPath = null;  // Original path (for display)
 let selectedClipPlayerType = null;  // 'video' or 'artnet'
 
+// Layer Selection State (Layer-as-Clips Architecture)
+let selectedLayerId = null;  // null = no layer selected, 0/1/2/... = layer ID
+let selectedLayerClipId = null;  // clip_id of selected layer
+
 // ========================================
 // INITIALIZATION
 // ========================================
@@ -895,6 +899,9 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video', cli
         
         const data = await response.json();
         if (data.success) {
+            // Clear layer selection when loading new clip
+            deselectLayer();
+            
             // Store clip info - use frontend clipId (UUID) instead of backend response
             selectedClipId = clipId || data.clip_id;
             debug.log(`🆔 Generator clip ID: frontend=${clipId}, backend=${data.clip_id}, using=${selectedClipId}`);
@@ -1910,6 +1917,9 @@ window.loadFile = async function(playerId, filePath, clipId = null, addToPlaylis
         const data = await response.json();
         
         if (data.success) {
+            // Clear layer selection when loading new clip
+            deselectLayer();
+            
             // Update current file
             config.currentFile = filePath.replace(/^[\\\/]+/, '');
             
@@ -2480,16 +2490,20 @@ window.addEffectToClip = async function(pluginId) {
         return;
     }
     
-    // Prevent adding Transport effect to generator clips
-    if (pluginId === 'transport' && window.currentGeneratorId) {
+    // Prevent adding Transport effect to generator clips (but allow on layers!)
+    if (pluginId === 'transport' && window.currentGeneratorId && !isLayerSelected()) {
         showToast('⚠️ Transport effect not available for generator clips', 'warning');
         debug.log('❌ Blocked Transport effect on generator clip');
         return;
     }
     
     try {
+        // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
+        const targetClipId = selectedLayerClipId || selectedClipId;
+        const target = isLayerSelected() ? `Layer ${selectedLayerId}` : 'Clip';
+        
         // NEW: Unified API endpoint
-        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/add`;
+        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${targetClipId}/effects/add`;
         
         const response = await fetch(endpoint, {
             method: 'POST',
@@ -2502,7 +2516,7 @@ window.addEffectToClip = async function(pluginId) {
         const data = await response.json();
         
         if (response.ok && data.success) {
-            debug.log('✅ Clip effect added:', pluginId, 'to Clip-ID:', selectedClipId);
+            debug.log(`✅ Effect added to ${target}:`, pluginId, 'Clip-ID:', targetClipId);
             await refreshClipEffects();
         } else {
             const errorMsg = data.error || data.message || 'Unknown error';
@@ -2527,8 +2541,11 @@ async function refreshClipEffects() {
     }
     
     try {
+        // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
+        const targetClipId = selectedLayerClipId || selectedClipId;
+        
         // NEW: Unified API endpoint (GET instead of POST)
-        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects`;
+        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${targetClipId}/effects`;
         
         const response = await fetch(endpoint, {
             method: 'GET',
@@ -2538,9 +2555,9 @@ async function refreshClipEffects() {
         const data = await response.json();
         
         if (data.success) {
-            // Filter out Transport effect for generator clips
+            // Filter out Transport effect for generator clips (but NOT for layers!)
             let effects = data.effects || [];
-            if (window.currentGeneratorId) {
+            if (window.currentGeneratorId && !isLayerSelected()) {
                 effects = effects.filter(effect => effect.plugin_id !== 'transport');
                 if ((data.effects || []).length !== effects.length) {
                     debug.log('🚫 Filtered out Transport effect from generator clip display');
@@ -2561,7 +2578,10 @@ async function updateClipEffectLiveParameters() {
     }
     
     try {
-        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects`;
+        // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
+        const targetClipId = selectedLayerClipId || selectedClipId;
+        
+        const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${targetClipId}/effects`;
         const response = await fetch(endpoint, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
@@ -2610,17 +2630,25 @@ function renderClipEffects() {
     const container = document.getElementById('clipFxList');
     const title = document.getElementById('clipFxTitle');
     
-    // Update title with player icon and clip name
-    let icon = selectedClipPlayerType === 'video' ? '🎬' : '🎨';
-    let clipName = selectedClipPath ? selectedClipPath.split('/').pop() : 'No Clip';
+    // Dynamic title based on selection (Layer-as-Clips Architecture)
+    let icon, titleText;
     
-    // If it's a generator, use generator icon and name
-    if (window.currentGeneratorId && window.currentGeneratorMeta) {
+    if (isLayerSelected()) {
+        // Layer selected - show Layer FX
+        icon = '📐';
+        titleText = `Layer ${selectedLayerId} FX`;
+    } else if (window.currentGeneratorId && window.currentGeneratorMeta) {
+        // Generator clip
         icon = '🌟';
-        clipName = window.currentGeneratorMeta.name;
+        titleText = `${window.currentGeneratorMeta.name} FX`;
+    } else {
+        // Normal clip
+        icon = selectedClipPlayerType === 'video' ? '🎬' : '🎨';
+        const clipName = selectedClipPath ? selectedClipPath.split('/').pop() : 'No Clip';
+        titleText = `${clipName} FX`;
     }
     
-    title.innerHTML = `<span class="player-icon">${icon}</span> ${clipName}`;
+    title.innerHTML = `<span class="player-icon">${icon}</span> ${titleText}`;
     
     // Save expanded states (including generator params)
     const expandedStates = new Set();
@@ -2864,7 +2892,9 @@ window.removeEffect = async function(player, index, e) {
             let bodyData = null;
             
             if (player === 'clip') {
-                endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/${index}`;
+                // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
+                const targetClipId = selectedLayerClipId || selectedClipId;
+                endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${targetClipId}/effects/${index}`;
                 bodyData = null;
             } else {
                 endpoint = player === 'video' 
@@ -3270,8 +3300,12 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
         const tripleSlider = controlId ? getTripleSlider(controlId) : null;
         
         if (player === 'clip') {
+            // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
+            const targetClipId = selectedLayerClipId || selectedClipId;
+            console.log(`🔍 sendParameterUpdate: selectedLayerId=${selectedLayerId}, selectedLayerClipId=${selectedLayerClipId}, selectedClipId=${selectedClipId}, targetClipId=${targetClipId}`);
+            
             // NEW: Unified API endpoint (clip_id in URL, no clip_path in body)
-            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/${effectIndex}/parameter`;
+            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${targetClipId}/effects/${effectIndex}/parameter`;
             body = { 
                 name: paramName, 
                 value: value
@@ -3280,6 +3314,7 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
                 const range = tripleSlider.getRange();
                 body.rangeMin = range.min;
                 body.rangeMax = range.max;
+                console.log(`🎚️ Triple-slider range: min=${range.min}, max=${range.max}, value=${value}`);
             }
             method = 'PUT';
         } else if (player === 'video') {
@@ -3311,7 +3346,8 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
         const data = await response.json();
         
         if (data.success) {
-            debug.log(`✅ Updated ${player} ${paramName} = ${value}`);
+            const target = isLayerSelected() ? `Layer ${selectedLayerId}` : player;
+            debug.log(`✅ Updated ${target} ${paramName} = ${value}`);
         } else {
             console.error(`❌ Failed to update ${player} ${paramName}:`, data.message || data.error);
         }
@@ -4097,9 +4133,10 @@ function renderSelectedClipLayers() {
         const isBaseLayer = layer.layer_id === 0;
         
         return `
-            <div class="layer-card ${!isEnabled ? 'disabled' : ''} ${isBaseLayer ? 'base-layer' : ''}"
+            <div class="layer-card ${!isEnabled ? 'disabled' : ''} ${isBaseLayer ? 'base-layer' : ''} ${selectedLayerId === layer.layer_id ? 'selected' : ''}"
                  data-layer-id="${layer.layer_id}"
-                 draggable="false">
+                 draggable="false"
+                 onclick="toggleLayerSelection(${layer.layer_id}, event)">
                 <div class="layer-header">
                     <span class="layer-id">
                         ${!isBaseLayer ? '<span class="layer-drag-handle" title="Drag to reorder">☰</span>' : ''}
@@ -4284,6 +4321,115 @@ window.addLayerToClip = async function(clipId, sourcePath, sourceType = 'video')
     } catch (error) {
         debug.error('Error adding layer:', error);
         showToast('Error adding layer', 'error');
+    }
+};
+
+// ========================================
+// LAYER SELECTION (Layer-as-Clips Architecture)
+// ========================================
+
+/**
+ * Select a layer for effect management
+ */
+async function selectLayer(layerId) {
+    if (!selectedClipId) {
+        console.warn('⚠️ No clip selected, cannot select layer');
+        return;
+    }
+    
+    // Update state
+    selectedLayerId = layerId;
+    
+    // Load layer.clip_id from backend
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${selectedClipId}/layers`);
+        const data = await response.json();
+        
+        console.log('🔍 API response:', data);
+        
+        if (data.success && data.layers) {
+            console.log('🔍 All layers:', data.layers);
+            const layer = data.layers.find(l => l.layer_id === layerId);
+            console.log(`🔍 Found layer ${layerId}:`, layer);
+            if (layer && layer.clip_id) {
+                selectedLayerClipId = layer.clip_id;
+                debug.log(`📐 Layer ${layerId} selected, clip_id: ${selectedLayerClipId}`);
+            } else {
+                console.warn(`⚠️ Layer ${layerId} has no clip_id!`, layer);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading layer clip_id:', error);
+    }
+    
+    // Update UI
+    updateLayerSelectionUI();
+    
+    // Refresh FX Tab (loads layer effects)
+    await refreshClipEffects();
+}
+
+/**
+ * Deselect layer
+ */
+function deselectLayer() {
+    selectedLayerId = null;
+    selectedLayerClipId = null;
+    
+    debug.log('📐 Layer deselected');
+    
+    // Update UI
+    updateLayerSelectionUI();
+    
+    // Refresh FX Tab (loads clip effects)
+    refreshClipEffects();
+}
+
+/**
+ * Check if layer is selected
+ */
+function isLayerSelected() {
+    return selectedLayerId !== null;
+}
+
+/**
+ * Update visual feedback for layer selection
+ */
+function updateLayerSelectionUI() {
+    // Remove 'selected' class from all layer cards
+    document.querySelectorAll('.layer-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    
+    // Add 'selected' class to selected layer
+    if (selectedLayerId !== null) {
+        const selectedCard = document.querySelector(`.layer-card[data-layer-id="${selectedLayerId}"]`);
+        if (selectedCard) {
+            selectedCard.classList.add('selected');
+        }
+    }
+}
+
+/**
+ * Toggle layer selection (called from layer-card click)
+ */
+window.toggleLayerSelection = async function(layerId, event) {
+    // Stop propagation to prevent conflicts with other handlers
+    if (event) {
+        event.stopPropagation();
+        
+        // Don't toggle if clicking on buttons or inputs
+        const target = event.target;
+        if (target.tagName === 'BUTTON' || target.tagName === 'INPUT' || target.tagName === 'SELECT') {
+            return;
+        }
+    }
+    
+    // Toggle: deselect if already selected, select if not
+    if (selectedLayerId === layerId) {
+        deselectLayer();
+    } else {
+        await selectLayer(layerId);
     }
 };
 
