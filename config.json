@@ -107,6 +107,8 @@
     "_quality_comment": "Quality presets: low (360p), medium (720p), high (1080p)",
     "max_fps": 30,
     "_max_fps_comment": "Maximum frames per second for streaming",
+    "max_concurrent_streams": 10,
+    "_max_concurrent_streams_comment": "Maximum number of concurrent WebSocket streams to prevent resource exhaustion",
     "quality_presets": {
       "low": {
         "width": 640,

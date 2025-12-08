@@ -24,6 +24,9 @@ class WebSocketPreview {
         this.frameCount = 0;
         this.startTime = null;
         this.fpsDisplay = options.fpsDisplay || null;
+        this.pendingUrls = new Set(); // Track URLs for cleanup
+        this.frameImage = null; // Reuse image object
+        this.isConnecting = false; // Prevent connection spam
     }
     
     /**
@@ -65,10 +68,18 @@ class WebSocketPreview {
      */
     connect() {
         return new Promise((resolve, reject) => {
+            // Prevent connection spam
+            if (this.isConnecting) {
+                reject(new Error('Connection already in progress'));
+                return;
+            }
+            this.isConnecting = true;
+            
             try {
                 // Load Socket.IO library if not already loaded
                 if (typeof io === 'undefined') {
                     // Socket.IO should be loaded in HTML
+                    this.isConnecting = false;
                     reject(new Error('Socket.IO library not loaded'));
                     return;
                 }
@@ -82,6 +93,7 @@ class WebSocketPreview {
                 // Connection successful
                 this.socket.on('connect', () => {
                     console.log('WebSocket connected:', this.socket.id);
+                    this.isConnecting = false;
                     this.options.onConnected();
                     resolve();
                 });
@@ -89,6 +101,7 @@ class WebSocketPreview {
                 // Connection error
                 this.socket.on('connect_error', (error) => {
                     console.error('WebSocket connection error:', error);
+                    this.isConnecting = false;
                     this.options.onError(error);
                     reject(error);
                 });
@@ -171,9 +184,11 @@ class WebSocketPreview {
             
             // Create object URL
             const url = URL.createObjectURL(blob);
+            this.pendingUrls.add(url);
             
-            // Load image
-            const img = new Image();
+            // Reuse image object or create new one
+            const img = this.frameImage || new Image();
+            this.frameImage = img;
             img.onload = () => {
                 // Clear canvas with black background
                 this.ctx.fillStyle = '#000000';
@@ -202,8 +217,9 @@ class WebSocketPreview {
                 // Draw image centered with aspect ratio preserved
                 this.ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
                 
-                // Clean up
+                // Clean up URL immediately
                 URL.revokeObjectURL(url);
+                this.pendingUrls.delete(url);
                 
                 // Update stats
                 this.frameCount++;
@@ -215,6 +231,9 @@ class WebSocketPreview {
             };
             img.onerror = (error) => {
                 console.error('Frame image load error:', error);
+                // Clean up URL on error
+                URL.revokeObjectURL(url);
+                this.pendingUrls.delete(url);
             };
             img.src = url;
             
@@ -231,12 +250,23 @@ class WebSocketPreview {
         
         this.stopStream();
         
+        // Clean up all pending URLs
+        this.pendingUrls.forEach(url => URL.revokeObjectURL(url));
+        this.pendingUrls.clear();
+        
+        // Clean up image
+        if (this.frameImage) {
+            this.frameImage.src = '';
+            this.frameImage = null;
+        }
+        
         if (this.socket) {
             this.socket.disconnect();
             this.socket = null;
         }
         
         this.isStreaming = false;
+        this.isConnecting = false;
     }
     
     /**

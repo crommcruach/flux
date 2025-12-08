@@ -271,19 +271,21 @@ class GeneratorSource(FrameSource):
         self.source_type = 'generator'  # Marker für Transport-Effekt
         self.plugin_instance = None
         self.start_time = 0
-        self.duration = parameters.get('duration', 30) if parameters else 30  # Duration in seconds
-        self.is_infinite = False  # Generators have duration for playlist auto-advance
         
-        # Playback control parameters
-        self.speed = 1.0
-        self.reverse = False
-        self.playback_mode = 'repeat'  # 'repeat', 'play_once', 'bounce', 'random'
+        # Duration support: default 30s, min 1s, max 60s (no infinite generation)
+        self.duration = parameters.get('duration', 30) if parameters else 30
+        self.is_infinite = (self.duration == 0)  # Infinite if duration not set (legacy)
         
-        # Internal playback state
-        self._virtual_time = 0.0
-        self._last_update = None
-        self._bounce_direction = 1
-        self._has_played_once = False
+        # Calculate total_frames from duration (for transport effect compatibility)
+        if self.duration > 0:
+            self.total_frames = int(self.duration * self.fps)
+        else:
+            self.total_frames = 0  # 0 = infinite
+        
+        logger.debug(f"GeneratorSource: duration={self.duration}s, total_frames={self.total_frames}, infinite={self.is_infinite}")
+        
+        # Simple time tracking for generators (transport plugin handles playback control)
+        self.start_time = 0
         
     def initialize(self):
         """Initialisiert Generator-Plugin."""
@@ -322,70 +324,23 @@ class GeneratorSource(FrameSource):
         return True
     
     def get_next_frame(self):
-        """Generiert nächstes Frame mit Playback-Control."""
+        """
+        Generates next frame using simple time progression.
+        Transport plugin handles speed, reverse, trim, and playback modes.
+        """
         if not self.plugin_instance:
             return None, 0
         
-        # Initialize last_update on first call
-        if self._last_update is None:
-            self._last_update = time.time()
+        # Calculate elapsed time since start
+        current_time = time.time() - self.start_time
         
-        # Calculate time delta
-        now = time.time()
-        delta_time = (now - self._last_update) * self.speed
-        self._last_update = now
-        
-        # Apply playback mode logic
-        if self.playback_mode == 'random':
-            # Random mode: Jump to random position in duration
-            self._virtual_time = random.uniform(0, self.duration)
-        else:
-            # Calculate direction
-            direction = -1 if self.reverse else 1
-            if self.playback_mode == 'bounce':
-                direction *= self._bounce_direction
-            
-            # Update virtual time
-            self._virtual_time += delta_time * direction
-            
-            # Handle playback mode boundaries
-            if self.playback_mode == 'repeat':
-                # Loop between 0 and duration
-                while self._virtual_time >= self.duration:
-                    self._virtual_time -= self.duration
-                while self._virtual_time < 0:
-                    self._virtual_time += self.duration
-            
-            elif self.playback_mode == 'play_once':
-                # Play once and stop
-                if self.reverse:
-                    if self._virtual_time < 0:
-                        self._virtual_time = 0
-                        self._has_played_once = True
-                else:
-                    if self._virtual_time >= self.duration:
-                        self._virtual_time = self.duration
-                        self._has_played_once = True
-                
-                # Check if should advance playlist
-                if self._has_played_once:
-                    logger.info(f"Generator {self.generator_id} play_once finished, triggering auto-advance")
-                    return None, 0
-            
-            elif self.playback_mode == 'bounce':
-                # Bounce between 0 and duration
-                if self._virtual_time >= self.duration:
-                    self._virtual_time = self.duration - (self._virtual_time - self.duration)
-                    self._bounce_direction = -1
-                elif self._virtual_time < 0:
-                    self._virtual_time = abs(self._virtual_time)
-                    self._bounce_direction = 1
-        
-        # Clamp to valid range
-        current_time = max(0, min(self.duration, self._virtual_time))
-        
-        # Calculate virtual frame number
+        # Calculate frame number from elapsed time
         virtual_frame = int(current_time * self.fps)
+        
+        # Loop frame number if duration is defined (for transport effect compatibility)
+        if self.total_frames > 0:
+            virtual_frame = virtual_frame % self.total_frames
+            current_time = virtual_frame / self.fps
         
         # Generators erzeugen Frames ohne Input (None)
         # Pass time and frame info via kwargs
@@ -431,30 +386,16 @@ class GeneratorSource(FrameSource):
         # Always update parameters dict
         self.parameters[param_name] = value
         
-        # Special handling for playback control parameters
+        # Special handling for duration parameter
         if param_name == 'duration':
             self.duration = float(value)
-            logger.info(f"Generator duration updated to {self.duration}s")
-            return True
-        
-        elif param_name == 'speed':
-            self.speed = float(value)
-            logger.info(f"Generator speed updated to {self.speed}x")
-            return True
-        
-        elif param_name == 'reverse':
-            self.reverse = bool(value)
-            logger.info(f"Generator reverse updated to {self.reverse}")
-            return True
-        
-        elif param_name == 'playback_mode':
-            old_mode = self.playback_mode
-            self.playback_mode = str(value)
-            if old_mode != self.playback_mode:
-                # Reset playback state on mode change
-                self._bounce_direction = 1
-                self._has_played_once = False
-                logger.info(f"Generator playback_mode updated to {self.playback_mode}")
+            # Recalculate total_frames and is_infinite
+            self.is_infinite = (self.duration == 0)
+            if self.duration > 0:
+                self.total_frames = int(self.duration * self.fps)
+            else:
+                self.total_frames = 0  # 0 = infinite
+            logger.info(f"Generator duration updated to {self.duration}s (total_frames={self.total_frames}, infinite={self.is_infinite})")
             return True
         
         # Use plugin's update_parameter method if available (preferred)
@@ -479,10 +420,6 @@ class GeneratorSource(FrameSource):
         """Setzt Generator zurück."""
         self.current_frame = 0
         self.start_time = time.time()
-        self._virtual_time = 0.0
-        self._last_update = None
-        self._bounce_direction = 1
-        self._has_played_once = False
         
         # Re-initialize plugin if needed
         if self.plugin_instance:
@@ -516,6 +453,15 @@ class GeneratorSource(FrameSource):
             info['version'] = metadata.get('version', '1.0.0')
         
         return info
+    
+    def is_duration_defined(self):
+        """
+        Check if generator has a defined duration (for master/slave sync compatibility).
+        
+        Returns:
+            bool: True if duration > 0 (finite), False if duration = 0 (infinite)
+        """
+        return self.duration > 0
 
 
 class DummySource(FrameSource):

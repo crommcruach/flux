@@ -54,7 +54,7 @@ class RainbowWaveGenerator(PluginBase):
             'name': 'duration',
             'label': 'Duration (seconds)',
             'type': ParameterType.INT,
-            'default': 10,
+            'default': 30,
             'min': 1,
             'max': 60,
             'step': 5,

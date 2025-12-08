@@ -42,7 +42,10 @@ def init_websocket_streaming(app, player_mgr, config):
         logger=False,
         engineio_logger=False,
         ping_timeout=60,
-        ping_interval=25
+        ping_interval=25,
+        max_http_buffer_size=1e8,   # 100MB buffer for large frames
+        websocket_ping_timeout=10,   # Faster ping timeout
+        websocket_ping_interval=5    # Detect dead connections faster
     )
     
     logger.info(f"WebSocket streaming initialized: quality={_config.get('default_quality', 'medium')}, "
@@ -79,6 +82,16 @@ def init_websocket_streaming(app, player_mgr, config):
         player_id = data.get('player_id', 'video')
         quality = data.get('quality', _config.get('default_quality', 'medium'))
         fps = data.get('fps', _config.get('max_fps', 30))
+        
+        # Clean up stale streams before starting new one
+        _cleanup_stale_streams()
+        
+        # Limit concurrent streams (prevent resource exhaustion)
+        max_streams = _config.get('max_concurrent_streams', 10)
+        if len(_streaming_threads) >= max_streams:
+            logger.warning(f"Max concurrent streams reached ({max_streams}), rejecting new stream")
+            emit('stream_error', {'error': 'Too many active streams, try again later'})
+            return
         
         logger.info(f"Start stream request: session={session_id}, player={player_id}, quality={quality}, fps={fps}")
         
@@ -131,8 +144,12 @@ def init_websocket_streaming(app, player_mgr, config):
 
 
 def _stop_streaming(session_id):
-    """Stop streaming for a specific session."""
-    if session_id in _streaming_threads:
+    """Stop streaming for a specific session (idempotent - safe to call multiple times)."""
+    if session_id not in _streaming_threads:
+        # Already stopped or never started
+        return
+    
+    try:
         _streaming_threads[session_id]['active'] = False
         # Don't join if we're the streaming thread itself (would cause RuntimeError)
         thread = _streaming_threads[session_id]['thread']
@@ -141,6 +158,27 @@ def _stop_streaming(session_id):
             thread.join(timeout=1.0)
         del _streaming_threads[session_id]
         logger.debug(f"Stopped streaming for session {session_id}")
+    except KeyError:
+        # Race condition - already deleted by another thread
+        logger.debug(f"Stream already stopped for session {session_id}")
+
+
+def _cleanup_stale_streams():
+    """Clean up streams with dead threads (called periodically)."""
+    stale_sessions = []
+    for session_id, stream_info in list(_streaming_threads.items()):
+        thread = stream_info.get('thread')
+        if thread and not thread.is_alive():
+            stale_sessions.append(session_id)
+    
+    for session_id in stale_sessions:
+        logger.warning(f"Cleaning up stale stream: {session_id}")
+        # Direct cleanup to avoid recursion
+        if session_id in _streaming_threads:
+            try:
+                del _streaming_threads[session_id]
+            except KeyError:
+                pass  # Already deleted
 
 
 def _stream_worker(session_id, player_id, width, height, jpeg_quality, target_fps):

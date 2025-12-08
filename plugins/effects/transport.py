@@ -60,9 +60,25 @@ class TransportEffect(PluginBase):
         {
             'name': 'playback_mode',
             'type': ParameterType.SELECT,
-            'default': 'repeat',
-            'options': ['repeat', 'play_once', 'bounce', 'random'],
+            'default': 'bounce',
+            'options': ['bounce', 'random'],
             'description': 'Playback Mode'
+        },
+        {
+            'name': 'loop_count',
+            'type': ParameterType.INT,
+            'default': 0,
+            'min': 0,
+            'max': 100,
+            'description': 'Loop Count (0 = infinite, 1+ = play N times then advance)'
+        },
+        {
+            'name': 'random_frame_count',
+            'type': ParameterType.INT,
+            'default': 30,
+            'min': 1,
+            'max': 1000,
+            'description': 'Random Mode: Number of random frames before signaling loop completion'
         }
     ]
     
@@ -87,20 +103,24 @@ class TransportEffect(PluginBase):
         # Other playback parameters
         self.speed = self.config.get('speed', 1.0)
         self.reverse = self.config.get('reverse', False)
-        self.playback_mode = self.config.get('playback_mode', 'repeat')
+        self.playback_mode = self.config.get('playback_mode', 'bounce')
+        self.loop_count = self.config.get('loop_count', 0)  # 0 = infinite
+        self.random_frame_count = self.config.get('random_frame_count', 30)  # Frames per random "loop"
         
         # Internal state
         self._virtual_frame = float(self.current_position)
         self._bounce_direction = 1  # 1 forward, -1 backward
         self._has_played_once = False
         self.loop_completed = False  # Flag when clip reaches end and loops
+        self._current_loop_iteration = 0  # Track how many loops completed
+        self._random_frame_counter = 0  # Track random frames in current loop
         
         # Frame source reference (wird bei process_frame gesetzt)
         self._frame_source = None
         self._total_frames = None
         self._fps = 30  # Default FPS, wird vom Source aktualisiert
         
-        logger.info(f"✅ Transport Effect initialized: S={self.in_point}, P={self.current_position}, E={self.out_point}, speed={self.speed}, mode={self.playback_mode}")
+        logger.info(f"✅ Transport Effect initialized: S={self.in_point}, P={self.current_position}, E={self.out_point}, speed={self.speed}, mode={self.playback_mode}, loop_count={self.loop_count}")
     
     def initialize(self, config):
         """
@@ -125,11 +145,15 @@ class TransportEffect(PluginBase):
             self.speed = config.get('speed', self.speed)
             self.reverse = config.get('reverse', self.reverse)
             self.playback_mode = config.get('playback_mode', self.playback_mode)
+            self.loop_count = config.get('loop_count', self.loop_count)
+            self.random_frame_count = config.get('random_frame_count', self.random_frame_count)
             
             # Reset internal state
             self._virtual_frame = float(self.current_position)
             self._bounce_direction = 1
             self._has_played_once = False
+            self._current_loop_iteration = 0
+            self._random_frame_counter = 0
             
             logger.debug(f"Transport Effect re-initialized: S={self.in_point}, P={self.current_position}, E={self.out_point}")
     
@@ -150,7 +174,14 @@ class TransportEffect(PluginBase):
     
     def _initialize_state(self, frame_source):
         """Initialisiert State beim ersten Frame."""
-        if self._frame_source is None:
+        if self._frame_source is None or self._frame_source != frame_source:
+            # New source detected (clip changed) - reset loop counter
+            if self._frame_source != frame_source:
+                logger.info(f"Transport: New source detected, resetting loop counter (was {self._current_loop_iteration})")
+                self._current_loop_iteration = 0
+                self._random_frame_counter = 0
+                self.loop_completed = False
+            
             self._frame_source = frame_source
             
             # Debug: Log frame_source attributes
@@ -228,11 +259,31 @@ class TransportEffect(PluginBase):
         if clip_length <= 0:
             return self.in_point
         
-        # Random mode: Spring zu komplett zufälliger Position (kein Speed-basiertes Inkrement)
+        # Random mode: Jump to random positions, signal loop after N frames
         if self.playback_mode == 'random':
             self._virtual_frame = float(random.randint(self.in_point, self.out_point))
             frame_num = int(self._virtual_frame)
             self.current_position = frame_num
+            
+            # Count frames in current random "loop"
+            self._random_frame_counter += 1
+            
+            # Check if we've shown enough random frames to complete one "loop"
+            if self._random_frame_counter >= self.random_frame_count:
+                # Reset frame counter and increment loop iteration
+                self._random_frame_counter = 0
+                self._current_loop_iteration += 1
+                
+                logger.debug(f"🎲 Random loop completed: {self._current_loop_iteration}/{self.loop_count if self.loop_count > 0 else '∞'} ({self.random_frame_count} frames shown)")
+                
+                # Check if we've completed all desired loops
+                if self.loop_count > 0 and self._current_loop_iteration >= self.loop_count:
+                    self.loop_completed = True
+                    logger.info(f"✅ Random mode loop_count reached: {self._current_loop_iteration}/{self.loop_count} - signaling completion")
+                elif self.loop_count == 0:
+                    # Infinite mode - signal completion after each "loop" of random frames
+                    self.loop_completed = True
+            
             return frame_num
         
         # Speed anwenden (mit Bounce-Direction)
@@ -243,39 +294,54 @@ class TransportEffect(PluginBase):
         self._virtual_frame += self.speed * direction
         
         # Mode-spezifische Logik
-        if self.playback_mode == 'repeat':
-            # Loop zwischen in_point und out_point
-            loop_detected = False
-            while self._virtual_frame > self.out_point:
-                self._virtual_frame -= clip_length
-                loop_detected = True
-            while self._virtual_frame < self.in_point:
-                self._virtual_frame += clip_length
-                loop_detected = True
-            
-            # Signalisiere Loop-Completion an Player (für Playlist-Autoplay)
-            if loop_detected:
-                self.loop_completed = True
+        # Apply loop counting for ALL modes (bounce, random)
+        loop_detected = False
         
-        elif self.playback_mode == 'play_once':
-            # Spiele einmal und stoppe
-            if self.reverse:
-                if self._virtual_frame < self.in_point:
-                    self._virtual_frame = self.in_point
-                    self._has_played_once = True
-            else:
-                if self._virtual_frame > self.out_point:
-                    self._virtual_frame = self.out_point
-                    self._has_played_once = True
-        
-        elif self.playback_mode == 'bounce':
+        if self.playback_mode == 'bounce':
             # Bounce zwischen in_point und out_point
+            # One complete loop = start → end → back to start (full cycle)
             if self._virtual_frame > self.out_point:
                 self._virtual_frame = self.out_point - (self._virtual_frame - self.out_point)
                 self._bounce_direction = -1
+                # Reached end, now bouncing back (half cycle)
             elif self._virtual_frame < self.in_point:
                 self._virtual_frame = self.in_point + (self.in_point - self._virtual_frame)
                 self._bounce_direction = 1
+                # Returned to start - complete cycle finished
+                loop_detected = True
+        
+        elif self.playback_mode == 'random':
+            # Random already handled at start of function
+            pass
+        
+        # Check if we've reached trim endpoints (for non-bounce modes)
+        # This handles forward/reverse playback reaching the trim boundaries
+        if self.playback_mode != 'bounce':
+            if not self.reverse and self._virtual_frame >= self.out_point:
+                # Forward playback reached out_point (trim end)
+                self._virtual_frame = self.in_point  # Wrap to start
+                loop_detected = True
+                logger.debug(f"🔄 Reached trim endpoint (out_point={self.out_point}), wrapping to start")
+            elif self.reverse and self._virtual_frame <= self.in_point:
+                # Reverse playback reached in_point (trim start)
+                self._virtual_frame = self.out_point  # Wrap to end
+                loop_detected = True
+                logger.debug(f"🔄 Reached trim startpoint (in_point={self.in_point}), wrapping to end")
+        
+        # Unified loop count logic (applies to all modes)
+        if loop_detected:
+            self._current_loop_iteration += 1
+            logger.debug(f"🔁 Loop detected: iteration {self._current_loop_iteration}/{self.loop_count if self.loop_count > 0 else '∞'}")
+            
+            # Check if we've completed the desired number of loops
+            if self.loop_count > 0 and self._current_loop_iteration >= self.loop_count:
+                # Reached loop limit → signal completion (for playlist autoplay)
+                self.loop_completed = True
+                logger.info(f"✅ Transport loop_count reached: {self._current_loop_iteration}/{self.loop_count} - signaling completion")
+            elif self.loop_count == 0:
+                # Infinite loop mode → signal completion every loop (legacy behavior)
+                self.loop_completed = True
+                logger.debug(f"🔁 Infinite loop mode: iteration {self._current_loop_iteration}, signaling completion")
         
         # Clamp to valid range
         frame_num = int(round(self._virtual_frame))
@@ -301,13 +367,6 @@ class TransportEffect(PluginBase):
                 logger.warning("Transport: No frame source found in kwargs")
                 return frame
             
-            # FIX: Skip Transport effect für Generator-Clips
-            # Generatoren haben keine frame-basierte Navigation
-            source_type = getattr(frame_source, 'source_type', None)
-            if source_type == 'generator':
-                logger.debug("Transport: Skipping for generator clip")
-                return frame
-            
             # Initialisiere beim ersten Frame
             self._initialize_state(frame_source)
             
@@ -317,11 +376,6 @@ class TransportEffect(PluginBase):
             # Setze Frame im Source (wenn möglich)
             if hasattr(frame_source, 'current_frame'):
                 frame_source.current_frame = next_frame
-            
-            # Für play_once Mode: Halte letzten Frame
-            if self.playback_mode == 'play_once' and self._has_played_once:
-                # Frame bleibt stehen, keine weitere Bewegung
-                pass
             
             # Frame selbst wird nicht modifiziert - nur Playback-Position
             return frame
@@ -394,25 +448,57 @@ class TransportEffect(PluginBase):
                 # Reset state bei Mode-Wechsel
                 self._bounce_direction = 1
                 self._has_played_once = False
+                self._current_loop_iteration = 0
                 logger.info(f"Transport: playback_mode changed to {self.playback_mode}")
+            return True
+        
+        elif name == 'loop_count':
+            # Extract actual value if it's a range metadata dict
+            if isinstance(value, dict) and '_value' in value:
+                value = value['_value']
+            old_count = self.loop_count
+            self.loop_count = int(value)
+            if old_count != self.loop_count:
+                # Reset loop counter when count changes
+                self._current_loop_iteration = 0
+                logger.info(f"Transport: loop_count changed to {self.loop_count} (0=infinite)")
+            return True
+        
+        elif name == 'random_frame_count':
+            # Extract actual value if it's a range metadata dict
+            if isinstance(value, dict) and '_value' in value:
+                value = value['_value']
+            old_count = self.random_frame_count
+            self.random_frame_count = int(value)
+            if old_count != self.random_frame_count:
+                # Reset frame counter when count changes
+                self._random_frame_counter = 0
+                logger.info(f"Transport: random_frame_count changed to {self.random_frame_count}")
             return True
         
         return False
     
     def get_parameters(self):
         """Gibt aktuelle Parameter-Werte zurück mit Range Metadata für Transport."""
+        # Ensure _totalFrames is valid (use out_point as fallback for short clips)
+        total_frames = self._total_frames if self._total_frames is not None else max(self.out_point, 100)
+        
         return {
             'transport_position': {
                 '_value': self.current_position,
                 '_rangeMin': self.in_point,
                 '_rangeMax': self.out_point,
                 '_fps': self._fps,
-                '_totalFrames': self._total_frames,
+                '_totalFrames': total_frames,
                 '_displayFormat': 'time'
             },
             'speed': self.speed,
             'reverse': self.reverse,
-            'playback_mode': self.playback_mode
+            'playback_mode': self.playback_mode,
+            'loop_count': self.loop_count,
+            'random_frame_count': self.random_frame_count,
+            '_loop_iteration': self._current_loop_iteration,  # Debug info
+            '_random_frame_counter': self._random_frame_counter  # Debug info
         }
     
     def cleanup(self):

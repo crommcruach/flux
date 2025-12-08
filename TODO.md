@@ -87,7 +87,143 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 1.1 🎛️ Dynamic Playlists via config.json (~8-12h) 🆕
+### 1.1 🔄 Master/Slave Duration Sync (~3-4h) 🆕
+
+**Ziel:** Slave clips automatically loop to match master clip duration for synchronized timing.
+
+**Concept:** When slave syncs to a clip, calculate required `loop_count` based on master's clip duration.
+
+- [ ] **Config Option (30min):**
+  - Add `master_slave.sync_slave_duration: false` to config.json
+  - Add `master_slave.duration_match_tolerance: 0.5` (seconds) for rounding
+  - Document config options in CONFIG_SCHEMA.md
+
+- [ ] **Duration Calculation Method (1h):**
+  - Add `_get_clip_duration(player)` to PlayerManager
+  - Calculate duration from source.total_frames / source.fps
+  - Handle edge cases: generators (return None), missing metadata
+  - Add `_get_transport_effect(player)` helper method
+
+- [ ] **Sync Logic Implementation (1-2h):**
+  - Enhance `_sync_slave_to_index()` in player_manager.py
+  - Calculate required loops: `math.ceil(master_duration / slave_duration)`
+  - Apply to slave's transport.loop_count
+  - Add detailed logging: "🔄 Slave duration sync: 5.0s × 6 = 30.0s (master: 30.0s)"
+
+- [ ] **Edge Case Handling (30min):**
+  - Slave longer than master: Use loop_count=1, log warning
+  - Generator clips: Skip duration sync, use manual loop_count
+  - Missing duration data: Fallback to existing behavior
+  - Zero/negative durations: Validation checks
+
+- [ ] **Testing & Validation (30min):**
+  - Test: 30s master + 5s slave = 6 loops
+  - Test: 10s master + 15s slave = 1 loop (slave plays full)
+  - Test: Master with generators
+  - Test: Config enabled/disabled behavior
+
+**Example Usage:**
+```json
+{
+    "master_slave": {
+        "sync_slave_duration": true
+    }
+}
+```
+
+**Result:**
+```
+Master: 30s clip, loop_count=1 → plays once, advances
+Slave:  5s clip, loop_count=6 (auto) → loops 6 times, syncs with master
+```
+
+**Siehe:** [TRANSPORT_MASTER_SLAVE_ANALYSIS.md](docs/TRANSPORT_MASTER_SLAVE_ANALYSIS.md) Option 1
+
+---
+
+### 1.2 🎨 Generator Duration Support (~3-4h) ✅ COMPLETED (2025-12-08)
+
+**Ziel:** Give generator clips a defined duration for proper loop_count and master/slave synchronization.
+
+**Concept:** Add `duration` parameter to GeneratorSource for calculating total_frames and enabling duration-based timing.
+
+- [x] **GeneratorSource Enhancement (2h):** ✅ COMPLETED
+  - Added `duration` parameter (seconds, default 0=infinite)
+  - Uses existing `fps` from FrameSource (default 30)
+  - Calculates `total_frames = duration * fps` when duration > 0
+  - Modified `get_next_frame()` to loop frames: `virtual_frame % total_frames`
+  - Added `is_duration_defined()` method for duration sync compatibility
+  - Updates `is_infinite` flag based on duration (0=infinite, >0=finite)
+
+- [x] **Plugin System Updates (1h):** ✅ COMPLETED
+  - PLUGIN_TEMPLATE.md already included duration parameter example
+  - Duration auto-handled by GeneratorSource parameter system
+  - Validation built-in via parameter min/max (0-600s in template)
+  - All existing generators can add duration parameter to PARAMETERS array
+
+- [x] **UI Integration (30min):** ✅ COMPLETED
+  - Generator parameter UI already supports INT parameters with triple-slider
+  - Duration shows as slider when added to generator's PARAMETERS
+  - Range customizable via param min/max (e.g., 0-300s)
+  - Value displayed automatically by existing parameter system
+
+- [x] **Master/Slave Compatibility (30min):** ✅ COMPLETED
+  - `is_duration_defined()` method ready for TODO 1.1 integration
+  - When `_get_clip_duration()` is implemented in TODO 1.1, it will check this method
+  - Generators with duration > 0 can be master clips
+  - Duration sync (1.1) will work seamlessly with generators
+
+**Implementation Details:**
+```python
+# src/modules/frame_source.py - GeneratorSource.__init__()
+self.duration = parameters.get('duration', 0)  # 0 = infinite, >0 = seconds
+self.is_infinite = (self.duration == 0)
+if self.duration > 0:
+    self.total_frames = int(self.duration * self.fps)
+else:
+    self.total_frames = 0  # 0 = infinite
+
+# src/modules/frame_source.py - GeneratorSource.get_next_frame()
+if self.total_frames > 0:
+    virtual_frame = virtual_frame % self.total_frames  # Loop frames
+
+# src/modules/frame_source.py - GeneratorSource.is_duration_defined()
+def is_duration_defined(self):
+    return self.duration > 0
+```
+
+**Usage in Generator Plugins:**
+```python
+# Add to PARAMETERS array
+{
+    'name': 'duration',
+    'label': 'Duration (seconds)',
+    'type': ParameterType.INT,
+    'default': 0,  # 0 = infinite
+    'min': 0,
+    'max': 600,
+    'description': 'Playback duration (0 = infinite, >0 = loop after N seconds)'
+}
+```
+
+**Edge Cases:**
+- duration=0: Infinite generator (default behavior)
+- duration>0: Loops after total_frames reached
+- Master/slave: Generators with duration can be master or calculate slave loops
+- UI: Duration parameter automatically gets slider in generator parameter panel
+
+**Benefits:**
+- ✅ Generators work in master/slave duration sync (TODO 1.1)
+- ✅ Predictable loop timing for playlist automation
+- ✅ Frame-accurate synchronization with video clips
+- ✅ Transport effect loop_count works with generators
+- ✅ No changes needed to existing generators (duration optional)
+
+**Siehe:** [TRANSPORT_MASTER_SLAVE_ANALYSIS.md](docs/TRANSPORT_MASTER_SLAVE_ANALYSIS.md) Option 3
+
+---
+
+### 1.3 🎛️ Dynamic Playlists via config.json (~8-12h) 🆕
 
 **Ziel:** Neue Playlists (Audio, DMX, OSC, MIDI, etc.) über config.json hinzufügen, ohne Code zu ändern.
 

@@ -1127,90 +1127,7 @@ function renderGeneratorParametersSection() {
         html += `</div>`;
     });
     
-    // Add Playback Control Section
-    html += `
-        <div class="param-control playback-controls-header" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-            <label style="font-weight: 600; color: var(--accent-color);">
-                ⏯️ Playback Controls
-            </label>
-        </div>
-    `;
-    
-    // Speed Control
-    const speedControlId = 'gen-playback-speed';
-    const currentSpeed = window.currentGeneratorParams?.speed ?? 1.0;
-    html += `
-        <div class="param-control">
-            <label>Speed</label>
-            <small>Playback speed multiplier</small>
-            <div class="param-control-row">
-                <div id="${speedControlId}" class="triple-slider-container" 
-                     data-default="1.0"
-                     oncontextmenu="resetGeneratorParameterToDefaultTriple(event, 'speed', 1.0, '${speedControlId}')"></div>
-                <span id="gen-param-speed-value" class="param-value">
-                    ${currentSpeed}x
-                </span>
-            </div>
-        </div>
-    `;
-    setTimeout(() => {
-        const existingSlider = getTripleSlider(speedControlId);
-        const containerInDOM = document.getElementById(speedControlId);
-        
-        if (existingSlider && containerInDOM && existingSlider.container === containerInDOM) {
-            existingSlider.updateValues(currentSpeed, 0.1, 10.0);
-            existingSlider.updateUI();
-        } else {
-            if (existingSlider) {
-                existingSlider.destroy();
-            }
-            
-            initTripleSlider(speedControlId, {
-                min: 0.1,
-                max: 10.0,
-                value: currentSpeed,
-                step: 0.1,
-                showRangeHandles: true,
-                rangeMin: 0.1,
-                rangeMax: 10.0,
-                onChange: (newValue) => {
-                    document.getElementById('gen-param-speed-value').textContent = newValue.toFixed(1) + 'x';
-                    updateGeneratorParameter('speed', newValue);
-                }
-            });
-        }
-    }, 0);
-    
-    // Reverse Checkbox
-    const currentReverse = window.currentGeneratorParams?.reverse ?? false;
-    html += `
-        <div class="param-control">
-            <label class="checkbox-label">
-                <input type="checkbox" 
-                       id="gen-param-reverse"
-                       ${currentReverse ? 'checked' : ''}
-                       onchange="updateGeneratorParameter('reverse', this.checked)">
-                <span>⏪ Reverse Playback</span>
-            </label>
-        </div>
-    `;
-    
-    // Playback Mode Dropdown
-    const currentMode = window.currentGeneratorParams?.playback_mode ?? 'repeat';
-    html += `
-        <div class="param-control">
-            <label for="gen-param-playback-mode">Playback Mode</label>
-            <select 
-                class="form-select form-select-sm" 
-                id="gen-param-playback-mode"
-                onchange="updateGeneratorParameter('playback_mode', this.value)">
-                <option value="repeat" ${currentMode === 'repeat' ? 'selected' : ''}>🔁 Repeat (Loop)</option>
-                <option value="play_once" ${currentMode === 'play_once' ? 'selected' : ''}>▶️ Play Once</option>
-                <option value="bounce" ${currentMode === 'bounce' ? 'selected' : ''}>↔️ Bounce (Ping-Pong)</option>
-                <option value="random" ${currentMode === 'random' ? 'selected' : ''}>🎲 Random</option>
-            </select>
-        </div>
-    `;
+    // Playback controls removed - use Transport Effect plugin instead
     
     html += `
             </div>
@@ -2892,12 +2809,7 @@ window.addEffectToClip = async function(pluginId) {
         return;
     }
     
-    // Prevent adding Transport effect to generator clips (but allow on layers!)
-    if (pluginId === 'transport' && window.currentGeneratorId && !isLayerSelected()) {
-        showToast('⚠️ Transport effect not available for generator clips', 'warning');
-        debug.log('❌ Blocked Transport effect on generator clip');
-        return;
-    }
+    // Transport effect now works with generators (speed, reverse, trim, playback modes)
     
     try {
         // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
@@ -2957,15 +2869,8 @@ async function refreshClipEffects() {
         const data = await response.json();
         
         if (data.success) {
-            // Filter out Transport effect for generator clips (but NOT for layers!)
-            let effects = data.effects || [];
-            if (window.currentGeneratorId && !isLayerSelected()) {
-                effects = effects.filter(effect => effect.plugin_id !== 'transport');
-                if ((data.effects || []).length !== effects.length) {
-                    debug.log('🚫 Filtered out Transport effect from generator clip display');
-                }
-            }
-            clipEffects = effects;
+            // Show all effects including transport (works with generators now)
+            clipEffects = data.effects || [];
             renderClipEffects();
         }
     } catch (error) {
@@ -5310,5 +5215,15 @@ async function reorderLayers(playerId, layerOrder) {
 window.addEventListener('beforeunload', () => {
     if (updateInterval) {
         clearInterval(updateInterval);
+    }
+    
+    // Clean up WebSocket connections to prevent "Insufficient resources" errors
+    if (websocketPreview) {
+        websocketPreview.stop();
+        websocketPreview = null;
+    }
+    if (websocketArtnetPreview) {
+        websocketArtnetPreview.stop();
+        websocketArtnetPreview = null;
     }
 });
