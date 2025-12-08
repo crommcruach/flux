@@ -32,14 +32,25 @@
   - Fixed max range calculation for clips <1 second
   - Added fallback: `total_frames = max(out_point, 100)` when total_frames is None
   - Ensures slider handles display correctly even for 20-frame clips
-- ✓ **WebSocket Resource Leak Fixes** - Improved stability
-  - Added URL cleanup: `pendingUrls` Set tracks and revokes all blob URLs
-  - Image object reuse: Single `frameImage` reused instead of creating new each frame
-  - Connection debouncing: `isConnecting` flag prevents connection spam
-  - Idempotent disconnect: Safe to call multiple times, handles KeyError race conditions
-  - Stale stream cleanup: Periodic cleanup of dead threads
-  - Connection limits: `max_concurrent_streams` config (default 10)
-  - Enhanced ping settings: Faster dead connection detection
+- ✓ **WebSocket Command Channel** - Low-latency communication infrastructure
+  - Flask-SocketIO integration for real-time preview streaming
+  - WebSocket-based frame preview with <100ms latency (replaced WebRTC)
+  - Socket.IO client integration in frontend (common.js)
+  - Aspect-ratio-preserving canvas rendering
+  - Frame identity tracking to avoid redundant transfers
+  - 1ms polling interval for responsive streaming
+  - Fast JPEG encoding for efficient bandwidth usage
+  - Fixed disconnect handler and thread joining issues
+  - Simplified LAN-only architecture (no STUN/TURN servers needed)
+  - Latency improvement: WebRTC ~1s → WebSocket <100ms
+  - Resource leak fixes:
+    - Added URL cleanup: `pendingUrls` Set tracks and revokes all blob URLs
+    - Image object reuse: Single `frameImage` reused instead of creating new each frame
+    - Connection debouncing: `isConnecting` flag prevents connection spam
+    - Idempotent disconnect: Safe to call multiple times, handles KeyError race conditions
+    - Stale stream cleanup: Periodic cleanup of dead threads
+    - Connection limits: `max_concurrent_streams` config (default 10)
+    - Enhanced ping settings: Faster dead connection detection
 - ✓ **Generator Playback Control Removal** - Simplified architecture
   - Removed speed, reverse, playback_mode from GeneratorSource
   - Removed all playback mode logic from get_next_frame()

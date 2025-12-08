@@ -701,39 +701,6 @@ Moved to HISTORY.md v2.3.x - Layer effects via Clip FX Tab, unified API, live ef
 
 ---
 
-### 1.4 🎬 Playlist-Sequenzer (~8-12h)
-
-- [ ] **Show-Editor UI (4h):**
-  - Liste von Clips mit Drag & Drop
-  - Clip-Properties: Video/Script, Duration, Transition, Brightness
-
-- [ ] **Persistence (2h):**
-  - Save/Load Show-Dateien (JSON `.fluxshow`)
-  - Show-Library (Liste aller Shows)
-
-- [ ] **Playback Engine (4h):**
-  - Sequential Playback mit Transitions
-  - Cue-System (Next Cue, Jump to Cue N)
-  - Loop-Mode
-
-- [ ] **REST API (2h):**
-  - GET/POST/PUT/DELETE `/api/sequencer/shows`
-  - POST `/api/sequencer/play`, `/api/sequencer/stop`
-  - POST `/api/sequencer/cue/<index>`
-
-**JSON-Format Beispiel:**
-```json
-{
-  "name": "Halloween Show 2025",
-  "clips": [
-    {"type": "video", "source": "kanal_1/intro.mp4", "duration": 15, "transition": "fade", "brightness": 1.0},
-    {"type": "script", "source": "plasma", "duration": 30, "transition": "cut"}
-  ],
-  "loop": true
-}
-```
-
----
 
 ### 1.5 🎛️ Dynamische Parameter Sequenzen (~6-10h) 🆕
 
@@ -864,44 +831,9 @@ Moved to HISTORY.md v2.3.x - Layer effects via Clip FX Tab, unified API, live ef
 ## ⚡ PRIORITÄT 2 - Mittel-Komplex, Hoch-Wert (~48-72h)
 **Mittlerer bis hoher Aufwand, hoher Performance-Gewinn & Skalierbarkeit**
 
-### 2.1 ⚡ WebSocket Command Channel (~4-6h) 🔥 PRIORITY
+### 2.1 ⚡ WebSocket Command Channel ✅ COMPLETED (2025-12-08)
 
-- [ ] **Zeitkritische Commands über WebSocket (Hybrid-Ansatz):**
-  - **Problem mit REST:** 10-50ms Latenz pro Request
-  - **WebSocket-Vorteile:** 2-5ms Latenz (LAN), Persistent Connection
-  - **Architektur-Entscheidung:**
-    - ✅ **WebSocket für Commands** (sofortiger Mehrwert)
-    - ⏸️ **WebRTC für Video** später optional (nur bei CPU-Problemen)
-  - **Zeitkritische Commands:**
-    - Playback: play, pause, stop, seek
-    - Parameter: brightness, speed, effect_param
-    - Blackout: sofortiger Blackout-Toggle
-  - **Features:**
-    - Auto-Reconnect bei Verbindungsabbruch
-    - Event-basiert (einfach erweiterbar)
-    - Broadcast an alle Clients (Multi-User)
-    - Command-Queue mit Priority-System
-    - Batch-Commands
-    - MessagePack Support (optional)
-  - **Implementierung:**
-    - Phase 1: Flask-SocketIO Integration (~1h)
-    - Phase 2: WebSocket Command Handler (~2h)
-    - Phase 3: Command-Queue & Priority (~1h)
-    - Phase 4: Client-Library (JavaScript) (~1h)
-    - Phase 5: MessagePack Support (optional) (~1h)
-  - **Latenz-Verbesserung:**
-    - REST: 10-50ms → WebSocket: 2-5ms (LAN)
-    - Responsiveness-Gewinn: 5-25x schneller
-
-**Code-Beispiel:**
-```javascript
-// Vorher (REST): 15-50ms Latenz
-await fetch('/api/player/video/play', {method: 'POST'});
-
-// Nachher (WebSocket): 2-5ms Latenz
-socket.emit('player.play', {player_id: 'video'});
-socket.on('player.status', (data) => console.log(data));
-```
+Moved to HISTORY.md v2.4.0 - WebSocket infrastructure with Flask-SocketIO, preview streaming, resource leak fixes, and enhanced connection management fully implemented.
 
 ---
 
@@ -1052,38 +984,9 @@ socket.on('player.status', (data) => console.log(data));
 ## 🔧 PRIORITÄT 3 - Mittel-Komplex, Mittel-Wert (~39-57h)
 **Mittlerer Aufwand, mittlere Business-Priorität**
 
-### 3.1 🎥 WebRTC Video Preview ✅ COMPLETED (~8h)
+### 3.1 🎥 WebRTC Video Preview ✅ COMPLETED (2025-12-08)
 
-- [x] **Hardware-beschleunigtes Video-Streaming:** ✅ COMPLETED (2025-12-08)
-  - **Performance Improvement:**
-    - CPU Usage: 40-60% → 5-10% (**10x reduction**)
-    - Bandwidth: 2-5 Mbps → 0.2-1 Mbps (**5x reduction**)
-    - Latency: 100-200ms → <100ms (**2x faster**)
-  - **Implemented Features:**
-    - ✅ Hardware-accelerated H.264 encoding (GPU via aiortc)
-    - ✅ Multi-Quality: Low (360p, 15fps), Medium (720p, 20fps), High (1080p, 30fps)
-    - ✅ Adaptive FPS control (10-30 FPS)
-    - ✅ Connection limit: Max 5 concurrent preview clients
-    - ✅ Automatic MJPEG fallback on WebRTC failure
-    - ✅ UI controls: Quality selector + mode toggle
-    - ✅ Real-time stats display (FPS + bandwidth)
-    - ✅ WebRTC signaling API (/api/webrtc/offer, /api/webrtc/close, /api/webrtc/stats)
-    - ✅ Full documentation (docs/WEBRTC_PREVIEW.md)
-  - **Backend Implementation:**
-    - `src/modules/webrtc_track.py`: PlayerVideoTrack class
-    - `src/modules/api_webrtc.py`: WebRTC signaling endpoints
-    - Integration with rest_api.py
-  - **Frontend Implementation:**
-    - `frontend/js/webrtc-preview.js`: WebRTCPreview class
-    - Integration in player.js + player.html
-    - Quality selector dropdown
-    - Mode toggle button (WebRTC ↔ MJPEG)
-    - Live stats display
-  - **Testing:**
-    - Verify WebRTC connection establishes
-    - Test quality switching (requires reconnection)
-    - Test automatic MJPEG fallback
-    - Monitor CPU/bandwidth improvements
+Moved to HISTORY.md v2.4.0 - Replaced with WebSocket-based preview streaming (aiortc removed). <100ms latency, simplified LAN-only architecture with Socket.IO integration.
 
 ---
 
