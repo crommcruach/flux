@@ -494,9 +494,6 @@ Audio Waveform Timeline (visualisiert)
 
 ---
 
-### 1.1 🎨 Generator Duration Support ✅ COMPLETED (2025-12-08)
-
-Moved to HISTORY.md v2.4.0 - Generator duration parameter, transport integration, and seamless looping fully implemented.
 
 ---
 
@@ -591,23 +588,9 @@ Moved to HISTORY.md v2.4.0 - Generator duration parameter, transport integration
 
 ---
 
-### 1.2 🎯 Playlist Master/Slave Synchronization ✅ COMPLETED (2025-12-08)
 
-Moved to HISTORY.md v2.4.0 - Master/Slave synchronization fully implemented with UI, backend, and REST API.
 
----
-
-### 1.2 🔌 Plugin-System erweitern ✅ COMPLETED (2025-12-07)
-
-Moved to HISTORY.md v2.3.x - Layer effects via Clip FX Tab, unified API, live effect instances, and transport integration fully implemented.
-
----
-
-### 1.3 ⚡ WebSocket Command Channel - Zeitkritische Commands (~6-8h) 🔥 🚧 IN PROGRESS
-
-**Problem:** Polling-Intervalle (250-3000ms) verursachen Latenz bei zeitkritischen Operationen.
-
-**Lösung:** Hybrid-Ansatz - REST für Daten-Operations, WebSocket für Commands & Live-Updates.
+.
 
 #### Endpoints nach Mehrwert (absteigend):
 
@@ -984,10 +967,6 @@ Moved to HISTORY.md v2.4.0 - WebSocket infrastructure with Flask-SocketIO, previ
 ## 🔧 PRIORITÄT 3 - Mittel-Komplex, Mittel-Wert (~39-57h)
 **Mittlerer Aufwand, mittlere Business-Priorität**
 
-### 3.1 🎥 WebRTC Video Preview ✅ COMPLETED (2025-12-08)
-
-Moved to HISTORY.md v2.4.0 - Replaced with WebSocket-based preview streaming (aiortc removed). <100ms latency, simplified LAN-only architecture with Socket.IO integration.
-
 ---
 
 ### 3.2 🎵 Audio-Reactive Support (~10-14h)
@@ -1026,12 +1005,7 @@ Moved to HISTORY.md v2.4.0 - Replaced with WebSocket-based preview streaming (ai
   - GLSL Shader Support (Shadertoy-kompatibel)
   - Uniform Variables (iTime, iResolution, iMouse)
 
-- [x] **LiveStream Source (2-5h):** ✅ COMPLETED
-  - RTSP/HTTP/HLS/RTMP Stream Support
-  - FFmpeg Integration via OpenCV
-  - YouTube URL Support (yt-dlp)
 
----
 
 ### 4.2 🎥 Projection Mapping Support (~16-24h)
 
@@ -1353,17 +1327,6 @@ Moved to HISTORY.md v2.4.0 - Replaced with WebSocket-based preview streaming (ai
   - Region-Capture für optimale Performance
   - Alternative: Window-Capture API
 
-- [x] **Multi-Layer System Testing (~2-4h):** ✅ COMPLETED (2025-12-02)
-  - ✅ Run `tests/test_api_layers.py` to verify all tests pass
-  - ✅ Test live multi-layer playback with different FPS sources
-    - ✅ Verify: Overlay läuft nicht doppelt so schnell bei höherer FPS
-    - ✅ Verify: Frame-Skipping funktioniert bei niedrigerer FPS
-  - ✅ Verify snapshot restore with layers
-  - ✅ Test generator + video layer combinations
-  - ✅ Test layer with effects + blend modes
-  - ✅ Test autoplay with multi-layer clips
-  - ✅ Test transitions on layer 0 with overlays active
-
 ### 5.4 🛠️ Weitere Verbesserungen
 
 - [ ] **File Browser Thumbnails (~6-10h):**
@@ -1396,54 +1359,6 @@ Moved to HISTORY.md v2.4.0 - Replaced with WebSocket-based preview streaming (ai
   - HTML/UI dynamisch aus `playerConfigs` generieren (Player-Container, Buttons)
   - Legacy-onclick-Handler (`window.playVideo`, etc.) entfernen und durch generische Event-Handler ersetzen
   - **Ziel:** Neuer Player nur durch Hinzufügen in `playerConfigs` möglich, ohne Code-Änderungen
-
-- [x] **Playlist Playback Refactoring (~4-6h):** ✅ COMPLETED
-  - ✅ Überarbeitung Loop/Autoplay/Play-Funktionen
-  - ✅ Clip-Add-Handling vereinheitlichen
-  - ✅ Auto-Start beim ersten Clip konsistent implementieren
-  - ✅ State-Management zwischen Frontend/Backend synchronisieren
-  - **Note:** Implemented with session_state.py persistence, autoplay/loop toggles, and consistent clip handling
-
-- [x] **player.js Performance-Optimierung (~6-10h):** ✅ COMPLETED - Already Optimized
-  - ✅ **Event-Handler-Leak behoben:** Event-Delegation implementiert (Lines 1689-1936)
-    - Memory-Leak behoben durch Event-Delegation Pattern
-    - 4 Event-Listener pro Container (statt 15-20 pro Item)
-    - Handler Cleanup on Re-Render implementiert
-    - **Einsparung: 40-60% Memory**
-  - ✅ **Generator-Map für O(1) Lookups:** Map-basierte Lookups implementiert (Lines 21-23, 381, 436)
-    - effectsMap und generatorsMap nutzen Map.get() statt Array.find()
-    - Alle Hot-Paths verwenden Map-Lookups (Lines 507, 896, 996, 1013)
-    - Nur 1x Array.find() Fallback (Line 1718, defensive coding, <1% impact)
-    - **Einsparung: 5-10% CPU**
-  - ✅ **Unified Update-Loop:** Intelligenter koordinierter Update-Loop (Lines 190-227)
-    - Single setInterval (250ms) mit koordinierten Sub-Intervallen
-    - Conditional Updates: nur bei Autoplay/Clip-Selection aktiv
-    - 3 separate Timer zu 1 koordiniertem Loop kombiniert
-    - **Einsparung: 10-15% CPU**
-  - ✅ **DOM-Query-Caching:** Minimal querySelector usage
-    - Nur 1x querySelectorAll() in dragend (Line 1781, nur bei Drag-Operations)
-    - Event-Delegation verhindert wiederholte Queries
-    - **Impact: <1% (drag operations sind selten)**
-  - ✅ **Bereits implementiert:**
-    - Fast-poll für Live-Parameter (500ms updateClipEffectLiveParameters) ohne Re-Rendering
-    - Separate Update-Intervalle für Video/Art-Net/Clip-Effects
-    - Conditional Updates (nur wenn nötig)
-  - **Gesamt-Ergebnis:** ~50-75% CPU/Memory Reduction achieved
-  - **Dokumentation:** `PERFORMANCE_ANALYSIS_PLAYER.md` (detaillierte Analyse)
-  - **Fazit:** ✅ Keine weitere Optimierung notwendig, Performance-Budget erfüllt
-
-- [x] **Projekt-Struktur Refactoring (~2-3h):** ✅ COMPLETED (2025-12-04)
-  - ✅ `src/plugins/` → `plugins/` (nach Root verschoben)
-  - ✅ `src/static/` → `frontend/` (nach Root verschoben + umbenannt)
-  - **Vorteile:**
-    - Klare Trennung: Backend (`src/`) vs Frontend (`frontend/`) vs Plugins (`plugins/`)
-    - Bessere Übersicht: Plugins sind Top-Level (wie Config)
-    - Standard-Konvention: Viele Projekte nutzen `frontend/` statt `static/`
-  - **Durchgeführte Änderungen:**
-    - Plugin-Verzeichnis: `plugin_manager.py` nutzt jetzt `plugins/`
-    - Flask static_folder: `rest_api.py` zeigt auf `../frontend`
-    - Test-Imports: `test_blend_*.py` nutzen `from plugins.effects`
-    - Alle Plugin-Dateien nutzen bereits `from plugins import` (keine Änderung nötig)
 
 - [ ] Unit Tests erweitern (Player, FrameSource, API)
 - [ ] API-Authentifizierung (Basic Auth/Token)
