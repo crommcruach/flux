@@ -3141,7 +3141,7 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
             control = `
                 <div class="parameter-control">
                     <div class="parameter-label">
-                        <label for="${controlId}">${param.label || param.name}</label>
+                        <label>${param.label || param.name}</label>
                         <span class="parameter-value" id="${controlId}_value">${intDisplayValue}</span>
                     </div>
                     <div id="${controlId}" class="triple-slider-container" 
@@ -3300,7 +3300,7 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
                 control = `
                     <div class="parameter-control">
                         <div class="parameter-label">
-                            <label for="${controlId}">${param.label || param.name}</label>
+                            <label>${param.label || param.name}</label>
                             <span class="parameter-value" id="${controlId}_value">${fallbackDecimals === 0 ? Math.round(fallbackValue) : fallbackValue.toFixed(fallbackDecimals)}</span>
                         </div>
                         <div id="${controlId}" class="triple-slider-container" 

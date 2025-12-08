@@ -222,7 +222,7 @@ function renderParameterControl(param, currentValue, effectIndex) {
             control = `
                 <div class="parameter-control">
                     <div class="parameter-label">
-                        <label for="${controlId}">${param.name}</label>
+                        <label>${param.name}</label>
                         <span class="parameter-value" id="${controlId}_value">${actualValue}</span>
                     </div>
                     <div id="${controlId}" class="triple-slider-container"></div>
