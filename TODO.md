@@ -17,7 +17,241 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 ## 🔥 PRIORITÄT 1 - Quick Wins (~43-66h)
 **Niedriger Aufwand, hoher Nutzen - sofort umsetzbar**
 
-### 1.0 🎨 Unified Playlist System - Player/Playlist Generalisierung (~7-10h) 🆕
+### 1.0 🎵 Audio-Driven Sequencer (~12-16h) 🆕 🔥
+**Ziel:** Waveform-basierter Sequencer mit Timeline-Slots für präzises Audio-Sync
+
+**Konzept:**
+```
+Audio Waveform Timeline (visualisiert)
+├─ User klickt auf Waveform → Split-Punkt erstellen
+├─ Time Slots (Segmente zwischen Splits)
+│  └─ Slot 0: 0.0-2.5s  → Clip 0
+│  └─ Slot 1: 2.5-4.0s  → Clip 1
+│  └─ Slot 2: 4.0-7.2s  → Clip 2
+├─ Audio-Timeline treibt Master-Playlist
+└─ Slaves folgen via Master/Slave-Sync
+```
+
+#### Phase 1: Backend - Audio Analysis (~3-4h)
+- [ ] **Audio Loading & Analysis**
+  - Neue Klasse: `AudioTimeline` in `src/modules/audio_timeline.py`
+  - Library: `librosa` für Audio-Analyse (oder `pydub` lightweight)
+  - Features:
+    - Load audio file (MP3, WAV, FLAC, OGG)
+    - Extract waveform data (amplitude over time)
+    - Optional: Beat detection (BPM, transients)
+    - Generate downsampled waveform for frontend (e.g., 1000 points)
+  
+- [ ] **Timeline Manager**
+  ```python
+  class AudioTimeline:
+      def __init__(self, audio_path):
+          self.audio_path = audio_path
+          self.duration = 0.0  # Total audio length in seconds
+          self.waveform = []   # Downsampled amplitude data
+          self.splits = []     # User-created split points [0.0, 2.5, 4.0, ...]
+          self.time_slots = [] # Computed slots [(0.0, 2.5), (2.5, 4.0), ...]
+      
+      def add_split(self, timestamp: float):
+          """Add split point at timestamp"""
+      
+      def remove_split(self, timestamp: float):
+          """Remove nearest split point"""
+      
+      def get_current_slot(self, current_time: float) -> int:
+          """Return slot index for given time"""
+      
+      def get_waveform_data(self, resolution=1000):
+          """Get downsampled waveform for frontend"""
+  ```
+
+- [ ] **REST API Endpoints**
+  - `POST /api/audio/load` - Load audio file, return waveform data
+  - `GET /api/audio/waveform` - Get waveform data
+  - `POST /api/audio/split/add` - Add split point
+  - `DELETE /api/audio/split/remove` - Remove split point
+  - `GET /api/audio/slots` - Get all time slots
+  - `GET /api/audio/current-slot` - Get current slot based on playback time
+
+#### Phase 2: Frontend - Waveform Visualization (~4-5h)
+- [ ] **WaveSurfer.js Integration** 🎯
+  - Library: [WaveSurfer.js](https://wavesurfer.xyz/) v7+ (MIT License)
+  - CDN: `<script src="https://unpkg.com/wavesurfer.js@7"></script>`
+  - Plugins:
+    - `RegionsPlugin` - For time slot markers (perfect for splits!)
+    - `TimelinePlugin` - Time ruler with seconds/minutes
+    - `MinimapPlugin` - Overview of entire waveform (optional)
+  
+- [ ] **Waveform Component** (`frontend/components/audio-timeline.js`)
+  ```javascript
+  class AudioTimeline {
+      constructor(containerId) {
+          // Initialize WaveSurfer
+          this.wavesurfer = WaveSurfer.create({
+              container: containerId,
+              waveColor: '#4a9eff',
+              progressColor: '#1e88e5',
+              cursorColor: '#ff6b6b',
+              barWidth: 2,
+              barGap: 1,
+              height: 128,
+              normalize: true,
+              backend: 'WebAudio'
+          });
+          
+          // Add Regions plugin for time slots
+          this.regions = this.wavesurfer.registerPlugin(
+              RegionsPlugin.create()
+          );
+          
+          // Add Timeline plugin
+          this.timeline = this.wavesurfer.registerPlugin(
+              TimelinePlugin.create()
+          );
+          
+          this.setupEventHandlers();
+      }
+      
+      loadAudio(audioUrl) {
+          this.wavesurfer.load(audioUrl);
+      }
+      
+      addSplit(time) {
+          // WaveSurfer regions handle this automatically!
+          this.regions.addRegion({
+              start: time,
+              end: time + 0.1, // Marker width
+              color: 'rgba(255, 107, 107, 0.3)',
+              drag: true,
+              resize: false
+          });
+      }
+      
+      setupEventHandlers() {
+          // Click to add split
+          this.wavesurfer.on('click', (relativeTime) => {
+              this.addSplit(relativeTime * this.wavesurfer.getDuration());
+          });
+          
+          // Region drag → update split point
+          this.regions.on('region-updated', (region) => {
+              this.onSplitMoved(region.start);
+          });
+          
+          // Right-click to remove split
+          this.regions.on('region-clicked', (region, e) => {
+              if (e.button === 2) { // Right-click
+                  region.remove();
+              }
+          });
+      }
+  }
+  ```
+  
+- [ ] **WaveSurfer Features (Built-in!)**
+  - ✅ Waveform rendering (auto-generated from audio)
+  - ✅ Zoom/pan controls (mousewheel + drag)
+  - ✅ Playback cursor (automatic)
+  - ✅ Region markers (for splits/slots)
+  - ✅ Drag & drop regions
+  - ✅ Time ruler with timestamps
+  - ✅ Responsive design
+  - ✅ Multiple waveform styles (bars, line, etc.)
+  - ✅ Minimap for long audio files
+  
+- [ ] **Timeline UI Integration**
+  - Add `<div id="waveform"></div>` above playlist section
+  - "Load Audio" button → File picker
+  - WaveSurfer auto-generates waveform from audio file
+  - Region colors match slot indices (rainbow gradient)
+  - Current slot highlighted with border
+  - Slot labels overlay (Clip 0, Clip 1, etc.)
+
+- [ ] **Slot Configuration Panel**
+  - Auto-generated from WaveSurfer regions
+  - List of time slots with timestamps
+  - Map each slot to playlist clip index
+  - Auto-mapping: Slot N → Clip N
+  - Manual override: "Slot 2 → Clip 5"
+  - Duration display per slot
+  - Delete/edit slot buttons
+
+#### Phase 3: Playback Integration (~3-4h)
+- [ ] **Audio Playback Engine**
+  - WaveSurfer.js handles audio playback internally (Web Audio API)
+  - No separate `<audio>` element needed!
+  - `wavesurfer.play()` / `wavesurfer.pause()` / `wavesurfer.seekTo()`
+  - Sync with master player start/stop
+  - Auto-pause when master pauses
+  
+- [ ] **Sequencer Logic** (`src/modules/sequencer.py`)
+  ```python
+  class Sequencer:
+      def __init__(self, audio_timeline, player_manager):
+          self.timeline = audio_timeline
+          self.player_manager = player_manager
+          self.current_slot = 0
+          self.audio_start_time = 0.0
+      
+      def update(self):
+          """Called every frame to check slot changes"""
+          current_time = time.time() - self.audio_start_time
+          new_slot = self.timeline.get_current_slot(current_time)
+          
+          if new_slot != self.current_slot:
+              # Slot changed → advance master playlist
+              self.player_manager.master_advance_to_clip(new_slot)
+              self.current_slot = new_slot
+  ```
+
+- [ ] **Master Integration**
+  - Audio timeline controls master playlist advancement
+  - Transport effect `loop_count` controls loops within slot
+  - When slot boundary crossed → force clip change
+  - Slave playlists auto-sync via existing master/slave
+
+#### Phase 4: UI/UX Polish (~2-3h)
+- [ ] **Visual Feedback**
+  - Current slot highlighted in waveform
+  - Playback cursor (vertical line moving across waveform)
+  - Slot colors match playlist item colors
+  - Beat markers (if beat detection enabled)
+  
+- [ ] **Controls**
+  - Play/Pause audio
+  - Seek by clicking waveform
+  - Snap splits to beats (optional)
+  - Clear all splits
+  - Export/Import timeline JSON
+  
+- [ ] **Info Display**
+  - Current time / Total duration
+  - Current slot / Total slots
+  - BPM (if detected)
+  - Clip name for current slot
+
+**Benefits:**
+- ✅ Intuitive visual sequencing (see music structure)
+- ✅ Precise audio-video sync (frame-accurate)
+- ✅ No complex timeline editing - just click to split
+- ✅ Reuses existing master/slave infrastructure
+- ✅ Works with any audio format
+- ✅ Beat detection for auto-splitting (optional)
+
+**Use Cases:**
+- VJ performances (audio-reactive visuals)
+- Music videos (sync clips to song structure)
+- Live shows (automated clip switching on beat)
+- Audio installations (generative art sync)
+
+**Tech Stack:**
+- Backend: `librosa` (audio analysis) or `pydub` (lightweight)
+- Frontend: Canvas API (waveform), HTML5 Audio (playback)
+- Integration: Existing master/slave + transport loop_count
+
+---
+
+### 1.1 🎨 Unified Playlist System - Player/Playlist Generalisierung (~7-10h) 🆕
 
 **Ziel:** 100% generalisiertes Player-System - neue Player durch `playerConfigs` hinzufügen, ohne Code-Änderungen.
 
@@ -87,61 +321,7 @@ Die Features sind in 6 Prioritätsstufen organisiert basierend auf **Implementie
 
 ---
 
-### 1.1 🔄 Master/Slave Duration Sync (~3-4h) 🆕
-
-**Ziel:** Slave clips automatically loop to match master clip duration for synchronized timing.
-
-**Concept:** When slave syncs to a clip, calculate required `loop_count` based on master's clip duration.
-
-- [ ] **Config Option (30min):**
-  - Add `master_slave.sync_slave_duration: false` to config.json
-  - Add `master_slave.duration_match_tolerance: 0.5` (seconds) for rounding
-  - Document config options in CONFIG_SCHEMA.md
-
-- [ ] **Duration Calculation Method (1h):**
-  - Add `_get_clip_duration(player)` to PlayerManager
-  - Calculate duration from source.total_frames / source.fps
-  - Handle edge cases: generators (return None), missing metadata
-  - Add `_get_transport_effect(player)` helper method
-
-- [ ] **Sync Logic Implementation (1-2h):**
-  - Enhance `_sync_slave_to_index()` in player_manager.py
-  - Calculate required loops: `math.ceil(master_duration / slave_duration)`
-  - Apply to slave's transport.loop_count
-  - Add detailed logging: "🔄 Slave duration sync: 5.0s × 6 = 30.0s (master: 30.0s)"
-
-- [ ] **Edge Case Handling (30min):**
-  - Slave longer than master: Use loop_count=1, log warning
-  - Generator clips: Skip duration sync, use manual loop_count
-  - Missing duration data: Fallback to existing behavior
-  - Zero/negative durations: Validation checks
-
-- [ ] **Testing & Validation (30min):**
-  - Test: 30s master + 5s slave = 6 loops
-  - Test: 10s master + 15s slave = 1 loop (slave plays full)
-  - Test: Master with generators
-  - Test: Config enabled/disabled behavior
-
-**Example Usage:**
-```json
-{
-    "master_slave": {
-        "sync_slave_duration": true
-    }
-}
-```
-
-**Result:**
-```
-Master: 30s clip, loop_count=1 → plays once, advances
-Slave:  5s clip, loop_count=6 (auto) → loops 6 times, syncs with master
-```
-
-**Siehe:** [TRANSPORT_MASTER_SLAVE_ANALYSIS.md](docs/TRANSPORT_MASTER_SLAVE_ANALYSIS.md) Option 1
-
----
-
-### 1.2 🎨 Generator Duration Support (~3-4h) ✅ COMPLETED (2025-12-08)
+### 1.1 🎨 Generator Duration Support (~3-4h) ✅ COMPLETED (2025-12-08)
 
 **Ziel:** Give generator clips a defined duration for proper loop_count and master/slave synchronization.
 

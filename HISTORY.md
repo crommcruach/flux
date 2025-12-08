@@ -1,5 +1,86 @@
 # Py_artnet - Version History
 
+## v2.4 - Transport Enhancements & Generator Improvements (2025-12-08)
+
+### v2.4.0 - Transport Plugin for Generators & Duration Defaults (2025-12-08)
+- ✓ **Transport Plugin for Generators** - Unified playback control across all source types
+  - Removed frontend blocking checks in player.js (lines 2813-2816, 2877-2883)
+  - Removed backend generator skip check in transport.py (lines 370-376)
+  - Generators now show transport effect in UI with full functionality
+  - Transport speed, reverse, trim, playback modes now work with generators
+  - Result: Unified playback architecture for videos AND generators
+- ✓ **Generator Duration Defaults Changed** - No infinite generation, practical defaults
+  - Default duration: 30 seconds (changed from 10s)
+  - Min duration: 1 second (no infinite generation)
+  - Max duration: 60 seconds
+  - Updated generators: checkerboard, fire, plasma, pulse, rainbow_wave, matrix_rain, static_picture
+  - GeneratorSource backend defaults to 30s instead of 0s (infinite)
+  - Live sources (webcam, screencapture, livestream) remain continuous (no duration limit)
+- ✓ **Transport Loop Count Feature** - Precise loop control for timing
+  - Added `loop_count` parameter (0=infinite, 1+=exact loops)
+  - Added `random_frame_count` parameter for random mode timing
+  - Internal loop iteration tracking (`_current_loop_iteration`)
+  - Signals completion after N loops for playlist autoplay
+  - Works with all playback modes (bounce, random)
+  - Enables precise master/slave timing control
+- ✓ **Transport Playback Mode Cleanup** - Simplified modes
+  - Removed `repeat` and `play_once` modes
+  - Kept `bounce` and `random` modes
+  - Default changed to `bounce` (more interesting than repeat)
+  - loop_count parameter replaces play_once functionality
+- ✓ **Timeline Slider Fix** - Correct display for short clips
+  - Fixed max range calculation for clips <1 second
+  - Added fallback: `total_frames = max(out_point, 100)` when total_frames is None
+  - Ensures slider handles display correctly even for 20-frame clips
+- ✓ **WebSocket Resource Leak Fixes** - Improved stability
+  - Added URL cleanup: `pendingUrls` Set tracks and revokes all blob URLs
+  - Image object reuse: Single `frameImage` reused instead of creating new each frame
+  - Connection debouncing: `isConnecting` flag prevents connection spam
+  - Idempotent disconnect: Safe to call multiple times, handles KeyError race conditions
+  - Stale stream cleanup: Periodic cleanup of dead threads
+  - Connection limits: `max_concurrent_streams` config (default 10)
+  - Enhanced ping settings: Faster dead connection detection
+- ✓ **Generator Playback Control Removal** - Simplified architecture
+  - Removed speed, reverse, playback_mode from GeneratorSource
+  - Removed all playback mode logic from get_next_frame()
+  - Simplified to time-based frame tracking: `virtual_frame % total_frames`
+  - Transport plugin now handles all playback control for generators
+  - Removed legacy playback UI from frontend (speed/reverse/mode sliders)
+  - ~150 lines of code removed from backend and frontend
+- ✓ **Seamless Generator Looping** - Frame wrapping works correctly
+  - Uses modulo arithmetic: `virtual_frame % total_frames`
+  - Time calculation: `time = virtual_frame / fps`
+  - No visual glitches when looping back to frame 0
+  - Works with transport speed/reverse/trim
+- ✓ **Master/Slave Auto-Loop Behavior** - Slaves automatically hold at current clip
+  - Slave detection: Checks if player_manager.master_playlist is set and player is not master
+  - When clip ends (frame=None): Slaves loop current clip (seek to 0) instead of advancing
+  - Waits for master sync event to advance to next clip
+  - Master advances independently via autoplay + transport loop_count
+  - Prevents slaves from advancing out of sync with master
+  - Debug logging: "🔄 Slave mode: Looping current clip"
+- ✓ **Documentation Added** - Architecture and analysis docs
+  - Created PLAYER_EXECUTION_FLOW.md - Complete system flow documentation
+  - Created TRANSPORT_MASTER_SLAVE_ANALYSIS.md - Master/slave timing analysis
+  - Documents WebSocket latency, frame processing times, sync mechanisms
+  - Includes loop_count feature details and use cases
+
+**Benefits:**
+- Unified playback control: Transport plugin works with videos AND generators
+- Practical defaults: No infinite generation, 30s duration makes sense
+- Precise timing: loop_count enables exact loop control
+- Better stability: WebSocket resource leaks fixed
+- Cleaner code: Removed duplicate playback control logic (~150 lines)
+- Frame-perfect looping: Seamless transitions for generators
+
+**Performance Improvements:**
+- WebSocket latency: <100ms (was ~1s with WebRTC)
+- Timeline slider: Works correctly for any clip length
+- Generator looping: No frame skips or visual glitches
+- Memory usage: Reduced blob URL leaks, connection limits enforced
+
+---
+
 ## v2.3 - Unified API & Plugin System (2025-11-26 - 2025-12-05)
 
 ### v2.3.7 - Legacy Code Cleanup & ScriptSource Removal (2025-12-05)
