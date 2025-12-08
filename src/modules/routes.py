@@ -161,8 +161,8 @@ def register_web_routes(app, config=None, player_manager=None):
             canvas_height = getattr(player, 'canvas_height', 180)
             frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
         
-        # Encode as JPEG
-        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        # Encode as JPEG (quality 95 for LAN - bandwidth not a concern)
+        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
         return Response(buffer.tobytes(), mimetype='image/jpeg')
     
     # ========================================
@@ -182,8 +182,23 @@ def register_web_routes(app, config=None, player_manager=None):
     def frontend_config():
         """Liefert Frontend-Konfiguration für JavaScript."""
         port = config.get('api', {}).get('port', 5000)
+        
+        # Get WebSocket command settings
+        websocket_config = config.get('websocket', {})
+        commands_config = websocket_config.get('commands', {})
+        
         return jsonify({
             "api_base": f"http://localhost:{port}/api",
             "websocket_url": f"http://localhost:{port}",
-            "polling_interval": config.get('frontend', {}).get('polling_interval', 3000)
+            "polling_interval": config.get('frontend', {}).get('polling_interval', 3000),
+            "websocket": {
+                "enabled": websocket_config.get('enabled', True),
+                "commands": {
+                    "enabled": commands_config.get('enabled', True),
+                    "debounce_ms": commands_config.get('debounce_ms', 50),
+                    "timeout_ms": commands_config.get('timeout_ms', 1000),
+                    "reconnect_attempts": commands_config.get('reconnect_attempts', 5),
+                    "reconnect_delay_ms": commands_config.get('reconnect_delay_ms', 1000)
+                }
+            }
         })

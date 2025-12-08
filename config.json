@@ -100,6 +100,47 @@
     "debug_logging": true,
     "_debug_logging_comment": "Enable/disable console.log debug output in browser console (true/false)"
   },
+  "websocket": {
+    "enabled": true,
+    "_enabled_comment": "Enable WebSocket video streaming (true = WebSocket, false = MJPEG fallback)",
+    "default_quality": "medium",
+    "_quality_comment": "Quality presets: low (360p), medium (720p), high (1080p)",
+    "max_fps": 30,
+    "_max_fps_comment": "Maximum frames per second for streaming",
+    "quality_presets": {
+      "low": {
+        "width": 640,
+        "height": 360,
+        "fps": 20,
+        "jpeg_quality": 75
+      },
+      "medium": {
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "jpeg_quality": 85
+      },
+      "high": {
+        "width": 1920,
+        "height": 1080,
+        "fps": 30,
+        "jpeg_quality": 95
+      }
+    },
+    "commands": {
+      "enabled": true,
+      "_enabled_comment": "Enable WebSocket command channels for low-latency control (play/pause/effects/layers)",
+      "debounce_ms": 50,
+      "_debounce_ms_comment": "Debounce delay for parameter updates in milliseconds (lower = more responsive, higher = less network traffic)",
+      "timeout_ms": 1000,
+      "_timeout_ms_comment": "WebSocket command timeout before falling back to REST API (milliseconds)",
+      "reconnect_attempts": 5,
+      "_reconnect_attempts_comment": "Number of reconnection attempts if WebSocket connection drops",
+      "reconnect_delay_ms": 1000,
+      "_reconnect_delay_ms_comment": "Delay between reconnection attempts (milliseconds)"
+    },
+    "_comment": "WebSocket video streaming + command channels. Set enabled=false to use MJPEG fallback for video preview."
+  },
   "paths": {
     "cache_dir": "caches",
     "data_dir": "data",

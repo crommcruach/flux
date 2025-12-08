@@ -70,9 +70,13 @@ class RestAPI:
             manage_session=False
         )
         
+        # Initialize WebSocket video streaming
+        self._init_websocket_video_streaming()
+        
         # Routen registrieren
         self._register_routes()
         self._register_socketio_events()
+        self._setup_websocket_command_handlers()  # NEW: WebSocket command channels
         
         # Error Handler für 500er Fehler (verhindert write() before start_response)
         @self.app.errorhandler(500)
@@ -95,6 +99,20 @@ class RestAPI:
         self.server_thread = None
         self.status_broadcast_thread = None
         self.is_running = False
+    
+    def _init_websocket_video_streaming(self):
+        """Initialize WebSocket video streaming if enabled in config."""
+        websocket_config = self.config.get('websocket', {})
+        
+        if websocket_config.get('enabled', False):
+            try:
+                from .api_websocket import init_websocket_streaming
+                init_websocket_streaming(self.app, self.player_manager, websocket_config)
+                logger.info("✅ WebSocket video streaming initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ WebSocket streaming init failed: {e}")
+        else:
+            logger.info("WebSocket streaming disabled in config")
     
     @property
     def player(self):
@@ -168,6 +186,9 @@ class RestAPI:
         from .api_transitions import register_transition_routes
         register_transition_routes(self.app, self.player_manager)
         
+        # Store config in app for route access
+        self.app.flux_config = self.config
+        
         # Register Session Snapshot API
         from .api_session import register_session_routes
         from .session_state import get_session_state
@@ -206,6 +227,319 @@ class RestAPI:
                 emit('console_update', {
                     "log": log_lines,
                     "total": len(self.console_log)
+                })
+    
+    def _setup_websocket_command_handlers(self):
+        """Setup WebSocket command handlers for low-latency commands."""
+        from flask import request
+        
+        # ========================================
+        # PLAYER NAMESPACE - Transport Controls
+        # ========================================
+        @self.socketio.on('connect', namespace='/player')
+        def handle_player_connect():
+            logger.info(f"Client connected to /player namespace: {request.sid}")
+            emit('connected', {'status': 'ready'})
+        
+        @self.socketio.on('disconnect', namespace='/player')
+        def handle_player_disconnect():
+            logger.info(f"Client disconnected from /player namespace: {request.sid}")
+        
+        @self.socketio.on('command.play', namespace='/player')
+        def handle_play(data):
+            """Handle play command via WebSocket."""
+            player_id = data.get('player_id', 'video')
+            try:
+                player = self.player_manager.get_player(player_id)
+                if player:
+                    player.play()
+                    emit('command.response', {
+                        'success': True,
+                        'command': 'play',
+                        'player_id': player_id
+                    })
+                    # Broadcast status change to all clients
+                    self.socketio.emit('player.status', {
+                        'player_id': player_id,
+                        'is_playing': True,
+                        'is_paused': False
+                    }, namespace='/player')
+            except Exception as e:
+                logger.error(f"WebSocket play command error: {e}")
+                emit('command.error', {
+                    'command': 'play',
+                    'error': str(e)
+                })
+        
+        @self.socketio.on('command.pause', namespace='/player')
+        def handle_pause(data):
+            """Handle pause command via WebSocket."""
+            player_id = data.get('player_id', 'video')
+            try:
+                player = self.player_manager.get_player(player_id)
+                if player:
+                    player.pause()
+                    emit('command.response', {
+                        'success': True,
+                        'command': 'pause',
+                        'player_id': player_id
+                    })
+                    self.socketio.emit('player.status', {
+                        'player_id': player_id,
+                        'is_paused': True
+                    }, namespace='/player')
+            except Exception as e:
+                logger.error(f"WebSocket pause command error: {e}")
+                emit('command.error', {
+                    'command': 'pause',
+                    'error': str(e)
+                })
+        
+        @self.socketio.on('command.stop', namespace='/player')
+        def handle_stop(data):
+            """Handle stop command via WebSocket."""
+            player_id = data.get('player_id', 'video')
+            try:
+                player = self.player_manager.get_player(player_id)
+                if player:
+                    player.stop()
+                    emit('command.response', {
+                        'success': True,
+                        'command': 'stop',
+                        'player_id': player_id
+                    })
+                    self.socketio.emit('player.status', {
+                        'player_id': player_id,
+                        'is_playing': False,
+                        'is_paused': False
+                    }, namespace='/player')
+            except Exception as e:
+                logger.error(f"WebSocket stop command error: {e}")
+                emit('command.error', {
+                    'command': 'stop',
+                    'error': str(e)
+                })
+        
+        @self.socketio.on('command.next', namespace='/player')
+        def handle_next(data):
+            """Handle next clip command via WebSocket."""
+            player_id = data.get('player_id', 'video')
+            try:
+                player = self.player_manager.get_player(player_id)
+                if player and hasattr(player, 'next_clip'):
+                    player.next_clip()
+                    emit('command.response', {
+                        'success': True,
+                        'command': 'next',
+                        'player_id': player_id
+                    })
+                    # Broadcast playlist change
+                    self.socketio.emit('playlist.changed', {
+                        'player_id': player_id,
+                        'current_index': getattr(player, 'playlist_index', 0)
+                    }, namespace='/player')
+            except Exception as e:
+                logger.error(f"WebSocket next command error: {e}")
+                emit('command.error', {
+                    'command': 'next',
+                    'error': str(e)
+                })
+        
+        @self.socketio.on('command.previous', namespace='/player')
+        def handle_previous(data):
+            """Handle previous clip command via WebSocket."""
+            player_id = data.get('player_id', 'video')
+            try:
+                player = self.player_manager.get_player(player_id)
+                if player and hasattr(player, 'previous_clip'):
+                    player.previous_clip()
+                    emit('command.response', {
+                        'success': True,
+                        'command': 'previous',
+                        'player_id': player_id
+                    })
+                    self.socketio.emit('playlist.changed', {
+                        'player_id': player_id,
+                        'current_index': getattr(player, 'playlist_index', 0)
+                    }, namespace='/player')
+            except Exception as e:
+                logger.error(f"WebSocket previous command error: {e}")
+                emit('command.error', {
+                    'command': 'previous',
+                    'error': str(e)
+                })
+        
+        # ========================================
+        # EFFECTS NAMESPACE - Effect Parameters
+        # ========================================
+        @self.socketio.on('connect', namespace='/effects')
+        def handle_effects_connect():
+            logger.info(f"Client connected to /effects namespace: {request.sid}")
+            emit('connected', {'status': 'ready'})
+        
+        @self.socketio.on('disconnect', namespace='/effects')
+        def handle_effects_disconnect():
+            logger.info(f"Client disconnected from /effects namespace: {request.sid}")
+        
+        @self.socketio.on('command.effect.param', namespace='/effects')
+        def handle_effect_param_update(data):
+            """Handle effect parameter update via WebSocket."""
+            player_id = data.get('player_id')
+            clip_id = data.get('clip_id')
+            effect_index = data.get('effect_index')
+            param_name = data.get('param_name')
+            value = data.get('value')
+            
+            try:
+                # Get player and update parameter
+                player = self.player_manager.get_player(player_id)
+                if not player:
+                    raise ValueError(f"Player {player_id} not found")
+                
+                # Get clip from registry
+                from .clip_registry import get_clip_registry
+                registry = get_clip_registry()
+                clip = registry.get_clip(clip_id)
+                
+                if not clip:
+                    raise ValueError(f"Clip {clip_id} not found")
+                
+                # Update effect parameter
+                if effect_index < len(clip.effects):
+                    effect = clip.effects[effect_index]
+                    
+                    # Try multiple update methods (in order of preference)
+                    updated = False
+                    
+                    # Method 1: set_parameter() method
+                    if hasattr(effect, 'set_parameter'):
+                        effect.set_parameter(param_name, value)
+                        updated = True
+                    # Method 2: Direct parameters dict
+                    elif hasattr(effect, 'parameters') and isinstance(effect.parameters, dict):
+                        effect.parameters[param_name] = value
+                        updated = True
+                    # Method 3: Direct attribute
+                    elif hasattr(effect, param_name):
+                        setattr(effect, param_name, value)
+                        updated = True
+                    
+                    if updated:
+                        emit('command.response', {
+                            'success': True,
+                            'command': 'effect.param',
+                            'effect_index': effect_index,
+                            'param_name': param_name,
+                            'value': value
+                        })
+                        
+                        logger.debug(f"✅ WebSocket: Updated {player_id} effect[{effect_index}].{param_name} = {value}")
+                        
+                        # Broadcast to all clients for multi-user sync
+                        self.socketio.emit('effect.param.changed', {
+                            'player_id': player_id,
+                            'clip_id': clip_id,
+                            'effect_index': effect_index,
+                            'param_name': param_name,
+                            'value': value
+                        }, namespace='/effects')
+                    else:
+                        raise AttributeError(f"Could not update parameter {param_name} on effect")
+                else:
+                    raise IndexError(f"Effect index {effect_index} out of range")
+                    
+            except Exception as e:
+                logger.error(f"WebSocket effect.param command error: {e}")
+                emit('command.error', {
+                    'command': 'effect.param',
+                    'error': str(e)
+                })
+        
+        # ========================================
+        # LAYERS NAMESPACE - Layer Controls
+        # ========================================
+        @self.socketio.on('connect', namespace='/layers')
+        def handle_layers_connect():
+            logger.info(f"Client connected to /layers namespace: {request.sid}")
+            emit('connected', {'status': 'ready'})
+        
+        @self.socketio.on('disconnect', namespace='/layers')
+        def handle_layers_disconnect():
+            logger.info(f"Client disconnected from /layers namespace: {request.sid}")
+        
+        @self.socketio.on('command.layer.opacity', namespace='/layers')
+        def handle_layer_opacity(data):
+            """Handle layer opacity update via WebSocket."""
+            player_id = data.get('player_id')
+            clip_id = data.get('clip_id')
+            layer_id = data.get('layer_id')
+            opacity = data.get('opacity')
+            
+            try:
+                player = self.player_manager.get_player(player_id)
+                if player and player.layers and layer_id < len(player.layers):
+                    player.layers[layer_id].opacity = opacity / 100.0
+                    
+                    logger.debug(f"✅ WebSocket: Updated {player_id} layer[{layer_id}].opacity = {opacity}%")
+                    
+                    emit('command.response', {
+                        'success': True,
+                        'command': 'layer.opacity',
+                        'layer_id': layer_id,
+                        'opacity': opacity
+                    })
+                    
+                    # Broadcast to all clients
+                    self.socketio.emit('layer.changed', {
+                        'player_id': player_id,
+                        'clip_id': clip_id,
+                        'layer_id': layer_id,
+                        'opacity': opacity
+                    }, namespace='/layers')
+                else:
+                    raise ValueError(f"Layer {layer_id} not found or invalid")
+            except Exception as e:
+                logger.error(f"WebSocket layer.opacity command error: {e}")
+                emit('command.error', {
+                    'command': 'layer.opacity',
+                    'error': str(e)
+                })
+        
+        @self.socketio.on('command.layer.blend_mode', namespace='/layers')
+        def handle_layer_blend_mode(data):
+            """Handle layer blend mode update via WebSocket."""
+            player_id = data.get('player_id')
+            clip_id = data.get('clip_id')
+            layer_id = data.get('layer_id')
+            blend_mode = data.get('blend_mode')
+            
+            try:
+                player = self.player_manager.get_player(player_id)
+                if player and player.layers and layer_id < len(player.layers):
+                    player.layers[layer_id].blend_mode = blend_mode
+                    
+                    logger.debug(f"✅ WebSocket: Updated {player_id} layer[{layer_id}].blend_mode = {blend_mode}")
+                    
+                    emit('command.response', {
+                        'success': True,
+                        'command': 'layer.blend_mode',
+                        'layer_id': layer_id,
+                        'blend_mode': blend_mode
+                    })
+                    
+                    self.socketio.emit('layer.changed', {
+                        'player_id': player_id,
+                        'clip_id': clip_id,
+                        'layer_id': layer_id,
+                        'blend_mode': blend_mode
+                    }, namespace='/layers')
+                else:
+                    raise ValueError(f"Layer {layer_id} not found or invalid")
+            except Exception as e:
+                logger.error(f"WebSocket layer.blend_mode command error: {e}")
+                emit('command.error', {
+                    'command': 'layer.blend_mode',
+                    'error': str(e)
                 })
     
     def _get_status_data(self):

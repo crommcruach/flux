@@ -13,6 +13,14 @@ export let API_BASE = 'http://localhost:5000/api';
 export let WEBSOCKET_URL = 'http://localhost:5000';
 export let POLLING_INTERVAL = 3000;
 
+// WebSocket settings
+export let WEBSOCKET_ENABLED = true;
+export let WEBSOCKET_COMMANDS_ENABLED = true;
+export let WEBSOCKET_DEBOUNCE_MS = 50;
+export let WEBSOCKET_TIMEOUT_MS = 1000;
+export let WEBSOCKET_RECONNECT_ATTEMPTS = 5;
+export let WEBSOCKET_RECONNECT_DELAY_MS = 1000;
+
 /**
  * Load configuration from API
  */
@@ -28,7 +36,32 @@ export async function loadConfig() {
         WEBSOCKET_URL = `http://${host}:${port}`;
         POLLING_INTERVAL = config.status_broadcast_interval || 3000;
         
-        debug.log('Config loaded:', { API_BASE, WEBSOCKET_URL, POLLING_INTERVAL });
+        // Load WebSocket settings
+        if (config.websocket) {
+            WEBSOCKET_ENABLED = config.websocket.enabled !== false;
+            
+            if (config.websocket.commands) {
+                WEBSOCKET_COMMANDS_ENABLED = config.websocket.commands.enabled !== false;
+                WEBSOCKET_DEBOUNCE_MS = config.websocket.commands.debounce_ms || 50;
+                WEBSOCKET_TIMEOUT_MS = config.websocket.commands.timeout_ms || 1000;
+                WEBSOCKET_RECONNECT_ATTEMPTS = config.websocket.commands.reconnect_attempts || 5;
+                WEBSOCKET_RECONNECT_DELAY_MS = config.websocket.commands.reconnect_delay_ms || 1000;
+            }
+        }
+        
+        debug.log('Config loaded:', { 
+            API_BASE, 
+            WEBSOCKET_URL, 
+            POLLING_INTERVAL,
+            websocket: {
+                enabled: WEBSOCKET_ENABLED,
+                commands_enabled: WEBSOCKET_COMMANDS_ENABLED,
+                debounce_ms: WEBSOCKET_DEBOUNCE_MS,
+                timeout_ms: WEBSOCKET_TIMEOUT_MS,
+                reconnect_attempts: WEBSOCKET_RECONNECT_ATTEMPTS,
+                reconnect_delay_ms: WEBSOCKET_RECONNECT_DELAY_MS
+            }
+        });
     } catch (error) {
         debug.warn('Could not load config, using defaults:', error);
     }
@@ -37,8 +70,16 @@ export async function loadConfig() {
 // ========================================
 // WEBSOCKET
 // ========================================
-let socket = null;
+let socket = null;  // DEPRECATED: Legacy socket for status/console/logs - will be removed after migration
 let socketConnected = false;
+
+// NEW: Command channel sockets (low-latency WebSocket commands)
+let playerSocket = null;
+let effectsSocket = null;
+let layersSocket = null;
+let playerSocketConnected = false;
+let effectsSocketConnected = false;
+let layersSocketConnected = false;
 
 export function getSocket() {
     return socket;
@@ -48,11 +89,37 @@ export function isSocketConnected() {
     return socketConnected;
 }
 
+// NEW: Export command sockets
+export function getPlayerSocket() {
+    return playerSocket;
+}
+
+export function getEffectsSocket() {
+    return effectsSocket;
+}
+
+export function getLayersSocket() {
+    return layersSocket;
+}
+
+export function isPlayerSocketConnected() {
+    return playerSocketConnected;
+}
+
+export function isEffectsSocketConnected() {
+    return effectsSocketConnected;
+}
+
+export function isLayersSocketConnected() {
+    return layersSocketConnected;
+}
+
 /**
  * Initialize WebSocket connection
  * @param {Object} handlers - Event handlers { onConnect, onDisconnect, onStatus, onConsoleUpdate, onLogUpdate }
  */
 export function initWebSocket(handlers = {}) {
+    // DEPRECATED: Legacy socket for status/console/logs
     socket = io(WEBSOCKET_URL, {
         transports: ['websocket', 'polling']
     });
@@ -85,6 +152,136 @@ export function initWebSocket(handlers = {}) {
     }
     if (handlers.onLogUpdate) {
         socket.on('log_update', handlers.onLogUpdate);
+    }
+    
+    // NEW: Initialize command channel sockets
+    _initCommandChannels();
+}
+
+/**
+ * Initialize WebSocket command channels (low-latency)
+ * @private
+ */
+function _initCommandChannels() {
+    // Skip if commands are disabled in config
+    if (!WEBSOCKET_COMMANDS_ENABLED) {
+        console.log('⚠️ WebSocket commands disabled in config');
+        return;
+    }
+    
+    // Player namespace - transport controls
+    playerSocket = io(`${WEBSOCKET_URL}/player`, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: WEBSOCKET_RECONNECT_ATTEMPTS,
+        reconnectionDelay: WEBSOCKET_RECONNECT_DELAY_MS
+    });
+    
+    playerSocket.on('connect', () => {
+        console.log('✅ Player WebSocket connected');
+        playerSocketConnected = true;
+    });
+    
+    playerSocket.on('disconnect', () => {
+        console.log('❌ Player WebSocket disconnected');
+        playerSocketConnected = false;
+    });
+    
+    // Effects namespace - effect parameters
+    effectsSocket = io(`${WEBSOCKET_URL}/effects`, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: WEBSOCKET_RECONNECT_ATTEMPTS,
+        reconnectionDelay: WEBSOCKET_RECONNECT_DELAY_MS
+    });
+    
+    effectsSocket.on('connect', () => {
+        console.log('✅ Effects WebSocket connected');
+        effectsSocketConnected = true;
+    });
+    
+    effectsSocket.on('disconnect', () => {
+        console.log('❌ Effects WebSocket disconnected');
+        effectsSocketConnected = false;
+    });
+    
+    // Layers namespace - layer controls
+    layersSocket = io(`${WEBSOCKET_URL}/layers`, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: WEBSOCKET_RECONNECT_ATTEMPTS,
+        reconnectionDelay: WEBSOCKET_RECONNECT_DELAY_MS
+    });
+    
+    layersSocket.on('connect', () => {
+        console.log('✅ Layers WebSocket connected');
+        layersSocketConnected = true;
+    });
+    
+    layersSocket.on('disconnect', () => {
+        console.log('❌ Layers WebSocket disconnected');
+        layersSocketConnected = false;
+    });
+}
+
+/**
+ * Hybrid command executor - tries WebSocket first, falls back to REST
+ * @param {string} namespace - WebSocket namespace ('player', 'effects', 'layers')
+ * @param {string} event - WebSocket event name (e.g., 'command.play')
+ * @param {object} data - Command payload
+ * @param {function} restFallback - REST API fallback function
+ * @returns {Promise<object>} Command result
+ */
+export async function executeCommand(namespace, event, data, restFallback) {
+    // Get appropriate socket
+    const socketMap = {
+        'player': playerSocket,
+        'effects': effectsSocket,
+        'layers': layersSocket
+    };
+    
+    const connectionMap = {
+        'player': playerSocketConnected,
+        'effects': effectsSocketConnected,
+        'layers': layersSocketConnected
+    };
+    
+    const socket = socketMap[namespace];
+    const isConnected = connectionMap[namespace];
+    
+    // Try WebSocket first (if connected and enabled)
+    if (WEBSOCKET_COMMANDS_ENABLED && isConnected && socket) {
+        try {
+            return await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('WebSocket command timeout'));
+                }, WEBSOCKET_TIMEOUT_MS); // Configurable timeout from config.json
+                
+                // Listen for response
+                socket.once('command.response', (response) => {
+                    clearTimeout(timeout);
+                    resolve(response);
+                });
+                
+                socket.once('command.error', (error) => {
+                    clearTimeout(timeout);
+                    reject(error);
+                });
+                
+                // Send command
+                socket.emit(event, data);
+            });
+        } catch (error) {
+            console.warn(`WebSocket command failed, falling back to REST:`, error);
+            // Fall through to REST fallback
+        }
+    }
+    
+    // Fallback to REST
+    if (restFallback) {
+        return await restFallback();
+    } else {
+        throw new Error('No REST fallback provided and WebSocket unavailable');
     }
 }
 

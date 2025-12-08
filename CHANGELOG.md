@@ -7,6 +7,40 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ---
 
+## [Unreleased] - 2025-12-08
+
+### 🔄 Migration: WebRTC → WebSocket
+
+#### Geändert
+- **Video Preview System** - Migration von WebRTC zu WebSocket streaming
+  - Ersetzt WebRTC (mit DTLS/ICE Komplexität) durch einfaches WebSocket streaming
+  - Optimiert für LAN-Umgebung ohne Verschlüsselung/STUN/TURN Overhead
+  - Socket.IO basierte Implementierung mit Flask-SocketIO
+  - Binary JPEG frame streaming über `/video` namespace
+  - Konfigurierbare Quality Presets (low/medium/high)
+  - Aspect-ratio-preserving canvas rendering mit letterboxing
+  
+- **Performance Optimierungen**
+  - Frame identity tracking - überspringt Encoding von duplizierten Frames
+  - 1ms polling für minimale Latenz bei neuen Frames
+  - Deaktivierte JPEG Optimierung für schnelleres Encoding
+  - Reduzierte Latenz von ~1s auf <100ms
+
+#### Entfernt
+- `src/modules/api_webrtc.py` - WebRTC signaling server
+- `src/modules/webrtc_track.py` - aiortc MediaStreamTrack implementation
+- `frontend/js/webrtc-preview.js` - WebRTC client
+- WebRTC config section aus `config.json`
+
+#### Hinzugefügt
+- `src/modules/api_websocket.py` - WebSocket streaming server mit Flask-SocketIO
+- `frontend/js/websocket-preview.js` - WebSocket client mit Socket.IO
+- WebSocket config section in `config.json` mit quality presets
+- Socket.IO CDN integration in player.html
+- Global debug accessors: `getWebSocketPreview()`, `getWebSocketArtnetPreview()`
+
+---
+
 ## [2.3.0] - 2025-11-26
 
 ### 🏗️ Unified API Architecture v2.0 - Breaking Changes

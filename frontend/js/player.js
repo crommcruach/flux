@@ -3,7 +3,7 @@
  * Video + Art-Net players with FX control
  */
 
-import { showToast } from './common.js';
+import { showToast, executeCommand, WEBSOCKET_ENABLED, WEBSOCKET_DEBOUNCE_MS } from './common.js';
 import { EffectsTab } from './components/effects-tab.js';
 import { SourcesTab } from './components/sources-tab.js';
 import { FilesTab } from './components/files-tab.js';
@@ -21,6 +21,10 @@ let updateInterval = null;
 // Performance: Maps for O(1) lookups instead of Array.find() (5-10% CPU reduction)
 let effectsMap = new Map();
 let generatorsMap = new Map();
+
+// WebSocket preview instances (global for debugging)
+let websocketPreview = null;
+let websocketArtnetPreview = null;
 
 // ========================================
 // GENERIC PLAYER CONFIGURATION
@@ -1302,21 +1306,222 @@ window.updateGeneratorParameter = async function(paramName, value) {
 };
 
 // ========================================
-// VIDEO PREVIEW STREAM
+// VIDEO PREVIEW STREAM (WebSocket)
 // ========================================
 
+let previewUseWebSocket = true;
+let previewStatsInterval = null;
+
 function startPreviewStream() {
+    const quality = document.getElementById('previewQuality')?.value || 'medium';
+    const canvas = document.getElementById('videoPreviewVideo');
+    
+    // Use WebSocket only if enabled in config
+    if (WEBSOCKET_ENABLED && previewUseWebSocket && window.WebSocketPreview && canvas) {
+        // Try WebSocket first
+        try {
+            websocketPreview = new WebSocketPreview({
+                playerId: 'video',
+                quality: quality,
+                fps: 30,
+                autoStart: true,
+                fpsDisplay: document.getElementById('previewStats'),
+                onConnected: () => {
+                    updatePreviewModeButton('connected');
+                    canvas.style.display = 'block';
+                    document.getElementById('videoPreviewImg').style.display = 'none';
+                },
+                onDisconnected: () => {
+                    updatePreviewModeButton('disconnected');
+                },
+                onError: (error) => {
+                    console.error('WebSocket error:', error);
+                    previewUseWebSocket = false;
+                    startMJPEGPreview();
+                }
+            });
+            websocketPreview.start(canvas);
+            updatePreviewModeButton('connecting');
+            console.log('WebSocket preview started');
+        } catch (error) {
+            console.error('WebSocket initialization failed:', error);
+            startMJPEGPreview();
+        }
+    } else {
+        // MJPEG fallback
+        startMJPEGPreview();
+    }
+}
+
+function startMJPEGPreview() {
     const previewImg = document.getElementById('videoPreviewImg');
+    previewImg.style.display = 'block';
+    document.getElementById('videoPreviewVideo').style.display = 'none';
     previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
     
     // Refresh preview every 100ms
     setInterval(() => {
         previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
     }, 100);
+    
+    updatePreviewModeButton('mjpeg');
 }
+
+function updatePreviewModeButton(state) {
+    const btn = document.getElementById('previewModeBtn');
+    if (!btn) return;
+    
+    if (state === 'connected') {
+        btn.textContent = '🔌 WebSocket';
+        btn.className = 'btn btn-sm btn-success';
+    } else if (state === 'connecting') {
+        btn.textContent = '⏳ Connecting...';
+        btn.className = 'btn btn-sm btn-warning';
+    } else if (state === 'mjpeg_fallback' || state === 'mjpeg') {
+        btn.textContent = '📷 MJPEG';
+        btn.className = 'btn btn-sm btn-info';
+    } else if (state === 'disconnected') {
+        btn.textContent = '❌ Disconnected';
+        btn.className = 'btn btn-sm btn-danger';
+    }
+}
+
+function updatePreviewStats(stats) {
+    const statsEl = document.getElementById('previewStats');
+    if (!statsEl) return;
+    
+    const fps = stats.framesReceived ? Math.round(stats.framesReceived / 2) : 0;  // Rough estimate
+    const mbps = stats.bytesReceived ? (stats.bytesReceived * 8 / 2000000).toFixed(2) : '0.00';
+    
+    statsEl.textContent = `${fps} FPS | ${mbps} Mbps`;
+}
+
+window.changePreviewQuality = async function() {
+    if (websocketPreview) {
+        const quality = document.getElementById('previewQuality').value;
+        websocketPreview.setQuality(quality);
+    }
+};
+
+window.togglePreviewMode = async function() {
+    if (websocketPreview) {
+        websocketPreview.stop();
+        websocketPreview = null;
+    }
+    
+    previewUseWebSocket = !previewUseWebSocket;
+    startPreviewStream();
+};
 
 window.openVideoFullscreen = function() {
     window.open('/fullscreen', 'Flux Fullscreen', 'width=1920,height=1080');
+};
+
+// ========================================
+// ART-NET PREVIEW STREAM (WebSocket)
+// ========================================
+
+let artnetPreviewUseWebSocket = true;
+
+function startArtnetPreviewStream() {
+    const quality = document.getElementById('artnetPreviewQuality')?.value || 'medium';
+    const canvas = document.getElementById('artnetPreviewVideo');
+    
+    // Use WebSocket only if enabled in config
+    if (WEBSOCKET_ENABLED && artnetPreviewUseWebSocket && window.WebSocketPreview && canvas) {
+        // Try WebSocket first
+        try {
+            websocketArtnetPreview = new WebSocketPreview({
+                playerId: 'artnet',
+                quality: quality,
+                fps: 30,
+                autoStart: true,
+                fpsDisplay: document.getElementById('artnetPreviewStats'),
+                onConnected: () => {
+                    updateArtnetPreviewModeButton('connected');
+                    canvas.style.display = 'block';
+                    document.getElementById('artnetPreviewImg').style.display = 'none';
+                },
+                onDisconnected: () => {
+                    updateArtnetPreviewModeButton('disconnected');
+                },
+                onError: (error) => {
+                    console.error('Art-Net WebSocket error:', error);
+                    artnetPreviewUseWebSocket = false;
+                    startArtnetMJPEGPreview();
+                }
+            });
+            websocketArtnetPreview.start(canvas);
+            updateArtnetPreviewModeButton('connecting');
+            console.log('Art-Net WebSocket preview started');
+        } catch (error) {
+            console.error('Art-Net WebSocket initialization failed:', error);
+            startArtnetMJPEGPreview();
+        }
+    } else {
+        // MJPEG fallback
+        startArtnetMJPEGPreview();
+    }
+}
+
+function startArtnetMJPEGPreview() {
+    const previewImg = document.getElementById('artnetPreviewImg');
+    previewImg.style.display = 'block';
+    document.getElementById('artnetPreviewVideo').style.display = 'none';
+    previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+    
+    // Refresh preview every 100ms
+    setInterval(() => {
+        previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+    }, 100);
+    
+    updateArtnetPreviewModeButton('mjpeg');
+}
+
+function updateArtnetPreviewModeButton(state) {
+    const btn = document.getElementById('artnetPreviewModeBtn');
+    if (!btn) return;
+    
+    if (state === 'connected') {
+        btn.textContent = '🎥 WebRTC';
+        btn.className = 'btn btn-sm btn-success';
+    } else if (state === 'connecting') {
+        btn.textContent = '⏳ Connecting...';
+        btn.className = 'btn btn-sm btn-warning';
+    } else if (state === 'mjpeg_fallback' || state === 'mjpeg') {
+        btn.textContent = '📷 MJPEG';
+        btn.className = 'btn btn-sm btn-info';
+    } else if (state === 'failed' || state === 'closed') {
+        btn.textContent = '❌ Disconnected';
+        btn.className = 'btn btn-sm btn-danger';
+    }
+}
+
+function updateArtnetPreviewStats(stats) {
+    const statsEl = document.getElementById('artnetPreviewStats');
+    if (!statsEl) return;
+    
+    const fps = stats.framesReceived ? Math.round(stats.framesReceived / 2) : 0;
+    const mbps = stats.bytesReceived ? (stats.bytesReceived * 8 / 2000000).toFixed(2) : '0.00';
+    
+    statsEl.textContent = `${fps} FPS | ${mbps} Mbps`;
+}
+
+window.changeArtnetPreviewQuality = async function() {
+    if (webrtcArtnetPreview) {
+        const quality = document.getElementById('artnetPreviewQuality').value;
+        await webrtcArtnetPreview.changeQuality(quality);
+    }
+};
+
+window.toggleArtnetPreviewMode = async function() {
+    if (webrtcArtnetPreview) {
+        await webrtcArtnetPreview.stop();
+        webrtcArtnetPreview = null;
+    }
+    
+    artnetPreviewUseWebRTC = !artnetPreviewUseWebRTC;
+    startArtnetPreviewStream();
 };
 
 // ========================================
@@ -2093,21 +2298,48 @@ window.play = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
-    await fetch(`${API_BASE}${config.apiBase}/play`, { method: 'POST' });
+    // NEW: Hybrid command - try WebSocket first, fallback to REST
+    await executeCommand(
+        'player',
+        'command.play',
+        { player_id: playerId },
+        async () => {
+            // REST fallback
+            await fetch(`${API_BASE}${config.apiBase}/play`, { method: 'POST' });
+        }
+    );
 };
 
 window.pause = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
-    await fetch(`${API_BASE}${config.apiBase}/pause`, { method: 'POST' });
+    // NEW: Hybrid command - try WebSocket first, fallback to REST
+    await executeCommand(
+        'player',
+        'command.pause',
+        { player_id: playerId },
+        async () => {
+            // REST fallback
+            await fetch(`${API_BASE}${config.apiBase}/pause`, { method: 'POST' });
+        }
+    );
 };
 
 window.stop = async function(playerId) {
     const config = playerConfigs[playerId];
     if (!config) return;
     
-    await fetch(`${API_BASE}${config.apiBase}/stop`, { method: 'POST' });
+    // NEW: Hybrid command - try WebSocket first, fallback to REST
+    await executeCommand(
+        'player',
+        'command.stop',
+        { player_id: playerId },
+        async () => {
+            // REST fallback
+            await fetch(`${API_BASE}${config.apiBase}/stop`, { method: 'POST' });
+        }
+    );
 };
 
 window.next = async function(playerId) {
@@ -2115,14 +2347,26 @@ window.next = async function(playerId) {
     if (!config) return;
     
     try {
-        const response = await fetch(`${API_BASE}${config.apiBase}/next`, { method: 'POST' });
-        const data = await response.json();
+        // NEW: Hybrid command - try WebSocket first, fallback to REST
+        const result = await executeCommand(
+            'player',
+            'command.next',
+            { player_id: playerId },
+            async () => {
+                // REST fallback
+                const response = await fetch(`${API_BASE}${config.apiBase}/next`, { method: 'POST' });
+                return await response.json();
+            }
+        );
+        
+        // Handle response (from WebSocket or REST)
+        const data = result.success !== undefined ? result : { success: result };
         
         if (data.success) {
-            config.currentFile = data.video;
-            config.currentItemId = data.clip_id || null;
+            if (data.video) config.currentFile = data.video;
+            if (data.clip_id) config.currentItemId = data.clip_id;
             renderPlaylist(playerId);
-            debug.log(`⏭️ Next ${config.name}:`, data.video);
+            debug.log(`⏭️ Next ${config.name}:`, data.video || 'clip');
         } else {
             console.error(`Failed to load next ${config.name}:`, data.message);
         }
@@ -2136,14 +2380,26 @@ window.previous = async function(playerId) {
     if (!config) return;
     
     try {
-        const response = await fetch(`${API_BASE}${config.apiBase}/previous`, { method: 'POST' });
-        const data = await response.json();
+        // NEW: Hybrid command - try WebSocket first, fallback to REST
+        const result = await executeCommand(
+            'player',
+            'command.previous',
+            { player_id: playerId },
+            async () => {
+                // REST fallback
+                const response = await fetch(`${API_BASE}${config.apiBase}/previous`, { method: 'POST' });
+                return await response.json();
+            }
+        );
+        
+        // Handle response (from WebSocket or REST)
+        const data = result.success !== undefined ? result : { success: result };
         
         if (data.success) {
-            config.currentFile = data.video;
-            config.currentItemId = data.clip_id || null;
+            if (data.video) config.currentFile = data.video;
+            if (data.clip_id) config.currentItemId = data.clip_id;
             renderPlaylist(playerId);
-            debug.log(`⏮️ Previous ${config.name}:`, data.video);
+            debug.log(`⏮️ Previous ${config.name}:`, data.video || 'clip');
         } else {
             console.error(`Failed to load previous ${config.name}:`, data.message);
         }
@@ -2384,16 +2640,6 @@ window.removeFromArtnetPlaylist = async function(index) {
     await updatePlaylist('artnet');
 };
 
-function startArtnetPreviewStream() {
-    const previewImg = document.getElementById('artnetPreviewImg');
-    
-    // Use separate Art-Net preview endpoint
-    previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
-    setInterval(() => {
-        previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
-    }, 100);
-}
-
 window.openArtnetFullscreen = function() {
     window.open('/fullscreen', 'Art-Net Fullscreen', 'width=1920,height=1080');
 };
@@ -2409,6 +2655,10 @@ window.nextArtnet = async function() { await next('artnet'); };
 window.previousArtnet = async function() { await previous('artnet'); };
 window.toggleArtnetAutoplay = async function() { await toggleAutoplay('artnet'); };
 window.toggleArtnetLoop = async function() { await toggleLoop('artnet'); };
+
+// Expose WebSocket preview instances for debugging
+window.getWebSocketPreview = () => websocketPreview;
+window.getWebSocketArtnetPreview = () => websocketArtnetPreview;
 
 // ========================================
 // VIDEO FX MANAGEMENT
@@ -3424,7 +3674,7 @@ window.updateParameter = async function(player, effectIndex, paramName, value, v
             }
         }
         
-        // Debounce: Warte 150ms nach letzter Änderung
+        // Configurable debounce (from config.json websocket.commands.debounce_ms)
         const timerKey = `${player}_${effectIndex}_${paramName}`;
         
         if (parameterUpdateTimers[timerKey]) {
@@ -3434,7 +3684,7 @@ window.updateParameter = async function(player, effectIndex, paramName, value, v
         parameterUpdateTimers[timerKey] = setTimeout(async () => {
             await sendParameterUpdate(player, effectIndex, paramName, value, valueDisplayId);
             delete parameterUpdateTimers[timerKey];
-        }, 150);
+        }, WEBSOCKET_DEBOUNCE_MS); // Configurable from config.json (default: 50ms)
         
     } catch (error) {
         console.error(`❌ Error updating ${player} parameter:`, error);
@@ -3443,21 +3693,22 @@ window.updateParameter = async function(player, effectIndex, paramName, value, v
 
 async function sendParameterUpdate(player, effectIndex, paramName, value, valueDisplayId = null) {
     try {
-        let endpoint;
-        let body;
-        let method;
-        
         // Check if this is a triple-slider and include range data
         const controlId = valueDisplayId ? valueDisplayId.replace('_value', '') : null;
         const tripleSlider = controlId ? getTripleSlider(controlId) : null;
         
+        let endpoint;
+        let body;
+        let method;
+        let playerId;
+        let targetClipId;
+        
         if (player === 'clip') {
             // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
-            const targetClipId = selectedLayerClipId || selectedClipId;
+            targetClipId = selectedLayerClipId || selectedClipId;
+            playerId = selectedClipPlayerType;
             console.log(`🔍 sendParameterUpdate: selectedLayerId=${selectedLayerId}, selectedLayerClipId=${selectedLayerClipId}, selectedClipId=${selectedClipId}, targetClipId=${targetClipId}`);
             
-            // NEW: Unified API endpoint (clip_id in URL, no clip_path in body)
-            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${targetClipId}/effects/${effectIndex}/parameter`;
             body = { 
                 name: paramName, 
                 value: value
@@ -3468,8 +3719,39 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
                 body.rangeMax = range.max;
                 console.log(`🎚️ Triple-slider range: min=${range.min}, max=${range.max}, value=${value}`);
             }
-            method = 'PUT';
+            
+            // Try WebSocket first for clip effects
+            try {
+                await executeCommand(
+                    'effects',
+                    'command.effect.param',
+                    {
+                        player_id: playerId,
+                        clip_id: targetClipId,
+                        effect_index: effectIndex,
+                        param_name: paramName,
+                        value: value
+                    },
+                    async () => {
+                        // REST fallback
+                        endpoint = `${API_BASE}/api/player/${playerId}/clip/${targetClipId}/effects/${effectIndex}/parameter`;
+                        const response = await fetch(endpoint, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+                        return await response.json();
+                    }
+                );
+                
+                const target = isLayerSelected() ? `Layer ${selectedLayerId}` : player;
+                debug.log(`✅ Updated ${target} ${paramName} = ${value} (WebSocket)`);
+                return;
+            } catch (error) {
+                console.error(`❌ WebSocket effect param update failed:`, error);
+            }
         } else if (player === 'video') {
+            playerId = 'video';
             endpoint = `${API_BASE}/api/player/video/effects/${effectIndex}/parameter`;
             body = { name: paramName, value: value };
             if (tripleSlider) {
@@ -3479,6 +3761,7 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
             }
             method = 'PUT';
         } else {
+            playerId = 'artnet';
             endpoint = `${API_BASE}/api/player/artnet/effects/${effectIndex}/parameter`;
             body = { name: paramName, value: value };
             if (tripleSlider) {
@@ -3489,6 +3772,7 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
             method = 'PUT';
         }
         
+        // REST API fallback for video/artnet global effects
         const response = await fetch(endpoint, {
             method: method,
             headers: { 'Content-Type': 'application/json' },
@@ -4731,20 +5015,27 @@ window.removeLayer = async function(playerId, layerId) {
  */
 window.updateLayerBlendMode = async function(playerId, layerId, blendMode) {
     try {
-        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ blend_mode: blendMode })
-        });
+        // Try WebSocket first
+        await executeCommand(
+            'layers',
+            'command.layer.blend_mode',
+            {
+                player_id: playerId,
+                layer_id: layerId,
+                blend_mode: blendMode
+            },
+            async () => {
+                // REST fallback
+                const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ blend_mode: blendMode })
+                });
+                return await response.json();
+            }
+        );
         
-        const data = await response.json();
-        
-        if (data.success) {
-            debug.log(`✅ Layer ${layerId} blend mode: ${blendMode}`);
-            // await loadLayers(playerId); // OLD: Now using clip-based layers
-        } else {
-            showToast(`Error: ${data.error}`, 'error');
-        }
+        debug.log(`✅ Layer ${layerId} blend mode: ${blendMode} (WebSocket)`);
     } catch (error) {
         debug.error(`❌ Error updating blend mode:`, error);
         showToast('Error updating blend mode', 'error');
@@ -4755,26 +5046,36 @@ window.updateLayerBlendMode = async function(playerId, layerId, blendMode) {
  * Update layer opacity
  */
 window.updateLayerOpacity = async function(playerId, layerId, value) {
-    const opacity = parseFloat(value) / 100;
+    const opacity = parseFloat(value);
     
     try {
-        const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ opacity: opacity })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // OLD: Update UI immediately (optimistic update) - now using clip-based layers
-            
-            // Update only the opacity display without full re-render
-            const card = document.querySelector(`[data-layer-id="${layerId}"] .opacity-value`);
-            if (card) {
-                card.textContent = `${Math.round(opacity * 100)}%`;
+        // Try WebSocket first
+        await executeCommand(
+            'layers',
+            'command.layer.opacity',
+            {
+                player_id: playerId,
+                layer_id: layerId,
+                opacity: opacity
+            },
+            async () => {
+                // REST fallback
+                const response = await fetch(`${API_BASE}/api/player/${playerId}/layers/${layerId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ opacity: opacity / 100 })
+                });
+                return await response.json();
             }
+        );
+        
+        // Update only the opacity display without full re-render
+        const card = document.querySelector(`[data-layer-id="${layerId}"] .opacity-value`);
+        if (card) {
+            card.textContent = `${Math.round(opacity)}%`;
         }
+        
+        debug.log(`✅ Layer ${layerId} opacity: ${opacity}% (WebSocket)`);
     } catch (error) {
         debug.error(`❌ Error updating opacity:`, error);
     }
