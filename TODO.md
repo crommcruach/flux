@@ -177,32 +177,205 @@ Audio Waveform Timeline (visualisiert)
   - Delete/edit slot buttons
 
 #### Phase 3: Playback Integration (~3-4h)
-- [ ] **Audio Playback Engine**
-  - WaveSurfer.js handles audio playback internally (Web Audio API)
-  - No separate `<audio>` element needed!
-  - `wavesurfer.play()` / `wavesurfer.pause()` / `wavesurfer.seekTo()`
-  - Sync with master player start/stop
-  - Auto-pause when master pauses
+- [ ] **Backend Audio Playback** 🎯 **CRITICAL**
   
-- [ ] **Sequencer Logic** (`src/modules/sequencer.py`)
+  **Requirements:**
+  - ✅ Must run without frontend (headless mode)
+  - ✅ Professional VJ system reliability
+  - ✅ No dependency on browser/UI
+  - ✅ Precise audio-video sync
+  
+  **Solution: miniaudio (Lightweight C Library)** ⭐
+  
+  **Why miniaudio:**
+  - ✅ Lightweight: Single-header C library with Python bindings
+  - ✅ Cross-platform: Windows, Linux, macOS
+  - ✅ No external dependencies (no DLLs needed)
+  - ✅ Low latency audio playback
+  - ✅ Supports all major formats: MP3, WAV, FLAC, OGG, etc.
+  - ✅ Frame-accurate timing via callback system
+  - ✅ Easy installation: `pip install miniaudio`
+  
+  **Alternative: pygame.mixer (Simpler but heavier)**
+  - ✅ Simple API, well-tested
+  - ✅ Good format support
+  - ⚠️ Larger dependency (pygame + SDL2)
+  - ⚠️ Less precise timing than miniaudio
+  
+- [ ] **Backend Audio Implementation**
   ```python
-  class Sequencer:
+  # src/modules/audio_sequencer.py
+  import miniaudio
+  import time
+  import threading
+  from .logger import get_logger
+  
+  logger = get_logger(__name__)
+  
+  class AudioSequencer:
+      """
+      Backend audio sequencer with precise timing.
+      Plays audio and triggers clip changes based on timeline slots.
+      """
+      
       def __init__(self, audio_timeline, player_manager):
           self.timeline = audio_timeline
           self.player_manager = player_manager
           self.current_slot = 0
-          self.audio_start_time = 0.0
-      
-      def update(self):
-          """Called every frame to check slot changes"""
-          current_time = time.time() - self.audio_start_time
-          new_slot = self.timeline.get_current_slot(current_time)
+          self.is_playing = False
+          self.is_paused = False
           
-          if new_slot != self.current_slot:
-              # Slot changed → advance master playlist
-              self.player_manager.master_advance_to_clip(new_slot)
-              self.current_slot = new_slot
+          # Audio playback
+          self.audio_device = None
+          self.audio_stream = None
+          self.start_time = 0.0
+          self.pause_time = 0.0
+          self.current_time = 0.0
+          
+          # Monitoring thread
+          self.monitor_thread = None
+          self.monitor_active = False
+      
+      def load_audio(self, audio_path: str):
+          """Load audio file for playback"""
+          try:
+              # Decode audio file
+              self.audio_stream = miniaudio.stream_file(audio_path)
+              self.duration = self.audio_stream.duration
+              logger.info(f"🎵 Loaded audio: {audio_path} ({self.duration:.2f}s)")
+              return True
+          except Exception as e:
+              logger.error(f"❌ Failed to load audio: {e}")
+              return False
+      
+      def play(self):
+          """Start audio playback and monitoring"""
+          if not self.audio_stream:
+              logger.error("❌ No audio loaded")
+              return
+          
+          if self.is_paused:
+              # Resume from pause
+              self.start_time = time.time() - self.pause_time
+              self.is_paused = False
+          else:
+              # Start fresh
+              self.start_time = time.time()
+              self.current_slot = 0
+          
+          self.is_playing = True
+          
+          # Start audio playback
+          self.audio_device = miniaudio.PlaybackDevice()
+          self.audio_device.start(self.audio_stream)
+          
+          # Start monitoring thread
+          self._start_monitoring()
+          
+          logger.info(f"▶️ Audio playback started")
+      
+      def pause(self):
+          """Pause audio playback"""
+          if not self.is_playing:
+              return
+          
+          self.is_paused = True
+          self.pause_time = time.time() - self.start_time
+          
+          if self.audio_device:
+              self.audio_device.close()
+              self.audio_device = None
+          
+          logger.info(f"⏸️ Audio paused at {self.pause_time:.2f}s")
+      
+      def stop(self):
+          """Stop audio playback"""
+          self.is_playing = False
+          self.is_paused = False
+          self._stop_monitoring()
+          
+          if self.audio_device:
+              self.audio_device.close()
+              self.audio_device = None
+          
+          self.current_slot = 0
+          logger.info(f"⏹️ Audio stopped")
+      
+      def seek(self, position: float):
+          """Seek to position in seconds"""
+          # miniaudio doesn't support seeking easily
+          # Workaround: Restart playback from position
+          # (or use alternative library like soundfile + sounddevice)
+          logger.warning("⚠️ Seeking not implemented (miniaudio limitation)")
+      
+      def _start_monitoring(self):
+          """Start background thread to monitor playback position"""
+          self.monitor_active = True
+          self.monitor_thread = threading.Thread(
+              target=self._monitor_loop,
+              daemon=True,
+              name="AudioSequencerMonitor"
+          )
+          self.monitor_thread.start()
+      
+      def _stop_monitoring(self):
+          """Stop monitoring thread"""
+          self.monitor_active = False
+          if self.monitor_thread:
+              self.monitor_thread.join(timeout=1.0)
+              self.monitor_thread = None
+      
+      def _monitor_loop(self):
+          """Monitor audio position and trigger clip changes"""
+          while self.monitor_active:
+              if self.is_playing and not self.is_paused:
+                  # Calculate current position
+                  self.current_time = time.time() - self.start_time
+                  
+                  # Check if we've reached the end
+                  if self.current_time >= self.duration:
+                      logger.info("🎵 Audio finished")
+                      self.stop()
+                      break
+                  
+                  # Get current slot from timeline
+                  new_slot = self.timeline.get_current_slot(self.current_time)
+                  
+                  # Trigger clip change on slot boundary
+                  if new_slot != self.current_slot and new_slot >= 0:
+                      logger.info(f"🎵 Slot changed: {self.current_slot} → {new_slot} "
+                                 f"(time: {self.current_time:.2f}s)")
+                      
+                      # Advance master playlist
+                      self.player_manager.master_advance_to_clip(new_slot)
+                      self.current_slot = new_slot
+              
+              # Check every 50ms for responsive slot changes
+              time.sleep(0.05)
+      
+      def get_current_time(self) -> float:
+          """Get current playback position"""
+          if self.is_paused:
+              return self.pause_time
+          elif self.is_playing:
+              return time.time() - self.start_time
+          else:
+              return 0.0
   ```
+
+- [ ] **Installation & Dependencies**
+  ```bash
+  pip install miniaudio  # Lightweight (~2MB), no external DLLs
+  # OR
+  pip install pygame     # Heavier (~10MB), includes SDL2
+  ```
+
+- [ ] **REST API Integration**
+  - `POST /api/sequencer/load` - Load audio file + timeline
+  - `POST /api/sequencer/play` - Start sequencer
+  - `POST /api/sequencer/pause` - Pause sequencer
+  - `POST /api/sequencer/stop` - Stop sequencer
+  - `GET /api/sequencer/status` - Get current time, slot, playing state
 
 - [ ] **Master Integration**
   - Audio timeline controls master playlist advancement
@@ -321,85 +494,9 @@ Audio Waveform Timeline (visualisiert)
 
 ---
 
-### 1.1 🎨 Generator Duration Support (~3-4h) ✅ COMPLETED (2025-12-08)
+### 1.1 🎨 Generator Duration Support ✅ COMPLETED (2025-12-08)
 
-**Ziel:** Give generator clips a defined duration for proper loop_count and master/slave synchronization.
-
-**Concept:** Add `duration` parameter to GeneratorSource for calculating total_frames and enabling duration-based timing.
-
-- [x] **GeneratorSource Enhancement (2h):** ✅ COMPLETED
-  - Added `duration` parameter (seconds, default 0=infinite)
-  - Uses existing `fps` from FrameSource (default 30)
-  - Calculates `total_frames = duration * fps` when duration > 0
-  - Modified `get_next_frame()` to loop frames: `virtual_frame % total_frames`
-  - Added `is_duration_defined()` method for duration sync compatibility
-  - Updates `is_infinite` flag based on duration (0=infinite, >0=finite)
-
-- [x] **Plugin System Updates (1h):** ✅ COMPLETED
-  - PLUGIN_TEMPLATE.md already included duration parameter example
-  - Duration auto-handled by GeneratorSource parameter system
-  - Validation built-in via parameter min/max (0-600s in template)
-  - All existing generators can add duration parameter to PARAMETERS array
-
-- [x] **UI Integration (30min):** ✅ COMPLETED
-  - Generator parameter UI already supports INT parameters with triple-slider
-  - Duration shows as slider when added to generator's PARAMETERS
-  - Range customizable via param min/max (e.g., 0-300s)
-  - Value displayed automatically by existing parameter system
-
-- [x] **Master/Slave Compatibility (30min):** ✅ COMPLETED
-  - `is_duration_defined()` method ready for TODO 1.1 integration
-  - When `_get_clip_duration()` is implemented in TODO 1.1, it will check this method
-  - Generators with duration > 0 can be master clips
-  - Duration sync (1.1) will work seamlessly with generators
-
-**Implementation Details:**
-```python
-# src/modules/frame_source.py - GeneratorSource.__init__()
-self.duration = parameters.get('duration', 0)  # 0 = infinite, >0 = seconds
-self.is_infinite = (self.duration == 0)
-if self.duration > 0:
-    self.total_frames = int(self.duration * self.fps)
-else:
-    self.total_frames = 0  # 0 = infinite
-
-# src/modules/frame_source.py - GeneratorSource.get_next_frame()
-if self.total_frames > 0:
-    virtual_frame = virtual_frame % self.total_frames  # Loop frames
-
-# src/modules/frame_source.py - GeneratorSource.is_duration_defined()
-def is_duration_defined(self):
-    return self.duration > 0
-```
-
-**Usage in Generator Plugins:**
-```python
-# Add to PARAMETERS array
-{
-    'name': 'duration',
-    'label': 'Duration (seconds)',
-    'type': ParameterType.INT,
-    'default': 0,  # 0 = infinite
-    'min': 0,
-    'max': 600,
-    'description': 'Playback duration (0 = infinite, >0 = loop after N seconds)'
-}
-```
-
-**Edge Cases:**
-- duration=0: Infinite generator (default behavior)
-- duration>0: Loops after total_frames reached
-- Master/slave: Generators with duration can be master or calculate slave loops
-- UI: Duration parameter automatically gets slider in generator parameter panel
-
-**Benefits:**
-- ✅ Generators work in master/slave duration sync (TODO 1.1)
-- ✅ Predictable loop timing for playlist automation
-- ✅ Frame-accurate synchronization with video clips
-- ✅ Transport effect loop_count works with generators
-- ✅ No changes needed to existing generators (duration optional)
-
-**Siehe:** [TRANSPORT_MASTER_SLAVE_ANALYSIS.md](docs/TRANSPORT_MASTER_SLAVE_ANALYSIS.md) Option 3
+Moved to HISTORY.md v2.4.0 - Generator duration parameter, transport integration, and seamless looping fully implemented.
 
 ---
 
@@ -494,86 +591,15 @@ def is_duration_defined(self):
 
 ---
 
-### 1.2 🎯 Playlist Master/Slave Synchronization (~8-14h) 🚧 IN PROGRESS
+### 1.2 🎯 Playlist Master/Slave Synchronization ✅ COMPLETED (2025-12-08)
 
-**⚠️ KNOWN ISSUE:** Generator clips in playlists with autoplay+loop+master/slave mode not working correctly. Need deeper investigation of generator handling in autoplay loop and slave synchronization context.
-
-- [x] **Master/Slave Toggle UI (2h):** ✅ COMPLETED
-  - Toggle-Button in Playlist-Header (Video & Art-Net)
-  - Master-Indicator (👑 Icon) für aktive Master-Playlist
-  - Nur eine Playlist kann Master sein (Toggle schaltet andere aus)
-  - Visuelles Feedback: Master (grün/golden), Slave (grau/normal)
-  - CSS Styling mit Switch-Animation
-
-- [x] **Synchronization Engine (4-6h):** ✅ COMPLETED
-  - Event-System: Master emittiert `clip_changed` Events mit Clip-Index
-  - Slave-Listener: Reagiert auf Master-Events und wechselt zum gleichen Clip-Index
-  - Initial Sync: Wenn Master aktiviert → Alle Slaves springen zu Master-Clip-Index
-  - Transition-Preservation: Slaves verwenden ihre eigenen Transition-Settings
-  - Edge-Case Handling:
-    - Slave hat weniger Clips als Master → Slave stopped (black screen)
-    - Master deaktiviert → Slaves werden autonom
-    - Playlist leer → Keine Sync-Aktion
-
-- [x] **Backend Implementation (3-4h):** ✅ COMPLETED
-  - `PlayerManager`: Master/Slave State Management
-  - `set_master_playlist(player_id)` → Setzt Master, alle anderen zu Slaves
-  - `sync_slaves_to_master()` → Synchronisiert alle Slaves zum Master-Clip
-  - Event-Dispatcher für Clip-Wechsel (Observer Pattern via `on_clip_changed()`)
-  - `current_clip_index` tracking in Player
-  - `load_clip_by_index()` for direct index-based clip loading
-
-- [x] **REST API (1-2h):** ✅ COMPLETED
-  - POST `/api/player/{player_id}/set_master` → Aktiviert Master-Mode
-  - GET `/api/player/sync_status` → Gibt Master/Slave Status zurück
-  - Unified API: Master-State in Player-Status integrieren (`is_master`, `master_playlist`, `current_clip_index`)
-
-- [x] **Frontend Integration (2h):** ✅ COMPLETED
-  - Master-Toggle-Button in Playlist-Controls (neben Autoplay/Loop)
-  - Master/Slave Status-Anzeige (Icon + Farbe)
-  - API-Calls für Toggle-Actions
-  - Visual Feedback bei Sync-Aktionen (grüner Rahmen auf aktiven Clip)
-  - `updateMasterUI()` für visuelles Feedback
-  - `pollSyncStatus()` für real-time Updates
-
-**Funktionsweise:**
-```
-MASTER (Video Playlist):     [Clip1] [Clip2] [Clip3] [Clip4] ← Master aktiviert
-                                                      ↓ Clip 4 aktiv
-SLAVE (Art-Net Playlist):    [Clip1] [Clip2] [Clip3] [Clip4] → Springt zu Clip 4
-                                                      ↑ Sync!
-
-Master → Clip 5:             [Clip5] wird geladen
-Slave:                       → Wechselt auch zu Clip 5 (sofort, mit eigener Transition)
-```
-
-**Vorteile:**
-- Synchrone Shows mit mehreren Outputs (Video + Art-Net)
-- Verschiedene Clips auf verschiedenen Ausgängen, aber synchroner Ablauf
-- Master/Slave kann jederzeit gewechselt werden
-- Jede Playlist behält ihre eigenen Effekte/Transitions
+Moved to HISTORY.md v2.4.0 - Master/Slave synchronization fully implemented with UI, backend, and REST API.
 
 ---
 
-### 1.2 🔌 Plugin-System erweitern (~8-12h) ✅ COMPLETED (2025-12-07)
+### 1.2 🔌 Plugin-System erweitern ✅ COMPLETED (2025-12-07)
 
-- [x] **Layer-Effekte über Clip FX Tab (8-12h):** ✅ COMPLETED
-  - ✅ API-Endpoints für Layer-Effekte (Unified API: `/api/player/{player_id}/clip/{clip_id}/effects`)
-  - ✅ Layer-Selection-Logik: Layer-as-Clips Architecture (jedes Layer hat eigene clip_id)
-  - ✅ Clip FX Tab: Zeigt Layer-Effekte wenn Layer ausgewählt (via selectedLayerClipId)
-  - ✅ API-Calls automatisch korrekt geroutet (targetClipId = selectedLayerClipId || selectedClipId)
-  - ✅ Drag & Drop von Effekten funktioniert für Clip UND Layer
-  - ✅ Backend: apply_layer_effects() vollständig integriert, Layer.effects Array populiert
-  - ✅ Live-Effekt-Instanzen: API gibt live Parameter von aktiven Layer-Instanzen zurück
-  - ✅ Unabhängige Layer-Effekte: Jedes Layer hat eigene Effekt-Instanzen (z.B. Transport, Transform)
-  - ✅ Parameter-Updates: Direkte Updates auf live Layer-Effekt-Instanzen (nicht Registry)
-  - ✅ Transport-Plugin: Timeline-Erkennung funktioniert pro Layer, Trim-Points persistieren
-  - ✅ Opacity-Persistence: Layer-Opacity bleibt erhalten über Transport-Loops
-  - **Key Fixes:**
-    - API findet aktive Layer by clip_id und updated live Effekt-Instanzen
-    - Transport prioritisiert layer.source über player.source für unabhängige Kontrolle
-    - Keine unnötigen Layer-Reloads mehr (nur bei Clip-Wechsel, nicht bei Parameter-Updates)
-    - Timeline auto-adjusts nur bei Default-Werten [0,100], respektiert User-Trim-Points
+Moved to HISTORY.md v2.3.x - Layer effects via Clip FX Tab, unified API, live effect instances, and transport integration fully implemented.
 
 ---
 

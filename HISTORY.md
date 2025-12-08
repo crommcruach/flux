@@ -48,6 +48,19 @@
   - Removed legacy playback UI from frontend (speed/reverse/mode sliders)
   - ~150 lines of code removed from backend and frontend
 - ✓ **Seamless Generator Looping** - Frame wrapping works correctly
+- ✓ **Master/Slave Playlist Synchronization** - Multi-output synchronized playback
+  - Master/Slave toggle UI in playlist headers (👑 master indicator)
+  - Only one playlist can be master (toggle switches others to slave)
+  - Event-based synchronization: Master emits `clip_changed`, slaves react
+  - Initial sync: All slaves jump to master clip index when master activated
+  - Edge case handling: Slaves with fewer clips stop (black screen), master deactivation makes slaves autonomous
+  - Backend: `PlayerManager` with master/slave state management
+  - API: `set_master_playlist()`, `sync_slaves_to_master()`, `on_clip_changed()` observer pattern
+  - REST endpoints: `POST /api/player/{id}/set_master`, `GET /api/player/sync_status`
+  - Frontend: Master toggle button, visual feedback (green/gold master, grey slave)
+  - Real-time status updates via `pollSyncStatus()`
+  - Independent transitions: Slaves use their own transition settings
+  - Result: Synchronized shows across multiple outputs (Video + Art-Net) with independent clip content but synchronized timing
   - Uses modulo arithmetic: `virtual_frame % total_frames`
   - Time calculation: `time = virtual_frame / fps`
   - No visual glitches when looping back to frame 0
@@ -78,6 +91,37 @@
 - Timeline slider: Works correctly for any clip length
 - Generator looping: No frame skips or visual glitches
 - Memory usage: Reduced blob URL leaks, connection limits enforced
+
+**Generator Duration Support (v2.4.0):**
+- ✓ Backend duration parameter in all generator plugins (checkerboard, fire, plasma, pulse, rainbow_wave, matrix_rain, static_picture)
+- ✓ Default: 30s, Min: 1s, Max: 60s (practical for shows)
+- ✓ GeneratorSource calculates `total_frames = fps * duration`
+- ✓ Frame wrapping via modulo: `frame_index = virtual_frame % total_frames`
+- ✓ Seamless looping without visual artifacts
+- ✓ Transport plugin recognizes generator duration (via `source.total_frames`)
+- ✓ Timeline slider shows generator duration (0-100%)
+- ✓ Trim points work with generators (in/out_point in frames)
+- ✓ Loop count: 0=infinite, 1+=defined number of loops
+- ✓ Speed/reverse control via Transport (generators have no own speed anymore)
+- ✓ Duration slider in generator settings (1s - 60s)
+- ✓ Display of current duration in seconds
+- ✓ Duration reset button (back to 30s)
+- ✓ Live preview on duration change (generator re-initialized)
+- Result: Practical show planning with defined-length generators, seamless looping, transport control works with generators, combinable with videos
+
+**Plugin System Extensions (v2.3.x - completed 2025-12-07):**
+- ✓ Layer effects via Clip FX Tab with unified API (`/api/player/{player_id}/clip/{clip_id}/effects`)
+- ✓ Layer-as-Clips Architecture: Each layer has own clip_id
+- ✓ Clip FX Tab shows layer effects when layer selected (via selectedLayerClipId)
+- ✓ API calls automatically routed (targetClipId = selectedLayerClipId || selectedClipId)
+- ✓ Drag & drop effects work for clips AND layers
+- ✓ Backend: apply_layer_effects() fully integrated, Layer.effects array populated
+- ✓ Live effect instances: API returns live parameters from active layer instances
+- ✓ Independent layer effects: Each layer has own effect instances (Transport, Transform, etc.)
+- ✓ Parameter updates: Direct updates on live layer effect instances (not registry)
+- ✓ Transport plugin: Timeline detection works per layer, trim points persist
+- ✓ Opacity persistence: Layer opacity maintained across transport loops
+- Key fixes: API finds active layers by clip_id, transport prioritizes layer.source, no unnecessary layer reloads, timeline auto-adjusts only for default values [0,100]
 
 ---
 
