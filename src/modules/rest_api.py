@@ -65,8 +65,9 @@ class RestAPI:
             async_mode='threading',
             logger=False,
             engineio_logger=False,
-            ping_timeout=60,
-            ping_interval=25,
+            ping_timeout=30,           # 30s timeout (reduced from 60s for faster disconnect detection)
+            ping_interval=10,          # 10s ping interval (reduced from 25s)
+            max_http_buffer_size=1e8,  # 100MB buffer for large video frames
             manage_session=False
         )
         
@@ -107,7 +108,7 @@ class RestAPI:
         if websocket_config.get('enabled', False):
             try:
                 from .api_websocket import init_websocket_streaming
-                init_websocket_streaming(self.app, self.player_manager, websocket_config)
+                init_websocket_streaming(self.app, self.player_manager, websocket_config, self.socketio)
                 logger.info("✅ WebSocket video streaming initialized")
             except Exception as e:
                 logger.warning(f"⚠️ WebSocket streaming init failed: {e}")

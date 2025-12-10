@@ -174,9 +174,20 @@ class TransportEffect(PluginBase):
     
     def _initialize_state(self, frame_source):
         """Initialisiert State beim ersten Frame."""
-        if self._frame_source is None or self._frame_source != frame_source:
+        # Check if source changed
+        source_changed = (self._frame_source is None or self._frame_source != frame_source)
+        
+        # Check if total_frames changed (generator duration updated)
+        total_frames_changed = False
+        if hasattr(frame_source, 'total_frames'):
+            new_total_frames = frame_source.total_frames
+            if self._total_frames is not None and self._total_frames != new_total_frames:
+                total_frames_changed = True
+                logger.info(f"Transport: Detected total_frames change from {self._total_frames} to {new_total_frames}")
+        
+        if source_changed or total_frames_changed:
             # New source detected (clip changed) - reset loop counter
-            if self._frame_source != frame_source:
+            if source_changed:
                 logger.info(f"Transport: New source detected, resetting loop counter (was {self._current_loop_iteration})")
                 self._current_loop_iteration = 0
                 self._random_frame_counter = 0
@@ -185,10 +196,11 @@ class TransportEffect(PluginBase):
             self._frame_source = frame_source
             
             # Debug: Log frame_source attributes
-            logger.info(f"Transport: Initializing with frame_source type={type(frame_source).__name__}")
-            logger.info(f"Transport: frame_source attributes: {dir(frame_source)}")
+            if source_changed:
+                logger.info(f"Transport: Initializing with frame_source type={type(frame_source).__name__}")
+                logger.info(f"Transport: frame_source attributes: {dir(frame_source)}")
             
-            # Hole total_frames und FPS vom Source
+            # Hole total_frames und FPS vom Source (always re-read to catch duration changes)
             if hasattr(frame_source, 'total_frames'):
                 self._total_frames = frame_source.total_frames
                 logger.info(f"Transport: total_frames={self._total_frames}")
@@ -197,40 +209,46 @@ class TransportEffect(PluginBase):
             
             if hasattr(frame_source, 'fps'):
                 self._fps = frame_source.fps
-                logger.info(f"Transport: fps={self._fps}")
+                if source_changed:
+                    logger.info(f"Transport: fps={self._fps}")
             else:
                 logger.warning(f"Transport: frame_source has no 'fps' attribute!")
             
-            # Auto-adjust range NUR wenn noch auf Default-Werten (0-100)
-            # Das erlaubt dem User, custom In/Out Points zu setzen die erhalten bleiben
-            if self._total_frames:
+            # Auto-adjust range based on clip/generator length
+            if self._total_frames and self._total_frames > 0:
                 old_in = self.in_point
                 old_out = self.out_point
                 
-                # Nur auto-adjusten wenn Range auf Default-Werten ist
-                # User-definierte Ranges werden beibehalten
-                if old_in == 0 and old_out == 100:
+                # Auto-adjust if on default values OR if total_frames changed (generator duration update)
+                if (old_in == 0 and old_out == 100) or total_frames_changed:
                     self.in_point = 0
                     self.out_point = self._total_frames - 1
                     
-                    # Wenn Position außerhalb des neuen Bereichs, setze auf Start
                     if self.current_position > self.out_point:
                         self.current_position = self.in_point
                         self._virtual_frame = float(self.in_point)
                     
-                    logger.info(f"Transport: Auto-adjusted range from [{old_in},{old_out}] to [0,{self.out_point}] based on clip length")
+                    # Update config so frontend receives correct range
+                    if hasattr(self, 'config') and self.config:
+                        transport_data = {
+                            '_value': self.current_position,
+                            '_rangeMin': self.in_point,
+                            '_rangeMax': self.out_point
+                        }
+                        self.config['transport_position'] = transport_data
+                    
+                    if total_frames_changed:
+                        logger.info(f"Transport: Adjusted range to [0,{self.out_point}] due to generator duration change")
+                    else:
+                        logger.info(f"Transport: Auto-adjusted range to [0,{self.out_point}] ({self._total_frames} frames)")
                 else:
-                    # User hat custom Range gesetzt - beibehalten
-                    # Nur validieren dass Range innerhalb clip_length liegt
+                    # User has custom range - validate it's within bounds
                     if old_out >= self._total_frames:
                         self.out_point = self._total_frames - 1
-                        logger.info(f"Transport: Clamped out_point from {old_out} to {self.out_point} (clip_length)")
-                    
-                    logger.info(f"Transport: Using custom range [{self.in_point},{self.out_point}], clip_length={self._total_frames}")
+                        logger.info(f"Transport: Clamped out_point to {self.out_point}")
             else:
-                # Fallback wenn keine total_frames verfügbar
-                if self.out_point == 100:
-                    logger.warning("Transport: No total_frames available, using default range 0-100")
+                # No total_frames available - use defaults
+                logger.warning("Transport: No total_frames available, using default range 0-100")
             
             # Setze virtual frame
             self._virtual_frame = float(self.current_position)
@@ -396,11 +414,12 @@ class TransportEffect(PluginBase):
                 
                 logger.info(f"🎚️ Transport update_parameter received: value={new_position}, min={new_in}, max={new_out}")
                 
-                # Update ranges
-                self.in_point = int(new_in)
-                self.out_point = int(new_out)
+                # Clamp ranges to valid total_frames (can't trim beyond actual content)
+                max_frame = (self._total_frames - 1) if self._total_frames else 10000
+                self.in_point = max(0, int(new_in))
+                self.out_point = min(max_frame, int(new_out))
                 
-                logger.info(f"✅ Transport ranges updated: in_point={self.in_point}, out_point={self.out_point}")
+                logger.info(f"✅ Transport ranges updated: in_point={self.in_point}, out_point={self.out_point} (clamped to 0-{max_frame})")
                 
                 # Update position (user can drag position handle to jump)
                 new_pos_int = int(new_position)

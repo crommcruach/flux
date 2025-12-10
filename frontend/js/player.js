@@ -1056,6 +1056,9 @@ function renderGeneratorParametersSection() {
             const genSavedRangeMax = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMax !== undefined ? currentValue._rangeMax : param.max;
             const genActualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : currentValue;
             
+            // Use savedRangeMax as slider max if it's a reasonable value (for dynamic ranges)
+            const genSliderMax = genSavedRangeMax > 0 && genSavedRangeMax <= param.max ? genSavedRangeMax : param.max;
+            
             html += `
                 <div class="param-control-row">
                     <div id="${genControlId}" class="triple-slider-container" 
@@ -1085,7 +1088,7 @@ function renderGeneratorParametersSection() {
                     
                     initTripleSlider(genControlId, {
                         min: param.min,
-                        max: param.max,
+                        max: genSliderMax,
                         value: genActualValue,
                         step: step,
                         showRangeHandles: true,
@@ -2907,7 +2910,9 @@ async function updateClipEffectLiveParameters() {
                         // Update triple-slider if it exists
                         const slider = getTripleSlider(controlId);
                         if (slider && typeof paramValue === 'object' && paramValue._value !== undefined) {
-                            slider.updateValues(paramValue._value, paramValue._rangeMin, paramValue._rangeMax);
+                            // Determine if we should auto-scale: only if rangeMax == totalFrames-1 (full content, not trimmed)
+                            const shouldScale = paramValue._totalFrames && paramValue._rangeMax === (paramValue._totalFrames - 1);
+                            slider.updateValues(paramValue._value, paramValue._rangeMin, paramValue._rangeMax, shouldScale);
                             
                             // Update external display
                             const displayElem = document.getElementById(`${controlId}_value`);

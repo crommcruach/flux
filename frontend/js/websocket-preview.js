@@ -50,11 +50,7 @@ class WebSocketPreview {
         try {
             // Connect to Socket.IO server
             await this.connect();
-            
-            // Start streaming
-            if (this.options.autoStart) {
-                this.startStream();
-            }
+            // Note: autoStart is handled in the connect() event handler after connection is established
             
         } catch (error) {
             console.error('WebSocket preview start error:', error);
@@ -73,6 +69,14 @@ class WebSocketPreview {
                 reject(new Error('Connection already in progress'));
                 return;
             }
+            
+            // Disconnect existing socket before creating new one
+            if (this.socket && this.socket.connected) {
+                console.log('Disconnecting existing video socket before reconnecting');
+                this.socket.disconnect();
+                this.socket = null;
+            }
+            
             this.isConnecting = true;
             
             try {
@@ -95,6 +99,14 @@ class WebSocketPreview {
                     console.log('WebSocket connected:', this.socket.id);
                     this.isConnecting = false;
                     this.options.onConnected();
+                    
+                    // Auto-start stream if enabled (must happen AFTER resolve to ensure socket.connected is true)
+                    setTimeout(() => {
+                        if (this.options.autoStart && !this.isStreaming) {
+                            this.startStream();
+                        }
+                    }, 100);
+                    
                     resolve();
                 });
                 
@@ -147,12 +159,23 @@ class WebSocketPreview {
      * Start streaming video frames
      */
     startStream() {
-        if (!this.socket || !this.socket.connected) {
-            console.error('Socket not connected');
+        if (!this.socket) {
+            console.error('Socket not initialized');
             return;
         }
         
-        console.log('Requesting stream start...');
+        if (!this.socket.connected) {
+            console.error('Socket not connected (connected=' + this.socket.connected + ', id=' + this.socket.id + ')');
+            return;
+        }
+        
+        console.log('Requesting stream start...', {
+            player_id: this.options.playerId,
+            quality: this.options.quality,
+            fps: this.options.fps,
+            socket_id: this.socket.id
+        });
+        
         this.socket.emit('start_stream', {
             player_id: this.options.playerId,
             quality: this.options.quality,

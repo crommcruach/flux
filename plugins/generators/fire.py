@@ -68,12 +68,9 @@ class FireGenerator(PluginBase):
         {
             'name': 'duration',
             'label': 'Duration (seconds)',
-            'type': ParameterType.INT,
-            'default': 30,
-            'min': 1,
-            'max': 60,
-            'step': 5,
-            'description': 'Playback duration in seconds (for playlist auto-advance)'
+            'type': ParameterType.STRING,
+            'default': '10',
+            'description': 'Duration in seconds (1-60, affects Transport timeline)'
         }
     ]
     
@@ -83,7 +80,12 @@ class FireGenerator(PluginBase):
         self.turbulence = config.get('turbulence', 1.0)
         self.speed = config.get('speed', 1.0)
         self.detail = config.get('detail', 10)
-        self.duration = config.get('duration', 10)
+        # Duration can be string or number, convert and clamp to 1-60
+        duration_val = config.get('duration', 10)
+        try:
+            self.duration = max(1, min(60, float(duration_val)))
+        except (ValueError, TypeError):
+            self.duration = 10
         self.time = 0.0
         self.noise_offset = 0.0
     

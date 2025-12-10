@@ -272,17 +272,20 @@ class GeneratorSource(FrameSource):
         self.plugin_instance = None
         self.start_time = 0
         
-        # Duration support: default 30s, min 1s, max 60s (no infinite generation)
-        self.duration = parameters.get('duration', 30) if parameters else 30
-        self.is_infinite = (self.duration == 0)  # Infinite if duration not set (legacy)
+        # Duration: configurable per generator, max 60s (defined in generator plugin parameters)
+        # Transport effect will auto-adjust to this duration
+        # Convert to float if it's a string (from ParameterType.STRING)
+        duration_value = parameters.get('duration', 10) if parameters else 10
+        if isinstance(duration_value, str):
+            try:
+                duration_value = float(duration_value)
+            except (ValueError, TypeError):
+                duration_value = 10
+        self.duration = min(60, max(1, duration_value))
+        self.is_infinite = False  # Generators have fixed duration
+        self.total_frames = int(self.duration * self.fps)
         
-        # Calculate total_frames from duration (for transport effect compatibility)
-        if self.duration > 0:
-            self.total_frames = int(self.duration * self.fps)
-        else:
-            self.total_frames = 0  # 0 = infinite
-        
-        logger.debug(f"GeneratorSource: duration={self.duration}s, total_frames={self.total_frames}, infinite={self.is_infinite}")
+        logger.debug(f"GeneratorSource: duration={self.duration}s, total_frames={self.total_frames}")
         
         # Simple time tracking for generators (transport plugin handles playback control)
         self.start_time = 0
@@ -386,16 +389,11 @@ class GeneratorSource(FrameSource):
         # Always update parameters dict
         self.parameters[param_name] = value
         
-        # Special handling for duration parameter
+        # Special handling for duration parameter (max 60s)
         if param_name == 'duration':
-            self.duration = float(value)
-            # Recalculate total_frames and is_infinite
-            self.is_infinite = (self.duration == 0)
-            if self.duration > 0:
-                self.total_frames = int(self.duration * self.fps)
-            else:
-                self.total_frames = 0  # 0 = infinite
-            logger.info(f"Generator duration updated to {self.duration}s (total_frames={self.total_frames}, infinite={self.is_infinite})")
+            self.duration = min(60, max(1, float(value)))
+            self.total_frames = int(self.duration * self.fps)
+            logger.info(f"Generator duration updated to {self.duration}s (total_frames={self.total_frames}, max 60s)")
             return True
         
         # Use plugin's update_parameter method if available (preferred)

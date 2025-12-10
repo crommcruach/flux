@@ -34,6 +34,10 @@ class TripleSlider {
             displayFormat: options.displayFormat || 'number', // 'number' or 'time'
             fps: options.fps || 30 // For time format conversion
         };
+        
+        // Track the actual content boundary (for dynamic scaling detection)
+        // This stays fixed unless content size actually changes
+        this.contentMax = this.config.max;
 
         this.isDragging = false;
         this.activeHandle = null;
@@ -254,7 +258,7 @@ class TripleSlider {
     }
 
     // Update all values at once (for real-time updates without triggering onChange)
-    updateValues(value, rangeMin, rangeMax) {
+    updateValues(value, rangeMin, rangeMax, autoScale = false) {
         // Don't update if user is hovering over the slider (easier to grab handle)
         if (this.isHovering || this.isDragging) {
             return;
@@ -273,6 +277,23 @@ class TripleSlider {
         if (rangeMax !== undefined) {
             this.config.rangeMax = rangeMax;
             updated = true;
+            
+            // Scale slider max only when explicitly requested AND rangeMax >= current contentMax
+            // This allows scaling UP when content grows, but prevents scaling DOWN during trim
+            if (autoScale && rangeMax >= this.contentMax) {
+                this.config.max = rangeMax;
+                this.contentMax = rangeMax;
+            } else if (autoScale && rangeMax < this.contentMax) {
+                // Content shrunk (e.g., generator duration decreased) - allow scaling down
+                // BUT only if rangeMax is close to a "round" frame count (likely from backend)
+                // Check if rangeMax is at max position (full content, not trimmed)
+                const epsilon = 5; // Allow small differences
+                if (Math.abs(rangeMax - this.contentMax) > epsilon) {
+                    // Likely a real content change, not a trim
+                    this.config.max = rangeMax;
+                    this.contentMax = rangeMax;
+                }
+            }
         }
         
         // Always update UI if any parameter was provided

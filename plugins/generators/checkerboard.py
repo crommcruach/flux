@@ -46,12 +46,9 @@ class CheckerboardGenerator(PluginBase):
         {
             'name': 'duration',
             'label': 'Duration (seconds)',
-            'type': ParameterType.INT,
-            'default': 30,
-            'min': 1,
-            'max': 60,
-            'step': 5,
-            'description': 'Playback duration in seconds (for playlist auto-advance)'
+            'type': ParameterType.STRING,
+            'default': '10',
+            'description': 'Playback duration in seconds (1-60, affects Transport timeline)'
         }
     ]
     
@@ -59,7 +56,12 @@ class CheckerboardGenerator(PluginBase):
         """Initialisiert Generator mit Parametern."""
         self.columns = int(config.get('columns', 8))
         self.rows = int(config.get('rows', 8))
-        self.duration = int(config.get('duration', 10))
+        # Duration can be string or number, convert and clamp to 1-60
+        duration_val = config.get('duration', 10)
+        try:
+            self.duration = max(1, min(60, float(duration_val)))
+        except (ValueError, TypeError):
+            self.duration = 10
         self.time = 0.0
     
     def process_frame(self, frame, **kwargs):
@@ -117,7 +119,10 @@ class CheckerboardGenerator(PluginBase):
             self.rows = max(1, min(64, int(value)))
             return True
         elif name == 'duration':
-            self.duration = max(5, min(600, int(value)))
+            try:
+                self.duration = max(1, min(60, float(value)))
+            except (ValueError, TypeError):
+                self.duration = 10
             return True
         return False
     

@@ -1276,13 +1276,22 @@ def register_unified_routes(app, player_manager, config):
             success = player.source.update_parameter(param_name, param_value)
             
             if success:
-                # Also store in player's playlist_params for persistence across loops
+                # Store in player's playlist_params for persistence across loops
                 generator_id = player.source.generator_id
                 if generator_id not in player.playlist_params:
                     player.playlist_params[generator_id] = {}
                 player.playlist_params[generator_id][param_name] = param_value
                 
-                logger.info(f"✅ [{player_id}] Generator parameter updated and stored: {param_name} = {param_value}")
+                # Update ClipRegistry metadata so parameters persist on clip reload
+                if hasattr(player, 'current_clip_id') and player.current_clip_id:
+                    clip = clip_registry.get_clip(player.current_clip_id)
+                    if clip and clip.get('metadata', {}).get('type') == 'generator':
+                        if 'parameters' not in clip['metadata']:
+                            clip['metadata']['parameters'] = {}
+                        clip['metadata']['parameters'][param_name] = param_value
+                        logger.info(f"📝 [{player_id}] Updated ClipRegistry metadata: {param_name} = {param_value}")
+                
+                logger.info(f"✅ [{player_id}] Generator parameter updated: {param_name} = {param_value}")
                 
                 # Auto-save session state
                 session_state = get_session_state()

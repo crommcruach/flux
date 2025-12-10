@@ -1401,12 +1401,8 @@ class Player:
                         # Instance ist garantiert vorhanden (pre-instantiated im Cache)
                         plugin_instance = effect_data['instance']
                         
-                        # Update parameters from effect_data EVERY frame (parameters may have changed via API)
-                        for param_name, param_value in effect_data['parameters'].items():
-                            # Extract actual value if it's a range metadata dict
-                            if isinstance(param_value, dict) and '_value' in param_value:
-                                param_value = param_value['_value']
-                            setattr(plugin_instance, param_name, param_value)
+                        # Parameters are already updated via update_parameter() when changed via API
+                        # No need to update every frame - plugin instances already have current values
                         
                         # Process frame (pass source for Transport plugin)
                         processed_frame = plugin_instance.process_frame(processed_frame, source=self.source, player=self)
@@ -1654,7 +1650,8 @@ class Player:
         elif abs_path.startswith('generator:'):
             gen_id = abs_path.replace('generator:', '')
             # Get generator parameters from clip metadata if available
-            gen_params = clip_data.get('metadata', {}).get('generator_params', {})
+            metadata = clip_data.get('metadata', {})
+            gen_params = metadata.get('parameters', metadata.get('generator_params', {}))
             base_source = GeneratorSource(gen_id, gen_params, canvas_width=self.canvas_width, canvas_height=self.canvas_height)
         
         if base_source and base_source.initialize():
@@ -1663,6 +1660,9 @@ class Player:
             new_layers.append(base_layer)
             layer_counter += 1
             logger.info(f"✅ [{self.player_name}] Created clip {clip_id} as Layer 0 (base)")
+            
+            # Load effects for base layer from registry (includes Transport for generators)
+            self.load_layer_effects_from_registry(base_layer)
         else:
             logger.error(f"❌ [{self.player_name}] Failed to create base layer for clip {clip_id}")
             return False

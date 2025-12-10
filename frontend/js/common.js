@@ -119,6 +119,12 @@ export function isLayersSocketConnected() {
  * @param {Object} handlers - Event handlers { onConnect, onDisconnect, onStatus, onConsoleUpdate, onLogUpdate }
  */
 export function initWebSocket(handlers = {}) {
+    // Disconnect existing socket if already connected
+    if (socket && socket.connected) {
+        debug.log('Disconnecting existing WebSocket before reconnecting');
+        socket.disconnect();
+    }
+    
     // DEPRECATED: Legacy socket for status/console/logs
     socket = io(WEBSOCKET_URL, {
         transports: ['websocket', 'polling']
@@ -167,6 +173,20 @@ function _initCommandChannels() {
     if (!WEBSOCKET_COMMANDS_ENABLED) {
         console.log('⚠️ WebSocket commands disabled in config');
         return;
+    }
+    
+    // Disconnect existing sockets if already connected
+    if (playerSocket && playerSocket.connected) {
+        console.log('Disconnecting existing player socket');
+        playerSocket.disconnect();
+    }
+    if (effectsSocket && effectsSocket.connected) {
+        console.log('Disconnecting existing effects socket');
+        effectsSocket.disconnect();
+    }
+    if (layersSocket && layersSocket.connected) {
+        console.log('Disconnecting existing layers socket');
+        layersSocket.disconnect();
     }
     
     // Player namespace - transport controls
@@ -223,6 +243,31 @@ function _initCommandChannels() {
         layersSocketConnected = false;
     });
 }
+
+/**
+ * Cleanup all WebSocket connections
+ */
+export function cleanupWebSockets() {
+    console.log('🧹 Cleaning up WebSocket connections');
+    
+    if (socket && socket.connected) {
+        socket.disconnect();
+    }
+    if (playerSocket && playerSocket.connected) {
+        playerSocket.disconnect();
+    }
+    if (effectsSocket && effectsSocket.connected) {
+        effectsSocket.disconnect();
+    }
+    if (layersSocket && layersSocket.connected) {
+        layersSocket.disconnect();
+    }
+}
+
+// Cleanup on page unload to prevent resource leaks
+window.addEventListener('beforeunload', () => {
+    cleanupWebSockets();
+});
 
 /**
  * Hybrid command executor - tries WebSocket first, falls back to REST

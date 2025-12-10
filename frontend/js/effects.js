@@ -219,6 +219,9 @@ function renderParameterControl(param, currentValue, effectIndex) {
             const savedRangeMax = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMax !== undefined ? currentValue._rangeMax : max;
             const actualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : value;
             
+            // Use savedRangeMax as slider max if it's a reasonable value (for dynamic ranges like Transport)
+            const sliderMax = savedRangeMax > 0 && savedRangeMax <= max ? savedRangeMax : max;
+            
             control = `
                 <div class="parameter-control">
                     <div class="parameter-label">
@@ -233,7 +236,7 @@ function renderParameterControl(param, currentValue, effectIndex) {
             setTimeout(() => {
                 initTripleSlider(controlId, {
                     min: min,
-                    max: max,
+                    max: sliderMax,
                     value: actualValue,
                     step: step,
                     showRange: true,

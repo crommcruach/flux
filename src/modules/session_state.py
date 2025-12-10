@@ -186,10 +186,25 @@ class SessionStateManager:
                     "global_effects": global_effects
                 }
             
-            # State in Datei schreiben
+            # State in Datei schreiben mit Retry-Logik für Windows File-Locking
             os.makedirs(os.path.dirname(self.state_file_path), exist_ok=True)
-            with open(self.state_file_path, 'w', encoding='utf-8') as f:
-                json.dump(state, f, indent=2, ensure_ascii=False)
+            
+            # Versuche bis zu 3x zu speichern (Windows kann Dateien kurzzeitig locken)
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    with open(self.state_file_path, 'w', encoding='utf-8') as f:
+                        json.dump(state, f, indent=2, ensure_ascii=False)
+                    break  # Erfolg - raus aus Retry-Loop
+                except PermissionError as perm_err:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ Permission denied beim Speichern (Versuch {attempt + 1}/{max_retries}), retry in 0.5s...")
+                        time.sleep(0.5)
+                    else:
+                        # Letzter Versuch fehlgeschlagen - logge nur als Warning, nicht als Error
+                        logger.warning(f"⚠️ Session State konnte nicht gespeichert werden (Datei gesperrt): {perm_err}")
+                        logger.info("💡 Tipp: Schließe alle Programme die session_state.json geöffnet haben")
+                        return False  # Gebe False zurück aber stoppe nicht die Anwendung
             
             self._state = state
             self._last_save_time = time.time()

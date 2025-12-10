@@ -20,7 +20,7 @@ player_manager = None
 _streaming_threads = {}  # {session_id: {'thread': Thread, 'active': bool, 'player_id': str}}
 _config = {}
 
-def init_websocket_streaming(app, player_mgr, config):
+def init_websocket_streaming(app, player_mgr, config, socketio_instance):
     """
     Initialize WebSocket streaming with Flask app and player manager.
     
@@ -28,25 +28,15 @@ def init_websocket_streaming(app, player_mgr, config):
         app: Flask application instance
         player_mgr: PlayerManager instance
         config: WebSocket configuration dict
+        socketio_instance: Existing SocketIO instance from RestAPI
     """
     global socketio, player_manager, _config
     
     player_manager = player_mgr
     _config = config
     
-    # Initialize Flask-SocketIO
-    socketio = SocketIO(
-        app,
-        cors_allowed_origins="*",  # Allow all origins for LAN
-        async_mode='threading',     # Use threading for simplicity
-        logger=False,
-        engineio_logger=False,
-        ping_timeout=60,
-        ping_interval=25,
-        max_http_buffer_size=1e8,   # 100MB buffer for large frames
-        websocket_ping_timeout=10,   # Faster ping timeout
-        websocket_ping_interval=5    # Detect dead connections faster
-    )
+    # Use the existing SocketIO instance from RestAPI (don't create a new one!)
+    socketio = socketio_instance
     
     logger.info(f"WebSocket streaming initialized: quality={_config.get('default_quality', 'medium')}, "
                 f"max_fps={_config.get('max_fps', 30)}")
@@ -251,8 +241,13 @@ def _stream_worker(session_id, player_id, width, height, jpeg_quality, target_fp
             ])
             frame_data = buffer.tobytes()
             
-            # Send frame to client
-            socketio.emit('video_frame', frame_data, namespace='/video', room=session_id)
+            # Send frame to client (catch disconnect errors)
+            try:
+                socketio.emit('video_frame', frame_data, namespace='/video', room=session_id)
+            except Exception as emit_error:
+                logger.warning(f"Frame emit error (session={session_id}): {emit_error}")
+                # Client disconnected, stop streaming
+                break
             
             frame_count += 1
             
