@@ -190,6 +190,13 @@ class DefaultEffectsManager:
             # Deep copy params to ensure each clip gets independent parameter objects
             params = deepcopy(effect_config.get('params', {}))
             
+            # SPECIAL CASE: transport_position should NOT be copied from config
+            # Let transport initialize dynamically based on actual clip length
+            if plugin_id == 'transport' and 'transport_position' in params:
+                logger.debug(f"  ⏭️ Removing transport_position from config params - will auto-initialize from clip length")
+                del params['transport_position']
+
+            
             try:
                 # Get plugin metadata
                 plugin_class = self.plugin_manager.registry.get(plugin_id)
@@ -238,8 +245,14 @@ class DefaultEffectsManager:
                 # Set default parameters if not provided
                 if 'parameters' in metadata:
                     for param in metadata['parameters']:
-                        if param['name'] not in effect_data['parameters']:
-                            effect_data['parameters'][param['name']] = param['default']
+                        param_name = param['name']
+                        if param_name not in effect_data['parameters']:
+                            # SPECIAL CASE: transport_position should NOT use hardcoded default
+                            # Let transport initialize dynamically based on actual clip length
+                            if plugin_id == 'transport' and param_name == 'transport_position':
+                                logger.debug(f"  ⏭️ Skipping default for transport_position - will auto-initialize from clip length")
+                                continue
+                            effect_data['parameters'][param_name] = param['default']
                 
                 # Add to clip registry
                 logger.debug(f"🔧 Adding effect '{plugin_id}' to clip {clip_id}")

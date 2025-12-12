@@ -29,7 +29,7 @@
             document.head.appendChild(scriptElement);
         }
         
-        console.log('✅ Transition menu component loaded');
+        if (window.DEBUG) console.log('✅ Transition menu component loaded');
     } catch (error) {
         console.error('❌ Failed to load transition menu component:', error);
     }

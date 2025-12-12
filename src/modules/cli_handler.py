@@ -230,20 +230,8 @@ class CLIHandler:
                 logger.info("Aktuelles Video nicht in Liste gefunden")
         
         elif self.current_script_name:
-            scripts = self._get_all_scripts()
-            if not scripts:
-                logger.info("Keine Scripts verfügbar")
-                return (True, None)
-            
-            try:
-                current_idx = scripts.index(self.current_script_name)
-                next_idx = (current_idx + 1) % len(scripts)
-                next_script = scripts[next_idx]
-                
-                # Lade nächstes Script
-                return self._handle_load_script(f"script:{next_script.replace('.py', '')}")
-            except ValueError:
-                logger.info("Aktuelles Script nicht in Liste gefunden")
+            logger.warning("⚠️  Script navigation is deprecated - use generator plugins from web UI")
+            return (True, None)
         else:
             logger.info("Kein Video oder Script aktiv")
         
@@ -277,20 +265,8 @@ class CLIHandler:
                 logger.info("Aktuelles Video nicht in Liste gefunden")
         
         elif self.current_script_name:
-            scripts = self._get_all_scripts()
-            if not scripts:
-                logger.info("Keine Scripts verfügbar")
-                return (True, None)
-            
-            try:
-                current_idx = scripts.index(self.current_script_name)
-                prev_idx = (current_idx - 1) % len(scripts)
-                prev_script = scripts[prev_idx]
-                
-                # Lade vorheriges Script
-                return self._handle_load_script(f"script:{prev_script.replace('.py', '')}")
-            except ValueError:
-                logger.info("Aktuelles Script nicht in Liste gefunden")
+            logger.warning("⚠️  Script navigation is deprecated - use generator plugins from web UI")
+            return (True, None)
         else:
             logger.info("Kein Video oder Script aktiv")
         
@@ -881,19 +857,8 @@ class CLIHandler:
         
         logger.info(f"{'='*60}")
         logger.info(f"\nInsgesamt {len(scripts)} Script(s)")
-        logger.info("Verwendung: script:<name>  (z.B. script:rainbow_wave)")
-        logger.warning("⚠️ Script loading is deprecated - use generator plugins instead")
-    
-    def _handle_load_script(self, command):
-        """Lädt und startet ein Script - DEPRECATED."""
-        logger.warning("⚠️ Script loading is deprecated - use generator plugins instead")
-        logger.info("Use generators from the Sources tab in the web UI instead")
-        
-        # Tracking für next/back
-        self.current_script_name = None
-        self.current_video_path = None
-        
-        return (True, None)
+        logger.info("Verwendung: Use generators from the Sources tab in the web UI")
+        logger.info("⚠️  Script loading via CLI is no longer supported")
     
     def _handle_open(self):
         """Öffnet Web-Interface im Browser (undokumentiert)."""

@@ -1,0 +1,355 @@
+/* ==================== THUMBNAIL DISPLAY ==================== */
+
+.file-list-item.with-thumbnail,
+.tree-node.file.with-thumbnail {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.file-thumbnail {
+    width: 50px;
+    height: 50px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    transition: transform 0.2s;
+}
+
+.file-thumbnail:hover {
+    transform: scale(1.05);
+}
+
+.file-thumbnail.loading {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.file-thumbnail-placeholder {
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+/* Tree View Thumbnails */
+.tree-node .file-thumbnail {
+    width: 40px;
+    height: 40px;
+}
+
+.tree-node .file-thumbnail-placeholder {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+}
+
+
+/* ==================== HOVER PREVIEW ==================== */
+
+.file-thumbnail-preview {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+}
+
+.file-thumbnail-preview.show {
+    opacity: 1;
+}
+
+.file-thumbnail-preview img {
+    width: 200px;
+    height: 200px;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    background: #000;
+    border: 2px solid #fff;
+}
+
+
+/* ==================== FILE PREVIEW MODAL ==================== */
+
+.file-preview-modal {
+    display: none;
+    position: fixed;
+    z-index: 10000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.file-preview-modal.show {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.file-preview-modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    animation: fadeIn 0.2s ease-out;
+}
+
+.file-preview-modal-content {
+    position: relative;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    width: 85vmin;
+    height: 85vmin;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow: hidden;
+    box-shadow: 0 8px 32px var(--shadow-color);
+    display: flex;
+    flex-direction: column;
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideIn {
+    from { 
+        opacity: 0;
+        transform: scale(0.9) translateY(-20px);
+    }
+    to { 
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.file-preview-modal-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 24px;
+    cursor: pointer;
+    border-radius: 50%;
+    z-index: 10;
+    transition: background 0.2s, transform 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.file-preview-modal-close:hover {
+    background: var(--bg-tertiary);
+    transform: scale(1.1);
+}
+
+.file-preview-modal-body {
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    gap: 1rem;
+}
+
+.file-preview-media {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    background: #000;
+    border-radius: 8px;
+    position: relative;
+}
+
+.file-preview-media .preview-media {
+    max-width: 100%;
+    max-height: 60vh;
+    object-fit: contain;
+}
+
+.file-preview-media video.preview-media {
+    width: 100%;
+    max-width: 800px;
+}
+
+.file-preview-info {
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+}
+
+.file-preview-filename {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    word-break: break-word;
+}
+
+.file-preview-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.meta-item {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.meta-item strong {
+    min-width: 60px;
+}
+
+.loading-spinner,
+.no-preview,
+.error-preview {
+    color: #fff;
+    font-size: 1.1rem;
+    text-align: center;
+    padding: 2rem;
+}
+
+.loading-spinner::after {
+    content: '';
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    margin-left: 10px;
+    border: 4px solid #fff;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+
+/* ==================== THUMBNAIL SETTINGS ==================== */
+
+.thumbnail-settings {
+    padding: 0.5rem;
+    background: #f8f9fa;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.thumbnail-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.thumbnail-toggle input[type="checkbox"] {
+    cursor: pointer;
+}
+
+.thumbnail-toggle label {
+    cursor: pointer;
+    user-select: none;
+    margin: 0;
+}
+
+.thumbnail-settings .btn-group {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+
+/* ==================== CONTEXT MENU HINT ==================== */
+
+.file-list-item:hover::after,
+.tree-node.file:hover::after {
+    content: 'Right-click for preview';
+    position: absolute;
+    right: 10px;
+    font-size: 11px;
+    color: #666;
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+/* Hide hint when multi-select is active */
+.file-list-item.selected:hover::after,
+.tree-node.file.selected:hover::after {
+    content: '';
+}
+
+
+/* ==================== RESPONSIVE ==================== */
+
+@media (max-width: 768px) {
+    .file-preview-modal-content {
+        max-width: 95vw;
+        max-height: 95vh;
+    }
+    
+    .file-preview-media {
+        min-height: 300px;
+    }
+    
+    .file-preview-media .preview-media {
+        max-height: 50vh;
+    }
+    
+    .file-thumbnail-preview img {
+        width: 150px;
+        height: 150px;
+    }
+}
+
+@media (max-width: 480px) {
+    .file-thumbnail,
+    .file-thumbnail-placeholder {
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
+    }
+    
+    .tree-node .file-thumbnail,
+    .tree-node .file-thumbnail-placeholder {
+        width: 32px;
+        height: 32px;
+        font-size: 16px;
+    }
+    
+    .file-list-item:hover::after,
+    .tree-node.file:hover::after {
+        display: none;
+    }
+}

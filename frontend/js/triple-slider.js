@@ -8,8 +8,16 @@
  * - Customizable callbacks
  */
 
+// Simple debug helper (respects window.DEBUG)
+const debugLog = (...args) => {
+    if (window.DEBUG === true) {
+        console.log(...args);
+    }
+};
+
 class TripleSlider {
     constructor(containerId, options = {}) {
+        this.containerId = containerId;
         this.container = document.getElementById(containerId);
         if (!this.container) {
             console.error(`TripleSlider: Container ${containerId} not found`);
@@ -34,6 +42,22 @@ class TripleSlider {
             displayFormat: options.displayFormat || 'number', // 'number' or 'time'
             fps: options.fps || 30 // For time format conversion
         };
+        
+        // DEBUG: Log triple-slider configuration
+        if (containerId && containerId.includes('transport_position')) {
+            debugLog('🎯 TRIPLE-SLIDER CREATED:', containerId, {
+                'options.min': options.min,
+                'options.max': options.max,
+                'options.rangeMin': options.rangeMin,
+                'options.rangeMax': options.rangeMax,
+                'options.value': options.value,
+                'final config.min': this.config.min,
+                'final config.max': this.config.max,
+                'final config.rangeMin': this.config.rangeMin,
+                'final config.rangeMax': this.config.rangeMax,
+                'final config.value': this.config.value
+            });
+        }
         
         // Track the actual content boundary (for dynamic scaling detection)
         // This stays fixed unless content size actually changes
@@ -259,17 +283,36 @@ class TripleSlider {
 
     // Update all values at once (for real-time updates without triggering onChange)
     updateValues(value, rangeMin, rangeMax, autoScale = false) {
-        // Don't update if user is hovering over the slider (easier to grab handle)
-        if (this.isHovering || this.isDragging) {
-            return;
+        // DEBUG: Log all updateValues calls for transport
+        if (this.containerId && this.containerId.includes('transport_position')) {
+            debugLog('🔧 updateValues called:', {
+                containerId: this.containerId,
+                value, rangeMin, rangeMax, autoScale,
+                isHovering: this.isHovering,
+                isDragging: this.isDragging,
+                'current config.value': this.config.value
+            });
         }
         
         let updated = false;
         
+        // Always update position value (even during hover/drag) so transport position moves
         if (value !== undefined) {
             this.config.value = value;
             updated = true;
         }
+        
+        // Don't update range handles if user is hovering or dragging (easier to grab)
+        if (this.isHovering || this.isDragging) {
+            if (updated) {
+                if (this.containerId && this.containerId.includes('transport_position')) {
+                    debugLog('🎨 Rendering slider (hover/drag mode, only value updated)');
+                }
+                this.render();
+            }
+            return;
+        }
+        
         if (rangeMin !== undefined) {
             this.config.rangeMin = rangeMin;
             updated = true;

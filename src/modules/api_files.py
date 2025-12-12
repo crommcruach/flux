@@ -3,16 +3,23 @@ API Files - File Browser and Directory Management
 
 Provides endpoints for browsing video directory structure.
 """
-from flask import jsonify
+from flask import jsonify, send_file, request
 import os
+import urllib.parse
+import cv2
 from .constants import VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
 from .logger import get_logger
+from .thumbnail_generator import ThumbnailGenerator
 
 logger = get_logger(__name__)
 
 
 def register_files_api(app, video_dir, config=None):
     """Registriert File Browser API."""
+    
+    # Initialisiere Thumbnail-Generator mit Config
+    thumbnail_gen = ThumbnailGenerator(config=config)
+    thumbnail_gen.start_worker()
     
     def get_video_sources():
         """Gibt alle konfigurierten Video-Quellen zurück."""
@@ -75,12 +82,24 @@ def register_files_api(app, video_dir, config=None):
                         else:
                             continue  # Überspringe andere Dateitypen
                         
+                        # Alle Videos und Bilder können Thumbnails haben (on-demand generiert)
+                        has_thumbnail = True
+                        
+                        # Extrahiere Video-Metadaten
+                        metadata = {}
+                        if file_type == "video":
+                            video_meta = _get_video_metadata(full_path)
+                            if video_meta:
+                                metadata = video_meta
+                        
                         file_info = {
                             "type": file_type,
                             "name": entry,
                             "path": rel_path.replace("\\", "/"),
                             "size": file_size,
-                            "size_human": _format_size(file_size)
+                            "size_human": _format_size(file_size),
+                            "has_thumbnail": has_thumbnail,
+                            **metadata  # Füge fps, duration, frame_count hinzu
                         }
                         files.append(file_info)
                 
@@ -146,6 +165,16 @@ def register_files_api(app, video_dir, config=None):
                             # Extrahiere Ordnername
                             folder_name = os.path.dirname(rel_path) if os.path.dirname(rel_path) else "root"
                             
+                            # Alle Videos und Bilder können Thumbnails haben (on-demand generiert)
+                            has_thumbnail = True
+                            
+                            # Extrahiere Video-Metadaten
+                            metadata = {}
+                            if file_type == "video":
+                                video_meta = _get_video_metadata(filepath)
+                                if video_meta:
+                                    metadata = video_meta
+                            
                             files_list.append({
                                 "filename": filename,
                                 "path": rel_path.replace("\\", "/"),
@@ -155,7 +184,9 @@ def register_files_api(app, video_dir, config=None):
                                 "folder": folder_name,
                                 "size": file_size,
                                 "size_human": _format_size(file_size),
-                                "type": file_type
+                                "type": file_type,
+                                "has_thumbnail": has_thumbnail,
+                                **metadata  # Füge fps, duration, frame_count hinzu
                             })
             
             return jsonify({
@@ -170,6 +201,207 @@ def register_files_api(app, video_dir, config=None):
                 "success": False,
                 "error": str(e)
             }), 500
+    
+    # ==================== THUMBNAIL ENDPOINTS ====================
+    
+    @app.route('/api/files/thumbnail/<path:file_path>', methods=['GET'])
+    def get_thumbnail(file_path):
+        """
+        Gibt Thumbnail für Datei zurück
+        
+        Query Parameters:
+            - generate: 'true' um Thumbnail zu generieren falls nicht existiert
+        """
+        try:
+            # Decode file path
+            file_path = urllib.parse.unquote(file_path)
+            
+            # Finde vollständigen Pfad in Video-Quellen
+            full_path = None
+            for source_path in get_video_sources():
+                potential_path = os.path.join(source_path, file_path)
+                if os.path.exists(potential_path):
+                    full_path = potential_path
+                    break
+                    
+            if not full_path:
+                return jsonify({
+                    'success': False,
+                    'error': 'File not found'
+                }), 404
+                
+            # Prüfe ob generieren gewünscht
+            should_generate = request.args.get('generate', 'false').lower() == 'true'
+            
+            # Versuche Thumbnail zu laden
+            thumbnail_path = thumbnail_gen.get_thumbnail_path(full_path)
+            
+            if not thumbnail_path and should_generate:
+                # Generiere synchron
+                thumbnail_path = thumbnail_gen.generate_thumbnail(full_path, async_mode=False)
+                
+            if thumbnail_path and os.path.exists(thumbnail_path):
+                return send_file(
+                    thumbnail_path,
+                    mimetype='image/jpeg',
+                    max_age=86400  # Cache 24h
+                )
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Thumbnail not available'
+                }), 404
+                
+        except Exception as e:
+            logger.error(f"Error serving thumbnail: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/files/video-preview/<path:file_path>', methods=['GET'])
+    def get_video_preview(file_path):
+        """
+        Gibt animiertes Video-Preview zurück (GIF oder WebM)
+        
+        Query Parameters:
+            - generate: 'true' um Preview zu generieren falls nicht existiert
+        """
+        try:
+            # Decode file path
+            file_path = urllib.parse.unquote(file_path)
+            
+            # Finde vollständigen Pfad
+            full_path = None
+            for source_path in get_video_sources():
+                potential_path = os.path.join(source_path, file_path)
+                if os.path.exists(potential_path):
+                    full_path = potential_path
+                    break
+                    
+            if not full_path:
+                return jsonify({
+                    'success': False,
+                    'error': 'File not found'
+                }), 404
+                
+            # Prüfe ob generieren gewünscht
+            should_generate = request.args.get('generate', 'false').lower() == 'true'
+            
+            # Versuche Preview zu laden
+            preview_path = None
+            if should_generate:
+                preview_path = thumbnail_gen.generate_video_preview(full_path)
+            else:
+                # Check if preview exists
+                from pathlib import Path
+                cache_filename = thumbnail_gen._get_cache_filename(Path(full_path))
+                file_ext = '.gif' if thumbnail_gen.video_preview_format == 'gif' else '.webm'
+                preview_filename = cache_filename.replace('.jpg', f'_preview{file_ext}')
+                potential_preview = thumbnail_gen.cache_dir / preview_filename
+                if potential_preview.exists():
+                    preview_path = str(potential_preview)
+                    
+            if preview_path and os.path.exists(preview_path):
+                mimetype = 'image/gif' if preview_path.endswith('.gif') else 'video/webm'
+                return send_file(
+                    preview_path,
+                    mimetype=mimetype,
+                    max_age=86400  # Cache 24h
+                )
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Preview not available'
+                }), 404
+                
+        except Exception as e:
+            logger.error(f"Error serving video preview: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+            
+    @app.route('/api/files/thumbnails/batch', methods=['POST'])
+    def generate_thumbnails_batch():
+        """
+        Generiert Thumbnails für mehrere Dateien asynchron
+        
+        Request Body:
+            {
+                "files": ["path/to/file1.mp4", "path/to/file2.jpg"]
+            }
+        """
+        try:
+            data = request.get_json()
+            file_paths = data.get('files', [])
+            
+            if not file_paths:
+                return jsonify({
+                    'success': False,
+                    'error': 'No files provided'
+                }), 400
+                
+            # Finde vollständige Pfade
+            full_paths = []
+            for file_path in file_paths:
+                for source_path in get_video_sources():
+                    potential_path = os.path.join(source_path, file_path)
+                    if os.path.exists(potential_path):
+                        full_paths.append(potential_path)
+                        break
+                        
+            # Queue für asynchrone Generierung
+            for full_path in full_paths:
+                thumbnail_gen.generate_thumbnail(full_path, async_mode=True)
+                
+            return jsonify({
+                'success': True,
+                'queued': len(full_paths),
+                'message': f'Queued {len(full_paths)} thumbnails for generation'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error queueing thumbnails: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+            
+    @app.route('/api/files/thumbnails/stats', methods=['GET'])
+    def get_thumbnail_stats():
+        """Gibt Cache-Statistiken zurück"""
+        try:
+            stats = thumbnail_gen.get_cache_stats()
+            return jsonify({
+                'success': True,
+                'stats': stats
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+            
+    @app.route('/api/files/thumbnails/cleanup', methods=['POST'])
+    def cleanup_thumbnails():
+        """Löscht alte Thumbnails"""
+        try:
+            data = request.get_json() or {}
+            days = data.get('days', None)  # None = use config default
+            
+            deleted = thumbnail_gen.cleanup_old_thumbnails(days)
+            
+            return jsonify({
+                'success': True,
+                'deleted': deleted,
+                'message': f'Deleted {deleted} thumbnails/previews'
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
 
 
 def _format_size(size_bytes):
@@ -179,3 +411,33 @@ def _format_size(size_bytes):
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024.0
     return f"{size_bytes:.1f} TB"
+
+
+def _get_video_metadata(video_path):
+    """Extract video metadata (duration, fps) using OpenCV."""
+    try:
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            return None
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # Skip corrupted videos (invalid metadata)
+        if fps <= 0 or frame_count <= 0:
+            cap.release()
+            return None
+        
+        duration = frame_count / fps if fps > 0 else 0
+        
+        cap.release()
+        
+        return {
+            'fps': round(fps, 2),
+            'duration': round(duration, 2),
+            'frame_count': frame_count
+        }
+    except Exception as e:
+        # Silently skip corrupted files (don't spam logs)
+        return None
+

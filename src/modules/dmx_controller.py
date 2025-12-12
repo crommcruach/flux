@@ -219,15 +219,9 @@ class DMXController:
         if dmx[9] != self.last_values[9]:
             script_slot = dmx[9]
             
-            # Suche Script in Cache
-            if self.script_cache and script_slot in self.script_cache:
-                script_name = self.script_cache[script_slot]
-                logger.info(f"[DMX] Script-Slot → Slot {script_slot}, Script: {script_name}")
-                
-                # ScriptSource removed - use generator plugins instead
-                logger.warning(f"[DMX] Script loading deprecated - use generators instead: {script_name}")
-            elif script_slot > 0:
-                logger.debug(f"[DMX] Script-Slot {script_slot} nicht gefunden")
+            # Script loading deprecated - generators are used instead
+            if script_slot > 0:
+                logger.debug(f"[DMX] Script-Slot {script_slot} (deprecated - use generators)")
         
         # Speichere aktuelle Werte
         self.last_values = dmx.copy()

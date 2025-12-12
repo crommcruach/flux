@@ -7,7 +7,7 @@ seinen spezifischen Effekten und Compositing-Einstellungen.
 
 import numpy as np
 from typing import Optional, List, Dict, Any
-from .logger import get_logger
+from .logger import get_logger, debug_layers
 
 logger = get_logger(__name__)
 
@@ -54,7 +54,8 @@ class Layer:
         # Cache für letztes Frame (für HOLD-Mode oder Frame-Blending)
         self.last_frame: Optional[np.ndarray] = None
         
-        logger.debug(
+        debug_layers(
+            logger,
             f"Layer {layer_id} created: {source.get_source_name()} "
             f"(blend={blend_mode}, opacity={opacity}%)"
         )
@@ -73,7 +74,7 @@ class Layer:
             self.source.cleanup()
         self.effects.clear()
         self.last_frame = None
-        logger.debug(f"Layer {self.layer_id} cleaned up")
+        debug_layers(logger, f"Layer {self.layer_id} cleaned up")
     
     def to_dict(self) -> Dict[str, Any]:
         """

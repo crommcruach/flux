@@ -21,7 +21,7 @@
             
             // Append to body
             document.body.appendChild(container);
-            console.log('✅ Toast component loaded');
+            if (window.DEBUG) console.log('✅ Toast component loaded');
         })
         .catch(error => {
             console.error('❌ Failed to load toast component:', error);

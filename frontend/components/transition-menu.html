@@ -177,7 +177,7 @@ window.createTransitionMenu = async function(playerId, container) {
                     effectSelect.value = config.effect;
                 }
                 
-                console.log(`✅ Loaded ${data.transitions.length} transitions for ${playerId}`);
+                if (window.DEBUG) console.log(`✅ Loaded ${data.transitions.length} transitions for ${playerId}`);
             }
         } catch (error) {
             console.error(`❌ Error loading transitions for ${playerId}:`, error);
@@ -206,7 +206,7 @@ window.createTransitionMenu = async function(playerId, container) {
                 durationValue.textContent = config.duration.toFixed(1) + 's';
                 settings.classList.toggle('disabled', !config.enabled);
                 
-                console.log(`✅ Loaded ${playerId} transition config:`, config);
+                if (window.DEBUG) console.log(`✅ Loaded ${playerId} transition config:`, config);
             }
         } catch (error) {
             console.error(`❌ Error loading ${playerId} transition config:`, error);

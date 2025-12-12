@@ -219,8 +219,34 @@ function renderParameterControl(param, currentValue, effectIndex) {
             const savedRangeMax = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMax !== undefined ? currentValue._rangeMax : max;
             const actualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : value;
             
-            // Use savedRangeMax as slider max if it's a reasonable value (for dynamic ranges like Transport)
-            const sliderMax = savedRangeMax > 0 && savedRangeMax <= max ? savedRangeMax : max;
+            // DEBUG: Log timeline slider initialization
+            if (param.name === 'transport_position') {
+                console.log('🎬 TIMELINE SLIDER INIT:', {
+                    paramName: param.name,
+                    'param.min': param.min,
+                    'param.max': param.max,
+                    'currentValue': currentValue,
+                    'savedRangeMin': savedRangeMin,
+                    'savedRangeMax': savedRangeMax,
+                    'actualValue': actualValue,
+                    'calculated min': min,
+                    'calculated max': max
+                });
+            }
+            
+            // For transport timeline: use actual content length as slider max (savedRangeMax contains clip length)
+            // For other parameters: use parameter max from schema
+            const sliderMax = savedRangeMax > 0 ? savedRangeMax : max;
+            
+            // DEBUG: Log final slider config
+            if (param.name === 'transport_position') {
+                console.log('🎚️ TIMELINE SLIDER CONFIG:', {
+                    'sliderMax (final)': sliderMax,
+                    'rangeMin': savedRangeMin,
+                    'rangeMax': savedRangeMax,
+                    'value': actualValue
+                });
+            }
             
             control = `
                 <div class="parameter-control">

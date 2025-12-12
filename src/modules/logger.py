@@ -247,3 +247,146 @@ def log_artnet_output(logger, universe, channel_count, first_values):
     """
     values_str = ', '.join(str(v) for v in first_values[:6])
     logger.debug(f"Art-Net Universe {universe}: {channel_count} Kanäle [{values_str}...]")
+
+
+# ========== DEBUG CATEGORIES SYSTEM ==========
+# Granulare Kontrolle über Debug-Ausgaben nach Kategorie
+
+class DebugCategories:
+    """
+    Verwaltet Debug-Kategorien für granulare Log-Kontrolle.
+    Kategorien können zur Laufzeit aktiviert/deaktiviert werden.
+    """
+    
+    # Definierte Debug-Kategorien
+    TRANSPORT = 'transport'          # Transport plugin (position, loop, speed)
+    EFFECTS = 'effects'              # Effect processing
+    LAYERS = 'layers'                # Layer compositing
+    PLAYBACK = 'playback'            # Playback loop, frame fetch
+    API = 'api'                      # API calls
+    WEBSOCKET = 'websocket'          # WebSocket communication
+    ARTNET = 'artnet'                # Art-Net output
+    PERFORMANCE = 'performance'      # Performance metrics
+    CACHE = 'cache'                  # Cache operations
+    
+    _enabled_categories = set()
+    _initialized = False
+    
+    @classmethod
+    def initialize(cls, enabled_categories=None):
+        """
+        Initialisiert Debug-Kategorien.
+        
+        Args:
+            enabled_categories: Liste der zu aktivierenden Kategorien (None = alle aus)
+        """
+        cls._enabled_categories = set(enabled_categories or [])
+        cls._initialized = True
+    
+    @classmethod
+    def enable(cls, *categories):
+        """Aktiviert eine oder mehrere Debug-Kategorien."""
+        if not cls._initialized:
+            cls.initialize()
+        cls._enabled_categories.update(categories)
+    
+    @classmethod
+    def disable(cls, *categories):
+        """Deaktiviert eine oder mehrere Debug-Kategorien."""
+        if not cls._initialized:
+            cls.initialize()
+        cls._enabled_categories.difference_update(categories)
+    
+    @classmethod
+    def is_enabled(cls, category):
+        """Prüft, ob eine Kategorie aktiviert ist."""
+        if not cls._initialized:
+            cls.initialize()
+        return category in cls._enabled_categories
+    
+    @classmethod
+    def enable_all(cls):
+        """Aktiviert alle Debug-Kategorien."""
+        cls._enabled_categories = {
+            cls.TRANSPORT, cls.EFFECTS, cls.LAYERS, cls.PLAYBACK,
+            cls.API, cls.WEBSOCKET, cls.ARTNET, cls.PERFORMANCE, cls.CACHE
+        }
+    
+    @classmethod
+    def disable_all(cls):
+        """Deaktiviert alle Debug-Kategorien."""
+        cls._enabled_categories.clear()
+    
+    @classmethod
+    def get_enabled(cls):
+        """Gibt Liste der aktivierten Kategorien zurück."""
+        return list(cls._enabled_categories)
+    
+    @classmethod
+    def get_all(cls):
+        """Gibt Liste aller verfügbaren Kategorien zurück."""
+        return [
+            cls.TRANSPORT, cls.EFFECTS, cls.LAYERS, cls.PLAYBACK,
+            cls.API, cls.WEBSOCKET, cls.ARTNET, cls.PERFORMANCE, cls.CACHE
+        ]
+
+
+def debug_log(logger, category, message, *args, **kwargs):
+    """
+    Bedingte Debug-Log-Ausgabe basierend auf Kategorie.
+    
+    Args:
+        logger: Logger-Instanz
+        category: Debug-Kategorie (z.B. DebugCategories.TRANSPORT)
+        message: Log-Nachricht (kann Formatierungs-Platzhalter enthalten)
+        *args: Argumente für String-Formatierung
+        **kwargs: Keyword-Argumente für String-Formatierung
+    
+    Example:
+        debug_log(logger, DebugCategories.TRANSPORT, 
+                  "Frame %d, position=%s", frame, position)
+    """
+    if DebugCategories.is_enabled(category):
+        # Format message if args provided
+        if args or kwargs:
+            message = message % args if args else message.format(**kwargs)
+        logger.debug(f"[{category}] {message}")
+
+
+def info_log_conditional(logger, category, message, *args, **kwargs):
+    """
+    Bedingte Info-Log-Ausgabe basierend auf Kategorie.
+    INFO-Logs werden immer in Datei geschrieben, aber nur bei aktivierter Kategorie auch ausgegeben.
+    
+    Args:
+        logger: Logger-Instanz
+        category: Debug-Kategorie
+        message: Log-Nachricht
+        *args, **kwargs: Format-Argumente
+    """
+    if DebugCategories.is_enabled(category):
+        if args or kwargs:
+            message = message % args if args else message.format(**kwargs)
+        logger.info(f"[{category}] {message}")
+
+
+# Convenience-Funktionen für häufig genutzte Kategorien
+def debug_transport(logger, message, *args, **kwargs):
+    """Transport-spezifisches Debug-Log."""
+    debug_log(logger, DebugCategories.TRANSPORT, message, *args, **kwargs)
+
+def debug_effects(logger, message, *args, **kwargs):
+    """Effects-spezifisches Debug-Log."""
+    debug_log(logger, DebugCategories.EFFECTS, message, *args, **kwargs)
+
+def debug_layers(logger, message, *args, **kwargs):
+    """Layer-spezifisches Debug-Log."""
+    debug_log(logger, DebugCategories.LAYERS, message, *args, **kwargs)
+
+def debug_playback(logger, message, *args, **kwargs):
+    """Playback-spezifisches Debug-Log."""
+    debug_log(logger, DebugCategories.PLAYBACK, message, *args, **kwargs)
+
+def debug_api(logger, message, *args, **kwargs):
+    """API-spezifisches Debug-Log."""
+    debug_log(logger, DebugCategories.API, message, *args, **kwargs)

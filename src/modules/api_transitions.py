@@ -109,17 +109,14 @@ def register_transition_routes(app, player_manager):
                 transition_plugin.update_parameter("duration", duration)
                 transition_plugin.update_parameter("easing", easing)
             
-            # Store config in player
-            if not hasattr(player, 'transition_config'):
-                player.transition_config = {}
-            
-            player.transition_config = {
-                "enabled": enabled,
-                "effect": effect,
-                "duration": duration,
-                "easing": easing,
-                "plugin": transition_plugin
-            }
+            # Store config in player's transition manager
+            player.transition_manager.configure(
+                enabled=enabled,
+                effect=effect,
+                duration=duration,
+                easing=easing,
+                plugin=transition_plugin
+            )
             
             logger.info(f"✅ {player_id} transition config updated: "
                        f"enabled={enabled}, effect={effect}, duration={duration}s, easing={easing}")
@@ -154,13 +151,8 @@ def register_transition_routes(app, player_manager):
                     "error": f"Player '{player_id}' not found"
                 }), 404
             
-            # Get config or return defaults
-            config = getattr(player, 'transition_config', {
-                "enabled": False,
-                "effect": "fade",
-                "duration": 1.0,
-                "easing": "ease_in_out"
-            })
+            # Get config from transition manager
+            config = player.transition_manager.config
             
             return jsonify({
                 "success": True,

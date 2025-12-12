@@ -6,7 +6,7 @@
 import { debug } from '../logger.js';
 
 export class FilesTab {
-    constructor(containerId, searchContainerId, viewMode = 'list', enableMultiselect = false) {
+    constructor(containerId, searchContainerId, viewMode = 'list', enableMultiselect = false, enableThumbnails = false) {
         this.containerId = containerId;
         this.searchContainerId = searchContainerId;
         this.files = [];
@@ -17,6 +17,10 @@ export class FilesTab {
         this.expandedFolders = new Set();
         this.enableMultiselect = enableMultiselect; // Enable multiselect mode
         this.selectedFiles = new Set(); // Track selected files in multiselect mode
+        this.enableThumbnails = enableThumbnails; // Enable thumbnail display
+        this.thumbnailCache = new Map(); // Cache loaded thumbnails
+        this.hoverPreview = null; // Hover preview element
+        this.previewModal = null; // Preview modal element
     }
     
     /**
@@ -27,7 +31,55 @@ export class FilesTab {
         if (this.viewMode === 'button') {
             this.setupViewToggle();
         }
+        if (this.enableThumbnails) {
+            this.setupThumbnailSystem();
+        }
         await this.loadFiles();
+    }
+    
+    /**
+     * Setup thumbnail system (hover preview + modal)
+     */
+    setupThumbnailSystem() {
+        // Create hover preview element
+        this.hoverPreview = document.createElement('div');
+        this.hoverPreview.className = 'file-thumbnail-preview';
+        this.hoverPreview.innerHTML = '<img src="" alt="Preview">';
+        document.body.appendChild(this.hoverPreview);
+        
+        // Create modal element
+        this.previewModal = document.createElement('div');
+        this.previewModal.className = 'file-preview-modal';
+        this.previewModal.innerHTML = `
+            <div class="file-preview-modal-backdrop"></div>
+            <div class="file-preview-modal-content">
+                <button class="file-preview-modal-close" aria-label="Close">&times;</button>
+                <div class="file-preview-modal-body">
+                    <div class="file-preview-media">
+                        <div class="loading-spinner">Loading preview...</div>
+                    </div>
+                    <div class="file-preview-info">
+                        <h4 class="file-preview-filename"></h4>
+                        <div class="file-preview-meta"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(this.previewModal);
+        
+        // Modal close handlers
+        const closeBtn = this.previewModal.querySelector('.file-preview-modal-close');
+        const backdrop = this.previewModal.querySelector('.file-preview-modal-backdrop');
+        
+        closeBtn.addEventListener('click', () => this.closePreviewModal());
+        backdrop.addEventListener('click', () => this.closePreviewModal());
+        
+        // ESC key to close
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.previewModal.classList.contains('show')) {
+                this.closePreviewModal();
+            }
+        });
     }
     
     /**
@@ -247,6 +299,11 @@ export class FilesTab {
         
         container.innerHTML = html;
         this.attachTreeEventListeners();
+        
+        // Load thumbnails after render
+        if (this.enableThumbnails) {
+            this.loadThumbnails();
+        }
     }
     
     /**
@@ -312,16 +369,40 @@ export class FilesTab {
             
             return html;
         } else {
-            const icon = node.type === 'video' ? '🎬' : '🖼️';
             const isSelected = this.selectedFiles.has(node.path);
+            const hasThumbnail = node.has_thumbnail || false;
+            const thumbnailClass = this.enableThumbnails && hasThumbnail ? 'with-thumbnail' : '';
+            
+            // Build tooltip
+            let tooltip = `${node.name}\nSize: ${node.size_human || 'Unknown'}`;
+            if (node.type === 'video') {
+                if (node.duration) {
+                    tooltip += `\nDuration: ${node.duration}s`;
+                }
+                if (node.fps) {
+                    tooltip += `\nFPS: ${node.fps}`;
+                }
+            }
+            
+            let thumbnailHtml = '';
+            if (this.enableThumbnails && hasThumbnail) {
+                thumbnailHtml = `
+                    <img class="file-thumbnail loading" 
+                         data-path="${node.path}" 
+                         alt="${node.name}">
+                `;
+            }
             
             return `
-                <div class="tree-node file ${isSelected ? 'selected' : ''}" 
+                <div class="tree-node file ${thumbnailClass} ${isSelected ? 'selected' : ''}" 
                      style="padding-left: ${indent}px" 
                      data-path="${node.path}"
                      data-type="${node.type}"
+                     data-filename="${node.name}"
+                     data-size="${node.size_human || ''}"
+                     title="${tooltip}"
                      draggable="true">
-                    <span class="tree-node-icon">${icon}</span>
+                    ${thumbnailHtml}
                     <span class="tree-node-name">${node.name}</span>
                     <span class="tree-node-size">${node.size_human || ''}</span>
                 </div>
@@ -348,15 +429,43 @@ export class FilesTab {
         let html = '<div class="file-list">';
         
         this.filteredFiles.forEach(file => {
-            const icon = file.type === 'video' ? '🎬' : '🖼️';
             const isSelected = this.selectedFiles.has(file.path);
+            const hasThumbnail = file.has_thumbnail || false;
+            const thumbnailClass = this.enableThumbnails && hasThumbnail ? 'with-thumbnail' : '';
+            
+            // Build tooltip
+            let tooltip = `${file.filename}\nSize: ${file.size_human}`;
+            if (file.type === 'video') {
+                if (file.duration) {
+                    tooltip += `\nDuration: ${file.duration}s`;
+                }
+                if (file.fps) {
+                    tooltip += `\nFPS: ${file.fps}`;
+                }
+            }
+            if (file.folder) {
+                tooltip += `\nFolder: ${file.folder}`;
+            }
+            
+            let thumbnailHtml = '';
+            if (this.enableThumbnails && hasThumbnail) {
+                thumbnailHtml = `
+                    <img class="file-thumbnail loading" 
+                         data-path="${file.path}" 
+                         alt="${file.filename}">
+                `;
+            }
             
             html += `
-                <div class="file-item ${isSelected ? 'selected' : ''}" 
+                <div class="file-item ${thumbnailClass} ${isSelected ? 'selected' : ''}" 
                      data-path="${file.path}"
                      data-type="${file.type}"
+                     data-filename="${file.filename}"
+                     data-size="${file.size_human}"
+                     data-folder="${file.folder || ''}"
+                     title="${tooltip}"
                      draggable="true">
-                    <span class="file-icon">${icon}</span>
+                    ${thumbnailHtml}
                     <div class="file-info">
                         <div class="file-name">${file.filename}</div>
                         <div class="file-path text-muted">${file.folder}</div>
@@ -370,6 +479,11 @@ export class FilesTab {
         
         container.innerHTML = html;
         this.attachListEventListeners();
+        
+        // Load thumbnails after render
+        if (this.enableThumbnails) {
+            this.loadThumbnails();
+        }
     }
     
     /**
@@ -495,6 +609,42 @@ export class FilesTab {
                 file.classList.remove('dragging');
             });
         });
+        
+        // Thumbnail hover preview
+        if (this.enableThumbnails) {
+            container.querySelectorAll('.file-thumbnail').forEach(thumbnail => {
+                thumbnail.addEventListener('mouseenter', (e) => {
+                    this.showHoverPreview(thumbnail, e);
+                });
+                
+                thumbnail.addEventListener('mousemove', (e) => {
+                    if (this.hoverPreview && this.hoverPreview.classList.contains('show')) {
+                        const x = e.clientX + 20;
+                        const y = e.clientY + 20;
+                        this.hoverPreview.style.left = `${x}px`;
+                        this.hoverPreview.style.top = `${y}px`;
+                    }
+                });
+                
+                thumbnail.addEventListener('mouseleave', () => {
+                    this.hideHoverPreview();
+                });
+            });
+            
+            // Right-click for preview modal
+            container.querySelectorAll('.tree-node.file').forEach(file => {
+                file.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    
+                    const path = file.getAttribute('data-path');
+                    const type = file.getAttribute('data-type');
+                    const filename = file.getAttribute('data-filename') || path;
+                    const size = file.getAttribute('data-size') || 'Unknown';
+                    
+                    this.showFilePreviewModal(path, type, filename, size, '');
+                });
+            });
+        }
     }
     
     /**
@@ -587,6 +737,45 @@ export class FilesTab {
                 item.classList.remove('dragging');
             });
         });
+        
+        // Thumbnail hover preview
+        if (this.enableThumbnails) {
+            const thumbnails = document.querySelectorAll(`#${this.containerId} .file-thumbnail`);
+            
+            thumbnails.forEach(thumbnail => {
+                thumbnail.addEventListener('mouseenter', (e) => {
+                    this.showHoverPreview(thumbnail, e);
+                });
+                
+                thumbnail.addEventListener('mousemove', (e) => {
+                    if (this.hoverPreview && this.hoverPreview.classList.contains('show')) {
+                        const x = e.clientX + 20;
+                        const y = e.clientY + 20;
+                        this.hoverPreview.style.left = `${x}px`;
+                        this.hoverPreview.style.top = `${y}px`;
+                    }
+                });
+                
+                thumbnail.addEventListener('mouseleave', () => {
+                    this.hideHoverPreview();
+                });
+            });
+            
+            // Right-click for preview modal
+            fileItems.forEach(item => {
+                item.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    
+                    const path = item.getAttribute('data-path');
+                    const type = item.getAttribute('data-type');
+                    const filename = item.getAttribute('data-filename') || path;
+                    const size = item.getAttribute('data-size') || 'Unknown';
+                    const folder = item.getAttribute('data-folder') || '';
+                    
+                    this.showFilePreviewModal(path, type, filename, size, folder);
+                });
+            });
+        }
     }
     
     /**
@@ -607,5 +796,159 @@ export class FilesTab {
      */
     async refresh() {
         await this.loadFiles();
+    }
+    
+    /**
+     * Load thumbnails for all visible file items
+     */
+    async loadThumbnails() {
+        const container = document.getElementById(this.containerId);
+        const thumbnails = container.querySelectorAll('.file-thumbnail.loading');
+        
+        debug.log(`🖼️ Loading ${thumbnails.length} thumbnails...`);
+        
+        // Load all thumbnails in parallel
+        const promises = Array.from(thumbnails).map(async (img) => {
+            const path = img.getAttribute('data-path');
+            
+            debug.log(`🖼️ Loading thumbnail for: ${path}`);
+            
+            // Check cache first
+            if (this.thumbnailCache.has(path)) {
+                debug.log(`✅ Thumbnail cached: ${path}`);
+                img.src = this.thumbnailCache.get(path);
+                img.classList.remove('loading');
+                return;
+            }
+            
+            // Load from API
+            try {
+                const url = `/api/files/thumbnail/${encodeURIComponent(path)}?generate=true`;
+                debug.log(`📥 Fetching: ${url}`);
+                const response = await fetch(url);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const objectUrl = URL.createObjectURL(blob);
+                    
+                    img.src = objectUrl;
+                    img.classList.remove('loading');
+                    this.thumbnailCache.set(path, objectUrl);
+                    debug.log(`✅ Thumbnail loaded: ${path} (${blob.size} bytes)`);
+                } else {
+                    // Show placeholder on error
+                    debug.warn(`⚠️ Thumbnail failed (HTTP ${response.status}): ${path}`);
+                    img.classList.remove('loading');
+                    img.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Failed to load thumbnail:', path, error);
+                img.classList.remove('loading');
+                img.style.display = 'none';
+            }
+        });
+        
+        await Promise.all(promises);
+        debug.log(`✅ All thumbnails loaded`);
+    }
+    
+    /**
+     * Show hover preview for thumbnail
+     */
+    showHoverPreview(thumbnailElement, event) {
+        if (!this.hoverPreview) return;
+        
+        const img = this.hoverPreview.querySelector('img');
+        img.src = thumbnailElement.src;
+        
+        // Position near mouse
+        const x = event.clientX + 20;
+        const y = event.clientY + 20;
+        
+        this.hoverPreview.style.left = `${x}px`;
+        this.hoverPreview.style.top = `${y}px`;
+        this.hoverPreview.classList.add('show');
+    }
+    
+    /**
+     * Hide hover preview
+     */
+    hideHoverPreview() {
+        if (this.hoverPreview) {
+            this.hoverPreview.classList.remove('show');
+        }
+    }
+    
+    /**
+     * Show file preview modal
+     */
+    async showFilePreviewModal(filePath, fileType, filename, fileSize, fileFolder) {
+        if (!this.previewModal) return;
+        
+        const modalBody = this.previewModal.querySelector('.file-preview-modal-body');
+        const mediaContainer = this.previewModal.querySelector('.file-preview-media');
+        const infoFilename = this.previewModal.querySelector('.file-preview-filename');
+        const infoMeta = this.previewModal.querySelector('.file-preview-meta');
+        
+        // Set file info
+        infoFilename.textContent = filename;
+        infoMeta.innerHTML = `
+            <div class="meta-item"><strong>Type:</strong> ${fileType}</div>
+            <div class="meta-item"><strong>Size:</strong> ${fileSize}</div>
+            ${fileFolder ? `<div class="meta-item"><strong>Folder:</strong> ${fileFolder}</div>` : ''}
+        `;
+        
+        // Show modal with loading state
+        mediaContainer.innerHTML = '<div class="loading-spinner">Loading preview...</div>';
+        this.previewModal.classList.add('show');
+        
+        // Load video preview
+        if (fileType === 'video') {
+            try {
+                const url = `/api/files/video-preview/${encodeURIComponent(filePath)}?generate=true&format=gif`;
+                const response = await fetch(url);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const objectUrl = URL.createObjectURL(blob);
+                    
+                    mediaContainer.innerHTML = `<img src="${objectUrl}" class="preview-media" alt="${filename}">`;
+                } else {
+                    mediaContainer.innerHTML = '<div class="no-preview">Video preview not available</div>';
+                }
+            } catch (error) {
+                console.error('Failed to load video preview:', error);
+                mediaContainer.innerHTML = '<div class="error-preview">Failed to load preview</div>';
+            }
+        } else if (fileType === 'image') {
+            // For images, show full-size image
+            try {
+                const url = `/api/files/thumbnail/${encodeURIComponent(filePath)}?generate=true`;
+                const response = await fetch(url);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const objectUrl = URL.createObjectURL(blob);
+                    
+                    mediaContainer.innerHTML = `<img src="${objectUrl}" class="preview-media" alt="${filename}">`;
+                } else {
+                    mediaContainer.innerHTML = '<div class="no-preview">Image preview not available</div>';
+                }
+            } catch (error) {
+                console.error('Failed to load image preview:', error);
+                mediaContainer.innerHTML = '<div class="error-preview">Failed to load preview</div>';
+            }
+        } else {
+            mediaContainer.innerHTML = '<div class="no-preview">Preview not available for this file type</div>';
+        }
+    }
+    
+    /**
+     * Close preview modal
+     */
+    closePreviewModal() {
+        if (this.previewModal) {
+            this.previewModal.classList.remove('show');
+        }
     }
 }

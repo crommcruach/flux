@@ -3,7 +3,7 @@ REST API Endpoints für Plugin-System
 """
 from flask import Blueprint, jsonify, request
 from modules.plugin_manager import get_plugin_manager
-from .logger import get_logger
+from .logger import get_logger, debug_api
 
 logger = get_logger(__name__)
 
@@ -37,7 +37,7 @@ def list_plugins():
         }
     """
     pm = get_plugin_manager()
-    logger.debug(f"API /list called. PluginManager registry has {len(pm.registry)} plugins")
+    debug_api(logger, f"API /list called. PluginManager registry has {len(pm.registry)} plugins")
     
     # Optional: Filter by type
     plugin_type = request.args.get('type')
@@ -51,7 +51,7 @@ def list_plugins():
     else:
         plugins = pm.list_plugins()
     
-    logger.debug(f"Returning {len(plugins)} plugins to API client")
+    debug_api(logger, f"Returning {len(plugins)} plugins to API client")
     
     return jsonify({
         "success": True,

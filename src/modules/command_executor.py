@@ -550,13 +550,6 @@ class CommandExecutor:
         else:
             return CommandResult(False, "Fehler beim Laden des Videos")
     
-    def _handle_script_load(self, script_name):
-        """Load a script - DEPRECATED: Use generators instead."""
-        logger.warning(f"Script loading deprecated: {script_name} - use generator plugins instead")
-        
-        msg = f"Script loading deprecated - use generators instead"
-        return CommandResult(False, msg)
-    
     # === System Commands ===
     
     def _handle_help(self, args):

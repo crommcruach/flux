@@ -127,7 +127,9 @@ export function initWebSocket(handlers = {}) {
     
     // DEPRECATED: Legacy socket for status/console/logs
     socket = io(WEBSOCKET_URL, {
-        transports: ['websocket', 'polling']
+        transports: ['polling', 'websocket'],  // Start with polling, upgrade to WebSocket
+        upgrade: true,
+        rememberUpgrade: true
     });
     
     socket.on('connect', () => {
@@ -191,7 +193,9 @@ function _initCommandChannels() {
     
     // Player namespace - transport controls
     playerSocket = io(`${WEBSOCKET_URL}/player`, {
-        transports: ['websocket', 'polling'],
+        transports: ['polling', 'websocket'],  // Start with polling, upgrade to WebSocket
+        upgrade: true,
+        rememberUpgrade: true,
         reconnection: true,
         reconnectionAttempts: WEBSOCKET_RECONNECT_ATTEMPTS,
         reconnectionDelay: WEBSOCKET_RECONNECT_DELAY_MS
@@ -209,7 +213,9 @@ function _initCommandChannels() {
     
     // Effects namespace - effect parameters
     effectsSocket = io(`${WEBSOCKET_URL}/effects`, {
-        transports: ['websocket', 'polling'],
+        transports: ['polling', 'websocket'],  // Start with polling, upgrade to WebSocket
+        upgrade: true,
+        rememberUpgrade: true,
         reconnection: true,
         reconnectionAttempts: WEBSOCKET_RECONNECT_ATTEMPTS,
         reconnectionDelay: WEBSOCKET_RECONNECT_DELAY_MS
@@ -227,7 +233,9 @@ function _initCommandChannels() {
     
     // Layers namespace - layer controls
     layersSocket = io(`${WEBSOCKET_URL}/layers`, {
-        transports: ['websocket', 'polling'],
+        transports: ['polling', 'websocket'],  // Start with polling, upgrade to WebSocket
+        upgrade: true,
+        rememberUpgrade: true,
         reconnection: true,
         reconnectionAttempts: WEBSOCKET_RECONNECT_ATTEMPTS,
         reconnectionDelay: WEBSOCKET_RECONNECT_DELAY_MS
@@ -250,17 +258,60 @@ function _initCommandChannels() {
 export function cleanupWebSockets() {
     console.log('🧹 Cleaning up WebSocket connections');
     
-    if (socket && socket.connected) {
-        socket.disconnect();
+    // Clean up main socket
+    if (socket) {
+        try {
+            if (socket.connected) {
+                socket.removeAllListeners();
+                socket.disconnect();
+            }
+        } catch (e) {
+            debug.warn('Error cleaning up main socket:', e);
+        }
+        socket = null;
+        socketConnected = false;
     }
-    if (playerSocket && playerSocket.connected) {
-        playerSocket.disconnect();
+    
+    // Clean up player socket
+    if (playerSocket) {
+        try {
+            if (playerSocket.connected) {
+                playerSocket.removeAllListeners();
+                playerSocket.disconnect();
+            }
+        } catch (e) {
+            debug.warn('Error cleaning up player socket:', e);
+        }
+        playerSocket = null;
+        playerSocketConnected = false;
     }
-    if (effectsSocket && effectsSocket.connected) {
-        effectsSocket.disconnect();
+    
+    // Clean up effects socket
+    if (effectsSocket) {
+        try {
+            if (effectsSocket.connected) {
+                effectsSocket.removeAllListeners();
+                effectsSocket.disconnect();
+            }
+        } catch (e) {
+            debug.warn('Error cleaning up effects socket:', e);
+        }
+        effectsSocket = null;
+        effectsSocketConnected = false;
     }
-    if (layersSocket && layersSocket.connected) {
-        layersSocket.disconnect();
+    
+    // Clean up layers socket
+    if (layersSocket) {
+        try {
+            if (layersSocket.connected) {
+                layersSocket.removeAllListeners();
+                layersSocket.disconnect();
+            }
+        } catch (e) {
+            debug.warn('Error cleaning up layers socket:', e);
+        }
+        layersSocket = null;
+        layersSocketConnected = false;
     }
 }
 

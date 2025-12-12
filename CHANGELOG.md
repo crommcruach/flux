@@ -9,6 +9,31 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased] - 2025-12-08
 
+### 🔧 Console Logging Optimierung
+
+#### Geändert
+- **Frontend Logger** - Debug-Modus standardmäßig deaktiviert
+  - `DEBUG_LOGGING = false` - weniger Konsolen-Spam
+  - Nur Fehler und Warnungen werden standardmäßig angezeigt
+  - Debug-Logs können mit `window.toggleDebug()` aktiviert werden
+  - WebSocketPreview nutzt eigenes debug-Flag (`options.debug`)
+  - Wichtige console.log() Aufrufe in player.js zu debug.log() konvertiert
+
+- **Socket.IO Compression** - Deaktiviert für binäre Video-Frames
+  - `compression_threshold=0` (war 1024)
+  - `http_compression=False` (war True)  
+  - `websocket_compression=False` (war True)
+  - Vermeidet doppelte Kompression von JPEG-Daten
+
+### 🔧 Bugfix: WebSocket Parse Error
+
+#### Behoben
+- **WebSocket Binary Frame Transmission** - Fixed parse error beim Senden von Video Frames
+  - Flask-SocketIO erkennt `bytes` automatisch als binär (kein `binary=True` Parameter)
+  - Socket.IO Compression deaktiviert (JPEG bereits komprimiert)
+  - Validierung von `start_stream` data Parameter gegen malformed requests
+  - Parse error: "WebSocket disconnected: parse error" behoben
+
 ### 🔄 Migration: WebRTC → WebSocket
 
 #### Geändert

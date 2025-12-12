@@ -114,7 +114,8 @@ async function initializeTabComponents() {
     
     // Initialize Files Tab with 'list' mode (options: 'list', 'tree', 'button')
     // 'list' shows only flat file list without toggle button
-    filesTab = new FilesTab('fileBrowser', 'filesSearchContainer', 'list');
+    // enableThumbnails = true activates thumbnail display and preview modal
+    filesTab = new FilesTab('fileBrowser', 'filesSearchContainer', 'list', false, true);
     await filesTab.init();
     
     debug.log('✅ Tab components initialized');
@@ -175,8 +176,12 @@ async function init() {
         
         // Layers are now loaded per-clip when clips are loaded
         
+        // Start preview streams with staggered timing to prevent connection burst
         startPreviewStream();
-        startArtnetPreviewStream();
+        setTimeout(() => {
+            startArtnetPreviewStream();
+        }, 500); // 500ms delay between preview connections
+        
         setupEffectDropZones();
         setupGeneratorDropZones();
         setupPlaylistContainerDropHandlers(); // Register container handlers once
@@ -198,8 +203,8 @@ async function init() {
     let lastLiveParamUpdate = 0;
     
     const EFFECT_REFRESH_INTERVAL = 2000;      // 2 seconds
-    const PLAYLIST_UPDATE_INTERVAL = 500;      // 500ms for autoplay
-    const LIVE_PARAM_UPDATE_INTERVAL = 500;    // 500ms for live parameters
+    const PLAYLIST_UPDATE_INTERVAL = 50;       // 50ms for responsive autoplay
+    const LIVE_PARAM_UPDATE_INTERVAL = 50;     // 50ms for responsive live parameters
     
     updateInterval = setInterval(async () => {
         const now = Date.now();
@@ -313,7 +318,7 @@ async function updateCurrentFromPlayer(playerId) {
             
             // Debug logging for slave mode
             if (clipIndexChanged) {
-                console.log(`🔄 [${playerId}] Clip index: ${config.currentClipIndex} → ${newClipIndex}`);
+                debug.log(`🔄 [${playerId}] Clip index: ${config.currentClipIndex} → ${newClipIndex}`);
             }
             
             // Always update these values
@@ -326,7 +331,7 @@ async function updateCurrentFromPlayer(playerId) {
                     debug.log(`🔄 [${playerId}] Current clip changed: ${newClipId.substring(0,8)}...`);
                 }
                 if (clipIndexChanged) {
-                    console.log(`✅ [${playerId}] Re-rendering playlist - index changed to ${newClipIndex}`);
+                    debug.log(`✅ [${playerId}] Re-rendering playlist - index changed to ${newClipIndex}`);
                 }
                 renderPlaylist(playerId);
             }
@@ -1236,6 +1241,16 @@ function startPreviewStream() {
     const quality = document.getElementById('previewQuality')?.value || 'medium';
     const canvas = document.getElementById('videoPreviewVideo');
     
+    // Cleanup existing WebSocket instance first
+    if (websocketPreview) {
+        try {
+            websocketPreview.stop();
+        } catch (e) {
+            debug.warn('Error stopping previous preview:', e);
+        }
+        websocketPreview = null;
+    }
+    
     // Use WebSocket only if enabled in config
     if (WEBSOCKET_ENABLED && previewUseWebSocket && window.WebSocketPreview && canvas) {
         // Try WebSocket first
@@ -1262,7 +1277,7 @@ function startPreviewStream() {
             });
             websocketPreview.start(canvas);
             updatePreviewModeButton('connecting');
-            console.log('WebSocket preview started');
+            debug.log('WebSocket preview started');
         } catch (error) {
             console.error('WebSocket initialization failed:', error);
             startMJPEGPreview();
@@ -1347,6 +1362,16 @@ function startArtnetPreviewStream() {
     const quality = document.getElementById('artnetPreviewQuality')?.value || 'medium';
     const canvas = document.getElementById('artnetPreviewVideo');
     
+    // Cleanup existing WebSocket instance first
+    if (websocketArtnetPreview) {
+        try {
+            websocketArtnetPreview.stop();
+        } catch (e) {
+            debug.warn('Error stopping previous artnet preview:', e);
+        }
+        websocketArtnetPreview = null;
+    }
+    
     // Use WebSocket only if enabled in config
     if (WEBSOCKET_ENABLED && artnetPreviewUseWebSocket && window.WebSocketPreview && canvas) {
         // Try WebSocket first
@@ -1373,7 +1398,7 @@ function startArtnetPreviewStream() {
             });
             websocketArtnetPreview.start(canvas);
             updateArtnetPreviewModeButton('connecting');
-            console.log('Art-Net WebSocket preview started');
+            debug.log('Art-Net WebSocket preview started');
         } catch (error) {
             console.error('Art-Net WebSocket initialization failed:', error);
             startArtnetMJPEGPreview();
@@ -1768,7 +1793,7 @@ function renderPlaylistGeneric(playlistId) {
         
         // Debug: Show comparison values for ALL items when index changes
         if (cfg.currentClipIndex >= 0) {
-            console.log(`🔍 [${playlistId}] item[${index}]: ${item.name.substring(0,20)} | index=${index} vs currentClipIndex=${cfg.currentClipIndex} | isActive=${isActive}`);
+            debug.log(`🔍 [${playlistId}] item[${index}]: ${item.name.substring(0,20)} | index=${index} vs currentClipIndex=${cfg.currentClipIndex} | isActive=${isActive}`);
         }
         
         // Debug duplicate active items
@@ -1780,15 +1805,40 @@ function renderPlaylistGeneric(playlistId) {
         const debugTooltip = `Index: ${index}\nUUID: ${item.id}\nPath: ${item.path || 'N/A'}`;
         
         itemsHtml += `<div class="drop-zone" data-drop-index="${index}" data-playlist="${playlistId}"></div>`;
+        
+        const isFxSelected = (selectedClipId === item.id && selectedClipPlayerType === playlistId);
+        
+        // Truncate name for FX tab if too long
+        const maxTabLength = 15;
+        const tabName = item.name.length > maxTabLength 
+            ? item.name.substring(0, maxTabLength) + '...' 
+            : item.name;
+        
+        // Generate thumbnail URL if item has a path
+        const thumbnailUrl = item.path ? `${API_BASE}/api/files/thumbnail/${encodeURIComponent(item.path)}` : null;
+        const thumbnailStyle = thumbnailUrl 
+            ? `background-image: url('${thumbnailUrl}'); background-size: cover; background-position: center;` 
+            : '';
+        
         itemsHtml += `
-            <div class="playlist-item ${isActive ? 'active' : ''}" 
-                 ${cfg.dataAttr}="${index}"
-                 data-playlist="${playlistId}"
-                 data-clip-id="${item.id}"
-                 draggable="true"
-                 title="${debugTooltip}">
-                <div class="playlist-item-name">${item.name} ${getLayerBadgeHtml(item.id)}</div>
-                <button class="playlist-item-remove" onclick="${cfg.removeFunc(index)}; event.stopPropagation();" title="Remove from playlist">×</button>
+            <div class="playlist-item-wrapper ${isActive ? 'active' : ''}">
+                <div class="playlist-item" 
+                     ${cfg.dataAttr}="${index}"
+                     data-playlist="${playlistId}"
+                     data-clip-id="${item.id}"
+                     draggable="true"
+                     style="${thumbnailStyle}"
+                     title="${debugTooltip}">
+                    ${getLayerBadgeHtml(item.id)}
+                    <button class="playlist-item-remove" onclick="${cfg.removeFunc(index)}; event.stopPropagation();" title="Remove from playlist">×</button>
+                </div>
+                <div class="playlist-item-fx-tab ${isFxSelected ? 'selected' : ''}" 
+                     data-playlist="${playlistId}"
+                     data-clip-id="${item.id}"
+                     data-clip-index="${index}"
+                     title="${item.name}">
+                    <span class="fx-icon">${tabName}</span>
+                </div>
             </div>
         `;
     });
@@ -1818,6 +1868,85 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
     container._playlistHandlers = [];
     
     let isDragging = false;
+    
+    // FX Tab click handler - select clip for ClipFX without playing it
+    const fxTabClickHandler = (e) => {
+        const fxTab = e.target.closest('.playlist-item-fx-tab');
+        if (!fxTab) return;
+        
+        e.preventDefault();
+        e.stopPropagation(); // Prevent playlist item click
+        
+        const clipId = fxTab.getAttribute('data-clip-id');
+        const index = parseInt(fxTab.getAttribute('data-clip-index'));
+        const fileItem = files[index];
+        
+        if (!fileItem) return;
+        
+        // Select clip for FX editing (synchronous)
+        selectedClipId = fileItem.id;
+        selectedClipPath = fileItem.path;
+        selectedClipPlayerType = playlistId;
+        
+        debug.log(`🎨 Selected clip for FX: ${fileItem.name} (${clipId})`);
+        
+        // Update UI immediately (sync operations first)
+        // Update all FX tabs in ALL playlists to show correct selection
+        document.querySelectorAll('.playlist-item-fx-tab').forEach(tab => {
+            const tabClipId = tab.getAttribute('data-clip-id');
+            const tabPlaylistId = tab.getAttribute('data-playlist');
+            if (tabClipId === clipId && tabPlaylistId === playlistId) {
+                tab.classList.add('selected');
+            } else {
+                tab.classList.remove('selected');
+            }
+        });
+        
+        // Switch to ClipFX tab immediately
+        const clipFxTab = document.querySelector('.tab-button[data-tab="clipfx"]');
+        if (clipFxTab && !clipFxTab.classList.contains('active')) {
+            clipFxTab.click();
+        }
+        
+        // Load data asynchronously (non-blocking)
+        (async () => {
+            try {
+                // Load clip layers
+                await loadClipLayers(fileItem.id);
+                renderSelectedClipLayers();
+                
+                // Load effects/generator parameters
+                if (fileItem.type === 'generator' && fileItem.generator_id) {
+                    const generator = generatorsMap.get(fileItem.generator_id) || availableGenerators.find(g => g.id === fileItem.generator_id);
+                    if (generator) {
+                        window.currentGeneratorId = fileItem.generator_id;
+                        window.currentGeneratorMeta = generator;
+                        
+                        const paramsResponse = await fetch(`${API_BASE}/api/plugins/${fileItem.generator_id}/parameters`);
+                        const paramsData = await paramsResponse.json();
+                        
+                        window.currentGeneratorParameters = paramsData.parameters || [];
+                        
+                        const params = {};
+                        if (paramsData.parameters) {
+                            paramsData.parameters.forEach(param => {
+                                params[param.name] = fileItem.parameters?.[param.name] ?? param.default;
+                            });
+                        }
+                        window.currentGeneratorParams = params;
+                        displayGeneratorParameters(fileItem.generator_id, paramsData.parameters || []);
+                    }
+                } else {
+                    window.currentGeneratorId = null;
+                    window.currentGeneratorParams = null;
+                    window.currentGeneratorMeta = null;
+                    await refreshClipEffects();
+                }
+            } catch (error) {
+                console.error('Error loading clip FX data:', error);
+            }
+        })();
+    };
     
     // Single click handler - delegated to container
     const clickHandler = async (e) => {
@@ -1911,6 +2040,7 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
     };
     
     // Attach delegated event listeners to container
+    container.addEventListener('click', fxTabClickHandler); // FX tab first (stopPropagation)
     container.addEventListener('click', clickHandler);
     container.addEventListener('dblclick', dblclickHandler);
     container.addEventListener('dragstart', dragstartHandler, true); // Use capture for drag events
@@ -1918,6 +2048,7 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
     
     // Store handlers for cleanup
     container._playlistHandlers = [
+        { event: 'click', handler: fxTabClickHandler },
         { event: 'click', handler: clickHandler },
         { event: 'dblclick', handler: dblclickHandler },
         { event: 'dragstart', handler: dragstartHandler },
@@ -2910,6 +3041,17 @@ async function updateClipEffectLiveParameters() {
                         // Update triple-slider if it exists
                         const slider = getTripleSlider(controlId);
                         if (slider && typeof paramValue === 'object' && paramValue._value !== undefined) {
+                            // DEBUG: Log transport position updates
+                            if (paramName === 'transport_position') {
+                                debug.log('🎬 Updating transport slider:', {
+                                    controlId,
+                                    value: paramValue._value,
+                                    rangeMin: paramValue._rangeMin,
+                                    rangeMax: paramValue._rangeMax,
+                                    sliderExists: !!slider
+                                });
+                            }
+                            
                             // Determine if we should auto-scale: only if rangeMax == totalFrames-1 (full content, not trimmed)
                             const shouldScale = paramValue._totalFrames && paramValue._rangeMax === (paramValue._totalFrames - 1);
                             slider.updateValues(paramValue._value, paramValue._rangeMin, paramValue._rangeMax, shouldScale);
@@ -3617,7 +3759,7 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
             // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
             targetClipId = selectedLayerClipId || selectedClipId;
             playerId = selectedClipPlayerType;
-            console.log(`🔍 sendParameterUpdate: selectedLayerId=${selectedLayerId}, selectedLayerClipId=${selectedLayerClipId}, selectedClipId=${selectedClipId}, targetClipId=${targetClipId}`);
+            debug.log(`🔍 sendParameterUpdate: selectedLayerId=${selectedLayerId}, selectedLayerClipId=${selectedLayerClipId}, selectedClipId=${selectedClipId}, targetClipId=${targetClipId}`);
             
             body = { 
                 name: paramName, 
@@ -3627,7 +3769,9 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
                 const range = tripleSlider.getRange();
                 body.rangeMin = range.min;
                 body.rangeMax = range.max;
-                console.log(`🎚️ Triple-slider range: min=${range.min}, max=${range.max}, value=${value}`);
+                if (window.DEBUG_LOGGING) {
+                    console.log(`🎚️ Triple-slider range: min=${range.min}, max=${range.max}, value=${value}`);
+                }
             }
             
             // Try WebSocket first for clip effects

@@ -334,16 +334,22 @@ class GeneratorSource(FrameSource):
         if not self.plugin_instance:
             return None, 0
         
-        # Calculate elapsed time since start
-        current_time = time.time() - self.start_time
-        
-        # Calculate frame number from elapsed time
-        virtual_frame = int(current_time * self.fps)
-        
-        # Loop frame number if duration is defined (for transport effect compatibility)
-        if self.total_frames > 0:
-            virtual_frame = virtual_frame % self.total_frames
+        # Use current_frame if set by transport effect, otherwise calculate from time
+        # This allows transport to control generator playback (speed, reverse, trim)
+        if hasattr(self, 'current_frame') and self.current_frame >= 0:
+            virtual_frame = self.current_frame
             current_time = virtual_frame / self.fps
+        else:
+            # Fallback: Calculate elapsed time since start (no transport control)
+            current_time = time.time() - self.start_time
+            
+            # Calculate frame number from elapsed time
+            virtual_frame = int(current_time * self.fps)
+            
+            # Loop frame number if duration is defined
+            if self.total_frames > 0:
+                virtual_frame = virtual_frame % self.total_frames
+                current_time = virtual_frame / self.fps
         
         # Generators erzeugen Frames ohne Input (None)
         # Pass time and frame info via kwargs

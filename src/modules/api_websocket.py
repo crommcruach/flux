@@ -11,6 +11,7 @@ from flask_socketio import SocketIO, emit, disconnect
 from flask import request
 import time
 import threading
+from modules.logger import debug_log, DebugCategories
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,13 @@ def init_websocket_streaming(app, player_mgr, config, socketio_instance):
     # Use the existing SocketIO instance from RestAPI (don't create a new one!)
     socketio = socketio_instance
     
+    # Set default config values for stability
+    _config.setdefault('max_frame_size_kb', 200)
+    _config.setdefault('skip_frame_threshold', 50)
+    _config.setdefault('quality_auto_adjust', True)
+    
     logger.info(f"WebSocket streaming initialized: quality={_config.get('default_quality', 'medium')}, "
-                f"max_fps={_config.get('max_fps', 30)}")
+                f"max_fps={_config.get('max_fps', 30)}, max_frame_size={_config.get('max_frame_size_kb')}KB")
     
     # Register event handlers
     @socketio.on('connect', namespace='/video')
@@ -69,6 +75,15 @@ def init_websocket_streaming(app, player_mgr, config, socketio_instance):
         }
         """
         session_id = request.sid
+        
+        # Validate data parameter (protect against parse errors)
+        if data is None:
+            data = {}
+        elif not isinstance(data, dict):
+            logger.error(f"Invalid start_stream data type: {type(data)}, expected dict")
+            emit('stream_error', {'error': 'Invalid request format'})
+            return
+        
         player_id = data.get('player_id', 'video')
         quality = data.get('quality', _config.get('default_quality', 'medium'))
         fps = data.get('fps', _config.get('max_fps', 30))
@@ -147,10 +162,10 @@ def _stop_streaming(session_id):
         if thread.is_alive() and thread != current_thread:
             thread.join(timeout=1.0)
         del _streaming_threads[session_id]
-        logger.debug(f"Stopped streaming for session {session_id}")
+        debug_log(logger, DebugCategories.WEBSOCKET, f"Stopped streaming for session {session_id}")
     except KeyError:
         # Race condition - already deleted by another thread
-        logger.debug(f"Stream already stopped for session {session_id}")
+        debug_log(logger, DebugCategories.WEBSOCKET, f"Stream already stopped for session {session_id}")
 
 
 def _cleanup_stale_streams():
@@ -235,13 +250,43 @@ def _stream_worker(session_id, player_id, width, height, jpeg_quality, target_fp
                 frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
             
             # Encode as JPEG (use FASTEST interpolation for low latency)
-            _, buffer = cv2.imencode('.jpg', frame, [
-                cv2.IMWRITE_JPEG_QUALITY, jpeg_quality,
-                cv2.IMWRITE_JPEG_OPTIMIZE, 0  # Disable optimization for faster encoding
-            ])
-            frame_data = buffer.tobytes()
+            current_quality = jpeg_quality
+            frame_too_large = True
+            max_attempts = 3
+            attempt = 0
+            
+            # Try to keep frame size below max_frame_size_kb
+            max_frame_size = _config.get('max_frame_size_kb', 200) * 1024  # Convert to bytes
+            
+            while frame_too_large and attempt < max_attempts:
+                _, buffer = cv2.imencode('.jpg', frame, [
+                    cv2.IMWRITE_JPEG_QUALITY, current_quality,
+                    cv2.IMWRITE_JPEG_OPTIMIZE, 0  # Disable optimization for faster encoding
+                ])
+                frame_data = buffer.tobytes()
+                frame_size = len(frame_data)
+                
+                if frame_size <= max_frame_size or attempt >= max_attempts - 1:
+                    frame_too_large = False
+                else:
+                    # Reduce quality for next attempt
+                    current_quality = max(30, current_quality - 15)
+                    attempt += 1
+                    debug_log(logger, DebugCategories.WEBSOCKET, f"Frame too large ({frame_size/1024:.1f}KB), reducing quality to {current_quality}")
+            
+            # Skip frame if still too large (prevents WebSocket overflow)
+            if frame_size > max_frame_size * 2:
+                skip_threshold = _config.get('skip_frame_threshold', 50)
+                if frame_count % skip_threshold != 0:
+                    # Skip this frame, wait shorter and try next
+                    time.sleep(frame_interval / 2)
+                    continue
+                else:
+                    # Force send every Nth frame even if large (for visual confirmation)
+                    logger.warning(f"Forcing large frame send ({frame_size/1024:.1f}KB)")
             
             # Send frame to client (catch disconnect errors)
+            # Flask-SocketIO automatically detects bytes objects and sends them as binary
             try:
                 socketio.emit('video_frame', frame_data, namespace='/video', room=session_id)
             except Exception as emit_error:
@@ -255,7 +300,7 @@ def _stream_worker(session_id, player_id, width, height, jpeg_quality, target_fp
             if frame_count % 100 == 0:
                 elapsed = time.time() - start_time
                 actual_fps = frame_count / elapsed if elapsed > 0 else 0
-                logger.debug(f"Stream stats: session={session_id}, frames={frame_count}, "
+                debug_log(logger, DebugCategories.WEBSOCKET, f"Stream stats: session={session_id}, frames={frame_count}, "
                            f"fps={actual_fps:.1f}, size={len(frame_data)/1024:.1f}KB")
             
             # Maintain target FPS

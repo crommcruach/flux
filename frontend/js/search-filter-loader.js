@@ -34,7 +34,7 @@
             document.body.appendChild(newScript);
         }
         
-        console.log('✅ Search filter component loaded');
+        if (window.DEBUG) console.log('✅ Search filter component loaded');
     } catch (error) {
         console.error('❌ Failed to load search filter component:', error);
     }

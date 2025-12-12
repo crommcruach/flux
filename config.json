@@ -74,7 +74,7 @@
           "transport_position": {
             "_value": 1,
             "_rangeMin": 0,
-            "_rangeMax": 100
+            "_rangeMax": 10
           },
           "speed": 1.0,
           "reverse": false,
@@ -97,8 +97,10 @@
     "polling_interval": 3000,
     "theme": "dark",
     "default_page": "editor",
-    "debug_logging": true,
-    "_debug_logging_comment": "Enable/disable console.log debug output in browser console (true/false)"
+    "debug_logging": false,
+    "_debug_logging_comment": "Enable/disable console.log debug output in browser console (true/false). Use window.toggleDebug() to enable at runtime.",
+    "verbose_logging": false,
+    "_verbose_logging_comment": "Extra verbose logging for development (even noisier than debug_logging)"
   },
   "websocket": {
     "enabled": true,

@@ -6,6 +6,7 @@ import json
 from flask import request, jsonify, send_file
 from pathlib import Path
 from datetime import datetime
+from .logger import debug_api
 
 
 def register_project_routes(app, logger):
@@ -71,7 +72,7 @@ def register_project_routes(app, logger):
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
-            logger.debug(f"Project saved: {filename}")
+            debug_api(logger, f"Project saved: {filename}")
             
             return jsonify({
                 'success': True,
@@ -99,7 +100,7 @@ def register_project_routes(app, logger):
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            logger.debug(f"Project loaded: {filename}")
+            debug_api(logger, f"Project loaded: {filename}")
             
             return jsonify({
                 'success': True,
@@ -124,7 +125,7 @@ def register_project_routes(app, logger):
             
             filepath.unlink()
             
-            logger.debug(f"Project deleted: {filename}")
+            debug_api(logger, f"Project deleted: {filename}")
             
             return jsonify({
                 'success': True,
@@ -157,4 +158,4 @@ def register_project_routes(app, logger):
             logger.error(f"Error downloading project: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
     
-    logger.debug("Project API routes registered")
+    debug_api(logger, "Project API routes registered")

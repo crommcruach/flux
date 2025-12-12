@@ -255,7 +255,7 @@ class ClipRegistry:
     
     def clear_clip_effects(self, clip_id: str) -> bool:
         """
-        Entfernt alle Effekte von einem Clip.
+        Entfernt alle Effekte von einem Clip, außer system_plugins (z.B. transport).
         
         Args:
             clip_id: Eindeutige Clip-ID
@@ -266,9 +266,21 @@ class ClipRegistry:
         if clip_id not in self.clips:
             return False
         
-        self.clips[clip_id]['effects'] = []
+        # Keep system plugins (e.g. transport)
+        system_effects = [
+            effect for effect in self.clips[clip_id]['effects']
+            if effect.get('metadata', {}).get('system_plugin', False)
+        ]
+        
+        self.clips[clip_id]['effects'] = system_effects
         self._invalidate_cache(clip_id)  # B3: Cache invalidieren
-        logger.debug(f"Alle Effekte von Clip entfernt: {clip_id}")
+        
+        removed_count = len(self.clips[clip_id]['effects']) - len(system_effects)
+        if removed_count > 0:
+            logger.debug(f"Removed {removed_count} effects from clip {clip_id}, kept {len(system_effects)} system plugins")
+        else:
+            logger.debug(f"No user effects to remove from clip {clip_id} (kept {len(system_effects)} system plugins)")
+        
         return True
     
     def update_clip_metadata(self, clip_id: str, metadata: Dict) -> bool:

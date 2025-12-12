@@ -9,7 +9,7 @@ Ersetzt separate Video- und Art-Net-APIs durch ein einheitliches Interface:
 
 import os
 from flask import request, jsonify
-from .logger import get_logger
+from .logger import get_logger, debug_api, debug_playback, DebugCategories
 from .clip_registry import get_clip_registry
 from .frame_source import VideoSource
 from .session_state import get_session_state
@@ -141,11 +141,11 @@ def register_unified_routes(app, player_manager, config):
                     try:
                         player.playlist_index = player.playlist.index(gen_path)
                         player.max_loops = 1 if player.autoplay else 0
-                        logger.debug(f"🔁 [{player_id}] Generator in playlist: max_loops={player.max_loops} (autoplay={player.autoplay})")
+                        debug_api(logger, f"🔁 [{player_id}] Generator in playlist: max_loops={player.max_loops} (autoplay={player.autoplay})")
                     except ValueError:
                         # Generator not in playlist yet - still set max_loops for autoplay
                         player.max_loops = 1 if player.autoplay else 0
-                        logger.debug(f"🔁 [{player_id}] Generator not in playlist (yet): max_loops={player.max_loops} (autoplay={player.autoplay})")
+                        debug_api(logger, f"🔁 [{player_id}] Generator not in playlist (yet): max_loops={player.max_loops} (autoplay={player.autoplay})")
                 
                 # Start playback if was playing OR autoplay is enabled
                 if was_playing or player.autoplay:
@@ -247,7 +247,7 @@ def register_unified_routes(app, player_manager, config):
                         player.playlist_ids.append(None)
                     player.playlist_ids[idx] = clip_id
                 logger.info(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
-                logger.debug(f"   Player state: current_clip_id={player.current_clip_id}, source type={type(video_source).__name__}")
+                debug_api(logger, f"   Player state: current_clip_id={player.current_clip_id}, source type={type(video_source).__name__}")
                 
                 # Load clip layers from registry
                 player.load_clip_layers(clip_id, clip_registry, video_dir)
@@ -258,12 +258,12 @@ def register_unified_routes(app, player_manager, config):
                         player.playlist_index = player.playlist.index(absolute_path)
                         # Set max_loops based on autoplay (if clip is in playlist)
                         player.max_loops = 1 if player.autoplay else 0
-                        logger.debug(f"🔁 [{player_id}] Clip in playlist: max_loops={player.max_loops} (autoplay={player.autoplay})")
+                        debug_api(logger, f"🔁 [{player_id}] Clip in playlist: max_loops={player.max_loops} (autoplay={player.autoplay})")
                     except ValueError:
                         player.playlist_index = -1
                         # Clip not in playlist yet - still set max_loops for autoplay
                         player.max_loops = 1 if player.autoplay else 0
-                        logger.debug(f"🔁 [{player_id}] Clip not in playlist (yet): max_loops={player.max_loops} (autoplay={player.autoplay})")
+                        debug_api(logger, f"🔁 [{player_id}] Clip not in playlist (yet): max_loops={player.max_loops} (autoplay={player.autoplay})")
                 
                 # Start playback if was playing OR autoplay is enabled
                 if was_playing or player.autoplay:
@@ -341,11 +341,14 @@ def register_unified_routes(app, player_manager, config):
             player = player_manager.get_player(player_id)
             active_layer_effects = None
             if player and hasattr(player, 'layers'):
-                for layer in player.layers:
+                logger.info(f"🔍 [get_clip_effects] Searching for active layer with clip_id={clip_id}, player has {len(player.layers)} layers")
+                for layer_idx, layer in enumerate(player.layers):
+                    layer_clip_id = getattr(layer, 'clip_id', None)
+                    logger.info(f"🔍 [get_clip_effects] Layer {layer_idx}: clip_id={layer_clip_id}, matches={layer_clip_id == clip_id}")
                     if hasattr(layer, 'clip_id') and layer.clip_id == clip_id:
                         # Found the active layer - use its live effect instances
                         active_layer_effects = layer.effects
-                        logger.debug(f"Found active layer with clip_id {clip_id}, using live effect instances")
+                        logger.info(f"✅ [get_clip_effects] Found active layer {layer_idx} with clip_id {clip_id}, has {len(layer.effects) if layer.effects else 0} effects")
                         break
             
             # Filter out non-serializable data and update with live parameters
@@ -355,18 +358,42 @@ def register_unified_routes(app, player_manager, config):
                 
                 # Prefer live parameters from active layer instances
                 live_instance = None
-                if active_layer_effects and i < len(active_layer_effects):
-                    live_instance = active_layer_effects[i].get('instance')
-                elif 'instance' in effect:
+                plugin_id = effect.get('plugin_id')
+                
+                # Search for matching plugin in active layer by plugin_id, not just index
+                if active_layer_effects:
+                    for layer_effect in active_layer_effects:
+                        if layer_effect.get('id') == plugin_id:
+                            live_instance = layer_effect.get('instance')
+                            logger.info(f"🔍 [get_clip_effects] Found LIVE instance for {plugin_id} in active layer")
+                            break
+                
+                # Fallback to registry instance (will be stuck at position=0 during playback)
+                if not live_instance and 'instance' in effect:
                     live_instance = effect['instance']
+                    logger.info(f"⚠️ [get_clip_effects] Using REGISTRY instance for {plugin_id} (not live!)")
                 
                 # Get live parameters from instance if available
                 if live_instance is not None:
                     try:
+                        # SPECIAL: Initialize transport ONLY if not already initialized
+                        if effect.get('plugin_id') == 'transport' and hasattr(live_instance, '_initialize_state'):
+                            # Check if already initialized by looking at out_point
+                            if live_instance.out_point == 0 and player and len(player.layers) > 0 and player.layers[0].source:
+                                logger.info(f"🎬 [get_clip_effects] Transport NOT initialized yet, initializing for clip {clip_id}")
+                                live_instance._initialize_state(player.layers[0].source)
+                                logger.info(f"🎬 [get_clip_effects] Transport initialized: out_point={live_instance.out_point}")
+                            else:
+                                logger.info(f"🎬 [get_clip_effects] Transport already initialized, skipping (out_point={live_instance.out_point})")
+                        
                         live_params = live_instance.get_parameters()
                         if live_params:
                             effect_copy['parameters'] = live_params
-                            logger.debug(f"Got live parameters for {effect.get('plugin_id')}: {live_params}")
+                            # DEBUG: Log transport position
+                            if effect.get('plugin_id') == 'transport':
+                                logger.info(f"🎬 [get_clip_effects] Transport params: current_position={live_instance.current_position}, in_point={live_instance.in_point}, out_point={live_instance.out_point}")
+                                logger.info(f"🎬 [get_clip_effects] Transport get_parameters returned: {live_params.get('transport_position', 'N/A')}")
+                            debug_api(logger, f"Got live parameters for {effect.get('plugin_id')}: {live_params}")
                     except Exception as e:
                         logger.warning(f"Could not get live parameters from {effect.get('plugin_id')}: {e}")
                 
@@ -526,7 +553,7 @@ def register_unified_routes(app, player_manager, config):
                 player = player_manager.get_player(player_id)
                 if player and hasattr(player, 'reload_all_layer_effects'):
                     player.reload_all_layer_effects()
-                    logger.debug(f"🔄 Reloaded layer effects for player {player_id}")
+                    debug_api(logger, f"🔄 Reloaded layer effects for player {player_id}")
             
             # Auto-save session state
             session_state = get_session_state()
@@ -576,6 +603,16 @@ def register_unified_routes(app, player_manager, config):
             player = player_manager.get_player(player_id)
             updated_live = False
             
+            # For transport_position, pass the full dict with range metadata
+            # For other parameters, extract scalar value
+            if param_name == 'transport_position':
+                value_to_update = param_data  # Keep full dict {_value, _rangeMin, _rangeMax}
+            else:
+                # Extract scalar value from dict format (triple-slider sends {_value, _rangeMin, _rangeMax})
+                value_to_update = param_data
+                if isinstance(param_data, dict) and '_value' in param_data:
+                    value_to_update = param_data['_value']
+            
             if player and hasattr(player, 'layers'):
                 for layer in player.layers:
                     if hasattr(layer, 'clip_id') and layer.clip_id == clip_id:
@@ -583,20 +620,20 @@ def register_unified_routes(app, player_manager, config):
                         if index < len(layer.effects):
                             live_effect = layer.effects[index]
                             if 'instance' in live_effect and live_effect['instance']:
-                                live_effect['instance'].update_parameter(param_name, param_data)
+                                live_effect['instance'].update_parameter(param_name, value_to_update)
                                 updated_live = True
                                 logger.info(f"✅ Updated LIVE layer effect instance: Layer {layer.layer_id}, effect {index}, {param_name}")
                                 break
             
             # Fallback: Update registry instance (for non-layer clips)
             if not updated_live and 'instance' in effect and effect['instance']:
-                effect['instance'].update_parameter(param_name, param_data)
+                effect['instance'].update_parameter(param_name, value_to_update)
                 logger.info(f"✅ Updated registry effect instance: {clip_id}[{index}].{param_name}")
             
             # B3: Invalidate cache so player detects parameter change
             clip_registry._invalidate_cache(clip_id)
             
-            logger.debug(f"🔧 Clip effect parameter updated: {clip_id}[{index}].{param_name} = {param_value}")
+            debug_api(logger, f"🔧 Clip effect parameter updated: {clip_id}[{index}].{param_name} = {param_value}")
             
             # DON'T reload layer effects - we just updated the live instance!
             # Reloading would recreate all plugins from registry and lose runtime state.
@@ -1360,11 +1397,11 @@ def register_unified_routes(app, player_manager, config):
                 # Speichere UUID in list (same index as playlist) UND registriere Clip sofort
                 if item_id:
                     playlist_ids.append(item_id)
-                    logger.debug(f"📝 Playlist[{len(playlist_ids)-1}]: {os.path.basename(absolute_path)} → {item_id}")
+                    debug_api(logger, f"📝 Playlist[{len(playlist_ids)-1}]: {os.path.basename(absolute_path)} → {item_id}")
                     
                     # Registriere Clip in Registry wenn noch nicht vorhanden
                     if item_id not in clip_registry.clips:
-                        logger.debug(f"📌 Registering clip from playlist: {item_id} → {os.path.basename(absolute_path)}")
+                        debug_api(logger, f"📌 Registering clip from playlist: {item_id} → {os.path.basename(absolute_path)}")
                         
                         # Use register_clip() to ensure default effects are applied
                         relative_path = os.path.relpath(absolute_path, video_dir) if not absolute_path.startswith('generator:') else absolute_path
@@ -1384,7 +1421,7 @@ def register_unified_routes(app, player_manager, config):
                             clip_registry.clips[item_id]['clip_id'] = item_id
                             del clip_registry.clips[registered_id]
                     else:
-                        logger.debug(f"✓ Clip {item_id} already registered, reusing existing clip")
+                        debug_api(logger, f"✓ Clip {item_id} already registered, reusing existing clip")
                 else:
                     # No item_id provided - check if clip already exists by path
                     existing_id = clip_registry.find_clip_by_path(player_id, absolute_path)

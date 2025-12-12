@@ -12,6 +12,7 @@ class WebSocketPreview {
             fps: options.fps || 30,
             autoStart: options.autoStart !== false,
             socketPath: options.socketPath || '/socket.io',
+            debug: options.debug || false, // Debug logging disabled by default
             onError: options.onError || (() => {}),
             onConnected: options.onConnected || (() => {}),
             onDisconnected: options.onDisconnected || (() => {})
@@ -30,6 +31,15 @@ class WebSocketPreview {
     }
     
     /**
+     * Internal logger - only logs when debug is enabled
+     */
+    log(...args) {
+        if (this.options.debug) {
+            console.log('[WebSocket]', ...args);
+        }
+    }
+    
+    /**
      * Initialize the preview with a canvas element
      * @param {HTMLCanvasElement} canvas - Canvas element to render video frames
      */
@@ -41,7 +51,7 @@ class WebSocketPreview {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         
-        console.log('Starting WebSocket preview:', {
+        this.log('Starting WebSocket preview:', {
             player: this.options.playerId,
             quality: this.options.quality,
             fps: this.options.fps
@@ -72,7 +82,7 @@ class WebSocketPreview {
             
             // Disconnect existing socket before creating new one
             if (this.socket && this.socket.connected) {
-                console.log('Disconnecting existing video socket before reconnecting');
+                this.log('Disconnecting existing video socket before reconnecting');
                 this.socket.disconnect();
                 this.socket = null;
             }
@@ -88,15 +98,26 @@ class WebSocketPreview {
                     return;
                 }
                 
-                // Connect to Socket.IO namespace
+                // Connect to Socket.IO namespace with stability settings
                 this.socket = io('/video', {
                     path: this.options.socketPath,
-                    transports: ['websocket', 'polling']
+                    transports: ['polling', 'websocket'],  // Start with polling, upgrade to WebSocket
+                    upgrade: true,
+                    rememberUpgrade: true,
+                    reconnection: true,
+                    reconnectionDelay: 2000,        // Increased from 1000ms
+                    reconnectionDelayMax: 10000,    // Increased from 5000ms
+                    reconnectionAttempts: 3,        // Reduced from 10 to prevent spam
+                    timeout: 15000,                 // Increased from 10000ms
+                    pingTimeout: 30000,
+                    pingInterval: 10000,
+                    perMessageDeflate: false,
+                    maxHttpBufferSize: 5e6  // 5MB max buffer
                 });
                 
                 // Connection successful
                 this.socket.on('connect', () => {
-                    console.log('WebSocket connected:', this.socket.id);
+                    this.log('WebSocket connected:', this.socket.id);
                     this.isConnecting = false;
                     this.options.onConnected();
                     
@@ -120,19 +141,54 @@ class WebSocketPreview {
                 
                 // Disconnected
                 this.socket.on('disconnect', (reason) => {
-                    console.log('WebSocket disconnected:', reason);
+                    this.log('WebSocket disconnected:', reason);
                     this.isStreaming = false;
                     this.options.onDisconnected(reason);
+                    
+                    // Only auto-reconnect if we didn't manually disconnect
+                    // and connection was unexpected lost
+                    const shouldReconnect = this.socket && 
+                                          !this.isConnecting && 
+                                          (reason === 'io server disconnect' || 
+                                           reason === 'ping timeout' || 
+                                           reason === 'transport close');
+                    
+                    if (shouldReconnect) {
+                        this.log('Attempting auto-reconnect...');
+                        setTimeout(() => {
+                            if (this.socket && !this.socket.connected) {
+                                this.socket.connect();
+                            }
+                        }, 2000);
+                    }
+                });
+                
+                // Reconnection events
+                this.socket.on('reconnect', (attemptNumber) => {
+                    this.log(`Reconnected after ${attemptNumber} attempts`);
+                    // Restart stream after reconnect
+                    if (this.options.autoStart) {
+                        setTimeout(() => this.startStream(), 500);
+                    }
+                });
+                
+                this.socket.on('reconnect_error', (error) => {
+                    console.warn('Reconnection error:', error.message);
+                });
+                
+                this.socket.on('reconnect_failed', () => {
+                    console.error('Reconnection failed after all attempts');
+                    this.options.onError(new Error('Failed to reconnect'));
                 });
                 
                 // Server confirms connection
                 this.socket.on('connected', (data) => {
-                    console.log('Server confirmed connection:', data);
+                    this.log('Server confirmed connection:', data);
                 });
                 
                 // Stream started confirmation
                 this.socket.on('stream_started', (data) => {
-                    console.log('Stream started:', data);
+                    this.log('Stream started:', data);
                     this.isStreaming = true;
                     this.frameCount = 0;
                     this.startTime = Date.now();
@@ -140,7 +196,7 @@ class WebSocketPreview {
                 
                 // Stream stopped confirmation
                 this.socket.on('stream_stopped', () => {
-                    console.log('Stream stopped');
+                    this.log('Stream stopped');
                     this.isStreaming = false;
                 });
                 
@@ -169,8 +225,8 @@ class WebSocketPreview {
             return;
         }
         
-        console.log('Requesting stream start...', {
-            player_id: this.options.playerId,
+        this.log('Requesting stream start...', {
+            player: this.options.playerId,
             quality: this.options.quality,
             fps: this.options.fps,
             socket_id: this.socket.id
@@ -189,7 +245,7 @@ class WebSocketPreview {
     stopStream() {
         if (!this.socket) return;
         
-        console.log('Requesting stream stop...');
+        this.log('Requesting stream stop...');
         this.isStreaming = false;
         this.socket.emit('stop_stream');
     }
@@ -199,6 +255,8 @@ class WebSocketPreview {
      * @param {ArrayBuffer} frameData - JPEG encoded frame data
      */
     handleFrame(frameData) {
+        // Ignore frames if we're not streaming or connection is closing
+        if (!this.isStreaming || !this.socket || !this.socket.connected) return;
         if (!this.ctx || !this.canvas) return;
         
         try {
@@ -269,9 +327,20 @@ class WebSocketPreview {
      * Stop streaming and disconnect
      */
     stop() {
-        console.log('Stopping WebSocket preview...');
+        this.log('Stopping WebSocket preview...');
         
-        this.stopStream();
+        // Set flags first to prevent race conditions
+        this.isStreaming = false;
+        this.isConnecting = false;
+        
+        // Stop stream if socket is still connected
+        if (this.socket && this.socket.connected) {
+            try {
+                this.socket.emit('stop_stream');
+            } catch (e) {
+                this.log('Error sending stop_stream:', e);
+            }
+        }
         
         // Clean up all pending URLs
         this.pendingUrls.forEach(url => URL.revokeObjectURL(url));
@@ -283,13 +352,18 @@ class WebSocketPreview {
             this.frameImage = null;
         }
         
+        // Disconnect and remove all listeners
         if (this.socket) {
-            this.socket.disconnect();
+            try {
+                // Remove all event listeners to prevent stale callbacks
+                this.socket.removeAllListeners();
+                // Disconnect gracefully
+                this.socket.disconnect();
+            } catch (e) {
+                this.log('Error during socket cleanup:', e);
+            }
             this.socket = null;
         }
-        
-        this.isStreaming = false;
-        this.isConnecting = false;
     }
     
     /**

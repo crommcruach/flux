@@ -29,7 +29,7 @@
             document.head.appendChild(scriptElement);
         }
         
-        console.log('✅ Modal component loaded');
+        if (window.DEBUG) console.log('✅ Modal component loaded');
     } catch (error) {
         console.error('❌ Failed to load modal component:', error);
     }

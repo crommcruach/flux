@@ -3,7 +3,7 @@
  * Provides configurable debug logging with multiple log levels
  */
 
-let DEBUG_LOGGING = true; // Default: enabled
+let DEBUG_LOGGING = false; // Default: disabled (use window.toggleDebug() to enable)
 let VERBOSE_LOGGING = false; // Default: disabled (very noisy logs)
 
 // Debug logger wrapper functions
@@ -26,13 +26,13 @@ export async function loadDebugConfig(apiBase = '') {
     try {
         const response = await fetch(`${apiBase}/api/config`);
         const config = await response.json();
-        DEBUG_LOGGING = config.frontend?.debug_logging ?? true;
+        DEBUG_LOGGING = config.frontend?.debug_logging ?? false;
         VERBOSE_LOGGING = config.frontend?.verbose_logging ?? false;
-        console.log(`🐛 Debug logging: ${DEBUG_LOGGING ? 'ENABLED' : 'DISABLED'}`);
+        if (DEBUG_LOGGING) console.log(`🐛 Debug logging: ENABLED`);
         if (VERBOSE_LOGGING) console.log(`🔬 Verbose logging: ENABLED`);
     } catch (error) {
-        console.error('❌ Failed to load debug config, using default (enabled):', error);
-        DEBUG_LOGGING = true;
+        console.error('❌ Failed to load debug config, using default (disabled):', error);
+        DEBUG_LOGGING = false;
         VERBOSE_LOGGING = false;
     }
 }

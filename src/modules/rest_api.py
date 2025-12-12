@@ -7,7 +7,7 @@ from flask_socketio import SocketIO, emit
 import os
 import threading
 from collections import deque
-from .logger import get_logger
+from .logger import get_logger, debug_api, debug_log, DebugCategories
 from .command_executor import CommandExecutor
 
 logger = get_logger(__name__)
@@ -58,17 +58,23 @@ class RestAPI:
         self.app.config['SECRET_KEY'] = secret_key
         CORS(self.app)  # CORS für alle Routen aktivieren
         
-        # Socket.IO initialisieren
+        # Socket.IO initialisieren mit erweiterten Stabilit\u00e4ts-Einstellungen
+        # Force polling first to establish connection, then upgrade to WebSocket
         self.socketio = SocketIO(
             self.app, 
             cors_allowed_origins="*", 
             async_mode='threading',
             logger=False,
             engineio_logger=False,
-            ping_timeout=30,           # 30s timeout (reduced from 60s for faster disconnect detection)
-            ping_interval=10,          # 10s ping interval (reduced from 25s)
-            max_http_buffer_size=1e8,  # 100MB buffer for large video frames
-            manage_session=False
+            ping_timeout=30,           # 30s timeout
+            ping_interval=10,          # 10s ping interval  
+            max_http_buffer_size=5e6,  # 5MB buffer
+            manage_session=False,
+            always_connect=True,       # Keep-Alive
+            allow_upgrades=True,       # Allow polling -> websocket upgrade
+            # Compression settings for binary frames (JPEG)
+            http_compression=False,    # No HTTP compression
+            websocket_compression=False # No WebSocket compression
         )
         
         # Initialize WebSocket video streaming
@@ -186,6 +192,10 @@ class RestAPI:
         # Register Transition API
         from .api_transitions import register_transition_routes
         register_transition_routes(self.app, self.player_manager)
+        
+        # Register Debug API
+        from .api_debug import register_debug_routes
+        register_debug_routes(self.app)
         
         # Store config in app for route access
         self.app.flux_config = self.config

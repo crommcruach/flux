@@ -1,7 +1,7 @@
 """
 Player Manager - Central player container (Single Source of Truth)
 """
-from .logger import get_logger
+from .logger import get_logger, debug_playback
 
 logger = get_logger(__name__)
 
