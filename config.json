@@ -103,34 +103,6 @@
     "_verbose_logging_comment": "Extra verbose logging for development (even noisier than debug_logging)"
   },
   "websocket": {
-    "enabled": true,
-    "_enabled_comment": "Enable WebSocket video streaming (true = WebSocket, false = MJPEG fallback)",
-    "default_quality": "medium",
-    "_quality_comment": "Quality presets: low (360p), medium (720p), high (1080p)",
-    "max_fps": 30,
-    "_max_fps_comment": "Maximum frames per second for streaming",
-    "max_concurrent_streams": 10,
-    "_max_concurrent_streams_comment": "Maximum number of concurrent WebSocket streams to prevent resource exhaustion",
-    "quality_presets": {
-      "low": {
-        "width": 640,
-        "height": 360,
-        "fps": 20,
-        "jpeg_quality": 75
-      },
-      "medium": {
-        "width": 1280,
-        "height": 720,
-        "fps": 30,
-        "jpeg_quality": 85
-      },
-      "high": {
-        "width": 1920,
-        "height": 1080,
-        "fps": 30,
-        "jpeg_quality": 95
-      }
-    },
     "commands": {
       "enabled": true,
       "_enabled_comment": "Enable WebSocket command channels for low-latency control (play/pause/effects/layers)",
@@ -143,7 +115,7 @@
       "reconnect_delay_ms": 1000,
       "_reconnect_delay_ms_comment": "Delay between reconnection attempts (milliseconds)"
     },
-    "_comment": "WebSocket video streaming + command channels. Set enabled=false to use MJPEG fallback for video preview."
+    "_comment": "WebSocket command channels for low-latency control. Video preview uses MJPEG (simple and stable)."
   },
   "paths": {
     "cache_dir": "caches",

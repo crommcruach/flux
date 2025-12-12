@@ -77,9 +77,6 @@ class RestAPI:
             websocket_compression=False # No WebSocket compression
         )
         
-        # Initialize WebSocket video streaming
-        self._init_websocket_video_streaming()
-        
         # Routen registrieren
         self._register_routes()
         self._register_socketio_events()
@@ -106,20 +103,6 @@ class RestAPI:
         self.server_thread = None
         self.status_broadcast_thread = None
         self.is_running = False
-    
-    def _init_websocket_video_streaming(self):
-        """Initialize WebSocket video streaming if enabled in config."""
-        websocket_config = self.config.get('websocket', {})
-        
-        if websocket_config.get('enabled', False):
-            try:
-                from .api_websocket import init_websocket_streaming
-                init_websocket_streaming(self.app, self.player_manager, websocket_config, self.socketio)
-                logger.info("✅ WebSocket video streaming initialized")
-            except Exception as e:
-                logger.warning(f"⚠️ WebSocket streaming init failed: {e}")
-        else:
-            logger.info("WebSocket streaming disabled in config")
     
     @property
     def player(self):

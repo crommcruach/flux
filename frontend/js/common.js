@@ -36,17 +36,14 @@ export async function loadConfig() {
         WEBSOCKET_URL = `http://${host}:${port}`;
         POLLING_INTERVAL = config.status_broadcast_interval || 3000;
         
-        // Load WebSocket settings
-        if (config.websocket) {
-            WEBSOCKET_ENABLED = config.websocket.enabled !== false;
-            
-            if (config.websocket.commands) {
-                WEBSOCKET_COMMANDS_ENABLED = config.websocket.commands.enabled !== false;
-                WEBSOCKET_DEBOUNCE_MS = config.websocket.commands.debounce_ms || 50;
-                WEBSOCKET_TIMEOUT_MS = config.websocket.commands.timeout_ms || 1000;
-                WEBSOCKET_RECONNECT_ATTEMPTS = config.websocket.commands.reconnect_attempts || 5;
-                WEBSOCKET_RECONNECT_DELAY_MS = config.websocket.commands.reconnect_delay_ms || 1000;
-            }
+        // Load WebSocket settings (for commands only, video preview uses MJPEG)
+        if (config.websocket && config.websocket.commands) {
+            WEBSOCKET_ENABLED = config.websocket.commands.enabled !== false;
+            WEBSOCKET_COMMANDS_ENABLED = config.websocket.commands.enabled !== false;
+            WEBSOCKET_DEBOUNCE_MS = config.websocket.commands.debounce_ms || 50;
+            WEBSOCKET_TIMEOUT_MS = config.websocket.commands.timeout_ms || 1000;
+            WEBSOCKET_RECONNECT_ATTEMPTS = config.websocket.commands.reconnect_attempts || 5;
+            WEBSOCKET_RECONNECT_DELAY_MS = config.websocket.commands.reconnect_delay_ms || 1000;
         }
         
         debug.log('Config loaded:', { 
