@@ -46,6 +46,11 @@ export async function loadConfig() {
             WEBSOCKET_RECONNECT_DELAY_MS = config.websocket.commands.reconnect_delay_ms || 1000;
         }
         
+        // Load video preview settings
+        if (config.video) {
+            window.PREVIEW_FPS = config.video.preview_fps || 25;
+        }
+        
         debug.log('Config loaded:', { 
             API_BASE, 
             WEBSOCKET_URL, 

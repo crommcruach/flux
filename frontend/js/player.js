@@ -1227,85 +1227,77 @@ window.updateGeneratorParameter = async function(paramName, value) {
 };
 
 // ========================================
-// VIDEO PREVIEW STREAM (WebSocket)
+// VIDEO PREVIEW STREAM (MJPEG)
 // ========================================
 
-let previewUseWebSocket = true;
-let previewStatsInterval = null;
+let previewRefreshInterval = null;
+let previewFpsInterval = null;
+let previewFrameCount = 0;
+let previewLastFpsUpdate = Date.now();
 
 function startPreviewStream() {
-    const quality = document.getElementById('previewQuality')?.value || 'medium';
-    const canvas = document.getElementById('videoPreviewVideo');
+    const previewImg = document.getElementById('videoPreviewImg');
+    if (!previewImg) return;
     
-    // Cleanup existing WebSocket instance first
-    if (websocketPreview) {
-        try {
-            websocketPreview.stop();
-        } catch (e) {
-            debug.warn('Error stopping previous preview:', e);
-        }
-        websocketPreview = null;
-    }
+    // Stop existing preview
+    stopPreviewStream();
     
-    // Use WebSocket only if enabled in config
-    if (WEBSOCKET_ENABLED && previewUseWebSocket && window.WebSocketPreview && canvas) {
-        // Try WebSocket first
-        try {
-            websocketPreview = new WebSocketPreview({
-                playerId: 'video',
-                quality: quality,
-                fps: 30,
-                autoStart: true,
-                fpsDisplay: document.getElementById('previewStats'),
-                onConnected: () => {
-                    updatePreviewModeButton('connected');
-                    canvas.style.display = 'block';
-                    document.getElementById('videoPreviewImg').style.display = 'none';
-                },
-                onDisconnected: () => {
-                    updatePreviewModeButton('disconnected');
-                },
-                onError: (error) => {
-                    console.error('WebSocket error:', error);
-                    previewUseWebSocket = false;
-                    startMJPEGPreview();
-                }
-            });
-            websocketPreview.start(canvas);
-            updatePreviewModeButton('connecting');
-            debug.log('WebSocket preview started');
-        } catch (error) {
-            console.error('WebSocket initialization failed:', error);
-            startMJPEGPreview();
+    // Start MJPEG stream
+    previewImg.style.display = 'block';
+    previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
+    
+    // Get FPS from config or default to 25
+    const previewFps = window.PREVIEW_FPS || 25;
+    const refreshInterval = Math.floor(1000 / previewFps);
+    
+    // Refresh preview at configured FPS
+    previewRefreshInterval = setInterval(() => {
+        if (previewImg && document.body.contains(previewImg)) {
+            previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
+        } else {
+            stopPreviewStream();
         }
-    } else {
-        // MJPEG fallback
-        startMJPEGPreview();
-    }
+    }, refreshInterval);
+    
+    // FPS counter
+    previewImg.onload = () => {
+        previewFrameCount++;
+        updatePreviewFPS();
+    };
+    
+    // Update FPS display every second
+    previewFpsInterval = setInterval(updatePreviewFPS, 1000);
+    
+    debug.log(`MJPEG preview started at ${previewFps} FPS (${refreshInterval}ms interval)`);
 }
 
 function stopPreviewStream() {
-    if (window.previewRefreshInterval) {
-        clearInterval(window.previewRefreshInterval);
-        window.previewRefreshInterval = null;
+    if (previewRefreshInterval) {
+        clearInterval(previewRefreshInterval);
+        previewRefreshInterval = null;
     }
-    debug.log('MJPEG preview stopped');
+    if (previewFpsInterval) {
+        clearInterval(previewFpsInterval);
+        previewFpsInterval = null;
+    }
+    previewFrameCount = 0;
+    previewLastFpsUpdate = Date.now();
 }
 
-window.changePreviewQuality = async function() {
-    // Quality changes not needed for MJPEG (fixed quality in backend)
-    debug.log('Preview quality: MJPEG uses fixed backend quality');
-};
-
-window.togglePreviewMode = async function() {
-    if (websocketPreview) {
-        websocketPreview.stop();
-        websocketPreview = null;
-    }
+function updatePreviewFPS() {
+    const now = Date.now();
+    const elapsed = now - previewLastFpsUpdate;
     
-    previewUseWebSocket = !previewUseWebSocket;
-    startPreviewStream();
-};
+    if (elapsed >= 1000) {
+        const fps = Math.round((previewFrameCount * 1000) / elapsed);
+        const statsEl = document.getElementById('previewStats');
+        if (statsEl) {
+            statsEl.textContent = `${fps} FPS`;
+        }
+        previewFrameCount = 0;
+        previewLastFpsUpdate = now;
+    }
+}
 
 window.openVideoFullscreen = function() {
     window.open('/fullscreen', 'Flux Fullscreen', 'width=1920,height=1080');
@@ -1317,116 +1309,74 @@ window.openVideoFullscreen = function() {
 
 let artnetPreviewUseWebSocket = true;
 
-function startArtnetPreviewStream() {
-    const quality = document.getElementById('artnetPreviewQuality')?.value || 'medium';
-    const canvas = document.getElementById('artnetPreviewVideo');
-    
-    // Cleanup existing WebSocket instance first
-    if (websocketArtnetPreview) {
-        try {
-            websocketArtnetPreview.stop();
-        } catch (e) {
-            debug.warn('Error stopping previous artnet preview:', e);
-        }
-        websocketArtnetPreview = null;
-    }
-    
-    // Use WebSocket only if enabled in config
-    if (WEBSOCKET_ENABLED && artnetPreviewUseWebSocket && window.WebSocketPreview && canvas) {
-        // Try WebSocket first
-        try {
-            websocketArtnetPreview = new WebSocketPreview({
-                playerId: 'artnet',
-                quality: quality,
-                fps: 30,
-                autoStart: true,
-                fpsDisplay: document.getElementById('artnetPreviewStats'),
-                onConnected: () => {
-                    updateArtnetPreviewModeButton('connected');
-                    canvas.style.display = 'block';
-                    document.getElementById('artnetPreviewImg').style.display = 'none';
-                },
-                onDisconnected: () => {
-                    updateArtnetPreviewModeButton('disconnected');
-                },
-                onError: (error) => {
-                    console.error('Art-Net WebSocket error:', error);
-                    artnetPreviewUseWebSocket = false;
-                    startArtnetMJPEGPreview();
-                }
-            });
-            websocketArtnetPreview.start(canvas);
-            updateArtnetPreviewModeButton('connecting');
-            debug.log('Art-Net WebSocket preview started');
-        } catch (error) {
-            console.error('Art-Net WebSocket initialization failed:', error);
-            startArtnetMJPEGPreview();
-        }
-    } else {
-        // MJPEG fallback
-        startArtnetMJPEGPreview();
-    }
-}
+let artnetPreviewRefreshInterval = null;
+let artnetPreviewFpsInterval = null;
+let artnetPreviewFrameCount = 0;
+let artnetPreviewLastFpsUpdate = Date.now();
 
-function startArtnetMJPEGPreview() {
+function startArtnetPreviewStream() {
     const previewImg = document.getElementById('artnetPreviewImg');
+    if (!previewImg) return;
+    
+    // Stop existing preview
+    stopArtnetPreviewStream();
+    
+    // Start MJPEG stream
     previewImg.style.display = 'block';
-    document.getElementById('artnetPreviewVideo').style.display = 'none';
     previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
     
-    // Refresh preview every 100ms
-    setInterval(() => {
-        previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
-    }, 100);
+    // Get FPS from config or default to 25
+    const previewFps = window.PREVIEW_FPS || 25;
+    const refreshInterval = Math.floor(1000 / previewFps);
     
-    updateArtnetPreviewModeButton('mjpeg');
+    // Refresh preview at configured FPS
+    artnetPreviewRefreshInterval = setInterval(() => {
+        if (previewImg && document.body.contains(previewImg)) {
+            previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+        } else {
+            stopArtnetPreviewStream();
+        }
+    }, refreshInterval);
+    
+    // FPS counter
+    previewImg.onload = () => {
+        artnetPreviewFrameCount++;
+        updateArtnetPreviewFPS();
+    };
+    
+    // Update FPS display every second
+    artnetPreviewFpsInterval = setInterval(updateArtnetPreviewFPS, 1000);
+    
+    debug.log(`Art-Net MJPEG preview started at ${previewFps} FPS (${refreshInterval}ms interval)`);
 }
 
-function updateArtnetPreviewModeButton(state) {
-    const btn = document.getElementById('artnetPreviewModeBtn');
-    if (!btn) return;
-    
-    if (state === 'connected') {
-        btn.textContent = '🎥 WebRTC';
-        btn.className = 'btn btn-sm btn-success';
-    } else if (state === 'connecting') {
-        btn.textContent = '⏳ Connecting...';
-        btn.className = 'btn btn-sm btn-warning';
-    } else if (state === 'mjpeg_fallback' || state === 'mjpeg') {
-        btn.textContent = '📷 MJPEG';
-        btn.className = 'btn btn-sm btn-info';
-    } else if (state === 'failed' || state === 'closed') {
-        btn.textContent = '❌ Disconnected';
-        btn.className = 'btn btn-sm btn-danger';
+function stopArtnetPreviewStream() {
+    if (artnetPreviewRefreshInterval) {
+        clearInterval(artnetPreviewRefreshInterval);
+        artnetPreviewRefreshInterval = null;
     }
+    if (artnetPreviewFpsInterval) {
+        clearInterval(artnetPreviewFpsInterval);
+        artnetPreviewFpsInterval = null;
+    }
+    artnetPreviewFrameCount = 0;
+    artnetPreviewLastFpsUpdate = Date.now();
 }
 
-function updateArtnetPreviewStats(stats) {
-    const statsEl = document.getElementById('artnetPreviewStats');
-    if (!statsEl) return;
+function updateArtnetPreviewFPS() {
+    const now = Date.now();
+    const elapsed = now - artnetPreviewLastFpsUpdate;
     
-    const fps = stats.framesReceived ? Math.round(stats.framesReceived / 2) : 0;
-    const mbps = stats.bytesReceived ? (stats.bytesReceived * 8 / 2000000).toFixed(2) : '0.00';
-    
-    statsEl.textContent = `${fps} FPS | ${mbps} Mbps`;
+    if (elapsed >= 1000) {
+        const fps = Math.round((artnetPreviewFrameCount * 1000) / elapsed);
+        const statsEl = document.getElementById('artnetPreviewStats');
+        if (statsEl) {
+            statsEl.textContent = `${fps} FPS`;
+        }
+        artnetPreviewFrameCount = 0;
+        artnetPreviewLastFpsUpdate = now;
+    }
 }
-
-window.changeArtnetPreviewQuality = async function() {
-    if (webrtcArtnetPreview) {
-        const quality = document.getElementById('artnetPreviewQuality').value;
-        await webrtcArtnetPreview.changeQuality(quality);
-    }
-};
-
-window.toggleArtnetPreviewMode = async function() {
-    if (webrtcArtnetPreview) {
-        await webrtcArtnetPreview.stop();
-        webrtcArtnetPreview = null;
-    }
-    
-    artnetPreviewUseWebRTC = !artnetPreviewUseWebRTC;
-    startArtnetPreviewStream();
-};
 
 // ========================================
 // GENERIC PLAYLIST MANAGEMENT

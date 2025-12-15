@@ -245,6 +245,11 @@ def main():
     player.player_manager = player_manager
     artnet_player.player_manager = player_manager
     
+    # Start both players to generate frames (even with DummySource for preview)
+    player.start()
+    artnet_player.start()
+    logger.info("Players started for preview generation")
+    
     # Default Effects Manager initialisieren und anwenden
     # WICHTIG: Nach Player-Initialisierung, damit PluginManager bereits geladen ist
     try:

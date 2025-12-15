@@ -187,6 +187,9 @@ def register_web_routes(app, config=None, player_manager=None):
         websocket_config = config.get('websocket', {})
         commands_config = websocket_config.get('commands', {})
         
+        # Get video settings
+        video_config = config.get('video', {})
+        
         return jsonify({
             "api_base": f"http://localhost:{port}/api",
             "websocket_url": f"http://localhost:{port}",
@@ -200,5 +203,8 @@ def register_web_routes(app, config=None, player_manager=None):
                     "reconnect_attempts": commands_config.get('reconnect_attempts', 5),
                     "reconnect_delay_ms": commands_config.get('reconnect_delay_ms', 1000)
                 }
+            },
+            "video": {
+                "preview_fps": video_config.get('preview_fps', 25)
             }
         })

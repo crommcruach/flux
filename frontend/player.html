@@ -38,7 +38,8 @@
             <!-- Preview -->
             <div class="preview-box">
                 <div class="preview-video" id="videoPreview" onclick="openVideoFullscreen()" title="Click to open fullscreen">
-                    <img src="" alt="Video Preview (MJPEG)" id="videoPreviewImg" style="width: 100%; height: 100%; object-fit: contain;">
+                    <canvas id="videoPreviewVideo" style="width: 100%; height: 100%; object-fit: contain; display: none;"></canvas>
+                    <img src="" alt="Video Preview" id="videoPreviewImg" style="width: 100%; height: 100%; object-fit: contain;">
                 </div>
                 <div class="player-controls">
                     <button class="btn btn-secondary btn-sm" onclick="previous('video')" title="Previous Video">⏮️</button>
@@ -231,6 +232,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/js/ion.rangeSlider.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="js/triple-slider.js"></script>
+    <script src="js/websocket-preview.js"></script>
     <script src="js/player.js" type="module"></script>
 </body>
 </html>

@@ -115,7 +115,7 @@
       "reconnect_delay_ms": 1000,
       "_reconnect_delay_ms_comment": "Delay between reconnection attempts (milliseconds)"
     },
-    "_comment": "WebSocket command channels for low-latency control. Video preview uses MJPEG (simpler, more stable)."
+    "_comment": "WebSocket command channels for low-latency control. Video preview uses MJPEG."
   },
   "paths": {
     "cache_dir": "caches",
@@ -131,6 +131,8 @@
     "default_brightness": 100,
     "default_fps": null,
     "default_speed": 1,
+    "preview_fps": 25,
+    "_preview_fps_comment": "MJPEG preview refresh rate (frames per second). Recommended: 15-30 FPS for smooth preview",
     "extensions": [
       ".mp4",
       ".avi",

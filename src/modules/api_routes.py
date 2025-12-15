@@ -464,6 +464,78 @@ def register_info_routes(app, player_manager, api=None):
         return Response(generate_frames(), 
                        mimetype='multipart/x-mixed-replace; boundary=frame')
     
+    @app.route('/api/preview/artnet/stream')
+    def preview_artnet_stream():
+        """MJPEG Stream des Art-Net Players."""
+        from flask import Response
+        import cv2
+        import numpy as np
+        import time
+        
+        def generate_frames():
+            """Generator für Art-Net Player MJPEG-Stream."""
+            while True:
+                try:
+                    # Hole Art-Net Player
+                    player = player_manager.artnet_player
+                    
+                    # Hole aktuelles Frame
+                    if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
+                        frame = player.last_video_frame
+                    elif not hasattr(player, 'last_frame') or player.last_frame is None:
+                        canvas_width = getattr(player, 'canvas_width', 320)
+                        canvas_height = getattr(player, 'canvas_height', 180)
+                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+                    else:
+                        # Rekonstruiere aus LED-Punkten
+                        frame_data = player.last_frame
+                        canvas_width = getattr(player, 'canvas_width', 320)
+                        canvas_height = getattr(player, 'canvas_height', 180)
+                        point_coords = getattr(player, 'point_coords', None)
+                        
+                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+                        
+                        if point_coords is not None and len(frame_data) >= len(point_coords) * 3:
+                            rgb_array = np.array(frame_data, dtype=np.uint8).reshape(-1, 3)
+                            x_coords = point_coords[:, 0]
+                            y_coords = point_coords[:, 1]
+                            valid_mask = (y_coords >= 0) & (y_coords < canvas_height) & (x_coords >= 0) & (x_coords < canvas_width)
+                            frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
+                    
+                    # Skaliere auf Preview-Größe
+                    max_width = 640
+                    if frame.shape[1] > max_width:
+                        scale = max_width / frame.shape[1]
+                        new_width = int(frame.shape[1] * scale)
+                        new_height = int(frame.shape[0] * scale)
+                        frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
+                    
+                    # Encode als JPEG
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    if not ret:
+                        time.sleep(0.033)
+                        continue
+                    
+                    frame_bytes = buffer.tobytes()
+                    
+                    # MJPEG Format
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    
+                    time.sleep(0.033)  # ~30 FPS
+                
+                except Exception as e:
+                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    if ret:
+                        frame_bytes = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    time.sleep(0.1)
+        
+        return Response(generate_frames(), 
+                       mimetype='multipart/x-mixed-replace; boundary=frame')
+    
     @app.route('/api/fullscreen/stream')
     def fullscreen_stream():
         """MJPEG Video-Stream in voller Player-Auflösung (ohne Skalierung)."""
