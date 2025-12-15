@@ -1227,32 +1227,61 @@ window.updateGeneratorParameter = async function(paramName, value) {
 };
 
 // ========================================
-// VIDEO PREVIEW STREAM (MJPEG)
+// VIDEO PREVIEW STREAM (WebSocket)
 // ========================================
 
+let previewUseWebSocket = true;
+let previewStatsInterval = null;
+
 function startPreviewStream() {
-    const previewImg = document.getElementById('videoPreviewImg');
-    if (!previewImg) {
-        debug.warn('Preview image element not found');
-        return;
-    }
+    const quality = document.getElementById('previewQuality')?.value || 'medium';
+    const canvas = document.getElementById('videoPreviewVideo');
     
-    previewImg.style.display = 'block';
-    previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
-    
-    // Stop any existing preview refresh
-    if (window.previewRefreshInterval) {
-        clearInterval(window.previewRefreshInterval);
-    }
-    
-    // Refresh preview every 100ms (~10 FPS)
-    window.previewRefreshInterval = setInterval(() => {
-        if (previewImg && document.getElementById('videoPreviewImg')) {
-            previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
+    // Cleanup existing WebSocket instance first
+    if (websocketPreview) {
+        try {
+            websocketPreview.stop();
+        } catch (e) {
+            debug.warn('Error stopping previous preview:', e);
         }
-    }, 100);
+        websocketPreview = null;
+    }
     
-    debug.log('MJPEG preview started');
+    // Use WebSocket only if enabled in config
+    if (WEBSOCKET_ENABLED && previewUseWebSocket && window.WebSocketPreview && canvas) {
+        // Try WebSocket first
+        try {
+            websocketPreview = new WebSocketPreview({
+                playerId: 'video',
+                quality: quality,
+                fps: 30,
+                autoStart: true,
+                fpsDisplay: document.getElementById('previewStats'),
+                onConnected: () => {
+                    updatePreviewModeButton('connected');
+                    canvas.style.display = 'block';
+                    document.getElementById('videoPreviewImg').style.display = 'none';
+                },
+                onDisconnected: () => {
+                    updatePreviewModeButton('disconnected');
+                },
+                onError: (error) => {
+                    console.error('WebSocket error:', error);
+                    previewUseWebSocket = false;
+                    startMJPEGPreview();
+                }
+            });
+            websocketPreview.start(canvas);
+            updatePreviewModeButton('connecting');
+            debug.log('WebSocket preview started');
+        } catch (error) {
+            console.error('WebSocket initialization failed:', error);
+            startMJPEGPreview();
+        }
+    } else {
+        // MJPEG fallback
+        startMJPEGPreview();
+    }
 }
 
 function stopPreviewStream() {
@@ -1260,47 +1289,144 @@ function stopPreviewStream() {
         clearInterval(window.previewRefreshInterval);
         window.previewRefreshInterval = null;
     }
+    debug.log('MJPEG preview stopped');
 }
+
+window.changePreviewQuality = async function() {
+    // Quality changes not needed for MJPEG (fixed quality in backend)
+    debug.log('Preview quality: MJPEG uses fixed backend quality');
+};
+
+window.togglePreviewMode = async function() {
+    if (websocketPreview) {
+        websocketPreview.stop();
+        websocketPreview = null;
+    }
+    
+    previewUseWebSocket = !previewUseWebSocket;
+    startPreviewStream();
+};
 
 window.openVideoFullscreen = function() {
     window.open('/fullscreen', 'Flux Fullscreen', 'width=1920,height=1080');
 };
 
 // ========================================
-// ART-NET PREVIEW STREAM (MJPEG)
+// ART-NET PREVIEW STREAM (WebSocket)
 // ========================================
 
+let artnetPreviewUseWebSocket = true;
+
 function startArtnetPreviewStream() {
-    const previewImg = document.getElementById('artnetPreviewImg');
-    if (!previewImg) {
-        debug.warn('Art-Net preview image element not found');
-        return;
-    }
+    const quality = document.getElementById('artnetPreviewQuality')?.value || 'medium';
+    const canvas = document.getElementById('artnetPreviewVideo');
     
-    previewImg.style.display = 'block';
-    previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
-    
-    // Stop any existing preview refresh
-    if (window.artnetPreviewRefreshInterval) {
-        clearInterval(window.artnetPreviewRefreshInterval);
-    }
-    
-    // Refresh preview every 100ms (~10 FPS)
-    window.artnetPreviewRefreshInterval = setInterval(() => {
-        if (previewImg && document.getElementById('artnetPreviewImg')) {
-            previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+    // Cleanup existing WebSocket instance first
+    if (websocketArtnetPreview) {
+        try {
+            websocketArtnetPreview.stop();
+        } catch (e) {
+            debug.warn('Error stopping previous artnet preview:', e);
         }
-    }, 100);
+        websocketArtnetPreview = null;
+    }
     
-    debug.log('Art-Net MJPEG preview started');
+    // Use WebSocket only if enabled in config
+    if (WEBSOCKET_ENABLED && artnetPreviewUseWebSocket && window.WebSocketPreview && canvas) {
+        // Try WebSocket first
+        try {
+            websocketArtnetPreview = new WebSocketPreview({
+                playerId: 'artnet',
+                quality: quality,
+                fps: 30,
+                autoStart: true,
+                fpsDisplay: document.getElementById('artnetPreviewStats'),
+                onConnected: () => {
+                    updateArtnetPreviewModeButton('connected');
+                    canvas.style.display = 'block';
+                    document.getElementById('artnetPreviewImg').style.display = 'none';
+                },
+                onDisconnected: () => {
+                    updateArtnetPreviewModeButton('disconnected');
+                },
+                onError: (error) => {
+                    console.error('Art-Net WebSocket error:', error);
+                    artnetPreviewUseWebSocket = false;
+                    startArtnetMJPEGPreview();
+                }
+            });
+            websocketArtnetPreview.start(canvas);
+            updateArtnetPreviewModeButton('connecting');
+            debug.log('Art-Net WebSocket preview started');
+        } catch (error) {
+            console.error('Art-Net WebSocket initialization failed:', error);
+            startArtnetMJPEGPreview();
+        }
+    } else {
+        // MJPEG fallback
+        startArtnetMJPEGPreview();
+    }
 }
 
-function stopArtnetPreviewStream() {
-    if (window.artnetPreviewRefreshInterval) {
-        clearInterval(window.artnetPreviewRefreshInterval);
-        window.artnetPreviewRefreshInterval = null;
+function startArtnetMJPEGPreview() {
+    const previewImg = document.getElementById('artnetPreviewImg');
+    previewImg.style.display = 'block';
+    document.getElementById('artnetPreviewVideo').style.display = 'none';
+    previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+    
+    // Refresh preview every 100ms
+    setInterval(() => {
+        previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+    }, 100);
+    
+    updateArtnetPreviewModeButton('mjpeg');
+}
+
+function updateArtnetPreviewModeButton(state) {
+    const btn = document.getElementById('artnetPreviewModeBtn');
+    if (!btn) return;
+    
+    if (state === 'connected') {
+        btn.textContent = '🎥 WebRTC';
+        btn.className = 'btn btn-sm btn-success';
+    } else if (state === 'connecting') {
+        btn.textContent = '⏳ Connecting...';
+        btn.className = 'btn btn-sm btn-warning';
+    } else if (state === 'mjpeg_fallback' || state === 'mjpeg') {
+        btn.textContent = '📷 MJPEG';
+        btn.className = 'btn btn-sm btn-info';
+    } else if (state === 'failed' || state === 'closed') {
+        btn.textContent = '❌ Disconnected';
+        btn.className = 'btn btn-sm btn-danger';
     }
 }
+
+function updateArtnetPreviewStats(stats) {
+    const statsEl = document.getElementById('artnetPreviewStats');
+    if (!statsEl) return;
+    
+    const fps = stats.framesReceived ? Math.round(stats.framesReceived / 2) : 0;
+    const mbps = stats.bytesReceived ? (stats.bytesReceived * 8 / 2000000).toFixed(2) : '0.00';
+    
+    statsEl.textContent = `${fps} FPS | ${mbps} Mbps`;
+}
+
+window.changeArtnetPreviewQuality = async function() {
+    if (webrtcArtnetPreview) {
+        const quality = document.getElementById('artnetPreviewQuality').value;
+        await webrtcArtnetPreview.changeQuality(quality);
+    }
+};
+
+window.toggleArtnetPreviewMode = async function() {
+    if (webrtcArtnetPreview) {
+        await webrtcArtnetPreview.stop();
+        webrtcArtnetPreview = null;
+    }
+    
+    artnetPreviewUseWebRTC = !artnetPreviewUseWebRTC;
+    startArtnetPreviewStream();
+};
 
 // ========================================
 // GENERIC PLAYLIST MANAGEMENT

@@ -115,7 +115,7 @@
       "reconnect_delay_ms": 1000,
       "_reconnect_delay_ms_comment": "Delay between reconnection attempts (milliseconds)"
     },
-    "_comment": "WebSocket command channels for low-latency control. Video preview uses MJPEG (simple and stable)."
+    "_comment": "WebSocket command channels for low-latency control. Video preview uses MJPEG (simpler, more stable)."
   },
   "paths": {
     "cache_dir": "caches",
