@@ -17,7 +17,7 @@ from .session_state import get_session_state
 logger = get_logger(__name__)
 
 
-def register_unified_routes(app, player_manager, config):
+def register_unified_routes(app, player_manager, config, socketio=None):
     """
     Registriert vereinheitlichte Player-API-Routes.
     
@@ -25,6 +25,7 @@ def register_unified_routes(app, player_manager, config):
         app: Flask-App-Instanz
         player_manager: PlayerManager-Instanz
         config: Konfiguration
+        socketio: SocketIO instance for WebSocket events (optional)
     """
     clip_registry = get_clip_registry()
     video_dir = config['paths']['video_dir']
@@ -528,6 +529,19 @@ def register_unified_routes(app, player_manager, config):
             if session_state:
                 session_state.save(player_manager, clip_registry)
             
+            # Emit WebSocket event for effect list change
+            if socketio:
+                try:
+                    socketio.emit('effects.changed', {
+                        'player_id': player_id,
+                        'clip_id': clip_id,
+                        'action': 'add',
+                        'effect_name': plugin_id
+                    }, namespace='/effects')
+                    logger.debug(f"📡 WebSocket: effects.changed emitted (add {plugin_id})")
+                except Exception as e:
+                    logger.error(f"❌ Error emitting effects.changed: {e}")
+            
             return jsonify({"success": True, "clip_id": clip_id})
             
         except Exception as e:
@@ -559,6 +573,19 @@ def register_unified_routes(app, player_manager, config):
             session_state = get_session_state()
             if session_state:
                 session_state.save(player_manager, clip_registry)
+            
+            # Emit WebSocket event for effect list change
+            if socketio:
+                try:
+                    socketio.emit('effects.changed', {
+                        'player_id': player_id,
+                        'clip_id': clip_id,
+                        'action': 'remove',
+                        'index': index
+                    }, namespace='/effects')
+                    logger.debug(f"📡 WebSocket: effects.changed emitted (remove index {index})")
+                except Exception as e:
+                    logger.error(f"❌ Error emitting effects.changed: {e}")
             
             return jsonify({"success": True})
             
@@ -714,6 +741,18 @@ def register_unified_routes(app, player_manager, config):
             if session_state:
                 session_state.save(player_manager, clip_registry)
             
+            # Emit WebSocket event for effect list change
+            if socketio:
+                try:
+                    socketio.emit('effects.changed', {
+                        'player_id': player_id,
+                        'clip_id': clip_id,
+                        'action': 'clear'
+                    }, namespace='/effects')
+                    logger.debug(f"📡 WebSocket: effects.changed emitted (clear all)")
+                except Exception as e:
+                    logger.error(f"❌ Error emitting effects.changed: {e}")
+            
             return jsonify({"success": True})
             
         except Exception as e:
@@ -772,6 +811,18 @@ def register_unified_routes(app, player_manager, config):
                 if session_state:
                     session_state.save(player_manager, clip_registry)
                 
+                # Emit WebSocket event for player effect change
+                if socketio:
+                    try:
+                        socketio.emit('effects.changed', {
+                            'player_id': player_id,
+                            'action': 'add',
+                            'effect_name': plugin_id
+                        }, namespace='/effects')
+                        logger.debug(f"📡 WebSocket: effects.changed emitted (player {player_id} add {plugin_id})")
+                    except Exception as e:
+                        logger.error(f"❌ Error emitting effects.changed: {e}")
+                
                 return jsonify({"success": True, "message": message, "player_id": player_id})
             else:
                 return jsonify({"success": False, "error": message}), 400
@@ -797,6 +848,18 @@ def register_unified_routes(app, player_manager, config):
                 if session_state:
                     session_state.save(player_manager, clip_registry)
                 
+                # Emit WebSocket event for player effect change
+                if socketio:
+                    try:
+                        socketio.emit('effects.changed', {
+                            'player_id': player_id,
+                            'action': 'remove',
+                            'index': index
+                        }, namespace='/effects')
+                        logger.debug(f"📡 WebSocket: effects.changed emitted (player {player_id} remove index {index})")
+                    except Exception as e:
+                        logger.error(f"❌ Error emitting effects.changed: {e}")
+                
                 return jsonify({"success": True, "message": message, "player_id": player_id})
             else:
                 return jsonify({"success": False, "error": message}), 400
@@ -820,6 +883,17 @@ def register_unified_routes(app, player_manager, config):
             session_state = get_session_state()
             if session_state:
                 session_state.save(player_manager, clip_registry)
+            
+            # Emit WebSocket event for player effect change
+            if socketio:
+                try:
+                    socketio.emit('effects.changed', {
+                        'player_id': player_id,
+                        'action': 'clear'
+                    }, namespace='/effects')
+                    logger.debug(f"📡 WebSocket: effects.changed emitted (player {player_id} clear all)")
+                except Exception as e:
+                    logger.error(f"❌ Error emitting effects.changed: {e}")
             
             return jsonify({"success": True, "message": message, "player_id": player_id})
             

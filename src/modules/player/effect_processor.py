@@ -315,6 +315,15 @@ class EffectProcessor:
                                     else:
                                         logger.info(f"🎬 [{player_name}] Transport already initialized, keeping trim: [{transport.in_point}, {transport.out_point}]")
                                     
+                                    # Set WebSocket context for position updates
+                                    if player and hasattr(player, 'player_manager') and hasattr(player.player_manager, 'socketio'):
+                                        transport.socketio = player.player_manager.socketio
+                                        transport.player_id = player.player_id
+                                        transport.clip_id = current_clip_id
+                                        logger.info(f"📡 [{player_name}] Transport WebSocket context set: player_id={player.player_id}, clip_id={current_clip_id}, socketio={transport.socketio is not None}")
+                                    else:
+                                        logger.warning(f"⚠️ [{player_name}] Could not set Transport WebSocket context: player={player is not None}, has_manager={hasattr(player, 'player_manager') if player else False}, has_socketio={hasattr(player.player_manager, 'socketio') if player and hasattr(player, 'player_manager') else False}")
+                                    
                                     # Sync parameters back to registry
                                     effect_data['parameters']['transport_position'] = {
                                         '_value': transport.current_position,

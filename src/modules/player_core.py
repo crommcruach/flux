@@ -97,6 +97,8 @@ class Player:
             plugin_manager=self.plugin_manager,
             clip_registry=clip_registry
         )
+        # Give layer_manager access to player for WebSocket context
+        self.layer_manager.player = self
         
         # Playback State
         self.is_running = False
@@ -666,65 +668,94 @@ class Player:
             
             # ========== MULTI-LAYER COMPOSITING ==========
             if not should_autoadvance and self.layers and len(self.layers) > 0:
-                # PRE-PROCESS: Let transport effect calculate next frame BEFORE fetching
-                # This prevents fetching frames outside trim range
-                transport_preprocessed = False
-                if self.layers[0].effects and self.layers[0].source:
-                    # Use LAYER transport instance, not registry instance!
-                    # This ensures the live instance gets updated current_position
-                    for effect in self.layers[0].effects:
-                        if effect.get('id') == 'transport' and effect.get('enabled', True):
-                            transport_instance = effect.get('instance')
-                            
-                            if transport_instance:
-                                # Initialize transport state if needed (only once)
-                                if hasattr(transport_instance, '_initialize_state'):
-                                    if transport_instance.out_point == 0:
-                                        transport_instance._initialize_state(self.layers[0].source)
-                                        debug_transport(logger, f"🎬 Transport initialized: out_point={transport_instance.out_point}")
-                                
-                                # Calculate and set next frame BEFORE fetch
-                                if hasattr(transport_instance, '_calculate_next_frame'):
-                                    next_frame = transport_instance._calculate_next_frame()
-                                    # Set current_frame on source (works for VideoSource, GeneratorSource, ScriptSource)
-                                    if hasattr(self.layers[0].source, 'current_frame'):
-                                        self.layers[0].source.current_frame = next_frame
-                                        transport_preprocessed = True
-                                        debug_transport(logger, f"🎯 Transport pre-set frame to {next_frame}, live instance current_position={transport_instance.current_position}")
-                            break
-                
-                # Master Frame (Layer 0 bestimmt Timing und Länge)
-                frame, source_delay = self.layers[0].source.get_next_frame()
-                
-                if frame is not None:
-                    # Wende Layer 0 Effects an (Transport controls playback here)
-                    frame = self.apply_layer_effects(self.layers[0], frame)
+                # OPTIMIZATION: Single-layer fast path (skip all compositing logic)
+                if len(self.layers) == 1:
+                    # Only one layer - no blending needed, process directly (saves 5-8ms)
+                    layer = self.layers[0]
                     
-                    # Composite Slave Layers (1-N)
-                    for layer in self.layers[1:]:
-                        if not layer.enabled:
-                            continue
+                    # PRE-PROCESS: Transport effect if present
+                    if layer.effects and layer.source:
+                        for effect in layer.effects:
+                            if effect.get('id') == 'transport' and effect.get('enabled', True):
+                                transport_instance = effect.get('instance')
+                                if transport_instance:
+                                    if hasattr(transport_instance, '_initialize_state'):
+                                        if transport_instance.out_point == 0:
+                                            transport_instance._initialize_state(layer.source)
+                                    if hasattr(transport_instance, '_calculate_next_frame'):
+                                        next_frame = transport_instance._calculate_next_frame()
+                                        if hasattr(layer.source, 'current_frame'):
+                                            layer.source.current_frame = next_frame
+                                break
+                    
+                    # Fetch and process single layer
+                    frame, source_delay = layer.source.get_next_frame()
+                    if frame is not None:
+                        frame = self.apply_layer_effects(layer, frame)
+                    # Continue to effect processing below (skip multi-layer compositing)
+                    
+                else:
+                    # Multiple layers - full compositing pipeline
+                    # PRE-PROCESS: Let transport effect calculate next frame BEFORE fetching
+                    # This prevents fetching frames outside trim range
+                    transport_preprocessed = False
+                    if self.layers[0].effects and self.layers[0].source:
+                        # Use LAYER transport instance, not registry instance!
+                        # This ensures the live instance gets updated current_position
+                        for effect in self.layers[0].effects:
+                            if effect.get('id') == 'transport' and effect.get('enabled', True):
+                                transport_instance = effect.get('instance')
+                                
+                                if transport_instance:
+                                    # Initialize transport state if needed (only once)
+                                    if hasattr(transport_instance, '_initialize_state'):
+                                        if transport_instance.out_point == 0:
+                                            transport_instance._initialize_state(self.layers[0].source)
+                                            debug_transport(logger, f"🎬 Transport initialized: out_point={transport_instance.out_point}")
+                                    
+                                    # Calculate and set next frame BEFORE fetch
+                                    if hasattr(transport_instance, '_calculate_next_frame'):
+                                        next_frame = transport_instance._calculate_next_frame()
+                                        # Set current_frame on source (works for VideoSource, GeneratorSource, ScriptSource)
+                                        if hasattr(self.layers[0].source, 'current_frame'):
+                                            self.layers[0].source.current_frame = next_frame
+                                            transport_preprocessed = True
+                                            debug_transport(logger, f"🎯 Transport pre-set frame to {next_frame}, live instance current_position={transport_instance.current_position}")
+                                break
+                    
+                    # Master Frame (Layer 0 bestimmt Timing und Länge)
+                    frame, source_delay = self.layers[0].source.get_next_frame()
+                    
+                    if frame is not None:
+                        # Wende Layer 0 Effects an (Transport controls playback here)
+                        frame = self.apply_layer_effects(self.layers[0], frame)
                         
-                        overlay_frame, _ = layer.source.get_next_frame()
-                        
-                        # Auto-Reset wenn Slave-Layer am Ende (Looping!)
-                        if overlay_frame is None:
-                            debug_layers(logger, f"🔁 Layer {layer.layer_id} reached end, auto-reset (slave loop)")
-                            layer.source.reset()
+                        # Composite Slave Layers (1-N)
+                        for layer in self.layers[1:]:
+                            # Skip invisible layers (saves get_next_frame + effects + blending)
+                            if not layer.enabled or layer.opacity <= 0:
+                                continue
+                            
                             overlay_frame, _ = layer.source.get_next_frame()
-                        
-                        # Wenn immer noch None (z.B. fehlerhafte Source) - überspringe Layer
-                        if overlay_frame is None:
-                            source_info = getattr(layer.source, 'video_path', getattr(layer.source, 'generator_name', 'Unknown'))
-                            logger.warning(f"⚠️ Layer {layer.layer_id} (source: {source_info}) returned None after reset, skipping")
-                            continue
-                        
-                        # Wende Layer Effects an
-                        overlay_frame = self.apply_layer_effects(layer, overlay_frame)
-                        
-                        # Composite mit BlendEffect
-                        blend_plugin = self.get_blend_plugin(layer.blend_mode, layer.opacity)
-                        frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
+                            
+                            # Auto-Reset wenn Slave-Layer am Ende (Looping!)
+                            if overlay_frame is None:
+                                debug_layers(logger, f"🔁 Layer {layer.layer_id} reached end, auto-reset (slave loop)")
+                                layer.source.reset()
+                                overlay_frame, _ = layer.source.get_next_frame()
+                            
+                            # Wenn immer noch None (z.B. fehlerhafte Source) - überspringe Layer
+                            if overlay_frame is None:
+                                source_info = getattr(layer.source, 'video_path', getattr(layer.source, 'generator_name', 'Unknown'))
+                                logger.warning(f"⚠️ Layer {layer.layer_id} (source: {source_info}) returned None after reset, skipping")
+                                continue
+                            
+                            # Wende Layer Effects an
+                            overlay_frame = self.apply_layer_effects(layer, overlay_frame)
+                            
+                            # Composite mit BlendEffect
+                            blend_plugin = self.get_blend_plugin(layer.blend_mode, layer.opacity)
+                            frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
                     
                     # Frame ist jetzt das finale composited Frame
                     # Weiter mit existing logic (brightness, effects, etc.)
@@ -902,11 +933,12 @@ class Player:
                 np.clip(frame, 0, 255, out=frame)
                 frame = frame.astype(np.uint8)
             
-            # Hue Shift in-place anwenden wenn aktiviert
+            # Hue Shift in-place anwenden wenn aktiviert (OPTIMIZATION: Lazy conversion)
             if self.hue_shift != 0:
                 frame_hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
                 frame_hsv[:, :, 0] = (frame_hsv[:, :, 0].astype(np.int16) + self.hue_shift // 2) % 180
                 cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2RGB, dst=frame)
+            # Note: When hue_shift == 0, skip entire HSV conversion (saves 2-3ms)
             
             # Wende Effect Chains an - nur kopieren wenn beide Chains unterschiedlich sind
             if self.effect_processor.video_effect_chain and self.effect_processor.artnet_effect_chain:
@@ -968,29 +1000,38 @@ class Player:
             cv2.cvtColor(frame_for_video_preview, cv2.COLOR_RGB2BGR, dst=self._bgr_buffer)
             self.last_video_frame = self._bgr_buffer
             
-            # NumPy-optimierte Pixel-Extraktion (verwende Art-Net Frame!)
-            valid_mask = (
-                (self.point_coords[:, 1] >= 0) & 
-                (self.point_coords[:, 1] < self.canvas_height) &
-                (self.point_coords[:, 0] >= 0) & 
-                (self.point_coords[:, 0] < self.canvas_width)
-            )
+            # DMX extraction - only if needed (Art-Net enabled OR recording active)
+            # This saves ~2-3ms per frame when Art-Net is disabled
+            needs_dmx = (self.enable_artnet and self.artnet_manager) or self.recording_manager.is_recording
             
-            # Extrahiere RGB-Werte für alle Punkte aus Art-Net Frame
-            y_coords = self.point_coords[valid_mask, 1]
-            x_coords = self.point_coords[valid_mask, 0]
-            rgb_values = frame_for_artnet[y_coords, x_coords]
-            
-            # DMX-Buffer erstellen
-            dmx_buffer = np.zeros((len(self.point_coords), 3), dtype=np.uint8)
-            dmx_buffer[valid_mask] = rgb_values
-            dmx_buffer = dmx_buffer.flatten().tolist()
-            
-            # Speichere für Preview (Liste ist bereits Kopie, kein .copy() nötig)
-            self.last_frame = dmx_buffer
+            if needs_dmx:
+                # NumPy-optimierte Pixel-Extraktion (verwende Art-Net Frame!)
+                valid_mask = (
+                    (self.point_coords[:, 1] >= 0) & 
+                    (self.point_coords[:, 1] < self.canvas_height) &
+                    (self.point_coords[:, 0] >= 0) & 
+                    (self.point_coords[:, 0] < self.canvas_width)
+                )
+                
+                # Extrahiere RGB-Werte für alle Punkte aus Art-Net Frame
+                y_coords = self.point_coords[valid_mask, 1]
+                x_coords = self.point_coords[valid_mask, 0]
+                rgb_values = frame_for_artnet[y_coords, x_coords]
+                
+                # DMX-Buffer erstellen
+                dmx_buffer = np.zeros((len(self.point_coords), 3), dtype=np.uint8)
+                dmx_buffer[valid_mask] = rgb_values
+                dmx_buffer = dmx_buffer.flatten().tolist()
+                
+                # Speichere für Preview (Liste ist bereits Kopie, kein .copy() nötig)
+                self.last_frame = dmx_buffer
+            else:
+                # No DMX needed - just set empty buffer for preview
+                dmx_buffer = None
+                self.last_frame = None
             
             # Recording
-            if self.recording_manager.is_recording:
+            if self.recording_manager.is_recording and dmx_buffer:
                 self.recording_manager.add_frame({
                     'frame': self.source.current_frame,
                     'timestamp': time.time() - self.start_time,
@@ -998,7 +1039,7 @@ class Player:
                 })
             
             # Sende über Art-Net (nur wenn aktiviert und wir aktiver Art-Net Player sind)
-            if self.enable_artnet and self.artnet_manager and self.is_running:
+            if self.enable_artnet and self.artnet_manager and self.is_running and dmx_buffer:
                 # Prüfe ob wir noch der aktive Art-Net Player sind
                 if player_lock._active_player is self:
                     self.artnet_manager.send_frame(dmx_buffer, source='video')

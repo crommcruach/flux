@@ -3,7 +3,7 @@
  * Video + Art-Net players with FX control
  */
 
-import { showToast, executeCommand, WEBSOCKET_ENABLED, WEBSOCKET_DEBOUNCE_MS } from './common.js';
+import { showToast, executeCommand, WEBSOCKET_ENABLED, WEBSOCKET_DEBOUNCE_MS, initWebSocket, getPlayerSocket, getEffectsSocket } from './common.js';
 import { EffectsTab } from './components/effects-tab.js';
 import { SourcesTab } from './components/sources-tab.js';
 import { FilesTab } from './components/files-tab.js';
@@ -172,6 +172,10 @@ async function init() {
         
         // Layers are now loaded per-clip when clips are loaded
         
+        // Initialize WebSocket and setup event listeners BEFORE starting preview
+        initWebSocket({});
+        setupWebSocketListeners();
+        
         // Start preview streams with staggered timing to prevent connection burst
         startPreviewStream();
         setTimeout(() => {
@@ -185,50 +189,192 @@ async function init() {
         initializeTransitionMenus(); // Initialize transition menu components
         updatePlaylistButtonStates(); // Set initial button states
         
-        // Initialize Master/Slave UI state from backend
-        await pollSyncStatus();
+        // REMOVED: Master/Slave sync polling - no longer needed
     } catch (error) {
         console.error('❌ Init failed:', error);
         throw error;
     }
     
-    // Performance: Unified update loop instead of 3 separate setInterval (10-15% CPU reduction)
-    // Coordinates different update frequencies using timestamps
-    let lastEffectRefresh = 0;
-    let lastPlaylistUpdate = 0;
-    let lastLiveParamUpdate = 0;
-    
-    const EFFECT_REFRESH_INTERVAL = 2000;      // 2 seconds
-    const PLAYLIST_UPDATE_INTERVAL = 50;       // 50ms for responsive autoplay
-    const LIVE_PARAM_UPDATE_INTERVAL = 50;     // 50ms for responsive live parameters
-    
-    updateInterval = setInterval(async () => {
-        const now = Date.now();
-        
-        // Effect refresh every 2000ms
-        if (now - lastEffectRefresh >= EFFECT_REFRESH_INTERVAL) {
-            await refreshVideoEffects();
-            await refreshArtnetEffects();
-            lastEffectRefresh = now;
+    // ========================================
+    // WEBSOCKET EVENT LISTENERS (Real-time Updates)
+    // ========================================
+    function setupWebSocketListeners() {
+        const playerSocket = getPlayerSocket();
+        if (!playerSocket) {
+            console.warn('⚠️ PlayerSocket not available, skipping WebSocket listeners');
+            return;
         }
         
-        // Playlist update every 500ms (only if autoplay active)
-        if (now - lastPlaylistUpdate >= PLAYLIST_UPDATE_INTERVAL) {
-            if (playerConfigs.video.autoplay || playerConfigs.artnet.autoplay) {
-                await updateCurrentFromPlayer('video');
-                await updateCurrentFromPlayer('artnet');
+        // Listen for playlist changes (REPLACES playlist polling)
+        playerSocket.on('playlist.changed', (data) => {
+            debug.log(`📋 Playlist changed via WebSocket: ${data.player_id}, index: ${data.current_index}`);
+            
+            // Ignore if we're currently reordering (prevent race condition)
+            if (window._ignorePlaylistChange) {
+                debug.log(`⏭️ Ignoring playlist.changed event - manual reorder in progress`);
+                return;
             }
-            lastPlaylistUpdate = now;
+            
+            // Update current clip index immediately from WebSocket event
+            const playerId = data.player_id;
+            const config = playerConfigs[playerId];
+            if (config) {
+                const newIndex = data.current_index !== undefined ? data.current_index : -1;
+                if (config.currentClipIndex !== newIndex) {
+                    debug.log(`✅ [${playerId}] Active clip index updated via WebSocket: ${config.currentClipIndex} → ${newIndex}`);
+                    config.currentClipIndex = newIndex;
+                    renderPlaylist(playerId); // Re-render to show active state
+                }
+            }
+            
+            // Also fetch full status for file path, etc.
+            updateCurrentFromPlayer(data.player_id);
+        });
+        
+        // Listen for player status updates (REPLACES status polling for play/pause state)
+        playerSocket.on('player.status', (data) => {
+            debug.log(`▶️ Player status update via WebSocket:`, data);
+            updatePlayerStatusUI(data);
+        });
+        
+        // Listen for effect parameter changes
+        const effectsSocket = getEffectsSocket();
+        if (effectsSocket) {
+            effectsSocket.on('effect.param.changed', (data) => {
+                debug.log(`🎨 Effect parameter changed via WebSocket:`, data);
+            });
+            
+            // Listen for effect list changes (REPLACES effect list polling)
+            effectsSocket.on('effects.changed', async (data) => {
+                debug.log('📡 WebSocket: effects.changed event received', data);
+                
+                // Refresh appropriate effect list
+                if (data.player_id === 'video') {
+                    await refreshVideoEffects();
+                } else if (data.player_id === 'artnet') {
+                    await refreshArtnetEffects();
+                }
+                
+                // Also refresh clip effects if this was a clip effect change
+                if (data.clip_id && selectedClipId === data.clip_id) {
+                    await loadClipEffects(selectedClipId, selectedClipPlayerType);
+                }
+            });
+            
+            // Listen for transport position updates (REPLACES polling)
+            effectsSocket.on('transport.position', (data) => {
+                debug.log('📡 WebSocket: transport.position event received', data);
+                
+                // Only update if this is the currently selected clip
+                if (data.clip_id === selectedClipId && data.player_id === selectedClipPlayerType) {
+                    debug.log('🎯 Updating transport for current clip:', {
+                        selectedClipId,
+                        selectedClipPlayerType,
+                        position: data.position
+                    });
+                    updateTransportPositionDisplay(data);
+                } else {
+                    debug.log('⏭️ Skipping transport update - not current clip:', {
+                        eventClipId: data.clip_id,
+                        selectedClipId,
+                        eventPlayerId: data.player_id,
+                        selectedPlayerType: selectedClipPlayerType
+                    });
+                }
+            });
         }
         
-        // Live parameter update every 500ms (only if clip selected)
-        if (now - lastLiveParamUpdate >= LIVE_PARAM_UPDATE_INTERVAL) {
-            if (selectedClipId && selectedClipPlayerType) {
-                await updateClipEffectLiveParameters();
-            }
-            lastLiveParamUpdate = now;
+        debug.log('✅ WebSocket event listeners registered');
+    }
+    
+    /**
+     * Update player UI based on status event from WebSocket
+     */
+    function updatePlayerStatusUI(statusData) {
+        const playerId = statusData.player_id;
+        const isPlaying = statusData.is_playing;
+        const isPaused = statusData.is_paused;
+        
+        // Update play/pause button states or visual indicators
+        const config = playerConfigs[playerId];
+        if (config) {
+            // Update internal state if needed
+            debug.log(`Status update: ${playerId} - playing: ${isPlaying}, paused: ${isPaused}`);
+            
+            // You can add visual indicators here (e.g., highlight active player)
+            // Example: Update button states, add active class, etc.
         }
-    }, 250); // Base interval: 250ms (GCD of 500ms and 2000ms)
+    }
+    
+    // ========================================
+    // MINIMAL UPDATE INTERVAL (WebSocket-based, no playlist polling)
+    // ========================================
+    
+    // REMOVED: Playlist polling - now handled by WebSocket events
+    // REMOVED: Effect list refresh polling - now handled by WebSocket events  
+    // REMOVED: Transport position polling - now handled by WebSocket events
+    
+    // No more polling intervals needed!
+    updateInterval = null;
+}
+
+/**
+ * Update transport position display from WebSocket data
+ */
+function updateTransportPositionDisplay(data) {
+    try {
+        const { position, in_point, out_point, total_frames, fps } = data;
+        
+        debug.log('🎬 updateTransportPositionDisplay called:', {
+            position,
+            in_point,
+            out_point,
+            total_frames,
+            fps,
+            clipEffectsLength: clipEffects.length
+        });
+        
+        // Find the transport effect in clip effects
+        const transportIndex = clipEffects.findIndex(e => e.plugin_id === 'transport');
+        if (transportIndex === -1) {
+            debug.log('⚠️ Transport effect not found in clipEffects');
+            return;
+        }
+        
+        debug.log('✅ Found transport at index:', transportIndex);
+        
+        const controlId = `clip_effect_${transportIndex}_transport_position`;
+        const slider = getTripleSlider(controlId);
+        
+        debug.log('🎚️ Slider lookup:', { controlId, sliderFound: !!slider });
+        
+        if (slider) {
+            // Determine if we should auto-scale
+            const shouldScale = total_frames && out_point === (total_frames - 1);
+            debug.log('📊 Updating slider values:', { position, in_point, out_point, shouldScale });
+            slider.updateValues(position, in_point, out_point, shouldScale);
+            
+            // Update time display
+            const displayElem = document.getElementById(`${controlId}_value`);
+            if (displayElem && fps) {
+                const totalSeconds = Math.floor(position / fps);
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                const seconds = totalSeconds % 60;
+                
+                if (hours > 0) {
+                    displayElem.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                } else {
+                    displayElem.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                }
+                debug.log('🕐 Time display updated:', displayElem.textContent);
+            }
+        } else {
+            debug.log('❌ Triple slider not found for controlId:', controlId);
+        }
+    } catch (error) {
+        console.error('❌ Failed to update transport position display:', error);
+    }
 }
 
 // Update playlist button states (autoplay/loop)
@@ -1050,64 +1196,25 @@ function renderGeneratorParametersSection() {
         // Render control based on parameter type
         if (param.type === 'float' || param.type === 'int') {
             const step = param.step || (param.type === 'int' ? 1 : 0.01);
-            const genControlId = `gen-param-${param.name}`;
-            
-            // Restore saved range if available, otherwise use full range
-            const genSavedRangeMin = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMin !== undefined ? currentValue._rangeMin : param.min;
-            const genSavedRangeMax = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMax !== undefined ? currentValue._rangeMax : param.max;
             const genActualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : currentValue;
             
-            // Use savedRangeMax as slider max if it's a reasonable value (for dynamic ranges)
-            const genSliderMax = genSavedRangeMax > 0 && genSavedRangeMax <= param.max ? genSavedRangeMax : param.max;
-            
+            // Use simple slider for generator parameters (not triple slider)
             html += `
                 <div class="param-control-row">
-                    <div id="${genControlId}" class="triple-slider-container" 
-                         data-default="${param.default}"
-                         oncontextmenu="resetGeneratorParameterToDefaultTriple(event, '${param.name}', ${param.default}, '${genControlId}')"></div>
+                    <input type="range" 
+                           id="gen-param-${param.name}"
+                           min="${param.min}"
+                           max="${param.max}"
+                           step="${step}"
+                           value="${genActualValue}"
+                           class="slider"
+                           oncontextmenu="resetGeneratorParameterToDefault(event, '${param.name}', ${param.default})"
+                           oninput="updateGeneratorParameter('${param.name}', this.value)">
                     <span id="gen-param-${param.name}-value" class="param-value">
                         ${genActualValue}
                     </span>
                 </div>
             `;
-            // Initialize triple-slider after DOM is updated
-            setTimeout(() => {
-                // FIX: Check if slider exists AND if its DOM container is still in document
-                const existingSlider = getTripleSlider(genControlId);
-                const containerInDOM = document.getElementById(genControlId);
-                
-                if (existingSlider && containerInDOM && existingSlider.container === containerInDOM) {
-                    // Slider exists with valid DOM - update it
-                    existingSlider.updateValues(genActualValue, genSavedRangeMin, genSavedRangeMax);
-                    existingSlider.updateUI();
-                } else {
-                    // Slider doesn't exist OR DOM was replaced - recreate
-                    if (existingSlider) {
-                        debug.verbose(`🔄 Generator triple-slider DOM replaced for ${genControlId}, recreating slider`);
-                        existingSlider.destroy();
-                    }
-                    
-                    initTripleSlider(genControlId, {
-                        min: param.min,
-                        max: genSliderMax,
-                        value: genActualValue,
-                        step: step,
-                        showRangeHandles: true,
-                        rangeMin: genSavedRangeMin,
-                        rangeMax: genSavedRangeMax,
-                        onChange: (newValue) => {
-                            updateGeneratorParameter(param.name, newValue);
-                        },
-                        onRangeChange: (rangeMin, rangeMax) => {
-                            // Range changed - trigger update to save range
-                            const slider = getTripleSlider(genControlId);
-                            if (slider) {
-                                updateGeneratorParameter(param.name, slider.getValue());
-                            }
-                        }
-                    });
-                }
-            }, 0);
         } else if (param.type === 'bool') {
             html += `
                 <label class="checkbox-label">
@@ -1230,7 +1337,6 @@ window.updateGeneratorParameter = async function(paramName, value) {
 // VIDEO PREVIEW STREAM (MJPEG)
 // ========================================
 
-let previewRefreshInterval = null;
 let previewFpsInterval = null;
 let previewFrameCount = 0;
 let previewLastFpsUpdate = Date.now();
@@ -1242,61 +1348,29 @@ function startPreviewStream() {
     // Stop existing preview
     stopPreviewStream();
     
-    // Start MJPEG stream
+    // Start MJPEG stream (browser handles it natively - no JavaScript interference)
     previewImg.style.display = 'block';
-    previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
+    previewImg.src = `${API_BASE}/api/preview/stream`;
     
-    // Get FPS from config or default to 25
-    const previewFps = window.PREVIEW_FPS || 25;
-    const refreshInterval = Math.floor(1000 / previewFps);
-    
-    // Refresh preview at configured FPS
-    previewRefreshInterval = setInterval(() => {
-        if (previewImg && document.body.contains(previewImg)) {
-            previewImg.src = `${API_BASE}/preview?t=${Date.now()}`;
-        } else {
-            stopPreviewStream();
-        }
-    }, refreshInterval);
-    
-    // FPS counter
-    previewImg.onload = () => {
-        previewFrameCount++;
-        updatePreviewFPS();
-    };
-    
-    // Update FPS display every second
-    previewFpsInterval = setInterval(updatePreviewFPS, 1000);
-    
-    debug.log(`MJPEG preview started at ${previewFps} FPS (${refreshInterval}ms interval)`);
+    debug.log(`MJPEG preview stream started`);
 }
 
 function stopPreviewStream() {
-    if (previewRefreshInterval) {
-        clearInterval(previewRefreshInterval);
-        previewRefreshInterval = null;
-    }
     if (previewFpsInterval) {
         clearInterval(previewFpsInterval);
         previewFpsInterval = null;
     }
     previewFrameCount = 0;
     previewLastFpsUpdate = Date.now();
+    
+    const previewImg = document.getElementById('videoPreviewImg');
+    if (previewImg) {
+        previewImg.src = '';
+    }
 }
 
 function updatePreviewFPS() {
-    const now = Date.now();
-    const elapsed = now - previewLastFpsUpdate;
-    
-    if (elapsed >= 1000) {
-        const fps = Math.round((previewFrameCount * 1000) / elapsed);
-        const statsEl = document.getElementById('previewStats');
-        if (statsEl) {
-            statsEl.textContent = `${fps} FPS`;
-        }
-        previewFrameCount = 0;
-        previewLastFpsUpdate = now;
-    }
+    // FPS display removed to prevent interference with MJPEG stream rendering
 }
 
 window.openVideoFullscreen = function() {
@@ -1307,9 +1381,6 @@ window.openVideoFullscreen = function() {
 // ART-NET PREVIEW STREAM (WebSocket)
 // ========================================
 
-let artnetPreviewUseWebSocket = true;
-
-let artnetPreviewRefreshInterval = null;
 let artnetPreviewFpsInterval = null;
 let artnetPreviewFrameCount = 0;
 let artnetPreviewLastFpsUpdate = Date.now();
@@ -1321,61 +1392,29 @@ function startArtnetPreviewStream() {
     // Stop existing preview
     stopArtnetPreviewStream();
     
-    // Start MJPEG stream
+    // Start MJPEG stream (browser handles it natively - no JavaScript interference)
     previewImg.style.display = 'block';
-    previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
+    previewImg.src = `${API_BASE}/api/preview/artnet/stream`;
     
-    // Get FPS from config or default to 25
-    const previewFps = window.PREVIEW_FPS || 25;
-    const refreshInterval = Math.floor(1000 / previewFps);
-    
-    // Refresh preview at configured FPS
-    artnetPreviewRefreshInterval = setInterval(() => {
-        if (previewImg && document.body.contains(previewImg)) {
-            previewImg.src = `${API_BASE}/preview/artnet?t=${Date.now()}`;
-        } else {
-            stopArtnetPreviewStream();
-        }
-    }, refreshInterval);
-    
-    // FPS counter
-    previewImg.onload = () => {
-        artnetPreviewFrameCount++;
-        updateArtnetPreviewFPS();
-    };
-    
-    // Update FPS display every second
-    artnetPreviewFpsInterval = setInterval(updateArtnetPreviewFPS, 1000);
-    
-    debug.log(`Art-Net MJPEG preview started at ${previewFps} FPS (${refreshInterval}ms interval)`);
+    debug.log(`Art-Net MJPEG preview stream started`);
 }
 
 function stopArtnetPreviewStream() {
-    if (artnetPreviewRefreshInterval) {
-        clearInterval(artnetPreviewRefreshInterval);
-        artnetPreviewRefreshInterval = null;
-    }
     if (artnetPreviewFpsInterval) {
         clearInterval(artnetPreviewFpsInterval);
         artnetPreviewFpsInterval = null;
     }
     artnetPreviewFrameCount = 0;
     artnetPreviewLastFpsUpdate = Date.now();
+    
+    const previewImg = document.getElementById('artnetPreviewImg');
+    if (previewImg) {
+        previewImg.src = '';
+    }
 }
 
 function updateArtnetPreviewFPS() {
-    const now = Date.now();
-    const elapsed = now - artnetPreviewLastFpsUpdate;
-    
-    if (elapsed >= 1000) {
-        const fps = Math.round((artnetPreviewFrameCount * 1000) / elapsed);
-        const statsEl = document.getElementById('artnetPreviewStats');
-        if (statsEl) {
-            statsEl.textContent = `${fps} FPS`;
-        }
-        artnetPreviewFrameCount = 0;
-        artnetPreviewLastFpsUpdate = now;
-    }
+    // FPS display removed to prevent interference with MJPEG stream rendering
 }
 
 // ========================================
@@ -2088,6 +2127,13 @@ function attachPlaylistDropZoneHandlers(container, playlistId, files, cfg) {
                 const item = files.splice(dragIndex, 1)[0];
                 const newIndex = dragIndex < dropIndex ? dropIndex - 1 : dropIndex;
                 files.splice(newIndex, 0, item);
+                
+                // Set flag to ignore WebSocket playlist.changed events briefly (prevent race condition)
+                window._ignorePlaylistChange = true;
+                setTimeout(() => {
+                    window._ignorePlaylistChange = false;
+                }, 500); // Ignore events for 500ms after manual reorder
+                
                 cfg.updateFunc();
                 setTimeout(() => renderPlaylist(playlistId), 0);
             }
@@ -2495,27 +2541,8 @@ function updateMasterUI() {
     });
 }
 
-// Poll sync status for real-time feedback (optional)
-async function pollSyncStatus() {
-    if (!masterPlaylist) return;
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/player/sync_status`);
-        const data = await response.json();
-        
-        if (data.success && data.master_playlist !== masterPlaylist) {
-            // Master changed externally - update UI
-            masterPlaylist = data.master_playlist;
-            updateMasterUI();
-        }
-    } catch (error) {
-        // Silently fail - not critical
-        console.debug('Sync status poll failed:', error);
-    }
-}
-
-// Poll every 2 seconds when master is active
-setInterval(pollSyncStatus, 2000);
+// REMOVED: Master/slave sync polling - no external master changes expected
+// If needed in future, implement via WebSocket events instead of polling
 
 async function updatePlaylist(playerId) {
     const config = playerConfigs[playerId];
@@ -3685,16 +3712,25 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
             
             // Try WebSocket first for clip effects
             try {
+                const wsParams = {
+                    player_id: playerId,
+                    clip_id: targetClipId,
+                    effect_index: effectIndex,
+                    param_name: paramName,
+                    value: value
+                };
+                
+                // Include range data if triple slider
+                if (tripleSlider) {
+                    const range = tripleSlider.getRange();
+                    wsParams.rangeMin = range.min;
+                    wsParams.rangeMax = range.max;
+                }
+                
                 await executeCommand(
                     'effects',
                     'command.effect.param',
-                    {
-                        player_id: playerId,
-                        clip_id: targetClipId,
-                        effect_index: effectIndex,
-                        param_name: paramName,
-                        value: value
-                    },
+                    wsParams,
                     async () => {
                         // REST fallback
                         endpoint = `${API_BASE}/api/player/${playerId}/clip/${targetClipId}/effects/${effectIndex}/parameter`;

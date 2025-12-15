@@ -33,6 +33,31 @@ class LayerManager:
         self.layers = []  # List of Layer objects
         self.layer_counter = 0  # For generating unique layer IDs
         self._layer_effect_log_frame = {}  # Frame counter for logging
+        self._blend_cache = {}  # Cache blend plugin instances: {(blend_mode, opacity): plugin_instance}
+        self.player = None  # Will be set by player after initialization
+        
+    def _set_websocket_context_on_transport(self, clip_id, player_name=""):
+        """Set WebSocket context on all transport effects in layers."""
+        if not self.player or not hasattr(self.player, 'player_manager'):
+            logger.warning(f"⚠️ [{player_name}] Cannot set WebSocket context: player or player_manager not available")
+            return
+        
+        if not hasattr(self.player.player_manager, 'socketio'):
+            logger.warning(f"⚠️ [{player_name}] Cannot set WebSocket context: socketio not available on player_manager")
+            return
+        
+        socketio = self.player.player_manager.socketio
+        player_id = self.player_id
+        
+        for layer in self.layers:
+            for effect in layer.effects:
+                if effect.get('id') == 'transport' and effect.get('instance'):
+                    transport = effect['instance']
+                    if hasattr(transport, '_needs_websocket_context'):
+                        transport.socketio = socketio
+                        transport.player_id = player_id
+                        transport.clip_id = clip_id
+                        logger.info(f"📡 [{player_name}] Set WebSocket context on transport: player_id={player_id}, clip_id={clip_id}, socketio={socketio is not None}")
         
     def load_clip_layers(self, clip_id, video_dir=None, player_name=""):
         """
@@ -66,8 +91,11 @@ class LayerManager:
         abs_path = clip_data['absolute_path']
         base_source = None
         
+        # Get video extensions from config
+        video_extensions = tuple(self.config.get('extensions', ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.gif']))
+        
         # Detect source type from path
-        if abs_path.endswith(('.mp4', '.avi', '.mov', '.mkv')):
+        if abs_path.endswith(video_extensions):
             base_source = VideoSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height, config=self.config, clip_id=clip_id)
         elif abs_path.startswith('generator:'):
             gen_id = abs_path.replace('generator:', '')
@@ -157,6 +185,9 @@ class LayerManager:
                 layer.cleanup()
             except Exception as e:
                 logger.warning(f"⚠️ Error cleaning up old layer: {e}")
+        
+        # Set WebSocket context on transport effects (needs player reference)
+        self._set_websocket_context_on_transport(clip_id, player_name)
         
         logger.info(f"✅ [{player_name}] Loaded {len(self.layers)} layers from clip {clip_id}")
         return True
@@ -415,6 +446,11 @@ class LayerManager:
             if plugin_id == 'transport' and hasattr(plugin_instance, '_initialize_state') and layer.source:
                 plugin_instance._initialize_state(layer.source)
                 debug_transport(logger, f"🎬 [{player_name}] Transport initialized for Layer {layer.layer_id}: out_point={plugin_instance.out_point}")
+                
+                # Set WebSocket context for position updates (need to get player reference)
+                # This needs to be done after layers are attached to player
+                # For now, mark that we need to set it
+                plugin_instance._needs_websocket_context = True
             
             # Add to layer effects
             try:
@@ -443,7 +479,7 @@ class LayerManager:
     
     def get_blend_plugin(self, blend_mode, opacity):
         """
-        Create BlendEffect plugin instance with given parameters.
+        Get BlendEffect plugin instance (cached for performance).
         
         Args:
             blend_mode: Blend mode
@@ -452,6 +488,13 @@ class LayerManager:
         Returns:
             BlendEffect plugin instance
         """
+        cache_key = (blend_mode, opacity)
+        
+        # Check cache first
+        if cache_key in self._blend_cache:
+            return self._blend_cache[cache_key]
+        
+        # Create new instance and cache it
         from plugins.effects.blend import BlendEffect
         
         blend = BlendEffect()
@@ -460,6 +503,7 @@ class LayerManager:
             'opacity': opacity
         })
         
+        self._blend_cache[cache_key] = blend
         return blend
     
     def clear(self):

@@ -216,6 +216,35 @@ def register_files_api(app, video_dir, config=None):
             # Decode file path
             file_path = urllib.parse.unquote(file_path)
             
+            # Handle generator sources
+            if file_path.startswith('generator:'):
+                generator_id = file_path.replace('generator:', '')
+                try:
+                    from .frame_source import GeneratorSource
+                    import cv2
+                    import io
+                    
+                    # Create generator and get first frame
+                    gen_source = GeneratorSource(generator_id, {}, canvas_width=200, canvas_height=200)
+                    if gen_source.initialize():
+                        frame, _ = gen_source.get_next_frame()
+                        if frame is not None:
+                            # Encode as JPEG
+                            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                            if ret:
+                                return send_file(
+                                    io.BytesIO(buffer.tobytes()),
+                                    mimetype='image/jpeg',
+                                    max_age=86400
+                                )
+                except Exception as e:
+                    logger.error(f"Error generating thumbnail for generator {generator_id}: {e}")
+                
+                return jsonify({
+                    'success': False,
+                    'error': 'Could not generate thumbnail for generator'
+                }), 404
+            
             # Finde vollständigen Pfad in Video-Quellen
             full_path = None
             for source_path in get_video_sources():

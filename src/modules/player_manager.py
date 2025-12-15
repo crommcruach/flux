@@ -23,13 +23,14 @@ class PlayerManager:
     UNIFIED ACCESS: Use get_player(player_id) for consistent access
     """
     
-    def __init__(self, player=None, artnet_player=None):
+    def __init__(self, player=None, artnet_player=None, socketio=None):
         """
         Initialize PlayerManager with dual players.
         
         Args:
             player: Video player instance (preview)
             artnet_player: Art-Net player instance (output)
+            socketio: SocketIO instance for WebSocket events (optional)
         """
         # Main player reference
         self._player = player
@@ -46,6 +47,9 @@ class PlayerManager:
         
         # Master/Slave Synchronization
         self.master_playlist = None  # 'video' or 'artnet' or None
+        
+        # WebSocket support
+        self.socketio = socketio
         
         logger.debug(f"PlayerManager initialized (video_player: {player is not None}, artnet_player: {artnet_player is not None})")
     
@@ -280,6 +284,17 @@ class PlayerManager:
             player_id: ID of player that changed clip
             clip_index: New clip index
         """
+        # Emit WebSocket event for playlist change
+        if self.socketio:
+            try:
+                self.socketio.emit('playlist.changed', {
+                    'player_id': player_id,
+                    'current_index': clip_index
+                }, namespace='/player')
+                logger.debug(f"📡 WebSocket: playlist.changed emitted for {player_id} index={clip_index}")
+            except Exception as e:
+                logger.error(f"❌ Error emitting playlist.changed WebSocket event: {e}")
+        
         if player_id != self.master_playlist:
             return  # Not Master, no sync action
         

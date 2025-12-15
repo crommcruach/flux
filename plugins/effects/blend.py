@@ -79,6 +79,13 @@ class BlendEffect(PluginBase):
         if overlay is None:
             return self._apply_opacity(frame)
         
+        # OPTIMIZATION: Fast path for normal mode at 100% opacity (zero-copy)
+        if self.blend_mode == 'normal' and self.opacity >= 100.0:
+            # Ensure same dimensions
+            if frame.shape != overlay.shape:
+                return cv2.resize(overlay, (frame.shape[1], frame.shape[0]))
+            return overlay  # Direct return, no processing needed (saves 3-5ms)
+        
         # Stelle sicher, dass beide Frames gleiche Dimensionen haben
         if frame.shape != overlay.shape:
             overlay = cv2.resize(overlay, (frame.shape[1], frame.shape[0]))

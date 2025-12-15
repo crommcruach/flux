@@ -147,7 +147,7 @@ class RestAPI:
         register_playback_routes(self.app, self.player_manager)
         register_settings_routes(self.app, self.player_manager)
         register_artnet_routes(self.app, self.player_manager)
-        register_info_routes(self.app, self.player_manager, self)
+        register_info_routes(self.app, self.player_manager, self, self.config)
         register_recording_routes(self.app, self.player_manager, self)
         register_cache_routes(self.app)
         register_script_routes(self.app, self.player_manager, self.config)
@@ -170,7 +170,7 @@ class RestAPI:
         
         # Register Unified Player API
         from .api_player_unified import register_unified_routes
-        register_unified_routes(self.app, self.player_manager, self.config)
+        register_unified_routes(self.app, self.player_manager, self.config, self.socketio)
         
         # Register Transition API
         from .api_transitions import register_transition_routes
@@ -383,6 +383,8 @@ class RestAPI:
             effect_index = data.get('effect_index')
             param_name = data.get('param_name')
             value = data.get('value')
+            range_min = data.get('rangeMin')
+            range_max = data.get('rangeMax')
             
             try:
                 # Get player and update parameter
@@ -398,27 +400,48 @@ class RestAPI:
                 if not clip:
                     raise ValueError(f"Clip {clip_id} not found")
                 
+                # Get effects list from clip dict
+                effects = clip.get('effects', [])
+                
                 # Update effect parameter
-                if effect_index < len(clip.effects):
-                    effect = clip.effects[effect_index]
+                if effect_index < len(effects):
+                    effect = effects[effect_index]
                     
-                    # Try multiple update methods (in order of preference)
-                    updated = False
-                    
-                    # Method 1: set_parameter() method
-                    if hasattr(effect, 'set_parameter'):
-                        effect.set_parameter(param_name, value)
-                        updated = True
-                    # Method 2: Direct parameters dict
-                    elif hasattr(effect, 'parameters') and isinstance(effect.parameters, dict):
-                        effect.parameters[param_name] = value
-                        updated = True
-                    # Method 3: Direct attribute
-                    elif hasattr(effect, param_name):
-                        setattr(effect, param_name, value)
-                        updated = True
-                    
-                    if updated:
+                    # Effects in registry are dicts with 'parameters' key (not 'params')
+                    if isinstance(effect, dict):
+                        if 'parameters' not in effect:
+                            effect['parameters'] = {}
+                        
+                        # For triple sliders with range data, store as dict with metadata
+                        param_value_to_store = None
+                        if range_min is not None and range_max is not None:
+                            param_value_to_store = {
+                                '_value': value,
+                                '_rangeMin': range_min,
+                                '_rangeMax': range_max
+                            }
+                            effect['parameters'][param_name] = param_value_to_store
+                            logger.debug(f"✅ WebSocket: Updated {player_id} clip {clip_id} effect[{effect_index}].{param_name} = {value} (range: {range_min}-{range_max})")
+                        else:
+                            param_value_to_store = value
+                            effect['parameters'][param_name] = param_value_to_store
+                            logger.debug(f"✅ WebSocket: Updated {player_id} clip {clip_id} effect[{effect_index}].{param_name} = {value}")
+                        
+                        # Update LIVE effect instance in player layers (critical for transport trim!)
+                        if player.layers and len(player.layers) > 0:
+                            for layer in player.layers:
+                                if layer.clip_id == clip_id and effect_index < len(layer.effects):
+                                    live_effect = layer.effects[effect_index]
+                                    if live_effect.get('id') == effect.get('plugin_id'):
+                                        live_instance = live_effect.get('instance')
+                                        if live_instance and hasattr(live_instance, 'update_parameter'):
+                                            live_instance.update_parameter(param_name, param_value_to_store)
+                                            logger.info(f"🔄 Updated LIVE instance: {effect.get('plugin_id')}.{param_name}")
+                                        break
+                        
+                        # Invalidate cache so changes are picked up
+                        registry._invalidate_cache(clip_id)
+                        
                         emit('command.response', {
                             'success': True,
                             'command': 'effect.param',
@@ -426,8 +449,6 @@ class RestAPI:
                             'param_name': param_name,
                             'value': value
                         })
-                        
-                        logger.debug(f"✅ WebSocket: Updated {player_id} effect[{effect_index}].{param_name} = {value}")
                         
                         # Broadcast to all clients for multi-user sync
                         self.socketio.emit('effect.param.changed', {
@@ -438,7 +459,7 @@ class RestAPI:
                             'value': value
                         }, namespace='/effects')
                     else:
-                        raise AttributeError(f"Could not update parameter {param_name} on effect")
+                        raise TypeError(f"Effect at index {effect_index} is not a dict")
                 else:
                     raise IndexError(f"Effect index {effect_index} out of range")
                     

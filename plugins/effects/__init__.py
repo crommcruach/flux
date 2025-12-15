@@ -45,6 +45,8 @@ from .tile import TileEffect
 from .circles import CirclesEffect
 from .bendoscope import BendoscopeEffect
 from .transport import TransportEffect
+from .ascii_art import AsciiArtEffect
+from .snow import SnowEffect
 
 __all__ = [
     'BlendEffect', 
@@ -91,5 +93,7 @@ __all__ = [
     'TileEffect',
     'CirclesEffect',
     'BendoscopeEffect',
-    'TransportEffect'
+    'TransportEffect',
+    'AsciiArtEffect',
+    'SnowEffect'
 ]

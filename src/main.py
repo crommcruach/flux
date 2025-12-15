@@ -298,6 +298,10 @@ def main():
     
     # REST API initialisieren und automatisch starten
     rest_api = RestAPI(player_manager, dmx_controller, data_dir, video_dir, config, replay_manager=replay_manager)
+    
+    # Set socketio reference in player_manager for WebSocket events
+    player_manager.socketio = rest_api.socketio
+    
     rest_api.start(host=config['api']['host'], port=config['api']['port'])
     
     # Console Capture NICHT aktivieren - verursacht "write() before start_response" Fehler

@@ -308,7 +308,7 @@ class TripleSlider {
                 if (this.containerId && this.containerId.includes('transport_position')) {
                     debugLog('🎨 Rendering slider (hover/drag mode, only value updated)');
                 }
-                this.render();
+                this.updateUI();
             }
             return;
         }

@@ -81,6 +81,13 @@ class VideoSource(FrameSource):
         self.gif_frame_delays = None
         self.gif_transparency_bg = tuple(config.get('video', {}).get('gif_transparency_bg', [0, 0, 0]) if config else [0, 0, 0])
         self.gif_respect_timing = config.get('video', {}).get('gif_respect_frame_timing', True) if config else True
+        
+        # OPTIMIZATION: Loop frame caching (keep decoded frames for short loops)
+        self.enable_loop_cache = config.get('performance', {}).get('enable_loop_cache', True) if config else True
+        self.loop_cache_max_duration = config.get('performance', {}).get('loop_cache_max_duration', 10.0) if config else 10.0  # seconds
+        self.loop_frame_cache = None  # Will store list of decoded frames
+        self.loop_cache_active = False
+        self.loop_number = 0
     
     def _is_gif_file(self, path):
         """Prüft ob Datei ein GIF ist."""
@@ -217,6 +224,9 @@ class VideoSource(FrameSource):
         # CRITICAL: Lock BOTH seek and read for HAP codec thread-safety
         # HAP codec has internal threading that can cause race conditions
         with self._lock:
+            # Double-check cap is still valid after acquiring lock (race condition)
+            if not self.cap:
+                return None, 0
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
             ret, frame = self.cap.read()
         

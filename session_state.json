@@ -1,0 +1,19 @@
+{
+  "last_updated": "2025-12-15T16:18:54.739090",
+  "players": {
+    "video": {
+      "playlist": [],
+      "current_index": -1,
+      "autoplay": true,
+      "loop": true,
+      "global_effects": []
+    },
+    "artnet": {
+      "playlist": [],
+      "current_index": -1,
+      "autoplay": true,
+      "loop": true,
+      "global_effects": []
+    }
+  }
+}

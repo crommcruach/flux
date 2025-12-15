@@ -295,7 +295,7 @@ def register_artnet_routes(app, player_manager):
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
 
 
-def register_info_routes(app, player_manager, api=None):
+def register_info_routes(app, player_manager, api=None, config=None):
     """Registriert Info-Endpunkte."""
     
     @app.route('/api/status', methods=['GET'])
@@ -381,6 +381,14 @@ def register_info_routes(app, player_manager, api=None):
         import numpy as np
         import time
         
+        # Load config settings for video preview
+        cfg = config if config else {}
+        preview_config = cfg.get('video', {}).get('preview_stream', {}).get('video', {})
+        stream_fps = preview_config.get('fps', 30)
+        max_width = preview_config.get('max_width', 640)
+        jpeg_quality = preview_config.get('jpeg_quality', 85)
+        frame_delay = 1.0 / stream_fps
+        
         # WICHTIG: Keine Logger/Print-Aufrufe vor oder im Generator!
         # Dies würde "write() before start_response" Fehler verursachen
         
@@ -424,18 +432,17 @@ def register_info_routes(app, player_manager, api=None):
                             # Setze alle Pixel auf einmal (BGR Format für OpenCV)
                             frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
                     
-                    # Skaliere auf vernünftige Preview-Größe (optional)
-                    max_width = 640
-                    if frame.shape[1] > max_width:
+                    # Skaliere auf Preview-Größe (wenn konfiguriert)
+                    if max_width > 0 and frame.shape[1] > max_width:
                         scale = max_width / frame.shape[1]
                         new_width = int(frame.shape[1] * scale)
                         new_height = int(frame.shape[0] * scale)
                         frame = cv2.resize(frame, (new_width, new_height))
                     
                     # Encode als JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
                     if not ret:
-                        time.sleep(0.033)  # ~30 FPS
+                        time.sleep(frame_delay)
                         continue
                     
                     frame_bytes = buffer.tobytes()
@@ -448,8 +455,8 @@ def register_info_routes(app, player_manager, api=None):
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                     
-                    # Limitiere auf ~30 FPS
-                    time.sleep(0.033)
+                    # Frame rate limiting
+                    time.sleep(frame_delay)
                 
                 except Exception as e:
                     # Bei Fehler: Schwarzes Bild
@@ -471,6 +478,14 @@ def register_info_routes(app, player_manager, api=None):
         import cv2
         import numpy as np
         import time
+        
+        # Load config settings for artnet preview
+        cfg = config if config else {}
+        preview_config = cfg.get('video', {}).get('preview_stream', {}).get('artnet', {})
+        stream_fps = preview_config.get('fps', 30)
+        max_width = preview_config.get('max_width', 640)
+        jpeg_quality = preview_config.get('jpeg_quality', 85)
+        frame_delay = 1.0 / stream_fps
         
         def generate_frames():
             """Generator für Art-Net Player MJPEG-Stream."""
@@ -502,18 +517,17 @@ def register_info_routes(app, player_manager, api=None):
                             valid_mask = (y_coords >= 0) & (y_coords < canvas_height) & (x_coords >= 0) & (x_coords < canvas_width)
                             frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
                     
-                    # Skaliere auf Preview-Größe
-                    max_width = 640
-                    if frame.shape[1] > max_width:
+                    # Skaliere auf Preview-Größe (wenn konfiguriert)
+                    if max_width > 0 and frame.shape[1] > max_width:
                         scale = max_width / frame.shape[1]
                         new_width = int(frame.shape[1] * scale)
                         new_height = int(frame.shape[0] * scale)
                         frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
                     
                     # Encode als JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
                     if not ret:
-                        time.sleep(0.033)
+                        time.sleep(frame_delay)
                         continue
                     
                     frame_bytes = buffer.tobytes()
@@ -522,7 +536,7 @@ def register_info_routes(app, player_manager, api=None):
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                     
-                    time.sleep(0.033)  # ~30 FPS
+                    time.sleep(frame_delay)
                 
                 except Exception as e:
                     frame = np.zeros((180, 320, 3), dtype=np.uint8)
@@ -543,6 +557,14 @@ def register_info_routes(app, player_manager, api=None):
         import cv2
         import numpy as np
         import time
+        
+        # Load config settings for fullscreen
+        cfg = config if config else {}
+        fullscreen_config = cfg.get('video', {}).get('preview_stream', {}).get('fullscreen', {})
+        stream_fps = fullscreen_config.get('fps', 60)
+        max_width = fullscreen_config.get('max_width', 0)
+        jpeg_quality = fullscreen_config.get('jpeg_quality', 95)
+        frame_delay = 1.0 / stream_fps
         
         def generate_frames():
             """Generator für MJPEG-Stream ohne Preview-Skalierung."""
@@ -584,12 +606,17 @@ def register_info_routes(app, player_manager, api=None):
                             # Setze alle Pixel auf einmal (BGR Format für OpenCV)
                             frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
                     
-                    # KEINE SKALIERUNG - volle Player-Auflösung
+                    # Skaliere auf konfigurierte Größe (wenn max_width > 0)
+                    if max_width > 0 and frame.shape[1] > max_width:
+                        scale = max_width / frame.shape[1]
+                        new_width = int(frame.shape[1] * scale)
+                        new_height = int(frame.shape[0] * scale)
+                        frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
                     
-                    # Encode als JPEG mit hoher Qualität
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    # Encode als JPEG mit konfigurierter Qualität
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
                     if not ret:
-                        time.sleep(0.033)  # ~30 FPS
+                        time.sleep(frame_delay)
                         continue
                     
                     frame_bytes = buffer.tobytes()
@@ -602,8 +629,8 @@ def register_info_routes(app, player_manager, api=None):
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                     
-                    # Limitiere auf ~30 FPS
-                    time.sleep(0.033)
+                    # Frame rate limiting
+                    time.sleep(frame_delay)
                 
                 except Exception as e:
                     # Bei Fehler: Schwarzes Bild

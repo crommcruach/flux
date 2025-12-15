@@ -95,6 +95,13 @@ class TransportEffect(PluginBase):
         self._total_frames = None
         self._fps = 30
         
+        # WebSocket update tracking
+        self._position_update_counter = 0
+        self._last_emitted_position = None
+        self.socketio = None  # Will be set by player
+        self.player_id = None  # Will be set by player
+        self.clip_id = None  # Will be set by player
+        
         # Now call parent init
         super().__init__(config)
         
@@ -367,6 +374,9 @@ class TransportEffect(PluginBase):
             '_rangeMax': self.out_point
         })
         
+        # WebSocket position update (rate-limited by config)
+        self._emit_position_update()
+        
         return frame_num
     
     def process_frame(self, frame, **kwargs):
@@ -463,6 +473,51 @@ class TransportEffect(PluginBase):
             return True
         
         return False
+    
+    def _emit_position_update(self):
+        """Emit WebSocket update for transport position (rate-limited by config)."""
+        # DEBUG: Check if WebSocket context is available
+        if not self.socketio or not self.player_id or not self.clip_id:
+            if self._position_update_counter == 0:  # Log only once to avoid spam
+                logger.info(f"⚠️ Transport WebSocket context not set: socketio={self.socketio is not None}, player_id={self.player_id}, clip_id={self.clip_id}")
+            return
+        
+        # Increment counter
+        self._position_update_counter += 1
+        
+        # Get update interval from config (default 10 frames)
+        try:
+            from modules.app_config import get_config
+            config = get_config()
+            update_interval = config.get('effects', {}).get('transport_position_update_interval', 10)
+        except:
+            update_interval = 10
+        
+        # Only emit every N frames or if position changed significantly
+        should_emit = (
+            self._position_update_counter >= update_interval or
+            self._last_emitted_position is None or
+            abs(self.current_position - self._last_emitted_position) > 30  # Force update if jumped
+        )
+        
+        if should_emit:
+            try:
+                logger.info(f"📡 Emitting transport.position: player={self.player_id}, clip={self.clip_id}, pos={self.current_position}/{self.out_point}")
+                
+                self.socketio.emit('transport.position', {
+                    'player_id': self.player_id,
+                    'clip_id': self.clip_id,
+                    'position': self.current_position,
+                    'in_point': self.in_point,
+                    'out_point': self.out_point,
+                    'total_frames': self._total_frames,
+                    'fps': self._fps
+                }, namespace='/effects')
+                
+                self._position_update_counter = 0
+                self._last_emitted_position = self.current_position
+            except Exception as e:
+                logger.error(f"❌ Failed to emit transport position: {e}")
     
     def get_parameters(self):
         """Gibt aktuelle Parameter-Werte zurück mit Range Metadata für Transport."""

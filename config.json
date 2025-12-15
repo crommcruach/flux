@@ -45,6 +45,8 @@
     "max_per_universe": 510
   },
   "effects": {
+    "transport_position_update_interval": 10,
+    "_transport_position_update_interval_comment": "Send transport position WebSocket updates every N frames (lower = more updates, higher = less network traffic)",
     "video": [
       {
         "plugin_id": "transform",
@@ -131,8 +133,27 @@
     "default_brightness": 100,
     "default_fps": null,
     "default_speed": 1,
-    "preview_fps": 25,
-    "_preview_fps_comment": "MJPEG preview refresh rate (frames per second). Recommended: 15-30 FPS for smooth preview",
+    "preview_stream": {
+      "video": {
+        "fps": 25,
+        "max_width": 640,
+        "jpeg_quality": 85,
+        "_comment": "Video player preview stream settings"
+      },
+      "artnet": {
+        "fps": 25,
+        "max_width": 320,
+        "jpeg_quality": 85,
+        "_comment": "Art-Net player preview stream settings"
+      },
+      "fullscreen": {
+        "fps": 30,
+        "max_width": 0,
+        "jpeg_quality": 85,
+        "_comment": "Fullscreen stream settings. max_width=0 means no scaling (original size)"
+      },
+      "_comment": "MJPEG stream settings. fps: 25-60 recommended. max_width: 0 for original size. jpeg_quality: 1-100"
+    },
     "extensions": [
       ".mp4",
       ".avi",
