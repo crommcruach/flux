@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Color Picker</title>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background: #2b2b2b;
+            color: #e0e0e0;
+        }
+        
+        .color-picker-container {
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            padding: 12px;
+            max-width: 650px;
+        }
+        
+        .color-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        
+        .color-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #e0e0e0;
+            min-width: 60px;
+        }
+        
+        .color-swatch {
+            width: 45px;
+            height: 24px;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            background: #ff0000;
+        }
+        
+        .mode-tabs {
+            display: flex;
+            gap: 2px;
+            margin-left: auto;
+        }
+        
+        .mode-tab {
+            padding: 4px 12px;
+            font-size: 11px;
+            background: #2b2b2b;
+            border: 1px solid #3c3c3c;
+            color: #a0a0a0;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .mode-tab:first-child {
+            border-radius: 3px 0 0 3px;
+        }
+        
+        .mode-tab:last-child {
+            border-radius: 0 3px 3px 0;
+        }
+        
+        .mode-tab.active {
+            background: #3c3c3c;
+            color: #e0e0e0;
+        }
+        
+        .mode-tab:hover:not(.active) {
+            background: #333;
+        }
+        
+        .mode-content {
+            display: none;
+        }
+        
+        .mode-content.active {
+            display: block;
+        }
+        
+        .slider-group {
+            margin-bottom: 8px;
+        }
+        
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+        
+        .slider-label {
+            font-size: 12px;
+            color: #e0e0e0;
+            min-width: 70px;
+        }
+        
+        .slider-container {
+            flex: 1;
+            position: relative;
+        }
+        
+        .color-slider {
+            width: 100%;
+            height: 20px;
+            border-radius: 3px;
+            border: 1px solid #555;
+            position: relative;
+            cursor: pointer;
+            overflow: hidden;
+        }
+        
+        .hue-slider {
+            background: linear-gradient(to right, 
+                #ff0000 0%, #ffff00 17%, #00ff00 33%, 
+                #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+        }
+        
+        .slider-thumb {
+            position: absolute;
+            top: -2px;
+            width: 4px;
+            height: 24px;
+            background: white;
+            border: 1px solid #000;
+            pointer-events: none;
+            transform: translateX(-50%);
+        }
+        
+        .slider-value {
+            font-size: 11px;
+            color: #a0a0a0;
+            min-width: 45px;
+            text-align: right;
+        }
+        
+        .palette-templates {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        
+        .template-btn {
+            padding: 6px 12px;
+            border: 1px solid #3c3c3c;
+            background: #2b2b2b;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            color: #e0e0e0;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .template-btn:hover {
+            background: #3c3c3c;
+        }
+        
+        .template-preview {
+            display: flex;
+            gap: 2px;
+        }
+        
+        .template-preview-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+        
+        .palette-colors {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .palette-color-item {
+            position: relative;
+        }
+        
+        .palette-color-box {
+            width: 40px;
+            height: 40px;
+            border-radius: 3px;
+            border: 1px solid #555;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .palette-color-box:hover {
+            transform: scale(1.1);
+            border-color: #888;
+        }
+        
+        .palette-color-box.add-color {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #2b2b2b;
+            font-size: 20px;
+            color: #a0a0a0;
+            border: 1px dashed #555;
+        }
+        
+        .remove-color {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #e74c3c;
+            color: white;
+            border: 1px solid #1e1e1e;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .palette-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        
+        .palette-btn {
+            padding: 6px 14px;
+            border: 1px solid #3c3c3c;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            background: #2b2b2b;
+            color: #e0e0e0;
+            transition: all 0.2s;
+        }
+        
+        .palette-btn:hover {
+            background: #3c3c3c;
+        }
+        
+        .palette-output {
+            background: #0d0d0d;
+            color: #e0e0e0;
+            padding: 10px;
+            border-radius: 3px;
+            border: 1px solid #3c3c3c;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px;
+            margin-top: 12px;
+            white-space: pre-wrap;
+        }
+        
+        .add-to-palette-btn {
+            padding: 6px 14px;
+            border: 1px solid #667eea;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            background: #667eea;
+            color: white;
+            margin-top: 8px;
+            transition: all 0.2s;
+        }
+        
+        .add-to-palette-btn:hover {
+            background: #5568d3;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="color-picker-container">
+        <div class="color-header">
+            <span class="color-label">Color</span>
+            <div class="color-swatch" id="colorSwatch"></div>
+            
+            <div class="mode-tabs">
+                <button class="mode-tab active" data-mode="hsb">HSB</button>
+                <button class="mode-tab" data-mode="rgb">RGB</button>
+                <button class="mode-tab" data-mode="palette">Palette</button>
+            </div>
+        </div>
+        
+        <!-- HSB Mode -->
+        <div class="mode-content active" id="hsbMode">
+            <div class="slider-group">
+                <div class="slider-row">
+                    <span class="slider-label">Hue</span>
+                    <div class="slider-container">
+                        <div class="color-slider hue-slider" data-slider="hue">
+                            <div class="slider-thumb" id="hueThumb"></div>
+                        </div>
+                    </div>
+                    <span class="slider-value" id="hueValue">0°</span>
+                </div>
+                
+                <div class="slider-row">
+                    <span class="slider-label">Saturation</span>
+                    <div class="slider-container">
+                        <div class="color-slider" data-slider="saturation" id="saturationSlider">
+                            <div class="slider-thumb" id="saturationThumb"></div>
+                        </div>
+                    </div>
+                    <span class="slider-value" id="saturationValue">100%</span>
+                </div>
+                
+                <div class="slider-row">
+                    <span class="slider-label">Brightness</span>
+                    <div class="slider-container">
+                        <div class="color-slider" data-slider="brightness" id="brightnessSlider">
+                            <div class="slider-thumb" id="brightnessThumb"></div>
+                        </div>
+                    </div>
+                    <span class="slider-value" id="brightnessValue">100%</span>
+                </div>
+                
+                <div class="slider-row">
+                    <span class="slider-label">Alpha</span>
+                    <div class="slider-container">
+                        <div class="color-slider" data-slider="alpha" id="alphaSlider">
+                            <div class="slider-thumb" id="alphaThumb"></div>
+                        </div>
+                    </div>
+                    <span class="slider-value" id="alphaValue">100%</span>
+                </div>
+            </div>
+            
+            <button class="add-to-palette-btn hidden" id="addToPaletteBtn">Add to Palette</button>
+        </div>
+        
+        <!-- RGB Mode -->
+        <div class="mode-content" id="rgbMode">
+            <div class="slider-group">
+                <div class="slider-row">
+                    <span class="slider-label">Red</span>
+                    <div class="slider-container">
+                        <div class="color-slider" data-slider="red" style="background: linear-gradient(to right, #000000, #ff0000);">
+                            <div class="slider-thumb" id="redThumb"></div>
+                        </div>
+                    </div>
+                    <span class="slider-value" id="redValue">255</span>
+                </div>
+                
+                <div class="slider-row">
+                    <span class="slider-label">Green</span>
+                    <div class="slider-container">
+                        <div class="color-slider" data-slider="green" style="background: linear-gradient(to right, #000000, #00ff00);">
+                            <div class="slider-thumb" id="greenThumb"></div>
+                        </div>
+                    </div>
+                    <span class="slider-value" id="greenValue">0</span>
+                </div>
+                
+                <div class="slider-row">
+                    <span class="slider-label">Blue</span>
+                    <div class="slider-container">
+                        <div class="color-slider" data-slider="blue" style="background: linear-gradient(to right, #000000, #0000ff);">
+                            <div class="slider-thumb" id="blueThumb"></div>
+                        </div>
+                    </div>
+                    <span class="slider-value" id="blueValue">0</span>
+                </div>
+                
+                <div class="slider-row">
+                    <span class="slider-label">Alpha</span>
+                    <div class="slider-container">
+                        <div class="color-slider" data-slider="alpha-rgb" id="alphaRgbSlider">
+                            <div class="slider-thumb" id="alphaRgbThumb"></div>
+                        </div>
+                    </div>
+                    <span class="slider-value" id="alphaRgbValue">100%</span>
+                </div>
+            </div>
+            
+            <button class="add-to-palette-btn hidden" id="addToPaletteRgbBtn">Add to Palette</button>
+        </div>
+        
+        <!-- Palette Mode -->
+        <div class="mode-content" id="paletteMode">
+            <div class="palette-templates">
+                <button class="template-btn" data-template="rainbow">
+                    <div class="template-preview">
+                        <div class="template-preview-color" style="background: #FF0000;"></div>
+                        <div class="template-preview-color" style="background: #FF7F00;"></div>
+                        <div class="template-preview-color" style="background: #FFFF00;"></div>
+                        <div class="template-preview-color" style="background: #00FF00;"></div>
+                        <div class="template-preview-color" style="background: #0000FF;"></div>
+                        <div class="template-preview-color" style="background: #8B00FF;"></div>
+                    </div>
+                    <span>Rainbow</span>
+                </button>
+                
+                <button class="template-btn" data-template="warm">
+                    <div class="template-preview">
+                        <div class="template-preview-color" style="background: #FF6B6B;"></div>
+                        <div class="template-preview-color" style="background: #FF8E53;"></div>
+                        <div class="template-preview-color" style="background: #FFD93D;"></div>
+                        <div class="template-preview-color" style="background: #FFA500;"></div>
+                    </div>
+                    <span>Warm</span>
+                </button>
+                
+                <button class="template-btn" data-template="cool">
+                    <div class="template-preview">
+                        <div class="template-preview-color" style="background: #667EEA;"></div>
+                        <div class="template-preview-color" style="background: #4ECDC4;"></div>
+                        <div class="template-preview-color" style="background: #45B7D1;"></div>
+                        <div class="template-preview-color" style="background: #764BA2;"></div>
+                    </div>
+                    <span>Cool</span>
+                </button>
+                
+                <button class="template-btn" data-template="neon">
+                    <div class="template-preview">
+                        <div class="template-preview-color" style="background: #FF10F0;"></div>
+                        <div class="template-preview-color" style="background: #00FFFF;"></div>
+                        <div class="template-preview-color" style="background: #39FF14;"></div>
+                        <div class="template-preview-color" style="background: #FFFF00;"></div>
+                    </div>
+                    <span>Neon</span>
+                </button>
+                
+                <button class="template-btn" data-template="sunset">
+                    <div class="template-preview">
+                        <div class="template-preview-color" style="background: #FF6B6B;"></div>
+                        <div class="template-preview-color" style="background: #FFB347;"></div>
+                        <div class="template-preview-color" style="background: #FF7F50;"></div>
+                        <div class="template-preview-color" style="background: #FF69B4;"></div>
+                    </div>
+                    <span>Sunset</span>
+                </button>
+            </div>
+            
+            <div class="palette-colors" id="paletteColors"></div>
+            
+            <div class="palette-controls">
+                <button class="palette-btn" id="savePalette">Save</button>
+                <button class="palette-btn" id="loadPalette">Load</button>
+                <button class="palette-btn" id="exportPalette">Export</button>
+                <button class="palette-btn" id="clearPalette">Clear</button>
+            </div>
+            <input type="file" id="paletteFileInput" accept=".json" style="display: none;">
+            
+            <div class="palette-output" id="paletteOutput" style="display: none;"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Color state
+        let isAddingToPalette = false;
+        let returnToTabAfterAdd = null;
+        let hsb = { h: 0, s: 100, b: 100, a: 100 };
+        let rgb = { r: 255, g: 0, b: 0, a: 100 };
+        
+        // Update color display
+        function updateColor() {
+            const color = hsbToRgb(hsb.h, hsb.s, hsb.b);
+            rgb = { ...color, a: hsb.a };
+            
+            const rgbaColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${hsb.a / 100})`;
+            document.getElementById('colorSwatch').style.backgroundColor = rgbaColor;
+            
+            // Update slider backgrounds
+            const satColor = hsbToRgb(hsb.h, 100, 100);
+            document.getElementById('saturationSlider').style.background = 
+                `linear-gradient(to right, #808080, rgb(${satColor.r}, ${satColor.g}, ${satColor.b}))`;
+            
+            const brightColor = hsbToRgb(hsb.h, hsb.s, 100);
+            document.getElementById('brightnessSlider').style.background = 
+                `linear-gradient(to right, #000000, rgb(${brightColor.r}, ${brightColor.g}, ${brightColor.b}))`;
+            
+            document.getElementById('alphaSlider').style.background = 
+                `linear-gradient(to right, transparent, rgb(${rgb.r}, ${rgb.g}, ${rgb.b})), repeating-conic-gradient(#808080 0% 25%, #ffffff 0% 50%) 50% / 10px 10px`;
+                
+            document.getElementById('alphaRgbSlider').style.background = 
+                `linear-gradient(to right, transparent, rgb(${rgb.r}, ${rgb.g}, ${rgb.b})), repeating-conic-gradient(#808080 0% 25%, #ffffff 0% 50%) 50% / 10px 10px`;
+        }
+        
+        // HSB to RGB conversion
+        function hsbToRgb(h, s, b) {
+            s /= 100;
+            b /= 100;
+            const k = (n) => (n + h / 60) % 6;
+            const f = (n) => b * (1 - s * Math.max(0, Math.min(k(n), 4 - k(n), 1)));
+            return {
+                r: Math.round(255 * f(5)),
+                g: Math.round(255 * f(3)),
+                b: Math.round(255 * f(1))
+            };
+        }
+        
+        // RGB to HSB conversion
+        function rgbToHsb(r, g, b) {
+            r /= 255;
+            g /= 255;
+            b /= 255;
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const d = max - min;
+            let h = 0;
+            const s = max === 0 ? 0 : d / max * 100;
+            const v = max * 100;
+            
+            if (d !== 0) {
+                if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+                else if (max === g) h = ((b - r) / d + 2) / 6;
+                else h = ((r - g) / d + 4) / 6;
+            }
+            
+            return { h: Math.round(h * 360), s: Math.round(s), b: Math.round(v) };
+        }
+        
+        // Setup sliders
+        function setupSlider(sliderEl, thumbEl, valueEl, property, max, unit = '') {
+            let isDragging = false;
+            
+            function updateSlider(e) {
+                const rect = sliderEl.getBoundingClientRect();
+                const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+                const percent = x / rect.width;
+                const value = Math.round(percent * max);
+                
+                if (property === 'hue') {
+                    hsb.h = value;
+                    document.getElementById('hueValue').textContent = value + '°';
+                } else if (property === 'saturation') {
+                    hsb.s = value;
+                    document.getElementById('saturationValue').textContent = value + '%';
+                } else if (property === 'brightness') {
+                    hsb.b = value;
+                    document.getElementById('brightnessValue').textContent = value + '%';
+                } else if (property === 'alpha' || property === 'alpha-rgb') {
+                    hsb.a = value;
+                    document.getElementById('alphaValue').textContent = value + '%';
+                    document.getElementById('alphaRgbValue').textContent = value + '%';
+                    document.getElementById('alphaRgbThumb').style.left = (percent * 100) + '%';
+                } else if (property === 'red') {
+                    rgb.r = value;
+                    const newHsb = rgbToHsb(rgb.r, rgb.g, rgb.b);
+                    hsb = { ...newHsb, a: hsb.a };
+                    document.getElementById('redValue').textContent = value;
+                } else if (property === 'green') {
+                    rgb.g = value;
+                    const newHsb = rgbToHsb(rgb.r, rgb.g, rgb.b);
+                    hsb = { ...newHsb, a: hsb.a };
+                    document.getElementById('greenValue').textContent = value;
+                } else if (property === 'blue') {
+                    rgb.b = value;
+                    const newHsb = rgbToHsb(rgb.r, rgb.g, rgb.b);
+                    hsb = { ...newHsb, a: hsb.a };
+                    document.getElementById('blueValue').textContent = value;
+                }
+                
+                thumbEl.style.left = (percent * 100) + '%';
+                updateColor();
+                updateRgbValues();
+            }
+            
+            sliderEl.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                updateSlider(e);
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) updateSlider(e);
+            });
+            
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+        }
+        
+        function updateRgbValues() {
+            document.getElementById('redValue').textContent = rgb.r;
+            document.getElementById('greenValue').textContent = rgb.g;
+            document.getElementById('blueValue').textContent = rgb.b;
+            document.getElementById('redThumb').style.left = (rgb.r / 255 * 100) + '%';
+            document.getElementById('greenThumb').style.left = (rgb.g / 255 * 100) + '%';
+            document.getElementById('blueThumb').style.left = (rgb.b / 255 * 100) + '%';
+        }
+        
+        // Initialize sliders
+        setupSlider(document.querySelector('[data-slider="hue"]'), document.getElementById('hueThumb'), document.getElementById('hueValue'), 'hue', 360);
+        setupSlider(document.querySelector('[data-slider="saturation"]'), document.getElementById('saturationThumb'), document.getElementById('saturationValue'), 'saturation', 100);
+        setupSlider(document.querySelector('[data-slider="brightness"]'), document.getElementById('brightnessThumb'), document.getElementById('brightnessValue'), 'brightness', 100);
+        setupSlider(document.querySelector('[data-slider="alpha"]'), document.getElementById('alphaThumb'), document.getElementById('alphaValue'), 'alpha', 100);
+        setupSlider(document.querySelector('[data-slider="red"]'), document.getElementById('redThumb'), document.getElementById('redValue'), 'red', 255);
+        setupSlider(document.querySelector('[data-slider="green"]'), document.getElementById('greenThumb'), document.getElementById('greenValue'), 'green', 255);
+        setupSlider(document.querySelector('[data-slider="blue"]'), document.getElementById('blueThumb'), document.getElementById('blueValue'), 'blue', 255);
+        setupSlider(document.querySelector('[data-slider="alpha-rgb"]'), document.getElementById('alphaRgbThumb'), document.getElementById('alphaRgbValue'), 'alpha-rgb', 100);
+        
+        // Mode tabs
+        document.querySelectorAll('.mode-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+                
+                // Hide/show add to palette button
+                if (isAddingToPalette) {
+                    if (tab.dataset.mode === 'hsb' || tab.dataset.mode === 'rgb') {
+                        document.getElementById('addToPaletteBtn').classList.remove('hidden');
+                        document.getElementById('addToPaletteRgbBtn').classList.remove('hidden');
+                    } else {
+                        document.getElementById('addToPaletteBtn').classList.add('hidden');
+                        document.getElementById('addToPaletteRgbBtn').classList.add('hidden');
+                    }
+                }
+                tab.classList.add('active');
+                document.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
+                document.getElementById(tab.dataset.mode + 'Mode').classList.add('active');
+            });
+        });
+        
+        // Initialize thumbs
+        document.getElementById('saturationThumb').style.left = '100%';
+        document.getElementById('brightnessThumb').style.left = '100%';
+        document.getElementById('alphaThumb').style.left = '100%';
+        document.getElementById('alphaRgbThumb').style.left = '100%';
+        updateColor();
+        updateRgbValues();
+        
+        // Palette mode
+        const templates = {
+            rainbow: ['#FF0000', '#FF7F00', '#FFFF00', '#00FF00', '#0000FF', '#8B00FF'],
+            warm: ['#FF6B6B', '#FF8E53', '#FFD93D', '#FFA500'],
+            cool: ['#667EEA', '#4ECDC4', '#45B7D1', '#764BA2'],
+            neon: ['#FF10F0', '#00FFFF', '#39FF14', '#FFFF00'],
+            sunset: ['#FF6B6B', '#FFB347', '#FF7F50', '#FF69B4']
+        };
+        
+        let paletteColors = [];
+        
+        // Template buttons
+        document.querySelectorAll('.template-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                paletteColors = [...templates[btn.dataset.template]];
+                renderPalette();
+            });
+        });
+        
+        function renderPalette() {
+            const container = document.getElementById('paletteColors');
+            container.innerHTML = '';
+            
+            paletteColors.forEach((color, index) => {
+                const item = document.createElement('div');
+                item.className = 'palette-color-item';
+                item.innerHTML = `
+                    <div class="palette-color-box" style="background-color: ${color}" data-index="${index}"></div>
+                    <div class="remove-color" data-index="${index}">×</div>
+                `;
+                container.appendChild(item);
+            });
+            
+            const addItem = document.createElement('div');
+            addItem.className = 'palette-color-item';
+            addItem.innerHTML = `
+                <div class="palette-color-box add-color" id="addColorBtn">+</div>
+            `;
+            container.appendChild(addItem);
+            
+            attachPaletteListeners();
+        }
+        
+        function attachPaletteListeners() {
+            document.querySelectorAll('.palette-color-box:not(.add-color)').forEach(box => {
+                box.addEventListener('click', () => editPaletteColor(parseInt(box.dataset.index)));
+            });
+            
+            document.querySelectorAll('.remove-color').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    paletteColors.splice(parseInt(btn.dataset.index), 1);
+                    renderPalette();
+                });
+            });
+            
+            const addBtn = document.getElementById('addColorBtn');
+            if (addBtn) {
+                addBtn.addEventListener('click', () => {
+                    // Switch to HSB mode for color picking
+                    isAddingToPalette = true;
+                    returnToTabAfterAdd = 'palette';
+                    
+                    // Show the add to palette button
+                    document.getElementById('addToPaletteBtn').classList.remove('hidden');
+                    document.getElementById('addToPaletteRgbBtn').classList.remove('hidden');
+                    
+                    // Switch to HSB mode
+                    document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelector('[data-mode="hsb"]').classList.add('active');
+                    document.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
+                    document.getElementById('hsbMode').classList.add('active');
+                });
+            }
+        }
+        
+        // Add to palette button handlers (called when user clicks "Add to Palette" button in HSB/RGB mode)
+        document.getElementById('addToPaletteBtn').addEventListener('click', () => {
+            const newColor = rgbToHex(rgb.r, rgb.g, rgb.b);
+            paletteColors.push(newColor);
+            
+            // Reset state
+            isAddingToPalette = false;
+            document.getElementById('addToPaletteBtn').classList.add('hidden');
+            document.getElementById('addToPaletteRgbBtn').classList.add('hidden');
+            
+            // Switch back to palette mode
+            document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-mode="palette"]').classList.add('active');
+            document.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('paletteMode').classList.add('active');
+            
+            renderPalette();
+        });
+        
+        document.getElementById('addToPaletteRgbBtn').addEventListener('click', () => {
+            const newColor = rgbToHex(rgb.r, rgb.g, rgb.b);
+            paletteColors.push(newColor);
+            
+            // Reset state
+            isAddingToPalette = false;
+            document.getElementById('addToPaletteBtn').classList.add('hidden');
+            document.getElementById('addToPaletteRgbBtn').classList.add('hidden');
+            
+            // Switch back to palette mode
+            document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-mode="palette"]').classList.add('active');
+            document.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('paletteMode').classList.add('active');
+            
+            renderPalette();
+        });
+        
+        function editPaletteColor(index) {
+            const color = paletteColors[index];
+            const rgbMatch = color.match(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
+            if (rgbMatch) {
+                rgb.r = parseInt(rgbMatch[1], 16);
+                rgb.g = parseInt(rgbMatch[2], 16);
+                rgb.b = parseInt(rgbMatch[3], 16);
+                const newHsb = rgbToHsb(rgb.r, rgb.g, rgb.b);
+                hsb = { ...newHsb, a: hsb.a };
+                updateColor();
+                updateRgbValues();
+                
+                document.getElementById('hueThumb').style.left = (hsb.h / 360 * 100) + '%';
+                document.getElementById('saturationThumb').style.left = (hsb.s / 100 * 100) + '%';
+                document.getElementById('brightnessThumb').style.left = (hsb.b / 100 * 100) + '%';
+            }
+        }
+        
+        function rgbToHex(r, g, b) {
+            return '#' + [r, g, b].map(x => {
+                const hex = x.toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            }).join('');
+        }
+        
+        document.getElementById('savePalette').addEventListener('click', () => {
+            if (paletteColors.length === 0) {
+                alert('Add some colors to the palette first!');
+                return;
+            }
+            
+            const paletteData = {
+                name: 'Custom Palette',
+                colors: paletteColors,
+                count: paletteColors.length,
+                created: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(paletteData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `palette_${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+        
+        document.getElementById('loadPalette').addEventListener('click', () => {
+            document.getElementById('paletteFileInput').click();
+        });
+        
+        document.getElementById('paletteFileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if (data.colors && Array.isArray(data.colors)) {
+                        paletteColors = data.colors;
+                        renderPalette();
+                    } else {
+                        alert('Invalid palette file format!');
+                    }
+                } catch (error) {
+                    alert('Error loading palette file: ' + error.message);
+                }
+                // Reset file input
+                e.target.value = '';
+            };
+            reader.readAsText(file);
+        });
+        
+        document.getElementById('exportPalette').addEventListener('click', () => {
+            if (paletteColors.length === 0) {
+                alert('Add some colors to the palette first!');
+                return;
+            }
+            
+            const output = {
+                colors: paletteColors,
+                count: paletteColors.length
+            };
+            
+            const outputDiv = document.getElementById('paletteOutput');
+            outputDiv.style.display = 'block';
+            outputDiv.textContent = JSON.stringify(output, null, 2);
+            console.log('Palette exported:', output);
+        });
+        
+        document.getElementById('clearPalette').addEventListener('click', () => {
+            if (paletteColors.length > 0 && confirm('Clear all colors?')) {
+                paletteColors = [];
+                renderPalette();
+                document.getElementById('paletteOutput').style.display = 'none';
+            }
+        });
+        
+        renderPalette();
+    </script>
+</body>
+</html>

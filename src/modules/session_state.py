@@ -69,6 +69,16 @@ class SessionStateManager:
                     "loop": False,
                     "global_effects": []
                 }
+            },
+            "sequencer": {
+                "mode_active": False,
+                "audio_file": None,
+                "timeline": {
+                    "duration": 0.0,
+                    "splits": [],
+                    "clip_mapping": {}
+                },
+                "last_position": 0.0
             }
         }
     
@@ -185,6 +195,25 @@ class SessionStateManager:
                     "loop": player.loop_playlist,
                     "global_effects": global_effects
                 }
+            
+            # Sequencer state speichern
+            if player_manager.sequencer:
+                try:
+                    sequencer_state = {
+                        "mode_active": player_manager.sequencer_mode_active,
+                        "audio_file": player_manager.sequencer.timeline.audio_file,
+                        "timeline": player_manager.sequencer.timeline.to_dict(),
+                        "last_position": player_manager.sequencer.get_position()
+                    }
+                    state["sequencer"] = sequencer_state
+                    logger.debug(f"🎵 Sequencer state saved: mode={sequencer_state['mode_active']}, audio={sequencer_state['audio_file']}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to save sequencer state: {e}")
+            
+            # Master/Slave state speichern
+            state["master_playlist"] = player_manager.get_master_playlist()
+            if state["master_playlist"]:
+                logger.debug(f"👑 Master playlist saved: {state['master_playlist']}")
             
             # State in Datei schreiben mit Retry-Logik für Windows File-Locking
             os.makedirs(os.path.dirname(self.state_file_path), exist_ok=True)
@@ -481,6 +510,48 @@ class SessionStateManager:
                 # TODO: Globale Effekte restaurieren (wenn implementiert)
                 
                 logger.info(f"✅ Player '{player_id}' restauriert: {len(player.layers)} Layer")
+            
+            # ========== SEQUENCER RESTAURIEREN ==========
+            sequencer_data = state.get('sequencer')
+            if sequencer_data and player_manager.sequencer:
+                try:
+                    # Restore audio file
+                    audio_file = sequencer_data.get('audio_file')
+                    if audio_file and os.path.exists(audio_file):
+                        player_manager.sequencer.load_audio(audio_file)
+                        
+                        # Restore timeline (splits, clip_mapping)
+                        timeline_data = sequencer_data.get('timeline', {})
+                        if timeline_data:
+                            player_manager.sequencer.timeline.from_dict(timeline_data)
+                        
+                        # Restore last position
+                        last_position = sequencer_data.get('last_position', 0.0)
+                        if last_position > 0:
+                            player_manager.sequencer.seek(last_position)
+                        
+                        # Restore sequencer mode
+                        mode_active = sequencer_data.get('mode_active', False)
+                        if mode_active:
+                            player_manager.set_sequencer_mode(True)
+                        
+                        logger.info(f"🎵 Sequencer restored: audio={os.path.basename(audio_file)}, splits={len(timeline_data.get('splits', []))}, mode={'ON' if mode_active else 'OFF'}")
+                    else:
+                        logger.debug("🎵 Sequencer audio file not found, skipping restore")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to restore sequencer: {e}")
+            
+            # ========== MASTER/SLAVE STATE RESTAURIEREN ==========
+            master_playlist = state.get('master_playlist')
+            if master_playlist:
+                try:
+                    success = player_manager.set_master_playlist(master_playlist)
+                    if success:
+                        logger.info(f"👑 Master playlist restored: {master_playlist}")
+                    else:
+                        logger.warning(f"⚠️ Failed to set master playlist: {master_playlist}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to restore master/slave state: {e}")
             
             return True
             

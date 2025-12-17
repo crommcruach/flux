@@ -302,11 +302,16 @@ class Player:
                 
                 # Auto-set playback_mode based on autoplay and slave status
                 # If autoplay is enabled and not in slave mode, use play_once to advance through playlist
-                is_slave = (self.player_manager and 
-                           self.player_manager.master_playlist is not None and 
-                           not self.player_manager.is_master(self.player_id))
+                # Slave condition: either normal slave mode OR sequencer mode active
+                is_slave = (self.player_manager and (
+                    # Normal slave mode: has master and not this player
+                    (self.player_manager.master_playlist is not None and 
+                     not self.player_manager.is_master(self.player_id)) or
+                    # Sequencer mode: all players are slaves to audio timeline
+                    getattr(self.player_manager, 'sequencer_mode_active', False)
+                ))
                 
-                if self.autoplay and not is_slave and 'playback_mode' not in parameters:
+                if self.playlist_manager.autoplay and not is_slave and 'playback_mode' not in parameters:
                     parameters['playback_mode'] = 'play_once'
                     debug_playback(logger, f"🔄 [{self.player_name}] Auto-set playback_mode=play_once (autoplay=True, slave={is_slave})")
                 elif is_slave and 'playback_mode' not in parameters:
@@ -595,13 +600,26 @@ class Player:
                 if self.max_loops > 0 and self.current_loop >= self.max_loops:
                     logger.info(f"📋 [{self.player_name}] max_loops reached ({self.current_loop}/{self.max_loops})")
                     
-                    # Prüfe Playlist-Autoplay
-                    if self.autoplay and len(self.playlist) > 0:
+                    # Check if this player is a slave (same check as Frame=None path)
+                    is_slave = (self.player_manager and (
+                        # Normal slave mode: has master and not this player
+                        (self.player_manager.master_playlist is not None and 
+                         not self.player_manager.is_master(self.player_id)) or
+                        # Sequencer mode: all players are slaves to audio timeline
+                        getattr(self.player_manager, 'sequencer_mode_active', False)
+                    ))
+                    
+                    # Prüfe Playlist-Autoplay (only if NOT a slave!)
+                    if not is_slave and self.playlist_manager.autoplay and len(self.playlist_manager.playlist) > 0:
                         # Skip frame reading and trigger autoplay
                         should_autoadvance = True
                         frame = None
                         source_delay = 0
                         debug_playback(logger, f"⏭️ [{self.player_name}] Triggering autoplay - skip frame reading")
+                    elif is_slave:
+                        # Slave mode: reset current loop and continue looping
+                        self.current_loop = 0
+                        debug_playback(logger, f"🔄 [{self.player_name}] Slave mode: Resetting loop counter to continue looping")
             
             # ========== MULTI-LAYER COMPOSITING ==========
             if not should_autoadvance and self.layers and len(self.layers) > 0:
@@ -684,9 +702,18 @@ class Player:
                 logger.info(f"🎬 [{self.player_name}] Frame=None (clip ended): current_loop={self.current_loop}, max_loops={self.max_loops}")
                 
                 # Check if this player is a slave
-                is_slave = (self.player_manager and 
-                           self.player_manager.master_playlist is not None and 
-                           not self.player_manager.is_master(self.player_id))
+                # Slave condition: either normal slave mode OR sequencer mode active
+                is_slave = (self.player_manager and (
+                    # Normal slave mode: has master and not this player
+                    (self.player_manager.master_playlist is not None and 
+                     not self.player_manager.is_master(self.player_id)) or
+                    # Sequencer mode: all players are slaves to audio timeline
+                    getattr(self.player_manager, 'sequencer_mode_active', False)
+                ))
+                
+                # DEBUG: Log slave detection
+                if self.player_manager:
+                    logger.info(f"🔍 [{self.player_name}] Slave check: master_playlist={self.player_manager.master_playlist}, is_master={self.player_manager.is_master(self.player_id) if self.player_manager.master_playlist else 'N/A'}, sequencer_mode={getattr(self.player_manager, 'sequencer_mode_active', False)} → is_slave={is_slave}")
                 
                 # If slave: loop current clip, don't advance
                 if is_slave:
@@ -699,7 +726,10 @@ class Player:
                     continue
                 
                 # Check playlist autoplay (only if NOT a slave!)
-                if self.playlist_manager.should_autoplay(is_slave):
+                should_autoplay = self.playlist_manager.should_autoplay(is_slave)
+                logger.info(f"🎯 [{self.player_name}] Autoplay check: is_slave={is_slave}, autoplay={self.playlist_manager.autoplay}, playlist_len={len(self.playlist_manager.playlist)} → should_autoplay={should_autoplay}")
+                
+                if should_autoplay:
                     # Get next item from playlist manager
                     next_item_path, next_clip_id = self.playlist_manager.advance(self.player_name)
                     
@@ -724,9 +754,14 @@ class Player:
                             )
                             
                             # Auto-set playback_mode based on autoplay and slave status
-                            is_slave = (self.player_manager and 
-                                       self.player_manager.master_playlist is not None and 
-                                       not self.player_manager.is_master(self.player_id))
+                            # Slave condition: either normal slave mode OR sequencer mode active
+                            is_slave = (self.player_manager and (
+                                # Normal slave mode: has master and not this player
+                                (self.player_manager.master_playlist is not None and 
+                                 not self.player_manager.is_master(self.player_id)) or
+                                # Sequencer mode: all players are slaves to audio timeline
+                                getattr(self.player_manager, 'sequencer_mode_active', False)
+                            ))
                             
                             if self.playlist_manager.autoplay and not is_slave and 'playback_mode' not in parameters:
                                 parameters['playback_mode'] = 'play_once'

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Waveform Analyzer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="analyzer-section">
+        <!-- Preview Box -->
+        <div class="preview-box">
+            <div class="preview-area">
+                <span>📊 Drag & Drop MP3<br>or Click to Browse</span>
+            </div>
+            <div class="file-info" id="fileInfo">No file loaded</div>
+            
+            <!-- Controls -->
+            <div class="controls">
+                <input type="file" id="audioFileInput" accept="audio/*">
+                <button class="btn" id="playBtn" disabled title="Play">▶️</button>
+                <button class="btn" id="pauseBtn" disabled title="Pause">⏸️</button>
+                <button class="btn" id="stopBtn" disabled title="Stop">⏹️</button>
+                <button class="btn btn-danger" id="clearSplitsBtn" disabled title="Clear All Splits">🗑️</button>
+                <button class="btn" id="minifyBtn" title="Minify">⬇️</button>
+            </div>
+        </div>
+        
+        <!-- Waveform & Playlist Area -->
+        <div class="playlist-waveform-area">
+            <!-- Waveform -->
+            <div class="waveform-container">
+                <div id="waveform"></div>
+                <div class="waveform-help">
+                    💡 <strong>Click</strong> on waveform to add split | <strong>Right-click</strong> region to remove | <strong>Click slot</strong> to loop
+                </div>
+                <div class="playback-info" style="margin-top: 8px;">
+                    <span><strong>Time:</strong> <span id="currentTime">0:00</span> / <span id="duration">0:00</span></span>
+                    <span style="margin-left: 12px;"><strong>Slot:</strong> <span id="currentSlot" class="info-badge">None</span></span>
+                </div>
+            </div>
+            
+            <!-- Slots Playlist -->
+            <div class="slots-container" id="slotsContainer">
+                <div id="slotsList"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module" src="app.js"></script>
+</body>
+</html>

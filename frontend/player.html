@@ -35,10 +35,10 @@
         </div>
         
         <!-- Waveform Analyzer Section -->
-        <div class="waveform-analyzer-section">
+        <div class="waveform-analyzer-section" style="display: none;">
             <!-- Preview Box -->
             <div class="preview-box-waveform">
-                <div class="preview-area-waveform" onclick="document.getElementById('audioFileInput').click()">
+                <div class="preview-area-waveform" id="preview-area-waveform" style="cursor: pointer;">
                     <span>📊 Drag & Drop MP3<br>or Click to Browse</span>
                 </div>
                 <div class="file-info-waveform" id="waveformFileInfo">No file loaded</div>
@@ -46,7 +46,8 @@
                 <!-- Controls -->
                 <div class="controls-waveform">
                     <input type="file" id="audioFileInput" accept="audio/*" style="display: none;">
-                    <button class="btn btn-sm btn-outline-secondary" id="playBtn" disabled title="Play">▶️</button>
+                    <button class="btn btn-sm btn-outline-primary" id="previewBtn" disabled title="Preview (Frontend Only - No Backend Sync)">👁️ Preview</button>
+                    <button class="btn btn-sm btn-success" id="playBtn" disabled title="Play Synced (Triggers Backend Audio + Playlist Sync)">▶️ Play Synced</button>
                     <button class="btn btn-sm btn-warning" id="pauseBtn" disabled title="Pause">⏸️</button>
                     <button class="btn btn-sm btn-danger" id="stopBtn" disabled title="Stop">⏹️</button>
                     <button class="btn btn-sm btn-outline-danger" id="clearSplitsBtn" disabled title="Clear All Splits">🗑️</button>
@@ -277,27 +278,85 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/js/ion.rangeSlider.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="js/triple-slider.js"></script>
+    <!-- Audio File Browser Modal -->
+    <div class="modal fade" id="sequencerFileBrowserModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Select Audio File</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Search/Filter -->
+                    <div class="mb-3">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" 
+                               id="sequencerFileSearch" placeholder="Search files...">
+                    </div>
+                    
+                    <!-- File List -->
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-dark table-hover">
+                            <thead class="sticky-top bg-dark">
+                                <tr>
+                                    <th>Filename</th>
+                                    <th>Folder</th>
+                                    <th>Size</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sequencerFileList">
+                                <!-- Populated via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="js/player.js" type="module"></script>
     <script type="module" src="js/waveform-analyzer.js"></script>
     <script>
-        // Sequencer Mode Toggle
-        let sequencerModeActive = false;
+        // Sequencer Mode Toggle (exposed on window for state restoration)
+        window.sequencerModeActive = false;
         
-        function toggleSequencerMode() {
-            sequencerModeActive = !sequencerModeActive;
+        async function toggleSequencerMode() {
+            window.sequencerModeActive = !window.sequencerModeActive;
             const waveformSection = document.querySelector('.waveform-analyzer-section');
             const btn = document.getElementById('sequencerModeBtn');
             
-            if (sequencerModeActive) {
-                waveformSection.style.display = 'none';
-                btn.classList.remove('btn-outline-secondary');
-                btn.classList.add('btn-success');
-                btn.textContent = '🎵 Sequencer: ON';
-            } else {
-                waveformSection.style.display = 'grid';
-                btn.classList.remove('btn-success');
-                btn.classList.add('btn-outline-secondary');
-                btn.textContent = '🎵 Sequencer Mode';
+            try {
+                // Call backend API to enable/disable master mode
+                const response = await fetch('/api/sequencer/mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: window.sequencerModeActive })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    if (window.sequencerModeActive) {
+                        waveformSection.style.display = 'grid';
+                        btn.classList.remove('btn-outline-secondary');
+                        btn.classList.add('btn-success');
+                        btn.textContent = '🎵 Sequencer: MASTER';
+                        console.log('✅ Sequencer mode ENABLED (MASTER)');
+                    } else {
+                        waveformSection.style.display = 'none';
+                        btn.classList.remove('btn-success');
+                        btn.classList.add('btn-outline-secondary');
+                        btn.textContent = '🎵 Sequencer Mode';
+                        console.log('✅ Sequencer mode DISABLED');
+                    }
+                } else {
+                    console.error('Failed to toggle sequencer mode');
+                    // Revert state
+                    window.sequencerModeActive = !window.sequencerModeActive;
+                }
+            } catch (error) {
+                console.error('Error toggling sequencer mode:', error);
+                // Revert state
+                window.sequencerModeActive = !window.sequencerModeActive;
             }
         }
     </script>

@@ -362,17 +362,7 @@ class LayerManager:
         Returns:
             Processed frame
         """
-        # Log every 30 frames to avoid spam
-        if layer.layer_id not in self._layer_effect_log_frame:
-            self._layer_effect_log_frame[layer.layer_id] = 0
-        
-        if self._layer_effect_log_frame[layer.layer_id] % 30 == 0:
-            logger.info(f"🎨 [{player_name}] Layer {layer.layer_id} has {len(layer.effects)} effects (clip_id={layer.clip_id})")
-            if layer.effects:
-                for i, eff in enumerate(layer.effects):
-                    logger.info(f"   [{i}] {eff.get('id')} - enabled: {eff.get('enabled', True)}")
-        
-        self._layer_effect_log_frame[layer.layer_id] += 1
+        # Layer effects logging removed for performance
         
         # Get latest parameters from registry (updated via API)
         if self.clip_registry and layer.clip_id:

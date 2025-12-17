@@ -24,7 +24,7 @@ def register_session_routes(app, session_state_manager):
     
     @app.route('/api/session/snapshot', methods=['POST'])
     def create_snapshot():
-        """Create a snapshot of current session state."""
+        """Create a snapshot of current session state (includes sequencer)."""
         try:
             data = request.get_json() or {}
             
@@ -33,6 +33,14 @@ def register_session_routes(app, session_state_manager):
             filename = f"{timestamp}_snap.json"
             
             snapshot_path = os.path.join(SNAPSHOTS_DIR, filename)
+            
+            # Force save current state to ensure sequencer is included
+            if hasattr(app, 'flux_player_manager') and hasattr(app, 'flux_clip_registry'):
+                session_state_manager.save(
+                    player_manager=app.flux_player_manager,
+                    clip_registry=app.flux_clip_registry,
+                    force=True
+                )
             
             # Copy current session_state.json to snapshots directory
             session_state_path = os.path.join(
@@ -119,7 +127,7 @@ def register_session_routes(app, session_state_manager):
     
     @app.route('/api/session/snapshot/restore', methods=['POST'])
     def restore_snapshot():
-        """Restore a snapshot to become the current session state."""
+        """Restore a snapshot including sequencer state (requires page reload)."""
         try:
             data = request.get_json()
             filename = data.get('filename')

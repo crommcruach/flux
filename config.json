@@ -9,7 +9,8 @@
   "app": {
     "default_player": "video",
     "console_log_level": "WARNING",
-    "_console_log_level_comment": "Console Log-Level: DEBUG, INFO, WARNING, ERROR, CRITICAL"
+    "file_log_level": "WARNING",
+    "_log_level_comment": "Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL"
   },
   "artnet": {
     "broadcast": true,
@@ -127,7 +128,8 @@
     "projects_dir": "PROJECTS",
     "scripts_dir": "scripts",
     "video_dir": "video",
-    "video_sources": []
+    "video_sources": [],
+    "sequencer_audio_dir": "audio"
   },
   "video": {
     "default_brightness": 100,

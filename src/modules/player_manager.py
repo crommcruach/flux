@@ -1,6 +1,7 @@
 """
 Player Manager - Central player container (Single Source of Truth)
 """
+import time
 from .logger import get_logger, debug_playback
 
 logger = get_logger(__name__)
@@ -48,8 +49,15 @@ class PlayerManager:
         # Master/Slave Synchronization
         self.master_playlist = None  # 'video' or 'artnet' or None
         
+        # Sequencer (audio-driven master control)
+        self.sequencer = None  # AudioSequencer instance
+        self.sequencer_mode_active = False  # Sequencer mode: ON = sequencer is MASTER, OFF = normal
+        
         # WebSocket support
         self.socketio = socketio
+        
+        # Initialize slave cache for all players
+        self._update_all_slave_caches()
         
         logger.debug(f"PlayerManager initialized (video_player: {player is not None}, artnet_player: {artnet_player is not None})")
     
@@ -78,6 +86,10 @@ class PlayerManager:
             new_player: New player instance
         """
         self.player = new_player
+        
+        # Update slave cache for new player
+        if new_player:
+            self._update_all_slave_caches()
     
     def get_player(self):
         """
@@ -102,6 +114,11 @@ class PlayerManager:
         """Set Art-Net player instance."""
         old_player = self.artnet_player
         self.artnet_player = new_player
+        self.players['artnet'] = new_player
+        
+        # Update slave cache for new player
+        if new_player:
+            self._update_all_slave_caches()
         
         if old_player and old_player != new_player:
             logger.debug(f"Art-Net player switched: {type(old_player).__name__} → {type(new_player).__name__}")
@@ -169,11 +186,25 @@ class PlayerManager:
         old_master = self.master_playlist
         self.master_playlist = player_id
         
+        # Update all players' slave cache when master changes
+        self._update_all_slave_caches()
+        
         # DEBUG: Log stack trace to find who's calling this
         import traceback
         logger.info(f"👑 Master playlist: {old_master} → {player_id}")
         if old_master != player_id:  # Only log stack on actual change
             logger.info(f"📞 set_master_playlist called from:\n{''.join(traceback.format_stack()[:-1])}")
+        
+        # Emit WebSocket event for master/slave state change
+        if self.socketio and old_master != player_id:
+            try:
+                self.socketio.emit('master_slave_changed', {
+                    'master_playlist': player_id,
+                    'timestamp': time.time()
+                }, namespace='/player')
+                logger.info(f"📡 WebSocket: master_slave_changed emitted (master={player_id})")
+            except Exception as e:
+                logger.error(f"❌ Error emitting master_slave_changed WebSocket event: {e}")
         
         # Initial Sync: When Master is activated, jump to index 0 and sync all players
         if player_id is not None:
@@ -271,7 +302,17 @@ class PlayerManager:
         success = slave_player.load_clip_by_index(clip_index, notify_manager=False)
         
         if success:
-            logger.info(f"🔄 Slave {slave_player.player_name} synced to index {clip_index} (current_clip_index={slave_player.current_clip_index}, playlist_index={slave_player.playlist_index})")
+            logger.debug(f"🔄 Slave {slave_player.player_name} synced to index {clip_index}")
+            
+            # Emit WebSocket event for slave clip change (for active border update)
+            if self.socketio:
+                try:
+                    self.socketio.emit('playlist.changed', {
+                        'player_id': slave_player.player_id,
+                        'current_index': clip_index
+                    }, namespace='/player')
+                except Exception as e:
+                    logger.error(f"❌ Error emitting slave playlist.changed WebSocket event: {e}")
         else:
             logger.warning(f"Failed to sync slave {slave_player.player_name} to index {clip_index}")
     
@@ -284,6 +325,11 @@ class PlayerManager:
             player_id: ID of player that changed clip
             clip_index: New clip index
         """
+        # In sequencer mode, ignore normal master/slave sync (sequencer controls everything)
+        if self.sequencer_mode_active:
+            logger.debug(f"⏭️ Ignoring on_clip_changed in sequencer mode (player={player_id}, index={clip_index})")
+            return
+        
         # Emit WebSocket event for playlist change
         if self.socketio:
             try:
@@ -308,3 +354,173 @@ class PlayerManager:
             slave_player = self.get_player(slave_id)
             if slave_player:
                 self._sync_slave_to_index(slave_player, clip_index)
+    
+    # ========== SEQUENCER INTEGRATION ==========
+    
+    def init_sequencer(self):
+        """Initialize audio sequencer (called during startup)"""
+        try:
+            from .audio_sequencer import AudioSequencer
+            self.sequencer = AudioSequencer(player_manager=self)
+            
+            # Set up callbacks for UI updates
+            self.sequencer.on_slot_change = self._on_sequencer_slot_change
+            self.sequencer.on_position_update = self._on_sequencer_position_update
+            
+            logger.info("🎵 AudioSequencer initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize sequencer: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def set_sequencer_mode(self, enabled: bool):
+        """Enable/disable sequencer mode
+        
+        When enabled:
+        - Sequencer becomes MASTER timeline controller
+        - All playlists become SLAVES following slot boundaries
+        - Master/slave via Transport is disabled
+        
+        When disabled:
+        - Normal Master/Slave operation via Transport
+        - Sequencer is inactive
+        
+        Args:
+            enabled: True to enable sequencer mode, False to disable
+        """
+        self.sequencer_mode_active = enabled
+        
+        # Update all players' slave cache when sequencer mode changes
+        self._update_all_slave_caches()
+        
+        if enabled:
+            # Clear master playlist - sequencer controls all
+            old_master = self.master_playlist
+            self.master_playlist = None
+            logger.info(f"🎵 SEQUENCER MODE ON: Sequencer is MASTER, all playlists are SLAVES (previous master: {old_master})")
+        else:
+            logger.info("🎵 SEQUENCER MODE OFF: Normal master/slave operation")
+            # Note: master_playlist will be set by user via transport position controls
+        
+        # Broadcast mode change via WebSocket
+        if self.socketio:
+            try:
+                self.socketio.emit('sequencer_mode_changed', {
+                    'enabled': enabled,
+                    'master_playlist': self.master_playlist
+                }, namespace='/player')
+            except Exception as e:
+                logger.error(f"❌ Error emitting sequencer_mode_changed: {e}")
+    
+    def sequencer_advance_slaves(self, slot_index: int, force_reload: bool = False):
+        """Advance all players to the clip matching the sequencer slot.
+        
+        Called when sequencer slot boundary is crossed.
+        Sequencer is MASTER, all playlists are SLAVES.
+        Slot index maps directly to clip index (slot 0 → clip 0, slot 1 → clip 1, etc.)
+        
+        Args:
+            slot_index: Current slot index (0, 1, 2, ...) - maps to clip index
+            force_reload: If True, reload clips even if already at correct index
+        """
+        logger.debug(f"🎯 Sequencer slot {slot_index}: Loading clip index in all playlists")
+        
+        if not self.sequencer_mode_active:
+            logger.warning("⚠️ Sequencer mode not active, skipping slave advance")
+            return
+        
+        # Load clip at slot_index in ALL playlists (they are all slaves to sequencer)
+        for player_id, player in self.players.items():
+            if player and player.playlist_manager.playlist and len(player.playlist_manager.playlist) > 0:
+                current_index = getattr(player, 'current_clip_index', -1)
+                
+                # Map slot index to clip index (with wrapping if slot exceeds playlist length)
+                target_index = slot_index % len(player.playlist_manager.playlist)
+                
+                if target_index != current_index or force_reload:
+                    logger.info(f"🔄 Sequencer: Loading {player_id} clip {target_index}")
+                    
+                    # Load clip at target index
+                    success = player.load_clip_by_index(target_index, notify_manager=False)
+                    
+                    if not success:
+                        logger.warning(f"❌ Failed to load {player_id} clip {target_index}")
+                        continue
+                    
+                    # Emit playlist.changed for frontend UI update
+                    if self.socketio:
+                        self.socketio.emit('playlist.changed', {
+                            'player_id': player_id,
+                            'current_index': target_index
+                        }, namespace='/player')
+                    
+                    if not player.is_playing:
+                        player.start()
+                else:
+                    # Still emit playlist.changed even when skipping reload
+                    if self.socketio:
+                        self.socketio.emit('playlist.changed', {
+                            'player_id': player_id,
+                            'current_index': target_index
+                        }, namespace='/player')
+        
+        # Broadcast to frontend via WebSocket
+        if self.socketio:
+            try:
+                self.socketio.emit('sequencer_slot_advance', {
+                    'slot_index': slot_index,
+                    'timestamp': time.time()
+                }, namespace='/player')
+            except Exception as e:
+                logger.error(f"❌ Error emitting sequencer_slot_advance: {e}")
+    
+    def _on_sequencer_slot_change(self, slot_index: int):
+        """Callback: Sequencer slot changed
+        
+        Args:
+            slot_index: New slot index
+        """
+        logger.debug(f"🎵 Sequencer slot change callback: slot {slot_index}")
+        # Additional logic can be added here if needed
+    
+    def _update_all_slave_caches(self):
+        """Update slave detection cache in all players when state changes"""
+        for player_id, player in self.players.items():
+            if player:
+                is_slave = (self.sequencer_mode_active or
+                           (self.master_playlist is not None and 
+                            not self.is_master(player_id)))
+                player._is_slave_cached = is_slave
+                logger.debug(f"Updated slave cache for {player_id}: {is_slave}")
+            else:
+                logger.debug(f"Skipping slave cache update for {player_id}: player is None")
+    
+    def _on_sequencer_position_update(self, position: float, slot_index: int):
+        """Callback: Sequencer position updated (100ms updates)
+        
+        Throttled to ~5/sec for WebSocket performance.
+        
+        Args:
+            position: Current position in seconds
+            slot_index: Current slot index or None
+        """
+        # Throttle WebSocket updates to 200ms (5/sec) for performance
+        if not hasattr(self, '_last_position_update'):
+            self._last_position_update = 0
+        
+        current_time = time.time()
+        if current_time - self._last_position_update < 0.2:  # 200ms throttle
+            return
+        
+        self._last_position_update = current_time
+        
+        # Broadcast position update via WebSocket
+        if self.socketio:
+            try:
+                self.socketio.emit('sequencer_position', {
+                    'position': position,
+                    'slot_index': slot_index
+                }, namespace='/player')
+            except Exception as e:
+                # Don't spam logs on WebSocket errors
+                pass

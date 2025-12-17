@@ -365,9 +365,7 @@ class Player:
                 
                 # Auto-set playback_mode based on autoplay and slave status
                 # If autoplay is enabled and not in slave mode, use play_once to advance through playlist
-                is_slave = (self.player_manager and 
-                           self.player_manager.master_playlist is not None and 
-                           not self.player_manager.is_master(self.player_id))
+                is_slave = getattr(self, '_is_slave_cached', False)
                 
                 if self.autoplay and not is_slave and 'playback_mode' not in parameters:
                     parameters['playback_mode'] = 'play_once'
@@ -399,6 +397,14 @@ class Player:
                 self.source = new_source
             
             self.current_loop = 0
+            
+            # Reset transport effect loop counter if present (ensure clean start)
+            if self.layers:
+                for layer in self.layers:
+                    for effect in layer.effects:
+                        if hasattr(effect, '_current_loop_iteration'):
+                            effect._current_loop_iteration = 0
+                            logger.info(f"🔁 [{self.player_name}] Reset transport effect loop counter on clip load")
             
             logger.info(f"✅ [{self.player_name}] Loaded clip at index {index}")
             
@@ -646,25 +652,34 @@ class Player:
                 debug_playback(logger, f"[{self.player_name}] Playing: frame {self.current_frame}, max_loops={self.max_loops}, current_loop={self.current_loop}")
             
             # ========== TRANSPORT LOOP DETECTION ==========
-            # Check if transport effect signaled loop completion (für Playlist-Autoplay)
-            transport_loop_completed = self._check_transport_loop_completion()
+            # Use cached slave state (updated only when user changes sequencer/master mode)
+            is_slave = getattr(self, '_is_slave_cached', False)
+            
+            # Only check transport loop if NOT a slave
+            # Slaves loop continuously until master/sequencer advances them
+            transport_loop_completed = False
             should_autoadvance = False
             
-            if transport_loop_completed:
-                self.current_loop += 1
-                logger.info(f"🔁 [{self.player_name}] Transport loop completed: current_loop={self.current_loop}, max_loops={self.max_loops}")
+            if not is_slave:
+                # Check if transport effect signaled loop completion (für Playlist-Autoplay)
+                transport_loop_completed = self._check_transport_loop_completion()
                 
-                # Check if we should advance to next clip in playlist
-                if self.max_loops > 0 and self.current_loop >= self.max_loops:
-                    logger.info(f"📋 [{self.player_name}] max_loops reached ({self.current_loop}/{self.max_loops})")
+                if transport_loop_completed:
+                    self.current_loop += 1
+                    logger.info(f"🔁 [{self.player_name}] Transport loop completed: current_loop={self.current_loop}, max_loops={self.max_loops}")
                     
-                    # Prüfe Playlist-Autoplay
-                    if self.autoplay and len(self.playlist) > 0:
-                        # Skip frame reading and trigger autoplay
-                        should_autoadvance = True
-                        frame = None
-                        source_delay = 0
-                        debug_playback(logger, f"⏭️ [{self.player_name}] Triggering autoplay - skip frame reading")
+                    # Check if we should advance to next clip in playlist
+                    if self.max_loops > 0 and self.current_loop >= self.max_loops:
+                        logger.info(f"📋 [{self.player_name}] max_loops reached ({self.current_loop}/{self.max_loops})")
+                        
+                        # Prüfe Playlist-Autoplay
+                        if self.autoplay and len(self.playlist) > 0:
+                            # Skip frame reading and trigger autoplay
+                            should_autoadvance = True
+                            frame = None
+                            source_delay = 0
+                            debug_playback(logger, f"⏭️ [{self.player_name}] Triggering autoplay - skip frame reading")
+            # Slave mode: ignore transport loop, just keep playing (no per-frame logging)
             
             # ========== MULTI-LAYER COMPOSITING ==========
             if not should_autoadvance and self.layers and len(self.layers) > 0:
@@ -773,21 +788,25 @@ class Player:
                 if not transport_loop_completed:
                     self.current_loop += 1
                 
-                logger.info(f"🎬 [{self.player_name}] Frame=None (clip ended): current_loop={self.current_loop}, max_loops={self.max_loops}")
+                logger.debug(f"🎬 [{self.player_name}] Frame=None (clip ended): current_loop={self.current_loop}, max_loops={self.max_loops}")
                 
-                # Check if this player is a slave
-                is_slave = (self.player_manager and 
-                           self.player_manager.master_playlist is not None and 
-                           not self.player_manager.is_master(self.player_id))
+                # Use cached slave state (updated only when user changes sequencer/master mode)
+                is_slave = getattr(self, '_is_slave_cached', False)
                 
                 # If slave: loop current clip, don't advance
                 if is_slave:
-                    debug_playback(logger, f"🔄 [{self.player_name}] Slave mode: Looping current clip")
                     # Reset source to beginning for loop
                     current_source = self.layers[0].source if self.layers else self.source
                     if current_source and hasattr(current_source, 'seek'):
                         current_source.seek(0)
                     self.current_loop = 0
+                    
+                    # Reset transport effect loop counter if present
+                    if self.layers:
+                        for layer in self.layers:
+                            for effect in layer.effects:
+                                if hasattr(effect, '_current_loop_iteration'):
+                                    effect._current_loop_iteration = 0
                     continue
                 
                 # Check playlist autoplay (only if NOT a slave!)
@@ -816,9 +835,8 @@ class Player:
                             )
                             
                             # Auto-set playback_mode based on autoplay and slave status
-                            is_slave = (self.player_manager and 
-                                       self.player_manager.master_playlist is not None and 
-                                       not self.player_manager.is_master(self.player_id))
+                            # Use cached slave state
+                            is_slave = getattr(self, '_is_slave_cached', False)
                             
                             if self.playlist_manager.autoplay and not is_slave and 'playback_mode' not in parameters:
                                 parameters['playback_mode'] = 'play_once'

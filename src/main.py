@@ -111,20 +111,23 @@ def main():
     # Konfiguration laden (vor Logger, um console_log_level zu erhalten)
     config = load_config()
     
-    # Console Log-Level aus Config lesen
+    # Log-Levels aus Config lesen
     console_level_str = config.get('app', {}).get('console_log_level', 'WARNING')
-    console_level_map = {
+    file_level_str = config.get('app', {}).get('file_log_level', 'WARNING')
+    
+    log_level_map = {
         'DEBUG': logging.DEBUG,
         'INFO': logging.INFO,
         'WARNING': logging.WARNING,
         'ERROR': logging.ERROR,
         'CRITICAL': logging.CRITICAL
     }
-    console_level = console_level_map.get(console_level_str.upper(), logging.WARNING)
+    console_level = log_level_map.get(console_level_str.upper(), logging.WARNING)
+    file_level = log_level_map.get(file_level_str.upper(), logging.WARNING)
     
-    # Logging initialisieren mit Console-Level aus Config
+    # Logging initialisieren mit Levels aus Config
     flux_logger = FluxLogger()
-    flux_logger.setup_logging(console_level=console_level)
+    flux_logger.setup_logging(log_level=file_level, console_level=console_level)
     logger.debug("Flux startet...")
     logger.debug("Konfiguration geladen")
     
@@ -244,6 +247,10 @@ def main():
     # Set PlayerManager reference in players (for Master/Slave sync)
     player.player_manager = player_manager
     artnet_player.player_manager = player_manager
+    
+    # Initialize Audio Sequencer
+    player_manager.init_sequencer()
+    logger.info("Audio Sequencer initialisiert")
     
     # Start both players to generate frames (even with DummySource for preview)
     player.start()

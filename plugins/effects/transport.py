@@ -502,8 +502,6 @@ class TransportEffect(PluginBase):
         
         if should_emit:
             try:
-                logger.info(f"📡 Emitting transport.position: player={self.player_id}, clip={self.clip_id}, pos={self.current_position}/{self.out_point}")
-                
                 self.socketio.emit('transport.position', {
                     'player_id': self.player_id,
                     'clip_id': self.clip_id,

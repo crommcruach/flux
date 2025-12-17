@@ -9,6 +9,7 @@ let splits = []; // Array of split times in seconds
 let slots = []; // Array of {start, end, clipName}
 let currentSlotIndex = -1;
 let loopingSlot = null; // {start, end} or null if not looping
+let currentAudioPath = null; // Track current audio file path on server
 
 // Initialize WaveSurfer
 function initWaveSurfer() {
@@ -66,6 +67,7 @@ function initWaveSurfer() {
 }
 
 function onWaveformReady() {
+    document.getElementById('previewBtn').disabled = false;
     document.getElementById('playBtn').disabled = false;
     document.getElementById('pauseBtn').disabled = false;
     document.getElementById('stopBtn').disabled = false;
@@ -77,20 +79,20 @@ function onWaveformReady() {
     updateSlots();
 }
 
-function onWaveformClick(relativeX) {
+async function onWaveformClick(relativeX) {
     const duration = wavesurfer.getDuration();
     const time = relativeX * duration;
-    addSplit(time);
+    await addSplitToBackend(time);
 }
 
 function onRegionCreated(region) {
     // Add contextmenu handler to catch right-click
     const regionEl = region.element;
     if (regionEl) {
-        regionEl.addEventListener('contextmenu', (e) => {
+        regionEl.addEventListener('contextmenu', async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            removeRegion(region);
+            await removeSplitFromBackend(region.start);
             return false;
         });
     }
@@ -447,7 +449,213 @@ function formatTime(seconds) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Load audio file helper
+// API Integration Functions
+async function addSplitToBackend(time) {
+    try {
+        const response = await fetch('/api/sequencer/split/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ time: time })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log(`✅ Split added at ${time.toFixed(2)}s`);
+            await fetchAndRenderTimeline();
+        } else {
+            console.warn('⚠️ Split not added (too close to existing split or boundary)');
+        }
+    } catch (error) {
+        console.error('❌ Error adding split:', error);
+    }
+}
+
+async function removeSplitFromBackend(time) {
+    try {
+        const response = await fetch('/api/sequencer/split/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ time: time })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log(`✅ Split removed at ${time.toFixed(2)}s`);
+            await fetchAndRenderTimeline();
+        } else {
+            console.warn('⚠️ Split not found');
+        }
+    } catch (error) {
+        console.error('❌ Error removing split:', error);
+    }
+}
+
+async function fetchAndRenderTimeline() {
+    try {
+        const response = await fetch('/api/sequencer/timeline');
+        const timeline = await response.json();
+        
+        if (timeline.splits) {
+            // Update local state
+            splits = timeline.splits;
+            slots = timeline.slots || [];
+            
+            // Update WaveSurfer regions to match backend splits
+            updateRegions();
+            renderSlots();
+            
+            console.log('📊 Timeline updated:', timeline);
+        }
+    } catch (error) {
+        console.error('❌ Error fetching timeline:', error);
+    }
+}
+
+async function uploadAudioFile(file) {
+    if (!file) return;
+    
+    // Validate audio file
+    const validExtensions = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'];
+    const extension = file.name.split('.').pop().toLowerCase();
+    if (!validExtensions.includes(extension)) {
+        alert('Invalid file type. Please upload MP3, WAV, OGG, FLAC, M4A, or AAC.');
+        return;
+    }
+    
+    // Upload file to backend
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        document.getElementById('waveformFileInfo').textContent = `📤 Uploading ${file.name}...`;
+        
+        const response = await fetch('/api/sequencer/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log('✅ Audio uploaded:', result.metadata);
+            document.getElementById('waveformFileInfo').textContent = `📊 ${result.filename}`;
+            await loadAudioFromServer(result.path);
+        } else {
+            alert('Upload failed: ' + result.error);
+            document.getElementById('waveformFileInfo').textContent = 'No file loaded';
+        }
+    } catch (error) {
+        console.error('❌ Upload error:', error);
+        alert('Failed to upload audio file');
+        document.getElementById('waveformFileInfo').textContent = 'No file loaded';
+    }
+}
+
+async function loadAudioFromServer(serverPath) {
+    try {
+        // Store the server path
+        currentAudioPath = serverPath;
+        
+        // Load audio via backend sequencer
+        const response = await fetch('/api/sequencer/load', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_path: serverPath })
+        });
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to load audio');
+        }
+        
+        console.log('🎵 Audio loaded from backend:', result.metadata);
+        
+        // Initialize WaveSurfer if needed
+        initWaveSurfer();
+        
+        // Load audio into WaveSurfer from server
+        const audioUrl = `/api/sequencer/audio/${encodeURIComponent(serverPath)}`;
+        await wavesurfer.load(audioUrl);
+        
+        // After loading, fetch initial timeline (may have saved splits)
+        await fetchAndRenderTimeline();
+    } catch (error) {
+        console.error('❌ Error loading audio:', error);
+        alert('Failed to load audio: ' + error.message);
+    }
+}
+
+async function openFileBrowserModal() {
+    try {
+        const response = await fetch('/api/sequencer/browse-audio');
+        const result = await response.json();
+        
+        if (result.success) {
+            renderFileList(result.files);
+            const modalElement = document.getElementById('sequencerFileBrowserModal');
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
+            modal.show();
+        } else {
+            alert('Failed to load audio files: ' + result.error);
+        }
+    } catch (error) {
+        console.error('❌ Error loading file list:', error);
+        alert('Failed to browse audio files');
+    }
+}
+
+function renderFileList(files) {
+    const tbody = document.getElementById('sequencerFileList');
+    tbody.innerHTML = '';
+    
+    if (files.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No audio files found</td></tr>';
+        return;
+    }
+    
+    files.forEach(file => {
+        const row = document.createElement('tr');
+        row.style.cursor = 'pointer';
+        row.innerHTML = `
+            <td>${file.filename}</td>
+            <td><small class="text-muted">${file.folder}</small></td>
+            <td><small class="text-muted">${formatBytes(file.size)}</small></td>
+        `;
+        
+        row.addEventListener('click', () => selectAudioFile(file.path));
+        tbody.appendChild(row);
+    });
+}
+
+async function selectAudioFile(filePath) {
+    try {
+        const modal = bootstrap.Modal.getInstance(document.getElementById('sequencerFileBrowserModal'));
+        modal.hide();
+        
+        const filename = filePath.split('/').pop();
+        document.getElementById('waveformFileInfo').textContent = `📂 Loading ${filename}...`;
+        
+        await loadAudioFromServer(filePath);
+        
+        document.getElementById('waveformFileInfo').textContent = `📊 ${filename}`;
+    } catch (error) {
+        console.error('❌ Error selecting audio:', error);
+        document.getElementById('waveformFileInfo').textContent = 'No file loaded';
+    }
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+// Load audio file helper (for local file input - legacy)
 function loadAudioFile(file) {
     if (!file) return;
     
@@ -457,23 +665,38 @@ function loadAudioFile(file) {
         return;
     }
     
-    document.getElementById('waveformFileInfo').textContent = `📊 ${file.name}`;
-    
-    initWaveSurfer();
-    
-    const url = URL.createObjectURL(file);
-    wavesurfer.load(url);
+    // Use upload instead
+    uploadAudioFile(file);
 }
 
 // Initialize event handlers
 function initApp() {
+    // Click on preview area to open file browser
+    const previewArea = document.getElementById('preview-area-waveform');
+    if (previewArea) {
+        previewArea.addEventListener('click', openFileBrowserModal);
+    }
+    
+    // File search filter
+    const fileSearch = document.getElementById('sequencerFileSearch');
+    if (fileSearch) {
+        fileSearch.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            const rows = document.querySelectorAll('#sequencerFileList tr');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(searchTerm) ? '' : 'none';
+            });
+        });
+    }
+    
     // Button handlers
     document.getElementById('audioFileInput').addEventListener('change', (e) => {
         loadAudioFile(e.target.files[0]);
     });
     
-    // Drag and drop handlers
-    const previewArea = document.querySelector('.preview-area-waveform');
+    // Drag and drop handlers (previewArea already selected above)
     if (previewArea) {
         previewArea.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -489,7 +712,7 @@ function initApp() {
             previewArea.style.background = '';
         });
         
-        previewArea.addEventListener('drop', (e) => {
+        previewArea.addEventListener('drop', async (e) => {
             e.preventDefault();
             e.stopPropagation();
             previewArea.style.borderColor = '';
@@ -497,45 +720,83 @@ function initApp() {
             
             const files = e.dataTransfer.files;
             if (files.length > 0) {
-                loadAudioFile(files[0]);
+                await uploadAudioFile(files[0]);
             }
         });
     }
     
+    // Preview button - frontend only (for testing/setup)
+    const previewBtn = document.getElementById('previewBtn');
+    if (previewBtn) {
+        previewBtn.addEventListener('click', () => {
+            if (wavesurfer) {
+                wavesurfer.play();
+                console.log('👁️ Preview playback (frontend only)');
+            }
+        });
+    }
+    
+    // Play Synced button - triggers backend audio + playlist sync
     const playBtn = document.getElementById('playBtn');
     if (playBtn) {
-        playBtn.addEventListener('click', () => {
-            if (wavesurfer) wavesurfer.play();
+        playBtn.addEventListener('click', async () => {
+            if (wavesurfer) {
+                // Stop and reset to beginning before playing
+                wavesurfer.stop();
+                wavesurfer.play();
+                // Call backend play endpoint
+                try {
+                    await fetch('/api/sequencer/play', { method: 'POST' });
+                    console.log('▶️ Synced playback started');
+                } catch (error) {
+                    console.error('❌ Error calling play endpoint:', error);
+                }
+            }
         });
     }
     
     const pauseBtn = document.getElementById('pauseBtn');
     if (pauseBtn) {
-        pauseBtn.addEventListener('click', () => {
-            if (wavesurfer) wavesurfer.pause();
+        pauseBtn.addEventListener('click', async () => {
+            if (wavesurfer) {
+                wavesurfer.pause();
+                // Call backend pause endpoint
+                try {
+                    await fetch('/api/sequencer/pause', { method: 'POST' });
+                } catch (error) {
+                    console.error('❌ Error calling pause endpoint:', error);
+                }
+            }
         });
     }
     
     const stopBtn = document.getElementById('stopBtn');
     if (stopBtn) {
-        stopBtn.addEventListener('click', () => {
+        stopBtn.addEventListener('click', async () => {
             if (wavesurfer) {
                 wavesurfer.stop();
                 currentSlotIndex = -1;
                 document.getElementById('currentSlot').textContent = 'None';
                 document.getElementById('currentTime').textContent = '0:00';
                 renderSlots();
+                // Call backend stop endpoint
+                try {
+                    await fetch('/api/sequencer/stop', { method: 'POST' });
+                } catch (error) {
+                    console.error('❌ Error calling stop endpoint:', error);
+                }
             }
         });
     }
     
     const clearSplitsBtn = document.getElementById('clearSplitsBtn');
     if (clearSplitsBtn) {
-        clearSplitsBtn.addEventListener('click', () => {
+        clearSplitsBtn.addEventListener('click', async () => {
             if (confirm('Clear all splits?')) {
-                splits = [];
-                updateRegions();
-                updateSlots();
+                // Remove splits one by one from backend
+                for (const split of [...splits]) {
+                    await removeSplitFromBackend(split);
+                }
             }
         });
     }
@@ -560,6 +821,48 @@ function initApp() {
             minifyBtn.textContent = isMinified ? '⬆️' : '⬇️';
             minifyBtn.title = isMinified ? 'Expand' : 'Minify';
         });
+    }
+    
+    // Restore sequencer state on page load
+    restoreSequencerState();
+}
+
+async function restoreSequencerState() {
+    try {
+        const response = await fetch('/api/sequencer/status');
+        const status = await response.json();
+        
+        console.log('📋 Restoring sequencer state:', status);
+        
+        // Restore sequencer mode UI if backend says it's active
+        if (status.mode_active) {
+            const waveformSection = document.querySelector('.waveform-analyzer-section');
+            const btn = document.getElementById('sequencerModeBtn');
+            
+            if (waveformSection && btn) {
+                // Update UI to match backend state
+                waveformSection.style.display = 'grid';
+                btn.classList.remove('btn-outline-secondary');
+                btn.classList.add('btn-success');
+                btn.textContent = '🎵 Sequencer: MASTER';
+                
+                // Update global variable in player.html
+                if (typeof window.sequencerModeActive !== 'undefined') {
+                    window.sequencerModeActive = true;
+                }
+                
+                console.log('✅ Sequencer mode restored: MASTER');
+            }
+        }
+        
+        // Restore audio file and timeline
+        if (status.has_audio && status.audio_file) {
+            console.log('📂 Restoring audio file:', status.audio_file);
+            await loadAudioFromServer(status.audio_file);
+            console.log('✅ Audio and timeline restored');
+        }
+    } catch (error) {
+        console.error('❌ Error restoring sequencer state:', error);
     }
 }
 

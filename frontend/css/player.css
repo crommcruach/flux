@@ -5,7 +5,8 @@
 
 /* Body Override for Player Page */
 body {
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     margin: 0;
     padding: 0;
 }
@@ -17,8 +18,7 @@ body {
 .app-layout {
     display: flex;
     flex-direction: column;
-    height: 95vh;
-    max-height: 95vh;
+    min-height: 95vh;
 }
 
 /* ========================================
@@ -438,7 +438,7 @@ body {
     grid-template-columns: 220px 0.8fr 0.8fr 1fr 1fr;
     gap: 1rem;
     padding: 1rem;
-    overflow: hidden;
+    min-height: 300px;
 }
 
 /* ========================================

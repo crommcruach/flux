@@ -80,6 +80,7 @@ let selectedLayerClipId = null;  // clip_id of selected layer
 
 // Master/Slave Synchronization State
 let masterPlaylist = null;  // 'video' or 'artnet' or null
+let sequencerModeActive = false;  // True when sequencer controls all playlists
 
 // ========================================
 // INITIALIZATION
@@ -170,6 +171,9 @@ async function init() {
         await refreshVideoEffects();
         await refreshArtnetEffects();
         
+        // Restore master/slave state from backend
+        await restoreMasterSlaveState();
+        
         // Layers are now loaded per-clip when clips are loaded
         
         // Initialize WebSocket and setup event listeners BEFORE starting preview
@@ -235,6 +239,28 @@ async function init() {
         playerSocket.on('player.status', (data) => {
             debug.log(`▶️ Player status update via WebSocket:`, data);
             updatePlayerStatusUI(data);
+        });
+        
+        // Listen for sequencer mode changes
+        playerSocket.on('sequencer_mode_changed', (data) => {
+            debug.log(`🎵 Sequencer mode changed via WebSocket:`, data);
+            // Update sequencer mode state
+            sequencerModeActive = data.enabled || false;
+            // Update master playlist state
+            if (data.master_playlist !== undefined) {
+                masterPlaylist = data.master_playlist;
+            }
+            updateMasterUI();
+        });
+        
+        // Listen for master/slave mode changes
+        playerSocket.on('master_slave_changed', (data) => {
+            debug.log(`👑 Master/Slave mode changed via WebSocket:`, data);
+            // Update master playlist state
+            if (data.master_playlist !== undefined) {
+                masterPlaylist = data.master_playlist;
+            }
+            updateMasterUI();
         });
         
         // Listen for effect parameter changes
@@ -2477,6 +2503,31 @@ window.toggleLoop = async function(playerId) {
 // MASTER/SLAVE SYNCHRONIZATION
 // ========================================
 
+async function restoreMasterSlaveState() {
+    try {
+        const response = await fetch(`${API_BASE}/api/player/sync_status`);
+        const data = await response.json();
+        
+        if (data.success && data.master_playlist) {
+            debug.log('👑 Restoring master/slave state:', data);
+            
+            // Update UI checkboxes
+            const videoCheckbox = document.getElementById('videoMasterSwitch');
+            const artnetCheckbox = document.getElementById('artnetMasterSwitch');
+            
+            if (videoCheckbox && artnetCheckbox) {
+                videoCheckbox.checked = (data.master_playlist === 'video');
+                artnetCheckbox.checked = (data.master_playlist === 'artnet');
+                masterPlaylist = data.master_playlist;
+                updateMasterUI();
+                debug.log('✅ Master/slave state restored from backend');
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error restoring master/slave state:', error);
+    }
+}
+
 window.toggleMasterPlaylist = async function(playerId) {
     const checkbox = document.getElementById(`${playerId}MasterSwitch`);
     const enabled = checkbox.checked;
@@ -2519,7 +2570,13 @@ function updateMasterUI() {
         const label = document.getElementById(`${playerId}MasterLabel`);
         if (!checkbox || !label) return;
         
-        if (masterPlaylist === playerId) {
+        if (sequencerModeActive) {
+            // Sequencer mode: All playlists are slaves to sequencer
+            checkbox.checked = false;
+            checkbox.disabled = true;
+            label.textContent = 'Slave (Sequencer)';
+            label.className = 'master-label is-slave';
+        } else if (masterPlaylist === playerId) {
             // This player is Master
             checkbox.checked = true;
             checkbox.disabled = false;
@@ -4103,6 +4160,32 @@ window.selectPlaylist = async function(playlistName) {
             
             renderPlaylist('video');
             renderPlaylist('artnet');
+            
+            // Restore master/slave state
+            const savedMasterPlaylist = loadData.master_playlist;
+            if (savedMasterPlaylist) {
+                debug.log('👑 Restoring master playlist:', savedMasterPlaylist);
+                // Update UI checkboxes
+                const videoCheckbox = document.getElementById('videoMasterSwitch');
+                const artnetCheckbox = document.getElementById('artnetMasterSwitch');
+                if (videoCheckbox && artnetCheckbox) {
+                    videoCheckbox.checked = (savedMasterPlaylist === 'video');
+                    artnetCheckbox.checked = (savedMasterPlaylist === 'artnet');
+                    masterPlaylist = savedMasterPlaylist;
+                    updateMasterUI();
+                    debug.log('✅ Master/slave UI restored');
+                }
+            } else {
+                // Clear master state if none saved
+                const videoCheckbox = document.getElementById('videoMasterSwitch');
+                const artnetCheckbox = document.getElementById('artnetMasterSwitch');
+                if (videoCheckbox && artnetCheckbox) {
+                    videoCheckbox.checked = false;
+                    artnetCheckbox.checked = false;
+                    masterPlaylist = null;
+                    updateMasterUI();
+                }
+            }
             
             showToast(`Playlists "${playlistName}" loaded (Video: ${playerConfigs.video.files.length}, Art-Net: ${playerConfigs.artnet.files.length})`, 'success');
             

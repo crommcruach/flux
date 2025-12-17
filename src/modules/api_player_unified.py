@@ -1676,6 +1676,18 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
             os.makedirs(playlists_dir, exist_ok=True)
             
+            # Get sequencer state
+            sequencer_state = None
+            if player_manager.sequencer:
+                try:
+                    sequencer_state = {
+                        "mode_active": player_manager.sequencer_mode_active,
+                        "audio_file": player_manager.sequencer.timeline.audio_file,
+                        "timeline": player_manager.sequencer.timeline.to_dict()
+                    }
+                except Exception as e:
+                    logger.warning(f"Failed to get sequencer state: {e}")
+            
             # Save combined playlist as JSON
             playlist_path = os.path.join(playlists_dir, f'{name}.json')
             playlist_data = {
@@ -1683,20 +1695,23 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 'created': datetime.now().isoformat(),
                 'video_playlist': video_playlist,
                 'artnet_playlist': artnet_playlist,
+                'sequencer': sequencer_state,  # Include sequencer settings
+                'master_playlist': player_manager.get_master_playlist(),  # Include master/slave state
                 'total_videos': len(video_playlist) + len(artnet_playlist)
             }
             
             with open(playlist_path, 'w', encoding='utf-8') as f:
                 json.dump(playlist_data, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"💾 Playlists saved: {name} (Video: {len(video_playlist)}, Art-Net: {len(artnet_playlist)})")
+            logger.info(f"💾 Playlists saved: {name} (Video: {len(video_playlist)}, Art-Net: {len(artnet_playlist)}, Sequencer: {'Yes' if sequencer_state else 'No'})")
             return jsonify({
                 "success": True,
                 "status": "success",
                 "message": f"Playlists '{name}' saved",
                 "path": playlist_path,
                 "video_count": len(video_playlist),
-                "artnet_count": len(artnet_playlist)
+                "artnet_count": len(artnet_playlist),
+                "has_sequencer": sequencer_state is not None
             })
         
         except Exception as e:
@@ -1717,12 +1732,45 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             
             with open(playlist_path, 'r', encoding='utf-8') as f:
                 playlist_data = json.load(f)
+            # Restore sequencer if included
+            sequencer_data = playlist_data.get('sequencer')
+            if sequencer_data and player_manager.sequencer:
+                try:
+                    # Restore audio file
+                    audio_file = sequencer_data.get('audio_file')
+                    if audio_file and os.path.exists(audio_file):
+                        player_manager.sequencer.load_audio(audio_file)
+                        
+                        # Restore timeline (splits, clip_mapping)
+                        timeline_data = sequencer_data.get('timeline', {})
+                        if timeline_data:
+                            player_manager.sequencer.timeline.from_dict(timeline_data)
+                        
+                        # Restore sequencer mode
+                        mode_active = sequencer_data.get('mode_active', False)
+                        player_manager.set_sequencer_mode(mode_active)
+                        
+                        logger.info(f"🎵 Sequencer restored from playlist: audio={os.path.basename(audio_file)}, splits={len(timeline_data.get('splits', []))}")
+                except Exception as e:
+                    logger.warning(f"Failed to restore sequencer from playlist: {e}")
+            
+            # Restore master/slave state
+            master_playlist = playlist_data.get('master_playlist')
+            if master_playlist:
+                try:
+                    success = player_manager.set_master_playlist(master_playlist)
+                    if success:
+                        logger.info(f"👑 Master playlist restored from playlist: {master_playlist}")
+                except Exception as e:
+                    logger.warning(f"Failed to restore master/slave state from playlist: {e}")
             
             logger.info(f"📂 Playlist loaded: {name}")
             return jsonify({
                 "success": True,
                 "name": name,
                 "video_playlist": playlist_data.get('video_playlist', []),
+                "artnet_playlist": playlist_data.get('artnet_playlist', []),
+                "sequencer": sequencer_data,  # Send sequencer data to frontend
                 "artnet_playlist": playlist_data.get('artnet_playlist', []),
                 "created": playlist_data.get('created'),
                 "total_videos": playlist_data.get('total_videos', 0)

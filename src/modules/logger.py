@@ -65,7 +65,7 @@ class FluxLogger:
             backupCount=5,
             encoding='utf-8'
         )
-        file_handler.setLevel(logging.DEBUG)  # Alles in Datei loggen
+        file_handler.setLevel(log_level)  # Verwendet log_level aus config.json
         file_handler.setFormatter(detailed_formatter)
         root_logger.addHandler(file_handler)
         
@@ -75,8 +75,9 @@ class FluxLogger:
         console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
         
-        # Speichere Console-Handler für spätere Level-Änderungen
+        # Speichere Handler für spätere Level-Änderungen
         self.console_handler = console_handler
+        self.file_handler = file_handler
         
         # Spezielle Logger für externe Bibliotheken dämpfen
         logging.getLogger('werkzeug').setLevel(logging.WARNING)

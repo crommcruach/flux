@@ -188,6 +188,10 @@ class RestAPI:
         from .session_state import get_session_state
         session_state = get_session_state()
         register_session_routes(self.app, session_state)
+        
+        # Register Sequencer API
+        from .api_sequencer import register_sequencer_routes
+        register_sequencer_routes(self.app, self.player_manager, self.config)
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
