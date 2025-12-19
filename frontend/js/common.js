@@ -349,30 +349,37 @@ export async function executeCommand(namespace, event, data, restFallback) {
     
     // Try WebSocket first (if connected and enabled)
     if (WEBSOCKET_COMMANDS_ENABLED && isConnected && socket) {
+        console.log(`🔌 [WebSocket] Attempting command: ${event}`, {namespace, connected: isConnected, data});
         try {
             return await new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
+                    console.warn(`⏱️ [WebSocket] Command timeout after ${WEBSOCKET_TIMEOUT_MS}ms:`, event);
                     reject(new Error('WebSocket command timeout'));
                 }, WEBSOCKET_TIMEOUT_MS); // Configurable timeout from config.json
                 
                 // Listen for response
                 socket.once('command.response', (response) => {
                     clearTimeout(timeout);
+                    console.log(`✅ [WebSocket] Command success:`, event, response);
                     resolve(response);
                 });
                 
                 socket.once('command.error', (error) => {
                     clearTimeout(timeout);
+                    console.error(`❌ [WebSocket] Command error:`, event, error);
                     reject(error);
                 });
                 
                 // Send command
+                console.log(`📤 [WebSocket] Emitting ${event} to ${namespace}`, data);
                 socket.emit(event, data);
             });
         } catch (error) {
-            console.warn(`WebSocket command failed, falling back to REST:`, error);
+            console.warn(`⚠️ [WebSocket] Command failed, falling back to REST:`, event, error);
             // Fall through to REST fallback
         }
+    } else {
+        console.log(`📡 [WebSocket] Skipped (disabled or not connected), using REST:`, {enabled: WEBSOCKET_COMMANDS_ENABLED, connected: isConnected, hasSocket: !!socket});
     }
     
     // Fallback to REST

@@ -12,6 +12,7 @@
     <link href="css/player.css" rel="stylesheet">
     <link href="css/tab-components.css" rel="stylesheet">
     <link href="css/thumbnails.css" rel="stylesheet">
+    <link href="css/color-picker.css" rel="stylesheet">
 </head>
 <body>
     <script src="js/menu-loader.js"></script>
@@ -147,7 +148,7 @@
             <!-- Playlist -->
             <div class="playlist-area">
                 <div class="playlist-header" id="artnetPlaylistHeader">
-                    <span>🎨 Art-Net Generator Playlist</span>
+                    <span>🎨 Art-Net Playlist</span>
                     <div class="master-toggle">
                         <label class="master-switch">
                             <input type="checkbox" id="artnetMasterSwitch" onchange="toggleMasterPlaylist('artnet')">
@@ -162,6 +163,16 @@
                         <p>No Art-Net sources loaded</p>
                     </div>
                 </div>
+            </div>
+        </div>
+        
+        <!-- New Section -->
+        <div class="middle-section">
+            <div class="middle-section-left">
+                <!-- Left section (260px, matches preview width) -->
+            </div>
+            <div class="middle-section-right">
+                <!-- Right section (remaining space) -->
             </div>
         </div>
         
@@ -200,7 +211,6 @@
                     
                     <!-- Files Tab -->
                     <div class="tab-pane active" id="tab-files">
-                        <h6>File Browser</h6>
                         <div id="filesSearchContainer"></div>
                         <div id="fileBrowser">
                             <div class="empty-state">
@@ -313,6 +323,7 @@
         </div>
     </div>
 
+    <script src="js/components/color-picker.js"></script>
     <script src="js/player.js" type="module"></script>
     <script type="module" src="js/waveform-analyzer.js"></script>
     <script>

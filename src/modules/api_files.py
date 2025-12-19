@@ -431,6 +431,72 @@ def register_files_api(app, video_dir, config=None):
                 'success': False,
                 'error': str(e)
             }), 500
+    
+    @app.route('/api/files/delete', methods=['DELETE'])
+    def delete_file():
+        """Delete a file from the video directory"""
+        try:
+            data = request.get_json()
+            file_path = data.get('path')
+            
+            if not file_path:
+                return jsonify({
+                    'success': False,
+                    'error': 'No file path provided'
+                }), 400
+            
+            # Find full path in video sources
+            full_path = None
+            for source_path in get_video_sources():
+                candidate_path = os.path.join(source_path, file_path)
+                if os.path.exists(candidate_path):
+                    full_path = candidate_path
+                    break
+            
+            if not full_path or not os.path.exists(full_path):
+                return jsonify({
+                    'success': False,
+                    'error': 'File not found'
+                }), 404
+            
+            # Security check: ensure file is within allowed directories
+            real_path = os.path.realpath(full_path)
+            allowed = False
+            for source_path in get_video_sources():
+                real_source = os.path.realpath(source_path)
+                if real_path.startswith(real_source):
+                    allowed = True
+                    break
+            
+            if not allowed:
+                logger.warning(f"Attempted to delete file outside allowed directories: {full_path}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Access denied'
+                }), 403
+            
+            # Delete the file
+            os.remove(full_path)
+            logger.info(f"File deleted: {full_path}")
+            
+            # Also delete thumbnail if exists
+            if thumbnail_gen:
+                try:
+                    thumbnail_gen.delete_thumbnail(full_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete thumbnail: {e}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'File deleted successfully'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error deleting file: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
 
 
 def _format_size(size_bytes):

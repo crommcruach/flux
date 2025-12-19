@@ -5,8 +5,8 @@
 
 /* Body Override for Player Page */
 body {
-    overflow-x: hidden;
     overflow-y: auto;
+    overflow-x: hidden;
     margin: 0;
     padding: 0;
 }
@@ -429,16 +429,43 @@ body {
 }
 
 /* ========================================
+   MIDDLE SECTION
+   ======================================== */
+
+.middle-section {
+    height: 50px;
+    background: var(--panel-bg);
+    border-bottom: 2px solid var(--border-color);
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 0.75rem;
+    padding: 0 0.75rem;
+    flex-shrink: 0;
+}
+
+.middle-section-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.middle-section-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* ========================================
    BOTTOM SECTION - Tabs + FX Controls
    ======================================== */
 
 .bottom-section {
-    flex: 1;
     display: grid;
     grid-template-columns: 220px 0.8fr 0.8fr 1fr 1fr;
     gap: 1rem;
     padding: 1rem;
-    min-height: 300px;
+    height: 400px;
+    flex-shrink: 0;
 }
 
 /* ========================================
@@ -1856,4 +1883,99 @@ body {
     padding: 2px 8px;
     border-radius: 3px;
     font-size: 0.7rem;
+}
+
+/* ========================================
+   CONTEXT MENU
+   ======================================== */
+
+.file-context-menu {
+    position: fixed;
+    display: none;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    min-width: 200px;
+    z-index: 10000;
+    overflow: hidden;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.context-menu-item:hover {
+    background: var(--bg-secondary);
+}
+
+.context-menu-item i {
+    width: 16px;
+    text-align: center;
+    opacity: 0.7;
+}
+
+.context-menu-item-danger {
+    color: #dc3545;
+}
+
+.context-menu-item-danger:hover {
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.context-menu-item-warning {
+    color: #ffc107;
+    font-weight: 500;
+}
+
+.context-menu-item-warning:hover {
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.context-menu-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 0.25rem 0;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: var(--border-color);
+    margin: 0.25rem 0;
+}
+
+.context-menu-item.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.context-menu-item small {
+    display: block;
+    font-size: 0.75rem;
+    opacity: 0.6;
+    margin-top: 2px;
+}
+
+.context-menu-item span {
+    display: block;
+}
+
+.context-menu {
+    position: fixed;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    min-width: 220px;
+    z-index: 10000;
+    overflow: hidden;
+    padding: 0.25rem 0;
 }

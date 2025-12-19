@@ -103,6 +103,42 @@ class ThumbnailGenerator:
         if thumbnail_path.exists():
             return str(thumbnail_path)
         return None
+    
+    def delete_thumbnail(self, file_path):
+        """
+        Löscht Thumbnail und Preview-Dateien für eine Datei
+        
+        Args:
+            file_path: Pfad zur Original-Datei
+            
+        Returns:
+            bool: True wenn Dateien gelöscht wurden, False wenn keine gefunden
+        """
+        try:
+            deleted_any = False
+            cache_filename = self._get_cache_filename(file_path)
+            
+            # Delete main thumbnail
+            thumbnail_path = self.cache_dir / cache_filename
+            if thumbnail_path.exists():
+                thumbnail_path.unlink()
+                logger.debug(f"Deleted thumbnail: {thumbnail_path}")
+                deleted_any = True
+            
+            # Delete video preview files (GIF and WebM)
+            for ext in ['.gif', '.webm']:
+                preview_filename = cache_filename.replace('.jpg', f'_preview{ext}')
+                preview_path = self.cache_dir / preview_filename
+                if preview_path.exists():
+                    preview_path.unlink()
+                    logger.debug(f"Deleted video preview: {preview_path}")
+                    deleted_any = True
+            
+            return deleted_any
+            
+        except Exception as e:
+            logger.error(f"Error deleting thumbnail for {file_path}: {e}")
+            return False
         
     def generate_thumbnail(self, file_path, async_mode=False, callback=None):
         """

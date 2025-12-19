@@ -1745,14 +1745,18 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                         timeline_data = sequencer_data.get('timeline', {})
                         if timeline_data:
                             player_manager.sequencer.timeline.from_dict(timeline_data)
+                            logger.info(f"🎵 Timeline restored: {len(timeline_data.get('splits', []))} splits, {len(timeline_data.get('clip_mapping', {}))} clip mappings")
+                            logger.debug(f"   Clip mappings: {timeline_data.get('clip_mapping', {})}")
                         
                         # Restore sequencer mode
                         mode_active = sequencer_data.get('mode_active', False)
                         player_manager.set_sequencer_mode(mode_active)
                         
-                        logger.info(f"🎵 Sequencer restored from playlist: audio={os.path.basename(audio_file)}, splits={len(timeline_data.get('splits', []))}")
+                        logger.info(f"🎵 Sequencer restored from playlist: audio={os.path.basename(audio_file)}, mode_active={mode_active}")
                 except Exception as e:
                     logger.warning(f"Failed to restore sequencer from playlist: {e}")
+                    import traceback
+                    logger.debug(f"Traceback: {traceback.format_exc()}")
             
             # Restore master/slave state
             master_playlist = playlist_data.get('master_playlist')

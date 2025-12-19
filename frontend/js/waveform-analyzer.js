@@ -341,6 +341,9 @@ function renderSlots() {
             `;
         }
         
+        // Display clip name if mapped
+        const clipNameDisplay = slot.clip_name ? `<div style="font-size: 0.75rem; color: #667eea; margin-top: 4px;">🎬 ${slot.clip_name}</div>` : '';
+        
         div.innerHTML = `
             <div class="slot-header">
                 <div class="slot-title">
@@ -353,6 +356,7 @@ function renderSlots() {
                                 stroke-dashoffset="0"/>
                     </svg>
                     <div class="slot-time">${formatTime(slot.start)} - ${formatTime(slot.end)} (${formatTime(slot.end - slot.start)})</div>
+                    ${clipNameDisplay}
                 </div>
             </div>
             ${splitEditorHTML}
@@ -572,6 +576,10 @@ async function loadAudioFromServer(serverPath) {
         }
         
         console.log('🎵 Audio loaded from backend:', result.metadata);
+        
+        // Update file info display
+        const filename = serverPath.split('/').pop();
+        document.getElementById('waveformFileInfo').textContent = `📊 ${filename}`;
         
         // Initialize WaveSurfer if needed
         initWaveSurfer();
@@ -851,6 +859,11 @@ async function restoreSequencerState() {
                     window.sequencerModeActive = true;
                 }
                 
+                // Update playlist slave mode UI
+                if (typeof updateMasterUI === 'function') {
+                    updateMasterUI();
+                }
+                
                 console.log('✅ Sequencer mode restored: MASTER');
             }
         }
@@ -858,13 +871,125 @@ async function restoreSequencerState() {
         // Restore audio file and timeline
         if (status.has_audio && status.audio_file) {
             console.log('📂 Restoring audio file:', status.audio_file);
+            
+            // Save splits and clip_mapping before loading audio (which resets them)
+            const savedSplits = status.splits || [];
+            const savedClipMapping = status.clip_mapping || {};
+            
+            // Load audio (this will reset timeline in backend!)
             await loadAudioFromServer(status.audio_file);
+            
+            // Now restore the splits and clip mappings
+            if (savedSplits.length > 0) {
+                console.log(`📐 Restoring ${savedSplits.length} splits...`);
+                for (const split of savedSplits) {
+                    const addResponse = await fetch('/api/sequencer/split/add', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ time: split })
+                    });
+                    const addResult = await addResponse.json();
+                    if (!addResult.success) {
+                        console.error(`❌ Failed to restore split at ${split}s`);
+                    }
+                }
+            }
+            
+            if (Object.keys(savedClipMapping).length > 0) {
+                console.log(`🎬 Restoring ${Object.keys(savedClipMapping).length} clip mappings...`);
+                const mapResponse = await fetch('/api/sequencer/clip-mapping', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mapping: savedClipMapping })
+                });
+                const mapResult = await mapResponse.json();
+                if (!mapResult.success) {
+                    console.error('❌ Failed to restore clip mappings');
+                }
+            }
+            
+            // Refresh UI to show restored timeline
+            await fetchAndRenderTimeline();
             console.log('✅ Audio and timeline restored');
         }
     } catch (error) {
         console.error('❌ Error restoring sequencer state:', error);
     }
 }
+
+// Load sequencer state from playlist data (called when loading saved playlist)
+window.loadSequencerState = async function(sequencerData) {
+    try {
+        console.log('🎵 Loading sequencer state from playlist:', sequencerData);
+        
+        // Restore sequencer mode UI if it was active
+        if (sequencerData.mode_active) {
+            const waveformSection = document.querySelector('.waveform-analyzer-section');
+            const btn = document.getElementById('sequencerModeBtn');
+            
+            if (waveformSection && btn) {
+                waveformSection.style.display = 'grid';
+                btn.classList.remove('btn-outline-secondary');
+                btn.classList.add('btn-success');
+                btn.textContent = '🎵 Sequencer: MASTER';
+                
+                if (typeof window.sequencerModeActive !== 'undefined') {
+                    window.sequencerModeActive = true;
+                }
+            }
+        }
+        
+        // Restore audio file and timeline
+        if (sequencerData.audio_file) {
+            console.log('📂 Loading audio from playlist:', sequencerData.audio_file);
+            await loadAudioFromServer(sequencerData.audio_file);
+            
+            // Now restore timeline data (splits and clip mappings)
+            // This must happen AFTER loading audio because load_audio() resets the timeline
+            const timeline = sequencerData.timeline || {};
+            if (timeline.splits && timeline.splits.length > 0) {
+                console.log(`📐 Restoring ${timeline.splits.length} splits...`);
+                
+                // Add each split
+                for (const split of timeline.splits) {
+                    const response = await fetch('/api/sequencer/split/add', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ time: split })
+                    });
+                    const result = await response.json();
+                    if (!result.success) {
+                        console.error(`❌ Failed to restore split at ${split}s`);
+                    }
+                }
+                
+                // Restore clip mappings
+                if (timeline.clip_mapping && Object.keys(timeline.clip_mapping).length > 0) {
+                    console.log(`🎬 Restoring ${Object.keys(timeline.clip_mapping).length} clip mappings...`);
+                    
+                    const response = await fetch('/api/sequencer/clip-mapping', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mapping: timeline.clip_mapping })
+                    });
+                    const result = await response.json();
+                    if (!result.success) {
+                        console.error('❌ Failed to restore clip mappings');
+                    }
+                }
+                
+                // Refresh the UI to show restored timeline
+                await fetchAndRenderTimeline();
+                console.log('✅ Timeline data restored');
+            }
+            
+            console.log('✅ Sequencer state loaded from playlist');
+        }
+    } catch (error) {
+        console.error('❌ Error loading sequencer state from playlist:', error);
+        throw error;
+    }
+};
 
 // Auto-init on load
 if (document.readyState === 'loading') {

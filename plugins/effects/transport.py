@@ -192,7 +192,12 @@ class TransportEffect(PluginBase):
             raise ValueError(f"Transport: Cannot initialize - invalid total_frames: {self._total_frames}")
         
         # Check if this is first initialization or source changed
-        source_changed = (self._frame_source is None or self._frame_source != frame_source)
+        # Use clip_id if available to detect different clips with same content
+        source_clip_id = getattr(frame_source, 'clip_id', None)
+        current_clip_id = getattr(self._frame_source, 'clip_id', None) if self._frame_source else None
+        source_changed = (self._frame_source is None or 
+                         self._frame_source != frame_source or 
+                         (source_clip_id and source_clip_id != current_clip_id))
         
         if source_changed:
             # New clip loaded - BUT preserve user's trim settings if they exist and are valid

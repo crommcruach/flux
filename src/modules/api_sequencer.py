@@ -19,13 +19,14 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 
-def register_sequencer_routes(app, player_manager, config):
+def register_sequencer_routes(app, player_manager, config, session_state=None):
     """Register sequencer API routes.
     
     Args:
         app: Flask app instance
         player_manager: PlayerManager with sequencer
         config: Application configuration
+        session_state: SessionStateManager instance (optional)
     """
     
     # Get workspace root from Flask static folder path
@@ -92,12 +93,18 @@ def register_sequencer_routes(app, player_manager, config):
                     # Path is outside workspace, use absolute
                     audio_file = engine._file_path
             
+            # Convert clip_mapping int keys to strings for JSON
+            clip_mapping_json = {}
+            if engine.is_loaded and timeline.clip_mapping:
+                clip_mapping_json = {str(k): v for k, v in timeline.clip_mapping.items()}
+            
             status = {
                 'mode_active': player_manager.sequencer_mode_active,
                 'has_audio': engine.is_loaded,
                 'audio_file': audio_file,
                 'audio_duration': engine.duration if engine.is_loaded else 0,
                 'splits': timeline.splits if engine.is_loaded else [],
+                'clip_mapping': clip_mapping_json,
                 'is_playing': engine.is_playing if engine.is_loaded else False
             }
             
@@ -342,6 +349,12 @@ def register_sequencer_routes(app, player_manager, config):
             success = player_manager.sequencer.add_split(time)
             
             if success:
+                # Save session state to persist splits
+                if session_state:
+                    from .clip_registry import get_clip_registry
+                    session_state.save(player_manager, get_clip_registry(), force=True)
+                    logger.debug("💾 Session state saved after split add")
+                
                 # Return updated timeline
                 timeline = player_manager.sequencer.get_timeline_data()
                 return jsonify({
@@ -370,6 +383,12 @@ def register_sequencer_routes(app, player_manager, config):
             success = player_manager.sequencer.remove_split(time)
             
             if success:
+                # Save session state to persist splits
+                if session_state:
+                    from .clip_registry import get_clip_registry
+                    session_state.save(player_manager, get_clip_registry(), force=True)
+                    logger.debug("💾 Session state saved after split remove")
+                
                 # Return updated timeline
                 timeline = player_manager.sequencer.get_timeline_data()
                 return jsonify({
@@ -407,6 +426,12 @@ def register_sequencer_routes(app, player_manager, config):
                 return jsonify({'error': 'Missing slot_index or clip_name'}), 400
             
             player_manager.sequencer.set_clip_mapping(slot_index, clip_name)
+            
+            # Save session state to persist clip mappings
+            if session_state:
+                from .clip_registry import get_clip_registry
+                session_state.save(player_manager, get_clip_registry(), force=True)
+                logger.debug("💾 Session state saved after clip mapping")
             
             return jsonify({'success': True})
         except Exception as e:

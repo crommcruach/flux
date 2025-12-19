@@ -21,6 +21,8 @@ export class FilesTab {
         this.thumbnailCache = new Map(); // Cache loaded thumbnails
         this.hoverPreview = null; // Hover preview element
         this.previewModal = null; // Preview modal element
+        this.contextMenu = null; // Context menu element
+        this.contextMenuTarget = null; // Currently right-clicked file
     }
     
     /**
@@ -34,6 +36,7 @@ export class FilesTab {
         if (this.enableThumbnails) {
             this.setupThumbnailSystem();
         }
+        this.setupContextMenu();
         await this.loadFiles();
     }
     
@@ -144,6 +147,188 @@ export class FilesTab {
         } else {
             toggleBtn.textContent = '🌳';
             toggleBtn.title = 'Tree view (click for list view)';
+        }
+    }
+    
+    /**
+     * Setup context menu
+     */
+    setupContextMenu() {
+        // Create context menu element
+        this.contextMenu = document.createElement('div');
+        this.contextMenu.className = 'file-context-menu';
+        this.contextMenu.innerHTML = `
+            <div class="context-menu-item" data-action="preview">
+                <i class="bi bi-play-circle"></i> Preview
+            </div>
+            <div class="context-menu-item" data-action="playlist1">
+                <i class="bi bi-collection-play"></i> Add to Video Playlist
+            </div>
+            <div class="context-menu-item" data-action="playlist2">
+                <i class="bi bi-collection-play"></i> Add to Art-Net Playlist
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item context-menu-item-danger" data-action="delete">
+                <i class="bi bi-trash"></i> Delete File
+            </div>
+        `;
+        document.body.appendChild(this.contextMenu);
+        
+        // Close menu on click outside
+        document.addEventListener('click', (e) => {
+            if (!this.contextMenu.contains(e.target)) {
+                this.hideContextMenu();
+            }
+        });
+        
+        // Close menu on window resize
+        window.addEventListener('resize', () => {
+            this.hideContextMenu();
+        });
+        
+        // Handle menu item clicks
+        this.contextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                const action = item.getAttribute('data-action');
+                this.handleContextMenuAction(action);
+                this.hideContextMenu();
+            });
+        });
+    }
+    
+    /**
+     * Show context menu at position
+     */
+    showContextMenu(x, y, filePath) {
+        this.contextMenuTarget = filePath;
+        this.contextMenu.style.display = 'block';
+        
+        // Get menu dimensions after making it visible
+        const menuWidth = this.contextMenu.offsetWidth;
+        const menuHeight = this.contextMenu.offsetHeight;
+        
+        // Get viewport dimensions
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        // Adjust position to keep menu within viewport bounds
+        let posX = x;
+        let posY = y;
+        
+        // Check right boundary
+        if (posX + menuWidth > viewportWidth) {
+            posX = viewportWidth - menuWidth - 5; // 5px padding
+        }
+        
+        // Check bottom boundary
+        if (posY + menuHeight > viewportHeight) {
+            posY = viewportHeight - menuHeight - 5; // 5px padding
+        }
+        
+        // Ensure menu doesn't go off left/top
+        posX = Math.max(5, posX);
+        posY = Math.max(5, posY);
+        
+        this.contextMenu.style.left = `${posX}px`;
+        this.contextMenu.style.top = `${posY}px`;
+    }
+    
+    /**
+     * Hide context menu
+     */
+    hideContextMenu() {
+        this.contextMenu.style.display = 'none';
+        this.contextMenuTarget = null;
+    }
+    
+    /**
+     * Handle context menu action
+     */
+    async handleContextMenuAction(action) {
+        if (!this.contextMenuTarget) return;
+        
+        const filePath = this.contextMenuTarget;
+        
+        switch (action) {
+            case 'preview':
+                // Get file details from filteredFiles
+                const fileInfo = this.filteredFiles.find(f => f.path === filePath);
+                if (fileInfo) {
+                    this.showFilePreviewModal(filePath, fileInfo.type, fileInfo.filename, fileInfo.size_human, fileInfo.folder || '');
+                }
+                break;
+            case 'playlist1':
+                await this.addToPlaylist('video', filePath);
+                break;
+            case 'playlist2':
+                await this.addToPlaylist('artnet', filePath);
+                break;
+            case 'delete':
+                await this.deleteFile(filePath);
+                break;
+        }
+    }
+    
+    /**
+     * Add file to playlist
+     */
+    async addToPlaylist(playerId, filePath) {
+        try {
+            // Get file info
+            const fileInfo = this.filteredFiles.find(f => f.path === filePath);
+            const fileType = fileInfo ? fileInfo.type : 'video';
+            const fileName = filePath.split('/').pop();
+            
+            // Dispatch custom event that player.js will handle
+            const event = new CustomEvent('addToPlaylistRequested', {
+                detail: {
+                    playerId: playerId,
+                    filePath: filePath,
+                    fileType: fileType,
+                    fileName: fileName
+                }
+            });
+            window.dispatchEvent(event);
+            
+            const playlistName = playerId === 'video' ? 'Video Playlist' : 'Art-Net Playlist';
+            console.log(`✅ Add to ${playlistName} requested:`, filePath);
+            
+        } catch (error) {
+            console.error('Error adding to playlist:', error);
+            alert(`Error: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Delete file
+     */
+    async deleteFile(filePath) {
+        const fileName = filePath.split('/').pop();
+        
+        if (!confirm(`Are you sure you want to delete "${fileName}"?\n\nThis action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/files/delete`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: filePath })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                console.log(`✅ File deleted:`, filePath);
+                // Refresh file list
+                await this.refresh();
+            } else {
+                console.error('Failed to delete file:', result.error);
+                alert(`Failed to delete file: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('Error deleting file:', error);
+            alert(`Error: ${error.message}`);
         }
     }
     
@@ -620,7 +805,7 @@ export class FilesTab {
                 thumbnail.addEventListener('mousemove', (e) => {
                     if (this.hoverPreview && this.hoverPreview.classList.contains('show')) {
                         const x = e.clientX + 20;
-                        const y = e.clientY + 20;
+                        const y = e.clientY - this.hoverPreview.offsetHeight - 10;
                         this.hoverPreview.style.left = `${x}px`;
                         this.hoverPreview.style.top = `${y}px`;
                     }
@@ -628,20 +813,6 @@ export class FilesTab {
                 
                 thumbnail.addEventListener('mouseleave', () => {
                     this.hideHoverPreview();
-                });
-            });
-            
-            // Right-click for preview modal
-            container.querySelectorAll('.tree-node.file').forEach(file => {
-                file.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    
-                    const path = file.getAttribute('data-path');
-                    const type = file.getAttribute('data-type');
-                    const filename = file.getAttribute('data-filename') || path;
-                    const size = file.getAttribute('data-size') || 'Unknown';
-                    
-                    this.showFilePreviewModal(path, type, filename, size, '');
                 });
             });
         }
@@ -685,6 +856,14 @@ export class FilesTab {
         const fileItems = document.querySelectorAll(`#${this.containerId} .file-item`);
         
         fileItems.forEach(item => {
+            // Context menu event
+            item.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const path = item.getAttribute('data-path');
+                // Use clientX/clientY for viewport-relative positioning (works with fixed positioning)
+                this.showContextMenu(e.clientX, e.clientY, path);
+            });
+            
             // Click event for multiselect
             if (this.enableMultiselect) {
                 item.addEventListener('click', (e) => {
@@ -750,7 +929,7 @@ export class FilesTab {
                 thumbnail.addEventListener('mousemove', (e) => {
                     if (this.hoverPreview && this.hoverPreview.classList.contains('show')) {
                         const x = e.clientX + 20;
-                        const y = e.clientY + 20;
+                        const y = e.clientY - this.hoverPreview.offsetHeight - 10;
                         this.hoverPreview.style.left = `${x}px`;
                         this.hoverPreview.style.top = `${y}px`;
                     }
@@ -758,21 +937,6 @@ export class FilesTab {
                 
                 thumbnail.addEventListener('mouseleave', () => {
                     this.hideHoverPreview();
-                });
-            });
-            
-            // Right-click for preview modal
-            fileItems.forEach(item => {
-                item.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    
-                    const path = item.getAttribute('data-path');
-                    const type = item.getAttribute('data-type');
-                    const filename = item.getAttribute('data-filename') || path;
-                    const size = item.getAttribute('data-size') || 'Unknown';
-                    const folder = item.getAttribute('data-folder') || '';
-                    
-                    this.showFilePreviewModal(path, type, filename, size, folder);
                 });
             });
         }

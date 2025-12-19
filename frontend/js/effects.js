@@ -311,9 +311,12 @@ function renderParameterControl(param, currentValue, effectIndex) {
                         id="${controlId}"
                         onchange="updateParameter(${effectIndex}, '${param.name}', this.value)"
                     >
-                        ${(param.options || []).map(opt => 
-                            `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
-                        ).join('')}
+                        ${(param.options || []).map(opt => {
+                            // Handle both string arrays and object arrays with value/label
+                            const optValue = typeof opt === 'string' ? opt : opt.value;
+                            const optLabel = typeof opt === 'string' ? opt : opt.label;
+                            return `<option value="${optValue}" ${value === optValue ? 'selected' : ''}>${optLabel}</option>`;
+                        }).join('')}
                     </select>
                     ${param.description ? `<div class="parameter-description">${param.description}</div>` : ''}
                 </div>

@@ -130,6 +130,11 @@ class VideoSource(FrameSource):
     
     def _load_cache(self, points_json_path):
         """Lädt gecachte RGB-Daten wenn verfügbar."""
+        # Check if RGB cache is enabled in config
+        enable_rgb_cache = self.config.get('performance', {}).get('enable_rgb_cache', True) if self.config else True
+        if not enable_rgb_cache:
+            return False
+        
         if not self.cache_manager:
             return False
         

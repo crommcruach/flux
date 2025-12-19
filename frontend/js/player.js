@@ -82,6 +82,9 @@ let selectedLayerClipId = null;  // clip_id of selected layer
 let masterPlaylist = null;  // 'video' or 'artnet' or null
 let sequencerModeActive = false;  // True when sequencer controls all playlists
 
+// Playlist Context Menu Clipboard
+let clipboardClip = null;  // {clip: {...}, sourcePlaylist: 'video'|'artnet'}
+
 // ========================================
 // INITIALIZATION
 // ========================================
@@ -125,6 +128,47 @@ async function init() {
         
         // Initialize tab components (includes search functionality)
         await initializeTabComponents();
+        
+        // Listen for playlist add requests from file browser context menu
+        window.addEventListener('addToPlaylistRequested', async (e) => {
+            const {playerId, filePath, fileType, fileName} = e.detail;
+            const config = playerConfigs[playerId];
+            
+            if (!config) {
+                console.error(`Player config not found for: ${playerId}`);
+                return;
+            }
+            
+            let newItem;
+            if (fileType === 'image') {
+                // Create static_picture generator for images
+                newItem = {
+                    path: `generator:static_picture`,
+                    name: `🖼️ ${fileName}`,
+                    id: crypto.randomUUID(),
+                    type: 'generator',
+                    generator_id: 'static_picture',
+                    parameters: {
+                        image_path: filePath,
+                        duration: 10
+                    }
+                };
+            } else {
+                // Video file
+                newItem = {
+                    path: filePath,
+                    name: `🎬 ${fileName}`,
+                    id: crypto.randomUUID(),
+                    type: 'video'
+                };
+            }
+            
+            config.files.push(newItem);
+            await updatePlaylist(playerId);
+            renderPlaylist(playerId);
+            
+            console.log(`✅ Added ${fileName} to ${playerId} playlist`);
+        });
         
         await loadAvailableEffects();
         await loadAvailableGenerators();
@@ -283,7 +327,7 @@ async function init() {
                 
                 // Also refresh clip effects if this was a clip effect change
                 if (data.clip_id && selectedClipId === data.clip_id) {
-                    await loadClipEffects(selectedClipId, selectedClipPlayerType);
+                    await refreshClipEffects();
                 }
             });
             
@@ -1158,6 +1202,19 @@ window.loadGeneratorClip = async function(generatorId, playerType = 'video', cli
             
             // Refresh effects and show generator parameters
             await refreshClipEffects();
+            
+            // Log transition effect if present
+            const config = playerConfigs[playerType];
+            const clipData = config.files.find(item => item.id === selectedClipId);
+            if (clipData && clipData.effects) {
+                const transitionEffect = clipData.effects.find(e => e.effect === 'transition');
+                if (transitionEffect) {
+                    debug.log(`🎬 Generator has custom transition:`, transitionEffect.parameters);
+                } else {
+                    debug.log(`🎬 Generator using default playlist transition`);
+                }
+            }
+            
             await displayGeneratorParameters(generatorId, paramsData.parameters);
         } else {
             showToast(`❌ Failed to load generator: ${data.error}`, 'error');
@@ -1259,6 +1316,22 @@ function renderGeneratorParametersSection() {
                        onchange="updateGeneratorParameter('${param.name}', this.value)"
                        class="form-control form-control-sm">
             `;
+        } else if (param.type === 'color') {
+            const colorPickerId = `gen-color-picker-${param.name}`;
+            html += `
+                <div id="${colorPickerId}" class="color-picker-wrapper"></div>
+            `;
+            
+            // Initialize color picker after render
+            setTimeout(() => {
+                if (!document.getElementById(colorPickerId)) return;
+                const picker = new ColorPicker(colorPickerId, currentValue || param.default || '#ff0000', (hexColor) => {
+                    updateGeneratorParameter(param.name, hexColor);
+                });
+                // Store reference for cleanup
+                if (!window.colorPickers) window.colorPickers = {};
+                window.colorPickers[colorPickerId] = picker;
+            }, 0);
         }
         
         html += `</div>`;
@@ -2013,10 +2086,27 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
         }, 50);
     };
     
+    // Context menu handler - right-click on playlist item
+    const contextmenuHandler = (e) => {
+        const item = e.target.closest('.playlist-item');
+        if (!item) return;
+        
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const indexAttr = item.getAttribute(cfg.dataAttr);
+        const index = parseInt(indexAttr);
+        const fileItem = files[index];
+        if (!fileItem) return;
+        
+        showPlaylistContextMenu(e.clientX, e.clientY, playlistId, index, fileItem);
+    };
+    
     // Attach delegated event listeners to container
     container.addEventListener('click', fxTabClickHandler); // FX tab first (stopPropagation)
     container.addEventListener('click', clickHandler);
     container.addEventListener('dblclick', dblclickHandler);
+    container.addEventListener('contextmenu', contextmenuHandler);
     container.addEventListener('dragstart', dragstartHandler, true); // Use capture for drag events
     container.addEventListener('dragend', dragendHandler, true);
     
@@ -2025,6 +2115,7 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
         { event: 'click', handler: fxTabClickHandler },
         { event: 'click', handler: clickHandler },
         { event: 'dblclick', handler: dblclickHandler },
+        { event: 'contextmenu', handler: contextmenuHandler },
         { event: 'dragstart', handler: dragstartHandler },
         { event: 'dragend', handler: dragendHandler }
     ];
@@ -2256,6 +2347,17 @@ window.loadFile = async function(playerId, filePath, clipId = null, addToPlaylis
             
             debug.log(`✅ ${config.name} file loaded with Clip-ID:`, selectedClipId);
             await refreshClipEffects();
+            
+            // Log transition effect if present
+            const clipData = config.files.find(item => item.id === selectedClipId);
+            if (clipData && clipData.effects) {
+                const transitionEffect = clipData.effects.find(e => e.effect === 'transition');
+                if (transitionEffect) {
+                    debug.log(`🎬 Clip has custom transition:`, transitionEffect.parameters);
+                } else {
+                    debug.log(`🎬 Clip using default playlist transition`);
+                }
+            }
             
             if (addToPlaylist) {
                 showToast(`✅ Added to ${config.name} playlist`, 'success');
@@ -2508,7 +2610,7 @@ async function restoreMasterSlaveState() {
         const response = await fetch(`${API_BASE}/api/player/sync_status`);
         const data = await response.json();
         
-        if (data.success && data.master_playlist) {
+        if (data.success) {
             debug.log('👑 Restoring master/slave state:', data);
             
             // Update UI checkboxes
@@ -2516,6 +2618,7 @@ async function restoreMasterSlaveState() {
             const artnetCheckbox = document.getElementById('artnetMasterSwitch');
             
             if (videoCheckbox && artnetCheckbox) {
+                // master_playlist can be 'video', 'artnet', or null
                 videoCheckbox.checked = (data.master_playlist === 'video');
                 artnetCheckbox.checked = (data.master_playlist === 'artnet');
                 masterPlaylist = data.master_playlist;
@@ -2563,14 +2666,14 @@ window.toggleMasterPlaylist = async function(playerId) {
     }
 };
 
-function updateMasterUI() {
+window.updateMasterUI = function() {
     // Update toggle switch states and labels for both players
     ['video', 'artnet'].forEach(playerId => {
         const checkbox = document.getElementById(`${playerId}MasterSwitch`);
         const label = document.getElementById(`${playerId}MasterLabel`);
         if (!checkbox || !label) return;
         
-        if (sequencerModeActive) {
+        if (window.sequencerModeActive) {
             // Sequencer mode: All playlists are slaves to sequencer
             checkbox.checked = false;
             checkbox.disabled = true;
@@ -2596,7 +2699,7 @@ function updateMasterUI() {
             label.className = 'master-label';
         }
     });
-}
+};
 
 // REMOVED: Master/slave sync polling - no external master changes expected
 // If needed in future, implement via WebSocket events instead of polling
@@ -3567,18 +3670,24 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
             break;
             
         case 'COLOR':
+            const colorPickerId = `${controlId}_colorpicker`;
             control = `
                 <div class="parameter-control">
-                    <label for="${controlId}" class="parameter-label">${param.name}</label>
-                    <input 
-                        type="color" 
-                        class="form-control form-control-color" 
-                        id="${controlId}"
-                        value="${value || '#FFFFFF'}"
-                        onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.value)"
-                    >
+                    <label class="parameter-label">${param.label || param.name}</label>
+                    <div id="${colorPickerId}" class="color-picker-wrapper"></div>
                 </div>
             `;
+            
+            // Initialize color picker after render
+            setTimeout(() => {
+                if (!document.getElementById(colorPickerId)) return;
+                const picker = new ColorPicker(colorPickerId, value || param.default || '#FFFFFF', (hexColor) => {
+                    updateParameter(player, effectIndex, param.name, hexColor);
+                });
+                // Store reference for cleanup
+                if (!window.colorPickers) window.colorPickers = {};
+                window.colorPickers[colorPickerId] = picker;
+            }, 0);
             break;
             
         default:
@@ -4184,6 +4293,17 @@ window.selectPlaylist = async function(playlistName) {
                     artnetCheckbox.checked = false;
                     masterPlaylist = null;
                     updateMasterUI();
+                }
+            }
+            
+            // Restore sequencer state if included
+            const sequencerData = loadData.sequencer;
+            if (sequencerData && window.loadSequencerState) {
+                try {
+                    await window.loadSequencerState(sequencerData);
+                    debug.log('🎵 Sequencer state restored from playlist');
+                } catch (error) {
+                    console.error('Failed to restore sequencer state:', error);
                 }
             }
             
@@ -5387,6 +5507,210 @@ async function reorderLayers(playerId, layerOrder) {
 
 // Add to init() function - we'll need to call loadLayers for both players
 // This will be integrated when init() is modified
+
+// ========================================
+// PLAYLIST CONTEXT MENU
+// ========================================
+
+function showPlaylistContextMenu(x, y, playlistId, index, fileItem) {
+    // Remove existing context menu
+    const existing = document.getElementById('playlistContextMenu');
+    if (existing) existing.remove();
+    
+    // Create context menu
+    const menu = document.createElement('div');
+    menu.id = 'playlistContextMenu';
+    menu.className = 'context-menu';
+    menu.style.position = 'fixed';
+    
+    const hasCopiedClip = clipboardClip !== null;
+    
+    menu.innerHTML = `
+        <div class="context-menu-item" data-action="clone">
+            <span>🔄 Clone</span>
+            <small>Full copy with effects & layers</small>
+        </div>
+        <div class="context-menu-item" data-action="duplicate">
+            <span>📄 Duplicate</span>
+            <small>Same file, new ID (no effects)</small>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" data-action="copy">
+            <span>📋 Copy</span>
+            <small>Copy base clip (no effects)</small>
+        </div>
+        <div class="context-menu-item ${!hasCopiedClip ? 'disabled' : ''}" data-action="paste">
+            <span>📥 Paste</span>
+            <small>${hasCopiedClip ? 'Paste copied clip' : 'No clip copied'}</small>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item context-menu-item-danger" data-action="remove">
+            <span>🗑️ Remove Clip</span>
+            <small>Delete from playlist</small>
+        </div>
+    `;
+    
+    document.body.appendChild(menu);
+    
+    // Position menu (with viewport boundary checking)
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    let posX = x;
+    let posY = y;
+    
+    if (posX + menuRect.width > viewportWidth) {
+        posX = viewportWidth - menuRect.width - 5;
+    }
+    if (posY + menuRect.height > viewportHeight) {
+        posY = viewportHeight - menuRect.height - 5;
+    }
+    
+    menu.style.left = `${posX}px`;
+    menu.style.top = `${posY}px`;
+    
+    // Handle menu item clicks
+    menu.addEventListener('click', async (e) => {
+        const menuItem = e.target.closest('.context-menu-item');
+        if (!menuItem || menuItem.classList.contains('disabled')) return;
+        
+        const action = menuItem.getAttribute('data-action');
+        
+        try {
+            switch (action) {
+                case 'clone':
+                    await clonePlaylistItem(playlistId, index, fileItem);
+                    break;
+                case 'duplicate':
+                    await duplicatePlaylistItem(playlistId, index, fileItem);
+                    break;
+                case 'copy':
+                    copyPlaylistItem(playlistId, fileItem);
+                    break;
+                case 'paste':
+                    await pastePlaylistItem(playlistId, index);
+                    break;
+                case 'remove':
+                    await removePlaylistItem(playlistId, index);
+                    break;
+            }
+        } catch (error) {
+            console.error(`Error executing ${action}:`, error);
+            showToast(`Error: ${error.message}`, 'error');
+        }
+        
+        menu.remove();
+    });
+    
+    // Close menu on click outside
+    const closeHandler = (e) => {
+        if (!menu.contains(e.target)) {
+            menu.remove();
+            document.removeEventListener('click', closeHandler);
+        }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+}
+
+async function clonePlaylistItem(playlistId, index, fileItem) {
+    const config = playerConfigs[playlistId];
+    if (!config) return;
+    
+    // Deep clone the item with all effects, layers, and parameters
+    const clonedItem = JSON.parse(JSON.stringify(fileItem));
+    clonedItem.id = crypto.randomUUID();
+    clonedItem.name = fileItem.name + ' (Clone)';
+    
+    // Insert after original
+    config.files.splice(index + 1, 0, clonedItem);
+    
+    await updatePlaylist(playlistId);
+    renderPlaylist(playlistId);
+    
+    showToast(`✅ Cloned: ${fileItem.name}`, 'success');
+    debug.log(`🔄 Cloned playlist item: ${fileItem.name} → ${clonedItem.name}`);
+}
+
+async function duplicatePlaylistItem(playlistId, index, fileItem) {
+    const config = playerConfigs[playlistId];
+    if (!config) return;
+    
+    // Create new item with only basic properties (no effects/layers)
+    const duplicatedItem = {
+        path: fileItem.path,
+        id: crypto.randomUUID(),
+        type: fileItem.type,
+        name: fileItem.name + ' (Duplicate)'
+    };
+    
+    // Copy generator-specific fields if it's a generator
+    if (fileItem.type === 'generator' && fileItem.generator_id) {
+        duplicatedItem.generator_id = fileItem.generator_id;
+        duplicatedItem.parameters = {};
+    }
+    
+    // Insert after original
+    config.files.splice(index + 1, 0, duplicatedItem);
+    
+    await updatePlaylist(playlistId);
+    renderPlaylist(playlistId);
+    
+    showToast(`✅ Duplicated: ${fileItem.name}`, 'success');
+    debug.log(`📄 Duplicated playlist item: ${fileItem.name} → ${duplicatedItem.name}`);
+}
+
+function copyPlaylistItem(playlistId, fileItem) {
+    // Copy base clip info to clipboard (no effects/layers)
+    clipboardClip = {
+        clip: {
+            path: fileItem.path,
+            type: fileItem.type,
+            name: fileItem.name,
+            // Copy generator-specific fields if it's a generator
+            ...(fileItem.type === 'generator' && fileItem.generator_id ? {
+                generator_id: fileItem.generator_id,
+                parameters: {}
+            } : {})
+        },
+        sourcePlaylist: playlistId
+    };
+    
+    showToast(`📋 Copied: ${fileItem.name}`, 'success');
+    debug.log(`📋 Copied to clipboard: ${fileItem.name}`);
+}
+
+async function pastePlaylistItem(playlistId, index) {
+    if (!clipboardClip) return;
+    
+    const config = playerConfigs[playlistId];
+    if (!config) return;
+    
+    // Create new item from clipboard
+    const pastedItem = {
+        ...clipboardClip.clip,
+        id: crypto.randomUUID(),
+        name: clipboardClip.clip.name + ' (Pasted)'
+    };
+    
+    // Insert after clicked position
+    config.files.splice(index + 1, 0, pastedItem);
+    
+    await updatePlaylist(playlistId);
+    renderPlaylist(playlistId);
+    
+    showToast(`✅ Pasted: ${pastedItem.name}`, 'success');
+    debug.log(`📥 Pasted from clipboard: ${pastedItem.name}`);
+}
+
+async function removePlaylistItem(playlistId, index) {
+    // Call the appropriate remove function
+    if (playlistId === 'video') {
+        await window.removeFromVideoPlaylist(index);
+    } else if (playlistId === 'artnet') {
+        await window.removeFromArtnetPlaylist(index);
+    }
+}
 
 // Cleanup
 window.addEventListener('beforeunload', () => {

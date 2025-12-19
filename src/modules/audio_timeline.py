@@ -192,6 +192,8 @@ class AudioTimeline:
         self.clip_mapping = {int(k): v for k, v in clip_mapping_raw.items()}
         
         logger.info(f"📥 Timeline loaded: {len(self.splits)} splits, {len(self.clip_mapping)} mappings")
+        if self.clip_mapping:
+            logger.debug(f"   Restored clip mappings: {self.clip_mapping}")
     
     def save(self, file_path: str):
         """Save timeline to JSON file

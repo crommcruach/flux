@@ -206,23 +206,28 @@ class PlayerManager:
             except Exception as e:
                 logger.error(f"❌ Error emitting master_slave_changed WebSocket event: {e}")
         
-        # Initial Sync: When Master is activated, jump to index 0 and sync all players
+        # Initial Sync: When Master is activated, ALL playlists jump to index 0 and start from frame 0
         if player_id is not None:
-            master_player = self.get_player(player_id)
-            if master_player and len(master_player.playlist) > 0:
-                was_playing = master_player.is_playing
-                logger.info(f"Master {player_id} activated - jumping to index 0 (was at index {master_player.current_clip_index})")
-                
-                # Force master to index 0 (notify_manager=False to avoid double-sync)
-                master_player.load_clip_by_index(0, notify_manager=False)
-                
-                # Restart playback if it was playing
-                if was_playing and not master_player.is_playing:
-                    master_player.start()
-                
-                # Now sync all slaves to master at index 0
-                logger.info(f"Syncing all slaves to master {player_id} at index 0")
-                self.sync_slaves_to_master()
+            # Reset ALL players to index 0, frame 0 (master AND slaves)
+            for pid in self.get_all_player_ids():
+                player = self.get_player(pid)
+                if player and len(player.playlist) > 0:
+                    was_playing = player.is_playing
+                    logger.info(f"Master mode activated - resetting {pid} to index 0, frame 0 (was at index {player.current_clip_index})")
+                    
+                    # Force to index 0 (notify_manager=False to avoid triggering sync events)
+                    player.load_clip_by_index(0, notify_manager=False)
+                    
+                    # Explicitly reset source to frame 0 (ensure clean start)
+                    if hasattr(player, 'source') and player.source:
+                        player.source.reset()
+                        player.source.current_frame = 0
+                    
+                    # Restart playback if it was playing
+                    if was_playing and not player.is_playing:
+                        player.start()
+                    
+                    logger.debug(f"✅ {pid} reset to clip 0, frame 0, playing={player.is_playing}")
         
         return True
     
@@ -292,16 +297,42 @@ class PlayerManager:
             logger.debug(f"Slave {slave_player.player_name} has empty playlist, skipping sync")
             return
         
-        # If Slave doesn't have enough clips → Stop playback
+        # If Slave doesn't have enough clips → Stop playback and show black screen
         if clip_index >= len(playlist):
             slave_player.stop()
-            logger.info(f"⏹️ Slave {slave_player.player_name} stopped (index {clip_index} out of range, has {len(playlist)} clips)")
+            
+            # Create black frame
+            import numpy as np
+            black_frame_rgb = np.zeros((slave_player.canvas_height, slave_player.canvas_width, 3), dtype=np.uint8)
+            
+            # Clear Art-Net output if enabled (expects RGB)
+            if hasattr(slave_player, 'artnet_manager') and slave_player.artnet_manager and slave_player.enable_artnet:
+                slave_player.artnet_manager.send_frame(black_frame_rgb.flatten().tolist())
+            
+            # Clear preview frame (expects BGR for MJPEG stream)
+            import cv2
+            black_frame_bgr = cv2.cvtColor(black_frame_rgb, cv2.COLOR_RGB2BGR)
+            slave_player.last_video_frame = black_frame_bgr
+            slave_player.last_frame = None
+            
+            # Mark as auto-stopped so it can be restarted when master returns to valid range
+            slave_player._auto_stopped_by_master = True
+            logger.info(f"⏹️ Slave {slave_player.player_name} stopped (index {clip_index} out of range, has {len(playlist)} clips) - black screen")
             return
+        
+        # Check if slave was previously auto-stopped by master (out of range)
+        was_auto_stopped = getattr(slave_player, '_auto_stopped_by_master', False)
         
         # Load clip at index (this will restart playback if player was playing)
         success = slave_player.load_clip_by_index(clip_index, notify_manager=False)
         
         if success:
+            # If slave was auto-stopped and now has valid clip, restart playback
+            if was_auto_stopped and not slave_player.is_playing:
+                logger.info(f"🔄 Slave {slave_player.player_name} was auto-stopped, restarting playback at index {clip_index}")
+                slave_player.start()
+                slave_player._auto_stopped_by_master = False  # Clear flag
+            
             logger.debug(f"🔄 Slave {slave_player.player_name} synced to index {clip_index}")
             
             # Emit WebSocket event for slave clip change (for active border update)
@@ -432,10 +463,31 @@ class PlayerManager:
         # Load clip at slot_index in ALL playlists (they are all slaves to sequencer)
         for player_id, player in self.players.items():
             if player and player.playlist_manager.playlist and len(player.playlist_manager.playlist) > 0:
-                current_index = getattr(player, 'current_clip_index', -1)
+                playlist_length = len(player.playlist_manager.playlist)
                 
-                # Map slot index to clip index (with wrapping if slot exceeds playlist length)
-                target_index = slot_index % len(player.playlist_manager.playlist)
+                # Check if slot index exceeds playlist length → stop player and show black screen
+                if slot_index >= playlist_length:
+                    player.stop()
+                    
+                    # Create black frame
+                    import numpy as np
+                    black_frame_rgb = np.zeros((player.canvas_height, player.canvas_width, 3), dtype=np.uint8)
+                    
+                    # Clear Art-Net output if enabled
+                    if hasattr(player, 'artnet_manager') and player.artnet_manager and player.enable_artnet:
+                        player.artnet_manager.send_frame(black_frame_rgb.flatten().tolist())
+                    
+                    # Clear preview frame
+                    import cv2
+                    black_frame_bgr = cv2.cvtColor(black_frame_rgb, cv2.COLOR_RGB2BGR)
+                    player.last_video_frame = black_frame_bgr
+                    player.last_frame = None
+                    
+                    logger.info(f"⏹️ Sequencer slot {slot_index}: {player_id} stopped (only has {playlist_length} clips) - black screen")
+                    continue
+                
+                current_index = getattr(player, 'current_clip_index', -1)
+                target_index = slot_index
                 
                 if target_index != current_index or force_reload:
                     logger.info(f"🔄 Sequencer: Loading {player_id} clip {target_index}")
