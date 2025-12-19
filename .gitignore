@@ -55,6 +55,9 @@ htmlcov/
 *.log
 logs/
 
+# Session state
+session_state.json
+
 # RGB Cache
 cache/
 *.rgbz
