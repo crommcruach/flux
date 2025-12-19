@@ -191,7 +191,7 @@ class RestAPI:
         
         # Register Sequencer API
         from .api_sequencer import register_sequencer_routes
-        register_sequencer_routes(self.app, self.player_manager, self.config)
+        register_sequencer_routes(self.app, self.player_manager, self.config, session_state)
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
@@ -445,6 +445,56 @@ class RestAPI:
                         
                         # Invalidate cache so changes are picked up
                         registry._invalidate_cache(clip_id)
+                        
+                        # 🎬 Check if this is a transition effect and update TransitionManager
+                        is_transition = effect.get('effect') == 'transition' or effect.get('plugin_id') == 'transition'
+                        if is_transition and player.transition_manager:
+                            logger.info(f"🎬 Transition effect parameter changed: {param_name}={value}")
+                            # Get the full transition config from the effect plugin
+                            try:
+                                # Use load_plugin() to create a new instance (proper way)
+                                transition_effect_plugin = player.plugin_manager.load_plugin('transition')
+                                
+                                if transition_effect_plugin:
+                                    transition_config = transition_effect_plugin.get_transition_config(effect.get('parameters', {}))
+                                    
+                                    if transition_config:
+                                        plugin_name = transition_config.get('plugin')
+                                        
+                                        # Load the actual transition plugin instance (use load_plugin not get_plugin)
+                                        transition_plugin_instance = player.plugin_manager.load_plugin(plugin_name)
+                                        
+                                        if transition_plugin_instance:
+                                            # Save original defaults before applying custom transition
+                                            if not hasattr(player.transition_manager, '_original_effect'):
+                                                player.transition_manager._original_effect = player.transition_manager.config.get('effect', 'fade')
+                                                player.transition_manager._original_plugin = player.transition_manager.config.get('plugin')
+                                                player.transition_manager._original_duration = player.transition_manager.config.get('duration', 1.0)
+                                                player.transition_manager._original_easing = player.transition_manager.config.get('easing', 'ease_in_out')
+                                                logger.debug(f"🎬 Saved playlist defaults: {player.transition_manager._original_effect}")
+                                            
+                                            # Extract actual values (handle triple-slider metadata)
+                                            duration = transition_config.get('duration', 1.0)
+                                            if isinstance(duration, dict) and '_value' in duration:
+                                                duration = duration['_value']
+                                            
+                                            easing = transition_config.get('easing', 'ease_in_out')
+                                            if isinstance(easing, dict) and '_value' in easing:
+                                                easing = easing['_value']
+                                            
+                                            player.transition_manager.configure(
+                                                plugin=transition_plugin_instance,
+                                                effect=plugin_name,
+                                                duration=duration,
+                                                easing=easing
+                                            )
+                                            logger.info(f"🎬 Applied custom transition: {plugin_name}")
+                                        else:
+                                            logger.warning(f"🎬 Transition plugin not found: {plugin_name}")
+                                    else:
+                                        logger.debug(f"🎬 Transition effect disabled")
+                            except Exception as e:
+                                logger.error(f"🎬 Error applying transition config: {e}")
                         
                         emit('command.response', {
                             'success': True,

@@ -248,6 +248,49 @@ class Player:
         """Loop playlist setter - delegates to playlist_manager."""
         self.playlist_manager.loop_playlist = value
     
+    def _find_clip_by_id(self, clip_id):
+        """
+        Find a clip by ID in the clip registry (where effects are stored).
+        
+        Args:
+            clip_id: Clip ID to search for
+            
+        Returns:
+            dict: Clip data or None
+        """
+        # Effects are stored in clip_registry, not in playlist data
+        from .clip_registry import get_clip_registry
+        registry = get_clip_registry()
+        return registry.get_clip(clip_id)
+    
+    def _extract_transition_from_effects(self, effects):
+        """
+        Extract transition effect configuration from clip effects.
+        
+        Args:
+            effects: List of effect dicts from clip
+            
+        Returns:
+            dict or None: Transition config or None if no transition effect found
+        """
+        if not effects or not isinstance(effects, list):
+            return None
+            
+        for effect in effects:
+            # Check both 'effect' and 'plugin_id' keys (registry uses plugin_id)
+            if effect.get('effect') == 'transition' or effect.get('plugin_id') == 'transition':
+                # Load the transition effect plugin
+                try:
+                    plugin = self.plugin_manager.load_plugin('transition')
+                    if plugin:
+                        parameters = effect.get('parameters', {})
+                        config = plugin.get_transition_config(parameters)
+                        return config
+                except Exception as e:
+                    logger.error(f"🎬 [{self.player_name}] Error extracting transition config: {e}")
+                    return None
+        return None
+    
     def switch_source(self, new_source):
         """
         Wechselt zu einer neuen Frame-Quelle ohne Player zu zerstören.
@@ -348,6 +391,77 @@ class Player:
             if self.thread.is_alive():
                 logger.warning(f"[{self.player_name}] Thread could not be stopped when switching clips!")
         
+        # --- Check for custom transition effect BEFORE loading clip ---
+        clip_data = self._find_clip_by_id(clip_id)
+        if clip_data:
+            effects = clip_data.get('effects', [])
+            transition_config = self._extract_transition_from_effects(effects)
+            
+            if transition_config:
+                plugin_name = transition_config.get('plugin')
+                logger.info(f"🎬 [{self.player_name}] Custom transition found: plugin={plugin_name}, duration={transition_config.get('duration')}s, easing={transition_config.get('easing')}")
+                
+                # Load the actual transition plugin instance using load_plugin()
+                transition_plugin_instance = self.plugin_manager.load_plugin(plugin_name)
+                if transition_plugin_instance:
+                    # Apply custom transition config to TransitionManager
+                    if self.transition_manager:
+                        # Extract actual values (handle triple-slider metadata)
+                        duration = transition_config.get('duration', 1.0)
+                        if isinstance(duration, dict) and '_value' in duration:
+                            duration = duration['_value']
+                        
+                        easing = transition_config.get('easing', 'ease_in_out')
+                        if isinstance(easing, dict) and '_value' in easing:
+                            easing = easing['_value']
+                        
+                        self.transition_manager.configure(
+                            plugin=transition_plugin_instance,
+                            effect=plugin_name,
+                            duration=duration,
+                            easing=easing
+                        )
+                        logger.info(f"🎬 [{self.player_name}] Applied transition plugin instance: {transition_plugin_instance}")
+                else:
+                    logger.error(f"🎬 [{self.player_name}] Transition plugin not found: {plugin_name}")
+            else:
+                logger.info(f"🎬 [{self.player_name}] No custom transition, restoring playlist defaults")
+                # Reset to playlist defaults by reloading the default transition plugin
+                if self.transition_manager:
+                    # Get current playlist transition config (defaults)
+                    current_effect = self.transition_manager.config.get('effect', 'fade')
+                    current_duration = self.transition_manager.config.get('duration', 1.0)
+                    current_easing = self.transition_manager.config.get('easing', 'ease_in_out')
+                    
+                    # Check if we need to restore (only if different from current)
+                    # Store original defaults on first custom transition
+                    if not hasattr(self.transition_manager, '_original_effect'):
+                        # Save the current config as original defaults
+                        self.transition_manager._original_effect = current_effect
+                        self.transition_manager._original_duration = current_duration
+                        self.transition_manager._original_easing = current_easing
+                        self.transition_manager._original_plugin = self.transition_manager.config.get('plugin')
+                        logger.debug(f"🎬 [{self.player_name}] Saved original defaults: {current_effect}")
+                    
+                    # Restore original defaults
+                    original_effect = getattr(self.transition_manager, '_original_effect', 'fade')
+                    original_plugin = getattr(self.transition_manager, '_original_plugin', None)
+                    
+                    if current_effect != original_effect or original_plugin:
+                        logger.info(f"🎬 [{self.player_name}] Restoring playlist default transition: {original_effect}")
+                        # Reload the original plugin
+                        if original_plugin is None:
+                            original_plugin = self.plugin_manager.load_plugin(original_effect)
+                        
+                        self.transition_manager.configure(
+                            plugin=original_plugin,
+                            effect=original_effect,
+                            duration=getattr(self.transition_manager, '_original_duration', 1.0),
+                            easing=getattr(self.transition_manager, '_original_easing', 'ease_in_out')
+                        )
+        else:
+            logger.debug(f"🎬 [{self.player_name}] Clip data not found for ID {clip_id}, using default transitions")
+        
         try:
             from .frame_source import VideoSource, GeneratorSource
             
@@ -398,13 +512,20 @@ class Player:
             
             self.current_loop = 0
             
-            # Reset transport effect loop counter if present (ensure clean start)
+            # Reset transport effect completely if present (ensure clean start for new clip)
             if self.layers:
                 for layer in self.layers:
                     for effect in layer.effects:
-                        if hasattr(effect, '_current_loop_iteration'):
-                            effect._current_loop_iteration = 0
-                            logger.info(f"🔁 [{self.player_name}] Reset transport effect loop counter on clip load")
+                        if effect.get('id') == 'transport' and effect.get('instance'):
+                            transport = effect['instance']
+                            # Force full reset for new clip
+                            transport._current_loop_iteration = 0
+                            transport.current_position = 0
+                            transport._virtual_frame = 0.0
+                            transport.loop_completed = False
+                            transport._has_played_once = False
+                            transport._frame_source = None  # Force re-initialization
+                            logger.debug(f"🔁 [{self.player_name}] Reset transport effect state on clip load")
             
             logger.info(f"✅ [{self.player_name}] Loaded clip at index {index}")
             
@@ -797,8 +918,9 @@ class Player:
                 if is_slave:
                     # Reset source to beginning for loop
                     current_source = self.layers[0].source if self.layers else self.source
-                    if current_source and hasattr(current_source, 'seek'):
-                        current_source.seek(0)
+                    if current_source:
+                        current_source.reset()
+                        current_source.current_frame = 0
                     self.current_loop = 0
                     
                     # Reset transport effect loop counter if present
@@ -807,7 +929,18 @@ class Player:
                             for effect in layer.effects:
                                 if hasattr(effect, '_current_loop_iteration'):
                                     effect._current_loop_iteration = 0
-                    continue
+                    
+                    # CRITICAL: Immediately fetch first frame for seamless looping
+                    # Don't rely on fall-through logic - fetch directly here
+                    if current_source:
+                        frame, source_delay = current_source.get_next_frame()
+                        if frame is None:
+                            logger.warning(f"⚠️ [{self.player_name}] Slave loop: Failed to fetch first frame after reset")
+                            break
+                        logger.debug(f"🔁 [{self.player_name}] Slave seamless loop: fetched frame 0")
+                    else:
+                        logger.error(f"❌ [{self.player_name}] Slave loop: No source available")
+                        break
                 
                 # Check playlist autoplay (only if NOT a slave!)
                 if self.playlist_manager.should_autoplay(is_slave):
@@ -903,6 +1036,56 @@ class Player:
                         # Only reload layers if switching to a different clip
                         if self.current_clip_id != next_clip_id:
                             self.current_clip_id = next_clip_id
+                            
+                            # 🎬 Check for custom transition effect on new clip
+                            clip_data = self._find_clip_by_id(next_clip_id)
+                            if clip_data:
+                                effects = clip_data.get('effects', [])
+                                transition_config = self._extract_transition_from_effects(effects)
+                                
+                                if transition_config:
+                                    plugin_name = transition_config.get('plugin')
+                                    logger.info(f"🎬 [{self.player_name}] Autoplay: Custom transition on clip: {plugin_name}")
+                                    
+                                    # Load and apply transition plugin
+                                    transition_plugin_instance = self.plugin_manager.load_plugin(plugin_name)
+                                    if transition_plugin_instance and self.transition_manager:
+                                        # Save defaults if not already saved
+                                        if not hasattr(self.transition_manager, '_original_effect'):
+                                            self.transition_manager._original_effect = self.transition_manager.config.get('effect', 'fade')
+                                            self.transition_manager._original_plugin = self.transition_manager.config.get('plugin')
+                                            self.transition_manager._original_duration = self.transition_manager.config.get('duration', 1.0)
+                                            self.transition_manager._original_easing = self.transition_manager.config.get('easing', 'ease_in_out')
+                                        
+                                        # Extract actual values (handle triple-slider metadata)
+                                        duration = transition_config.get('duration', 1.0)
+                                        if isinstance(duration, dict) and '_value' in duration:
+                                            duration = duration['_value']
+                                        
+                                        easing = transition_config.get('easing', 'ease_in_out')
+                                        if isinstance(easing, dict) and '_value' in easing:
+                                            easing = easing['_value']
+                                        
+                                        self.transition_manager.configure(
+                                            plugin=transition_plugin_instance,
+                                            effect=plugin_name,
+                                            duration=duration,
+                                            easing=easing
+                                        )
+                                else:
+                                    # No custom transition - restore defaults
+                                    if self.transition_manager and hasattr(self.transition_manager, '_original_effect'):
+                                        logger.info(f"🎬 [{self.player_name}] Autoplay: Restoring default transition")
+                                        original_plugin = self.transition_manager._original_plugin
+                                        if original_plugin is None:
+                                            original_plugin = self.plugin_manager.load_plugin(self.transition_manager._original_effect)
+                                        
+                                        self.transition_manager.configure(
+                                            plugin=original_plugin,
+                                            effect=self.transition_manager._original_effect,
+                                            duration=self.transition_manager._original_duration,
+                                            easing=self.transition_manager._original_easing
+                                        )
                             
                             # Load layers for new clip
                             video_dir = self.config.get('paths', {}).get('video_dir', 'video')

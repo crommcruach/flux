@@ -100,6 +100,7 @@ class TransitionManager:
                     return blended_frame
                 except Exception as e:
                     logger.error(f"❌ [{player_name}] Transition error: {e}")
+                    print(f"❌ TRANSITION ERROR: {e}")
                     self.active = False
                     return new_frame
         else:
