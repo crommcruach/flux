@@ -576,3 +576,18 @@ class PlayerManager:
             except Exception as e:
                 # Don't spam logs on WebSocket errors
                 pass
+    
+    def update_sequences(self, dt: float):
+        """
+        Update all dynamic parameter sequences
+        
+        Should be called from the render loop with delta time.
+        
+        Args:
+            dt: Delta time in seconds since last update
+        """
+        if hasattr(self, 'sequence_manager') and self.sequence_manager:
+            try:
+                self.sequence_manager.update_all(dt, self)
+            except Exception as e:
+                logger.error(f"Error updating sequences: {e}", exc_info=True)

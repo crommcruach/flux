@@ -1,6 +1,6 @@
-import WaveSurfer from 'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/wavesurfer.esm.js';
-import RegionsPlugin from 'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/plugins/regions.esm.js';
-import TimelinePlugin from 'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/plugins/timeline.esm.js';
+import WaveSurfer from '../libs/wavesurfer/dist/wavesurfer.esm.js';
+import RegionsPlugin from '../libs/wavesurfer/dist/plugins/regions.esm.js';
+import TimelinePlugin from '../libs/wavesurfer/dist/plugins/timeline.esm.js';
 
 let wavesurfer = null;
 let regions = null;

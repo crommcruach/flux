@@ -1,0 +1,493 @@
+<!doctype html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="utf-8" />
+
+<title>270° Circular Slider</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<style>
+
+:root {
+
+--size: 240px;
+
+--stroke: 16;
+
+--radius: 90; /* center to arc midpoint (size/2 - stroke) */
+
+--track: #d0d6dd;
+
+--progress: #2f6bff;
+
+--knob: #ffffff;
+
+--knob-border: #2f6bff;
+
+--bg: #f7f8fa;
+
+--text: #1c1f23;
+
+}
+
+body {
+
+margin: 0;
+
+min-height: 100vh;
+
+display: grid;
+
+place-items: center;
+
+background: var(--bg);
+
+font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+
+color: var(--text);
+
+}
+
+.wrap {
+
+width: var(--size);
+
+height: var(--size);
+
+position: relative;
+
+user-select: none;
+
+}
+
+.value {
+
+position: absolute;
+
+inset: 0;
+
+display: grid;
+
+place-items: center;
+
+font-size: 24px;
+
+font-weight: 600;
+
+pointer-events: none;
+
+}
+
+/* Make the slider focusable and visually indicate focus */
+
+.slider[tabindex="0"]:focus-visible + .value::after {
+
+content: '';
+
+position: absolute;
+
+width: calc(var(--size) - 8px);
+
+height: calc(var(--size) - 8px);
+
+border-radius: 50%;
+
+outline: 2px solid #87a6ff;
+
+outline-offset: 4px;
+
+}
+
+/* Optional label below */
+
+.label {
+
+text-align: center;
+
+margin-top: 12px;
+
+font-size: 14px;
+
+color: #4c5561;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="wrap">
+
+<svg id="slider" class="slider" width="240" height="240" viewBox="0 0 240 240"
+
+role="slider" aria-label="Circular slider"
+
+aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+
+tabindex="0">
+
+<!-- Base track (270° arc) -->
+
+<path id="track" fill="none" stroke-linecap="round"
+
+stroke="var(--track)" stroke-width="16"/>
+
+<!-- Progress arc -->
+
+<path id="progress" fill="none" stroke-linecap="round"
+
+stroke="var(--progress)" stroke-width="16"/>
+
+<!-- Knob -->
+
+<circle id="knob" r="12" fill="var(--knob)" stroke="var(--knob-border)" stroke-width="3"/>
+
+</svg>
+
+<div class="value"><span id="valueText">0</span></div>
+
+<div class="label">Move within 270° range (0–100)</div>
+
+</div>
+
+<script>
+
+// --- Geometry / configuration ---
+
+const svg = document.getElementById('slider');
+
+const track = document.getElementById('track');
+
+const progress = document.getElementById('progress');
+
+const knob = document.getElementById('knob');
+
+const valueText = document.getElementById('valueText');
+
+// SVG center and radius
+
+const cx = 120, cy = 120;
+
+const r = 90;
+
+// Slider value range
+
+const min = 0, max = 255;
+
+// 270° arc: start at 135°, end at 45° (clockwise), leaving 90° gap at top (centered on 90°)
+
+const startDeg = 135; // min position
+
+const endDegCanonical = 45; // canonical end (wraps through 360)
+
+const endDeg = 405; // same end but +360 to simplify clamping (135 → 405 is 270°)
+
+// Utility: degrees→radians
+
+const d2r = deg => (deg * Math.PI) / 180;
+
+// Utility: normalize angle to [0,360)
+
+const norm360 = deg => ((deg % 360) + 360) % 360;
+
+// Convert polar angle (deg) to cartesian point on circle
+
+function polarToCartesian(cx, cy, r, deg) {
+
+const rad = d2r(deg);
+
+return {
+
+x: cx + r * Math.cos(rad),
+
+y: cy + r * Math.sin(rad)
+
+};
+
+}
+
+// Build an SVG arc path string from start->end (clockwise)
+
+function arcPath(cx, cy, r, startDeg, endDegCW) {
+
+// We want clockwise sweep across the positive delta (wrap through 360 if needed)
+
+const start = polarToCartesian(cx, cy, r, startDeg);
+
+const endNorm = norm360(endDegCW);
+
+const startNorm = norm360(startDeg);
+
+// delta in [0,360)
+
+let delta = (endNorm - startNorm + 360) % 360;
+
+// If we intended a wrapped arc (e.g., 135 → 45 should be 270), ensure that case:
+
+// When caller passes endDegCW bigger than startDeg, delta calculated below changes.
+
+// To get correct delta when endDegCW is expressed >360, recompute if needed:
+
+if (endDegCW - startDeg > 180) delta = endDegCW - startDeg; // supports 270° etc.
+
+const end = polarToCartesian(cx, cy, r, endNorm);
+
+const largeArcFlag = delta > 180 ? 1 : 0;
+
+const sweepFlag = 1; // clockwise
+
+return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArcFlag} ${sweepFlag} ${end.x} ${end.y}`;
+
+}
+
+// Map angle to value (startDeg..endDeg [135..405] → min..max)
+
+function angleToValue(angleDegCW) {
+
+// Ensure angle is within [startDeg, endDeg] in CW measure
+
+let a = angleDegCW;
+
+if (a < startDeg) a += 360; // wrap into [135, 495)
+
+a = Math.min(Math.max(a, startDeg), endDeg); // clamp to [135, 405]
+
+const ratio = (a - startDeg) / (endDeg - startDeg); // 0..1
+
+return Math.round(min + ratio * (max - min));
+
+}
+
+// Map value back to angle in [startDeg, endDeg]
+
+function valueToAngle(val) {
+
+const ratio = (val - min) / (max - min);
+
+return startDeg + ratio * (endDeg - startDeg);
+
+}
+
+// Draw the static base track (270°)
+
+function drawTrack() {
+
+track.setAttribute('d', arcPath(cx, cy, r, startDeg, endDeg));
+
+}
+
+// Update progress arc + knob position + aria value
+
+function render(val) {
+
+const a = valueToAngle(val); // angle possibly > 360 for wrapped arcs
+
+// Progress path from startDeg to current angle
+
+progress.setAttribute('d', arcPath(cx, cy, r, startDeg, a));
+
+// Place knob at current angle (normalize to 0..360 for coordinates)
+
+const p = polarToCartesian(cx, cy, r, norm360(a));
+
+knob.setAttribute('cx', p.x);
+
+knob.setAttribute('cy', p.y);
+
+valueText.textContent = val;
+
+svg.setAttribute('aria-valuenow', String(val));
+
+}
+
+// Initialize
+
+drawTrack();
+
+let currentValue = 0;
+
+render(currentValue);
+
+// --- Interaction: pointer (mouse/touch) ---
+
+let dragging = false;
+
+function clientPointToAngle(e) {
+
+const rect = svg.getBoundingClientRect();
+
+const x = e.clientX - rect.left;
+
+const y = e.clientY - rect.top;
+
+// atan2 uses screen coords: with y downwards, angles increase clockwise, which suits us
+
+let angle = Math.atan2(y - cy, x - cx) * 180 / Math.PI; // -180..180, 0 at +x
+
+if (angle < 0) angle += 360; // normalize to 0..360
+
+// For clamping across the 270° span, push below-start angles (0..134) by +360
+
+if (angle < startDeg) angle += 360;
+
+angle = Math.min(Math.max(angle, startDeg), endDeg);
+
+return angle;
+
+}
+
+function angleEventToValue(e) {
+
+const angleDeg = clientPointToAngle(e);
+
+return angleToValue(angleDeg);
+
+}
+
+function onPointerDown(e) {
+
+svg.setPointerCapture?.(e.pointerId);
+
+dragging = true;
+
+currentValue = angleEventToValue(e);
+
+render(currentValue);
+
+e.preventDefault();
+
+}
+
+function onPointerMove(e) {
+
+if (!dragging) return;
+
+currentValue = angleEventToValue(e);
+
+render(currentValue);
+
+}
+
+function onPointerUp(e) {
+
+dragging = false;
+
+svg.releasePointerCapture?.(e.pointerId);
+
+}
+
+// Use pointer events if supported; fallback to mouse/touch
+
+if ('PointerEvent' in window) {
+
+svg.addEventListener('pointerdown', onPointerDown);
+
+window.addEventListener('pointermove', onPointerMove);
+
+window.addEventListener('pointerup', onPointerUp);
+
+} else {
+
+svg.addEventListener('mousedown', e => { dragging = true; currentValue = angleEventToValue(e); render(currentValue); });
+
+window.addEventListener('mousemove', e => { if (!dragging) return; currentValue = angleEventToValue(e); render(currentValue); });
+
+window.addEventListener('mouseup', () => { dragging = false; });
+
+svg.addEventListener('touchstart', e => { dragging = true; const t = e.touches[0]; currentValue = angleEventToValue(t); render(currentValue); });
+
+window.addEventListener('touchmove', e => { if (!dragging) return; const t = e.touches[0]; currentValue = angleEventToValue(t); render(currentValue); });
+
+window.addEventListener('touchend', () => { dragging = false; });
+
+}
+
+// --- Accessibility: keyboard control ---
+
+svg.addEventListener('keydown', (e) => {
+
+const step = 1;
+
+const big = 10;
+
+let handled = true;
+
+switch (e.key) {
+
+case 'ArrowRight':
+
+case 'ArrowUp':
+
+currentValue = Math.min(max, currentValue + step);
+
+break;
+
+case 'ArrowLeft':
+
+case 'ArrowDown':
+
+currentValue = Math.max(min, currentValue - step);
+
+break;
+
+case 'PageUp':
+
+currentValue = Math.min(max, currentValue + big);
+
+break;
+
+case 'PageDown':
+
+currentValue = Math.max(min, currentValue - big);
+
+break;
+
+case 'Home':
+
+currentValue = min;
+
+break;
+
+case 'End':
+
+currentValue = max;
+
+break;
+
+default:
+
+handled = false;
+
+}
+
+if (handled) {
+
+render(currentValue);
+
+e.preventDefault();
+
+}
+
+});
+
+// Example: expose a way to programmatically set value
+
+window.setCircularSliderValue = (val) => {
+
+currentValue = Math.min(Math.max(val, min), max);
+
+render(currentValue);
+
+};
+
+</script>
+
+</body>
+
+</html>

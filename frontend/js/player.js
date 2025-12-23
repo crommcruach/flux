@@ -129,6 +129,15 @@ async function init() {
         // Initialize tab components (includes search functionality)
         await initializeTabComponents();
         
+        // Initialize Sequence Manager
+        if (typeof SequenceManager !== 'undefined') {
+            window.sequenceManager = new SequenceManager();
+            window.sequenceManager.init();
+            console.log('✅ Sequence Manager initialized');
+        } else {
+            console.warn('⚠️ SequenceManager not available');
+        }
+        
         // Listen for playlist add requests from file browser context menu
         window.addEventListener('addToPlaylistRequested', async (e) => {
             const {playerId, filePath, fileType, fileName} = e.detail;
@@ -3224,7 +3233,7 @@ function renderClipEffects() {
         `;
     } else {
         html += clipEffects.map((effect, index) => 
-            renderEffectItem(effect, index, 'clip')
+            renderEffectItem(effect, index, 'clip', selectedClipId)
         ).join('');
     }
     
@@ -3243,6 +3252,11 @@ function renderClipEffects() {
             element.classList.add('expanded');
         }
     });
+    
+    // Restore inline audio controls for sequences
+    if (window.sequenceManager) {
+        window.sequenceManager.restoreInlineAudioControls();
+    }
 }
 
 let clearClipEffectsClicks = 0;
@@ -3293,10 +3307,11 @@ window.clearClipEffects = async function() {
 // EFFECT RENDERING
 // ========================================
 
-function renderEffectItem(effect, index, player) {
+function renderEffectItem(effect, index, player, clipId = null) {
     const metadata = effect.metadata || {};
     const parameters = metadata.parameters || [];
     const isSystemPlugin = metadata.system_plugin === true;
+    const pluginId = effect.plugin_id || '';
     
     // Debug: Log effect data
     if (parameters.length === 0) {
@@ -3333,7 +3348,7 @@ function renderEffectItem(effect, index, player) {
             </div>
             <div class="effect-body">
                 ${parameters.length > 0 ? 
-                    parameters.map(param => renderParameterControl(param, effect.parameters[param.name], index, player)).join('') :
+                    parameters.map(param => renderParameterControl(param, effect.parameters[param.name], index, player, pluginId, clipId)).join('') :
                     '<p class="text-muted">No configurable parameters</p>'
                 }
             </div>
@@ -3487,9 +3502,32 @@ window.removeEffect = async function(player, index, e) {
 // PARAMETER CONTROLS
 // ========================================
 
-function renderParameterControl(param, currentValue, effectIndex, player) {
+function renderParameterControl(param, currentValue, effectIndex, player, pluginId = '', clipId = null) {
     const value = currentValue !== undefined ? currentValue : param.default;
     const controlId = `${player}_effect_${effectIndex}_${param.name}`;
+    
+    // Construct parameter path for sequences following session state hierarchy
+    // Format: {player_id}.{clip_id}.{plugin_id}.{param_name}
+    let paramPath;
+    if (clipId) {
+        // Clip-level effect
+        paramPath = `${player}.${clipId}.${pluginId}.${param.name}`;
+    } else {
+        // Player-level effect (legacy format for backwards compatibility)
+        paramPath = `${player}.effects[${effectIndex}].parameters.${param.name}`;
+    }
+    
+    // Get UID from current value if it exists (_uid property), otherwise generate new one
+    let paramUid;
+    if (currentValue && typeof currentValue === 'object' && currentValue._uid) {
+        paramUid = currentValue._uid;
+        console.log(`♻️ Restoring UID for ${param.name}:`, paramUid);
+    } else {
+        paramUid = `param_${player}_${effectIndex}_${param.name}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        console.log(`🆕 Generated new UID for ${param.name}:`, paramUid);
+    }
+    
+    const sequenceBtn = `<button class="sequence-btn" onclick="window.sequenceManager && window.sequenceManager.showContextMenu('${paramPath}', '${param.label || param.name}', ${value}, event, '${paramUid}', '${controlId}'); event.stopPropagation();" title="Dynamic Parameter Sequence" data-param-uid="${paramUid}">⚙️</button>`;
     
     const paramType = (param.type || '').toUpperCase();
     
@@ -3539,6 +3577,7 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
             control = `
                 <div class="parameter-control">
                     <div class="parameter-label">
+                        ${sequenceBtn}
                         <label>${param.label || param.name}</label>
                         <span class="parameter-value" id="${controlId}_value">${intDisplayValue}</span>
                     </div>
@@ -3546,6 +3585,23 @@ function renderParameterControl(param, currentValue, effectIndex, player) {
                          data-default="${intDefaultValue}" 
                          data-decimals="${intDecimals}"
                          oncontextmenu="resetParameterToDefaultTriple(event, '${player}', ${effectIndex}, '${param.name}', ${intDefaultValue}, '${controlId}', '${controlId}_value', ${intDecimals})"></div>
+                    <!-- Audio Reactive Inline Controls (hidden by default) -->
+                    <div id="${controlId}_audio_controls" class="audio-inline-controls" style="display: none; margin-top: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <div class="audio-inline-bands">
+                                <button class="audio-band-btn-inline active" data-band="bass" data-param="${paramPath}" title="Bass">B</button>
+                                <button class="audio-band-btn-inline" data-band="mid" data-param="${paramPath}" title="Mid">M</button>
+                                <button class="audio-band-btn-inline" data-band="treble" data-param="${paramPath}" title="Treble">T</button>
+                            </div>
+                            <div class="audio-inline-directions">
+                                <button class="audio-dir-btn-inline active" data-direction="rise-from-max" data-param="${paramPath}" title="Rise from max">◄</button>
+                                <button class="audio-dir-btn-inline" data-direction="rise-from-min" data-param="${paramPath}" title="Rise from min">►</button>
+                                <button class="audio-dir-btn-inline" data-direction="beat-forward" data-param="${paramPath}" title="Beat forward">+</button>
+                                <button class="audio-dir-btn-inline" data-direction="beat-backward" data-param="${paramPath}" title="Beat backward">−</button>
+                            </div>
+                            <div id="${controlId}_attack_release" class="audio-inline-knob"></div>
+                        </div>
+                    </div>
                 </div>
             `;
             // Initialize triple-slider after DOM is updated

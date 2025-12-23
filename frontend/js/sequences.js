@@ -1,0 +1,1959 @@
+/**
+ * Dynamic Parameter Sequences - Frontend
+ * 
+ * Provides UI for creating and managing parameter sequences:
+ * - Audio Reactive
+ * - LFO (Low Frequency Oscillator)
+ * - Timeline Keyframes
+ */
+
+class SequenceManager {
+    constructor() {
+        this.sequences = [];
+        this.currentSequence = null;
+        this.currentParameter = null;
+        this.audioAnalyzerRunning = false;
+        this.audioFeatures = {};
+        this.audioGainKnob = null;
+        this.audioDevice = null;
+        this.audioDeviceName = null;
+        this.cachedAudioDevices = null; // Cache for audio devices
+        this.audioFeaturePeaks = { bass: 0.001, mid: 0.001, treble: 0.001 }; // Track peak values for adaptive scaling
+        this.peakDecayRate = 0.995; // Slow decay for peak tracking
+        this._contextMenuSetup = false;
+        this._audioContextMenuSetup = false;
+        this._audioPollingInterval = null;
+        
+        // Canvas contexts
+        this.spectrumCanvas = null;
+        this.lfoCanvas = null;
+        this.timelineCanvas = null;
+        
+        // Animation frame ID
+        this.animationFrame = null;
+        
+        // Initialize
+        this.init();
+    }
+    
+    init() {
+        console.log('SequenceManager initialized');
+        
+        // Load sequences from session state (not separate API call)
+        this.loadSequencesFromSessionState();
+        
+        // Restore audio analyzer state from session (async, doesn't block)
+        this.restoreAudioAnalyzerFromSession();
+        
+        // Setup WebSocket for audio features
+        this.setupWebSocket();
+        
+        // Start preview updates
+        this.startPreviewLoop();
+        
+        // Setup context menu
+        this.setupContextMenu();
+        
+        // Setup audio analyzer context menu
+        this.setupAudioContextMenu();
+        
+        // Initial gain
+        this.audioGain = 1.0;
+        
+        // Initialize audio gain circular slider
+        this.initAudioGainKnob();
+    }
+    
+    /**
+     * Setup context menu
+     */
+    setupContextMenu() {
+        const menu = document.getElementById('sequenceContextMenu');
+        if (!menu) return;
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.sequence-btn') && !e.target.closest('#sequenceContextMenu')) {
+                menu.classList.remove('show');
+            }
+        });
+    }
+    
+    /**
+     * Setup audio analyzer context menu
+     */
+    setupAudioContextMenu() {
+        const menu = document.getElementById('audioAnalyzerContextMenu');
+        if (!menu) return;
+        
+        // Prevent duplicate event listeners
+        if (this._audioContextMenuSetup) return;
+        this._audioContextMenuSetup = true;
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#globalAudioStatus') && !e.target.closest('#audioAnalyzerContextMenu')) {
+                menu.classList.remove('show');
+            }
+        });
+    }
+    
+    /**
+     * Show audio analyzer context menu
+     */
+    async showAudioContextMenu(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        const menu = document.getElementById('audioAnalyzerContextMenu');
+        if (!menu) return;
+        
+        // Update toggle text based on current state
+        const toggleText = document.getElementById('audioToggleText');
+        if (toggleText) {
+            toggleText.textContent = this.audioAnalyzerRunning ? '⏸️ Stop Analyzer' : '▶️ Start Analyzer';
+        }
+        
+        // Position menu at click location
+        menu.style.left = event.pageX + 'px';
+        menu.style.top = event.pageY + 'px';
+        menu.classList.add('show');
+        
+        // Use cached devices if available, otherwise load
+        const deviceList = document.getElementById('audioDeviceList');
+        if (this.cachedAudioDevices && deviceList) {
+            // Show cached devices immediately
+            this.populateDeviceList(this.cachedAudioDevices);
+        } else if (deviceList) {
+            // Show loading state
+            deviceList.innerHTML = '<div class="sequence-context-menu-item" style="opacity: 0.5;">Loading devices...</div>';
+            // Load devices for first time
+            this.loadAudioDevices();
+        }
+        
+        console.log('🎚️ Audio analyzer context menu opened');
+    }
+    
+    /**
+     * Load available audio devices
+     */
+    async loadAudioDevices() {
+        try {
+            const response = await fetch('/api/audio/devices');
+            if (response.ok) {
+                const data = await response.json();
+                const devices = data.devices || [];
+                
+                // Cache the devices
+                this.cachedAudioDevices = devices;
+                
+                // Populate the device list
+                this.populateDeviceList(devices);
+            }
+        } catch (error) {
+            console.error('Error loading audio devices:', error);
+            const deviceList = document.getElementById('audioDeviceList');
+            if (deviceList) {
+                deviceList.innerHTML = '<div class="sequence-context-menu-item" style="opacity: 0.5; color: #ff6b6b;">Error loading devices</div>';
+            }
+        }
+    }
+    
+    /**
+     * Populate device list in context menu
+     */
+    populateDeviceList(devices) {
+        const deviceList = document.getElementById('audioDeviceList');
+        if (!deviceList) return;
+        
+        // Clear existing devices
+        deviceList.innerHTML = '';
+        
+        if (devices.length === 0) {
+            deviceList.innerHTML = '<div class="sequence-context-menu-item" style="opacity: 0.5;">No devices found</div>';
+            return;
+        }
+        
+        // Add each device
+        devices.forEach(device => {
+            const item = document.createElement('div');
+            item.className = 'sequence-context-menu-item';
+            
+            // Check if this is the currently selected device
+            const isSelected = this.audioDevice === device.index;
+            if (isSelected) {
+                item.classList.add('selected');
+            }
+            
+            item.textContent = `${isSelected ? '✓ ' : ''}🎤 ${device.name}`;
+            item.onclick = () => this.setAudioDevice(device.index, device.name);
+            deviceList.appendChild(item);
+        });
+        
+        // Add refresh button
+        const refreshItem = document.createElement('div');
+        refreshItem.className = 'sequence-context-menu-item';
+        refreshItem.style.borderTop = '1px solid #444';
+        refreshItem.style.marginTop = '4px';
+        refreshItem.style.paddingTop = '8px';
+        refreshItem.style.opacity = '0.7';
+        refreshItem.textContent = '🔄 Refresh Devices';
+        refreshItem.onclick = () => {
+            this.cachedAudioDevices = null; // Clear cache
+            deviceList.innerHTML = '<div class="sequence-context-menu-item" style="opacity: 0.5;">Loading devices...</div>';
+            this.loadAudioDevices();
+        };
+        deviceList.appendChild(refreshItem);
+    }
+    
+    /**
+     * Set audio device by index
+     */
+    async setAudioDevice(deviceIndex, deviceName) {
+        const menu = document.getElementById('audioAnalyzerContextMenu');
+        if (menu) menu.classList.remove('show');
+        
+        try {
+            const wasRunning = this.audioAnalyzerRunning;
+            
+            // Stop if running
+            if (wasRunning) {
+                await this.stopAudioAnalyzer();
+            }
+            
+            console.log('🎚️ Switching to device:', deviceIndex, deviceName);
+            
+            // Store device selection
+            this.audioDevice = deviceIndex;
+            this.audioDeviceName = deviceName;
+            
+            // Restart with new device if it was running
+            if (wasRunning) {
+                await this.startAudioAnalyzer();
+                this.showNotification(`Audio device: ${deviceName}`, 'success');
+                
+                // Save to session
+                this.saveAudioAnalyzerToSession();
+            } else {
+                this.showNotification(`Device set to: ${deviceName}`, 'info');
+                
+                // Save to session even if not running
+                this.saveAudioAnalyzerToSession();
+            }
+        } catch (error) {
+            console.error('Error changing audio device:', error);
+            this.showNotification('Failed to change audio device', 'error');
+        }
+    }
+    
+    /**
+     * Get audio analyzer state for session saving
+     */
+    getAudioAnalyzerState() {
+        return {
+            running: this.audioAnalyzerRunning,
+            device: this.audioDevice || null,
+            deviceName: this.audioDeviceName || null,
+            gain: this.audioGainKnob ? this.audioGainKnob.getValue() : 1.0
+        };
+    }
+    
+    /**
+     * Restore audio analyzer state from session
+     */
+    async restoreAudioAnalyzerState(state) {
+        if (!state) return;
+        
+        try {
+            console.log('🔄 Restoring audio analyzer state:', state);
+            
+            // Restore device if specified
+            if (state.device !== null && state.device !== undefined) {
+                this.audioDevice = state.device;
+                this.audioDeviceName = state.deviceName || null;
+            }
+            
+            // Restore gain
+            if (state.gain !== undefined && this.audioGainKnob) {
+                this.audioGainKnob.setValue(state.gain);
+                // Send to backend
+                await fetch('/api/audio/gain', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gain: state.gain })
+                });
+            }
+            
+            // Restore running state
+            if (state.running && !this.audioAnalyzerRunning) {
+                await this.startAudioAnalyzer();
+            }
+            
+            console.log('✅ Audio analyzer state restored');
+        } catch (error) {
+            console.error('Error restoring audio analyzer state:', error);
+        }
+    }
+    
+    /**
+     * Restore audio analyzer from session state (called on page load)
+     */
+    async restoreAudioAnalyzerFromSession() {
+        try {
+            // Use centralized session loader instead of fetching separately
+            if (!window.sessionStateLoader) {
+                console.warn('⚠️ Session state loader not available');
+                return;
+            }
+
+            // Wait for state to be loaded if not already
+            if (!window.sessionStateLoader.isLoaded()) {
+                console.log('⏳ Waiting for session state to load...');
+                await window.sessionStateLoader.load();
+            }
+
+            const audioState = window.sessionStateLoader.get('audio_analyzer');
+            
+            if (audioState) {
+                // Convert backend state to frontend format
+                const state = {
+                    device: audioState.device,
+                    deviceName: null,  // Backend doesn't store device name
+                    gain: audioState.config?.gain || 1.0,
+                    running: audioState.running
+                };
+                
+                await this.restoreAudioAnalyzerState(state);
+            }
+        } catch (error) {
+            console.error('Error loading session state:', error);
+            // Don't auto-start on error - let user start manually
+        }
+    }
+    
+    /**
+     * Toggle audio analyzer on/off
+     */
+    async toggleAudioAnalyzer() {
+        const menu = document.getElementById('audioAnalyzerContextMenu');
+        if (menu) menu.classList.remove('show');
+        
+        if (this.audioAnalyzerRunning) {
+            await this.stopAudioAnalyzer();
+        } else {
+            await this.startAudioAnalyzer();
+        }
+    }
+    
+    /**
+     * Set audio source
+     */
+    async setAudioSource(source) {
+        const menu = document.getElementById('audioAnalyzerContextMenu');
+        if (menu) menu.classList.remove('show');
+        
+        try {
+            const wasRunning = this.audioAnalyzerRunning;
+            
+            // Stop if running
+            if (wasRunning) {
+                await this.stopAudioAnalyzer();
+            }
+            
+            // Set source in config
+            console.log('🎚️ Switching audio source to:', source);
+            
+            // Restart with new source
+            if (wasRunning) {
+                // Pass source parameter when starting
+                const response = await fetch('/api/audio/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ source: source })
+                });
+                
+                if (response.ok) {
+                    this.audioAnalyzerRunning = true;
+                    this.updateAudioStatus();
+                    this.showNotification(`Audio source changed to ${source}`, 'success');
+                } else {
+                    throw new Error('Failed to restart with new source');
+                }
+            } else {
+                this.showNotification(`Audio source set to ${source}`, 'info');
+            }
+        } catch (error) {
+            console.error('Error changing audio source:', error);
+            this.showNotification('Failed to change audio source', 'error');
+        }
+    }
+    
+    /**
+     * Show context menu for parameter
+     */
+    showContextMenu(parameterId, parameterLabel, currentValue, event, paramUid, controlId) {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        console.log('📝 Context menu for:', { parameterId, parameterLabel, currentValue, paramUid, controlId });
+        
+        // Store current parameter for context menu actions
+        this.contextParameter = {
+            id: parameterId,
+            label: parameterLabel,
+            value: currentValue,
+            uid: paramUid,
+            controlId: controlId
+        };
+        
+        const menu = document.getElementById('sequenceContextMenu');
+        if (!menu) return;
+        
+        // Position menu at click location
+        menu.style.left = event.pageX + 'px';
+        menu.style.top = event.pageY + 'px';
+        menu.classList.add('show');
+    }
+    
+    /**
+     * Open editor with specific type from context menu
+     */
+    openEditorWithType(type) {
+        console.log('🎯 Opening editor with type:', type);
+        
+        if (!this.contextParameter) {
+            console.error('❌ No context parameter set');
+            return;
+        }
+        
+        // Close context menu
+        document.getElementById('sequenceContextMenu').classList.remove('show');
+        
+        // For audio type, show inline controls WITHOUT creating sequence yet
+        if (type === 'audio') {
+            console.log('🎵 Showing audio inline controls for:', this.contextParameter.id);
+            this.showInlineAudioControlsEmpty(this.contextParameter.id);
+        } else {
+            // For other types, open editor modal
+            this.openEditor(this.contextParameter.id, this.contextParameter.label, this.contextParameter.value, type);
+        }
+    }
+    
+    /**
+     * Show inline audio controls WITHOUT creating sequence (user will create by clicking band/direction)
+     */
+    showInlineAudioControlsEmpty(parameterId) {
+        console.log('🎵 Showing empty audio controls for:', parameterId);
+        
+        // Use controlId from context parameter (passed from button click)
+        const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
+        const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
+        
+        console.log('🔍 Looking for audio controls:', `${controlId}_audio_controls`);
+        
+        if (!controlsContainer) {
+            console.warn('⚠️ Audio controls container not found for:', parameterId, 'controlId:', controlId);
+            return;
+        }
+        
+        // Show the controls
+        controlsContainer.style.display = 'block';
+        
+        // Track selected band and direction
+        let selectedBand = null;
+        let selectedDirection = null;
+        
+        // Function to create sequence when both band and direction are selected
+        const tryCreateSequence = () => {
+            if (selectedBand && selectedDirection) {
+                this.createAudioSequenceWithConfig(parameterId, {
+                    band: selectedBand,
+                    direction: selectedDirection
+                });
+            }
+        };
+        
+        // Set up band buttons to select band and create if direction is set
+        const bandButtons = controlsContainer.querySelectorAll('.audio-band-btn-inline');
+        bandButtons.forEach(btn => {
+            btn.classList.remove('active');
+            btn.onclick = () => {
+                // Toggle active state
+                bandButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedBand = btn.dataset.band;
+                console.log('🎵 Band selected:', selectedBand);
+                tryCreateSequence();
+            };
+        });
+        
+        // Set up direction buttons to select direction and create if band is set
+        const dirButtons = controlsContainer.querySelectorAll('.audio-dir-btn-inline');
+        dirButtons.forEach(btn => {
+            btn.classList.remove('active');
+            btn.onclick = () => {
+                // Toggle active state
+                dirButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedDirection = btn.dataset.direction;
+                console.log('🎵 Direction selected:', selectedDirection);
+                tryCreateSequence();
+            };
+        });
+        
+        // Initialize attack/release knob
+        const knobContainer = document.getElementById(`${controlId}_attack_release`);
+        if (knobContainer && !knobContainer._circularSlider) {
+            const slider = new CircularSlider(knobContainer, {
+                min: 0.0,
+                max: 1.0,
+                value: 0.5,
+                step: 0.01,
+                arc: 270,
+                size: 'tiny',
+                label: '',
+                decimals: 2,
+                unit: '',
+                variant: 'primary',
+                showValue: false,
+                onChange: (value) => {
+                    // Update sequence if exists, otherwise just store value
+                    const sequence = this.sequences.find(s => s.target_parameter === parameterId);
+                    if (sequence) {
+                        this.updateSequenceInline(parameterId, { attack_release: value });
+                    }
+                }
+            });
+            knobContainer._circularSlider = slider;
+        }
+        
+        console.log('✅ Audio controls shown (no sequence created yet - select band + direction)');
+    }
+    
+    /**
+     * Create audio sequence with specific configuration (when user clicks band/direction)
+     */
+    async createAudioSequenceWithConfig(parameterId, updates) {
+        console.log('🎯 Creating audio sequence with config:', { parameterId, updates });
+        
+        // Use stored controlId from context parameter
+        const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
+        
+        // Get current knob value
+        const knobContainer = document.getElementById(`${controlId}_attack_release`);
+        const attackRelease = knobContainer?._circularSlider?.value || 0.5;
+        
+        // Get min/max from triple slider
+        const tripleSlider = getTripleSlider(controlId);
+        let minValue = 0;
+        let maxValue = 100;
+        
+        console.log('🔍 Looking for triple slider:', controlId);
+        console.log('🔍 Slider instance:', tripleSlider);
+        
+        if (tripleSlider) {
+            minValue = tripleSlider.rangeMin;
+            maxValue = tripleSlider.rangeMax;
+            console.log('📊 Using slider range:', { minValue, maxValue });
+        } else {
+            console.warn('⚠️ Triple slider not found, using defaults:', { minValue, maxValue });
+        }
+        
+        // Create config with values from UI
+        const config = {
+            feature: 'rms',
+            band: updates.band,
+            direction: updates.direction,
+            attack_release: attackRelease,
+            min_value: minValue,
+            max_value: maxValue,
+            invert: false
+        };
+        
+        const data = {
+            type: 'audio',
+            target_parameter: this.contextParameter.uid || parameterId,
+            config: config
+        };
+        
+        console.log('📦 Creating sequence with UID:', this.contextParameter.uid, 'config:', data);
+        
+        try {
+            const response = await fetch('/api/sequences', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ Audio sequence created:', result);
+                
+                await window.sessionStateLoader.reload();
+                await this.loadSequencesFromSessionState();
+                
+                const savedSequence = this.sequences.find(s => s.target_parameter === parameterId);
+                if (savedSequence) {
+                    this.showInlineAudioControls(parameterId, savedSequence);
+                }
+                
+                this.showNotification('Audio reactive applied!', 'success');
+            } else {
+                const error = await response.json();
+                console.error('❌ Server error:', error);
+                this.showNotification(`Error: ${error.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error creating audio sequence:', error);
+            this.showNotification('Failed to create audio sequence', 'error');
+        }
+    }
+    
+    /**
+     * Remove sequence from context menu
+     */
+    async removeSequenceFromContext() {
+        if (!this.contextParameter) return;
+        
+        // Close context menu
+        document.getElementById('sequenceContextMenu').classList.remove('show');
+        
+        // Find and delete sequence
+        const existing = this.sequences.find(s => s.target_parameter === this.contextParameter.id);
+        if (existing) {
+            this.currentSequence = existing;
+            await this.deleteSequence();
+        } else {
+            this.showNotification('No sequence found for this parameter', 'warning');
+        }
+    }
+    
+    /**
+     * Open sequence editor for a parameter
+     */
+    openEditor(parameterId, parameterLabel, currentValue, presetType = null) {
+        console.log('🔓 openEditor called:', { parameterId, parameterLabel, currentValue, presetType });
+        
+        this.currentParameter = {
+            id: parameterId,
+            label: parameterLabel,
+            value: currentValue
+        };
+        
+        console.log('📌 Set currentParameter:', this.currentParameter);
+        
+        // Check if sequence already exists for this parameter
+        const existing = this.sequences.find(s => s.target_parameter === parameterId);
+        if (existing && !presetType) {
+            this.currentSequence = existing;
+            this.loadSequenceIntoEditor(existing);
+            console.log('✏️ Editing existing sequence:', existing);
+        } else {
+            this.currentSequence = null;
+            this.resetEditor();
+            
+            // Select preset type if provided
+            if (presetType) {
+                this.selectType(presetType);
+                console.log('🎯 Preset type selected:', presetType);
+            }
+            
+            console.log('➕ Creating new sequence');
+        }
+        
+        // Update modal title
+        document.getElementById('sequenceParameterName').textContent = parameterLabel;
+        
+        // Show modal
+        const modal = document.getElementById('sequenceModal');
+        modal.classList.add('show');
+        modal.style.display = 'block';
+        console.log('✅ Modal shown');
+    }
+    
+    /**
+     * Close sequence editor
+     */
+    closeEditor() {
+        console.log('🔒 closeEditor called');
+        const modal = document.getElementById('sequenceModal');
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+        this.currentParameter = null;
+        this.currentSequence = null;
+    }
+    
+    /**
+     * Reset editor to default state
+     */
+    resetEditor() {
+        // Select Audio type by default
+        this.selectType('audio');
+        
+        // Reset audio form
+        document.getElementById('audioFeature').value = 'rms';
+        document.getElementById('audioMinValue').value = '0';
+        document.getElementById('audioMaxValue').value = '100';
+        document.getElementById('audioInvert').checked = false;
+        
+        // Reset audio band selection (default to bass)
+        this.selectAudioBand('bass');
+        
+        // Reset audio direction (default to rise-from-max)
+        this.selectAudioDirection('rise-from-max');
+        
+        // Reset attack/release knob to 0.5
+        if (this.audioAttackReleaseSlider) {
+            this.audioAttackReleaseSlider.setValue(0.5);
+        }
+        
+        // Reset LFO form
+        document.getElementById('lfoWaveform').value = 'sine';
+        document.getElementById('lfoFrequency').value = '1.0';
+        document.getElementById('lfoAmplitude').value = '1.0';
+        document.getElementById('lfoPhase').value = '0.0';
+        document.getElementById('lfoMinValue').value = '0';
+        document.getElementById('lfoMaxValue').value = '100';
+        
+        // Reset timeline form
+        document.getElementById('timelineKeyframes').innerHTML = '<p style="color: #666; text-align: center;">No keyframes yet</p>';
+        document.getElementById('timelineInterpolation').value = 'linear';
+        document.getElementById('timelineLoopMode').value = 'once';
+        document.getElementById('timelineDuration').value = '10.0';
+        
+        // Clear keyframes array
+        this.timelineKeyframes = [];
+    }
+    
+    /**
+     * Load existing sequence into editor
+     */
+    loadSequenceIntoEditor(sequence) {
+        this.selectType(sequence.type);
+        
+        const config = sequence.config || sequence;
+        
+        if (sequence.type === 'audio') {
+            document.getElementById('audioFeature').value = config.feature || 'rms';
+            document.getElementById('audioMinValue').value = config.min_value || 0;
+            document.getElementById('audioMaxValue').value = config.max_value || 100;
+            document.getElementById('audioInvert').checked = config.invert || false;
+            
+            // Restore band selection
+            const band = config.band || 'bass';
+            this.selectAudioBand(band);
+            
+            // Restore direction selection
+            const direction = config.direction || 'rise-from-min';
+            this.selectAudioDirection(direction);
+            
+            // Restore attack/release
+            if (this.audioAttackReleaseKnob && config.attack_release !== undefined) {
+                this.audioAttackReleaseKnob.setValue(config.attack_release);
+            }
+        } else if (sequence.type === 'lfo') {
+            document.getElementById('lfoWaveform').value = config.waveform || 'sine';
+            document.getElementById('lfoFrequency').value = config.frequency || 1.0;
+            document.getElementById('lfoAmplitude').value = config.amplitude || 1.0;
+            document.getElementById('lfoPhase').value = config.phase || 0.0;
+            document.getElementById('lfoMinValue').value = config.min_value || 0;
+            document.getElementById('lfoMaxValue').value = config.max_value || 100;
+        } else if (sequence.type === 'timeline') {
+            this.timelineKeyframes = config.keyframes || [];
+            this.renderKeyframesList();
+            document.getElementById('timelineInterpolation').value = config.interpolation || 'linear';
+            document.getElementById('timelineLoopMode').value = config.loop_mode || 'once';
+            document.getElementById('timelineDuration').value = config.duration || 10.0;
+            this.drawTimelinePreview();
+        }
+    }
+    
+    /**
+     * Select sequence type
+     */
+    selectType(type) {
+        // Update buttons
+        document.querySelectorAll('.sequence-type-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-type="${type}"]`).classList.add('active');
+        
+        // Show/hide controls
+        document.querySelectorAll('.sequence-controls').forEach(ctrl => {
+            ctrl.style.display = 'none';
+        });
+        document.getElementById(`${type}Controls`).style.display = 'block';
+        
+        // Initialize canvases if needed
+        if (type === 'audio' && !this.spectrumCanvas) {
+            this.spectrumCanvas = document.getElementById('audioSpectrumCanvas');
+            this.drawAudioSpectrum();
+            // Initialize attack/release knob
+            this.initAudioAttackReleaseKnob();
+        } else if (type === 'lfo' && !this.lfoCanvas) {
+            this.lfoCanvas = document.getElementById('lfoPreviewCanvas');
+            this.drawLFOPreview();
+        } else if (type === 'timeline' && !this.timelineCanvas) {
+            this.timelineCanvas = document.getElementById('timelineCanvas');
+            this.drawTimelinePreview();
+        }
+    }
+    
+    /**
+     * Save sequence
+     */
+    async saveSequence() {
+        console.log('💾 saveSequence() called');
+        console.log('📌 currentParameter:', this.currentParameter);
+        
+        if (!this.currentParameter) {
+            console.error('❌ No currentParameter set!');
+            this.showNotification('No parameter selected. Please close and reopen the editor.', 'error');
+            return;
+        }
+        
+        const typeBtn = document.querySelector('.sequence-type-btn.active');
+        if (!typeBtn) {
+            console.error('❌ No active sequence type button found');
+            this.showNotification('Please select a sequence type', 'error');
+            return;
+        }
+        
+        const type = typeBtn.dataset.type;
+        console.log('📝 Sequence type:', type);
+        
+        let config = {};
+        
+        if (type === 'audio') {
+            // Get selected band
+            const selectedBand = document.querySelector('.audio-band-btn.active')?.dataset.band || 'bass';
+            // Get selected direction
+            const selectedDirection = document.querySelector('.audio-direction-btn.active')?.dataset.direction || 'rise-from-min';
+            // Get attack/release value
+            const attackRelease = this.audioAttackReleaseKnob ? this.audioAttackReleaseKnob.getValue() : 0.1;
+            
+            config = {
+                feature: document.getElementById('audioFeature').value,
+                band: selectedBand,
+                direction: selectedDirection,
+                attack_release: attackRelease,
+                min_value: parseFloat(document.getElementById('audioMinValue').value),
+                max_value: parseFloat(document.getElementById('audioMaxValue').value),
+                invert: document.getElementById('audioInvert').checked
+            };
+        } else if (type === 'lfo') {
+            config = {
+                waveform: document.getElementById('lfoWaveform').value,
+                frequency: parseFloat(document.getElementById('lfoFrequency').value),
+                amplitude: parseFloat(document.getElementById('lfoAmplitude').value),
+                phase: parseFloat(document.getElementById('lfoPhase').value),
+                min_value: parseFloat(document.getElementById('lfoMinValue').value),
+                max_value: parseFloat(document.getElementById('lfoMaxValue').value)
+            };
+        } else if (type === 'timeline') {
+            config = {
+                keyframes: this.timelineKeyframes,
+                interpolation: document.getElementById('timelineInterpolation').value,
+                loop_mode: document.getElementById('timelineLoopMode').value,
+                duration: parseFloat(document.getElementById('timelineDuration').value)
+            };
+        }
+        
+        const data = {
+            type: type,
+            target_parameter: this.currentParameter.id,
+            config: config
+        };
+        
+        console.log('📦 Data to send:', data);
+        
+        try {
+            let response;
+            if (this.currentSequence) {
+                // Update existing
+                console.log('🔄 Updating existing sequence:', this.currentSequence.id);
+                response = await fetch(`/api/sequences/${this.currentSequence.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config: config })
+                });
+            } else {
+                // Create new
+                console.log('➕ Creating new sequence');
+                response = await fetch('/api/sequences', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+            }
+            
+            console.log('📡 Response status:', response.status);
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ Sequence saved:', result);
+                await window.sessionStateLoader.reload(); // Force reload to get updated state
+                await this.loadSequencesFromSessionState();
+                
+                // Show inline controls immediately if it's an audio sequence
+                if (type === 'audio' && this.currentParameter) {
+                    const savedSequence = this.sequences.find(s => s.target_parameter === this.currentParameter.id);
+                    if (savedSequence) {
+                        this.showInlineAudioControls(this.currentParameter.id, savedSequence);
+                    }
+                }
+                
+                this.closeEditor();
+                this.showNotification('Sequence saved successfully!', 'success');
+            } else {
+                const error = await response.json();
+                console.error('❌ Server error:', error);
+                this.showNotification(`Error: ${error.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error saving sequence:', error);
+            this.showNotification('Failed to save sequence', 'error');
+        }
+    }
+    
+    /**
+     * Delete sequence
+     */
+    async deleteSequence() {
+        if (!this.currentSequence) {
+            this.showNotification('No sequence to delete', 'warning');
+            return;
+        }
+        
+        if (!confirm('Delete this sequence?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/sequences/${this.currentSequence.id}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                console.log('Sequence deleted');
+                await window.sessionStateLoader.reload(); // Force reload to get updated state
+                await this.loadSequencesFromSessionState();
+                this.closeEditor();
+                this.showNotification('Sequence deleted', 'success');
+            } else {
+                const error = await response.json();
+                this.showNotification(`Error: ${error.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error deleting sequence:', error);
+            this.showNotification('Failed to delete sequence', 'error');
+        }
+    }
+    
+    /**
+     * Load sequences from centralized session state (flat by UID structure)
+     */
+    async loadSequencesFromSessionState() {
+        try {
+            // Wait for session state to load
+            await window.sessionStateLoader.load();
+            const state = window.sessionStateLoader.state;
+            
+            console.log('🔍 Loading sequences from flat structure...');
+            
+            // Load from flat sequences dictionary
+            const sequencesData = state.sequences || {};
+            const sequences = [];
+            
+            for (const [uid, seqList] of Object.entries(sequencesData)) {
+                for (const seq of seqList) {
+                    sequences.push(seq);
+                    console.log(`✅ Loaded sequence for UID ${uid}:`, seq);
+                }
+            }
+            
+            this.sequences = sequences;
+            console.log(`📦 Loaded ${sequences.length} sequences from flat structure`);
+            
+            // Schedule restoration after DOM is ready (buttons are rendered)
+            setTimeout(() => this.restoreInlineAudioControls(), 500);
+            
+        } catch (error) {
+            console.error('❌ Error loading sequences from session state:', error);
+        }
+    }
+    
+    /**
+     * Restore inline audio controls for all audio sequences on page reload
+     */
+    restoreInlineAudioControls() {
+        console.log('🔄 Restoring inline audio controls for audio sequences...');
+        
+        // Find all audio sequences
+        const audioSequences = this.sequences.filter(seq => seq.type === 'audio');
+        console.log(`📋 Found ${audioSequences.length} audio sequences to restore`);
+        
+        audioSequences.forEach(seq => {
+            // Find the button with matching UID
+            const button = document.querySelector(`[data-param-uid="${seq.target_parameter}"]`);
+            if (!button) {
+                console.warn('⚠️ No button found for UID:', seq.target_parameter);
+                return;
+            }
+            
+            // Get the parameter control container
+            const paramControl = button.closest('.parameter-control');
+            if (!paramControl) {
+                console.warn('⚠️ No parameter control found for button');
+                return;
+            }
+            
+            // Find the audio controls container
+            const tripleSliderContainer = paramControl.querySelector('.triple-slider-container');
+            if (!tripleSliderContainer) {
+                console.warn('⚠️ No triple slider container found');
+                return;
+            }
+            
+            const controlId = tripleSliderContainer.id;
+            const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
+            
+            if (!controlsContainer) {
+                console.warn('⚠️ No audio controls container found for:', controlId);
+                return;
+            }
+            
+            // Show the controls
+            controlsContainer.style.display = 'block';
+            
+            // Restore band selection
+            const bandBtn = controlsContainer.querySelector(`[data-band="${seq.config?.band}"]`);
+            if (bandBtn) {
+                controlsContainer.querySelectorAll('.audio-band-btn').forEach(btn => btn.classList.remove('active'));
+                bandBtn.classList.add('active');
+            }
+            
+            // Restore direction selection
+            const directionBtn = controlsContainer.querySelector(`[data-direction="${seq.config?.direction}"]`);
+            if (directionBtn) {
+                controlsContainer.querySelectorAll('.audio-direction-btn').forEach(btn => btn.classList.remove('active'));
+                directionBtn.classList.add('active');
+            }
+            
+            // Restore attack/release knob value
+            const knobContainer = document.getElementById(`${controlId}_attack_release`);
+            if (knobContainer?._circularSlider && seq.config?.attack_release !== undefined) {
+                knobContainer._circularSlider.setValue(seq.config.attack_release);
+            }
+            
+            console.log(`✅ Restored controls for UID ${seq.target_parameter}:`, {
+                controlId,
+                band: seq.config?.band,
+                direction: seq.config?.direction,
+                attackRelease: seq.config?.attack_release
+            });
+        });
+    }
+    
+    /**
+     * Update sequence buttons in UI
+     */
+    updateSequenceButtons() {
+        // Find all parameter controls and add/update sequence buttons
+        document.querySelectorAll('[data-parameter-id]').forEach(param => {
+            const paramId = param.dataset.parameterId;
+            const sequence = this.sequences.find(s => s.target_parameter === paramId && s.enabled);
+            const hasSequence = !!sequence;
+            
+            let btn = param.querySelector('.sequence-btn');
+            if (!btn) {
+                btn = document.createElement('button');
+                btn.className = 'sequence-btn';
+                btn.innerHTML = '⚙️';
+                btn.title = 'Parameter Sequence';
+                param.appendChild(btn);
+                
+                btn.addEventListener('click', () => {
+                    const label = param.querySelector('label')?.textContent || paramId;
+                    const value = param.querySelector('input')?.value || 0;
+                    this.openEditor(paramId, label, value);
+                });
+            }
+            
+            if (hasSequence) {
+                btn.classList.add('active');
+                // Show inline controls if it's an audio sequence
+                if (sequence && sequence.type === 'audio') {
+                    this.showInlineAudioControls(paramId, sequence);
+                }
+            } else {
+                btn.classList.remove('active');
+                // Hide inline controls
+                this.hideInlineAudioControls(paramId);
+            }
+        });
+    }
+    
+    /**
+     * Check audio analyzer status
+     */
+    async checkAudioStatus() {
+        try {
+            const response = await fetch('/api/audio/status');
+            if (response.ok) {
+                const data = await response.json();
+                this.audioAnalyzerRunning = data.running;
+                this.updateAudioStatus();
+            }
+        } catch (error) {
+            console.error('Error checking audio status:', error);
+        }
+    }
+    
+    /**
+     * Initialize audio gain circular slider
+     */
+    initAudioGainKnob() {
+        const container = document.getElementById('audioGainKnob');
+        if (!container) {
+            console.warn('⚠️ Audio gain knob container not found');
+            return;
+        }
+        
+        // Prevent duplicate initialization
+        if (this.audioGainKnob) {
+            console.log('⚠️ Audio gain knob already initialized');
+            return;
+        }
+        
+        this.audioGainKnob = new CircularSlider(container, {
+            min: 0.1,
+            max: 5.0,
+            value: 1.0,
+            step: 0.1,
+            arc: 270,
+            size: 'tiny',
+            label: '',
+            decimals: 1,
+            unit: '',
+            variant: 'primary',
+            showValue: true,
+            onChange: (value) => {
+                // Only update local gain value during dragging
+                this.audioGain = parseFloat(value);
+            },
+            onDragEnd: (value) => {
+                // Update and log only when drag ends (mouse release)
+                this.setAudioGain(value);
+            }
+        });
+        
+        console.log('🎛️ Audio gain knob initialized');
+    }
+    
+    /**
+     * Initialize audio attack/release knob
+     */
+    initAudioAttackReleaseKnob() {
+        const container = document.getElementById('audioAttackReleaseKnob');
+        if (!container) return;
+        
+        if (this.audioAttackReleaseKnob) {
+            return; // Already initialized
+        }
+        
+        this.audioAttackReleaseKnob = new CircularSlider(container, {
+            min: 0.0,
+            max: 1.0,
+            value: 0.1,
+            step: 0.01,
+            arc: 270,
+            size: 'small',
+            label: '',
+            decimals: 2,
+            unit: '',
+            variant: 'success',
+            showValue: true
+        });
+        
+        console.log('🎛️ Audio attack/release knob initialized');
+    }
+    
+    /**
+     * Select audio frequency band
+     */
+    selectAudioBand(band) {
+        // Update button states
+        document.querySelectorAll('.audio-band-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-band="${band}"]`).classList.add('active');
+        
+        console.log('📊 Audio band selected:', band);
+    }
+    
+    /**
+     * Select audio playback direction
+     */
+    selectAudioDirection(direction) {
+        // Update button states
+        document.querySelectorAll('.audio-direction-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-direction="${direction}"]`).classList.add('active');
+        
+        console.log('🎯 Audio direction selected:', direction);
+    }
+    
+    /**
+     * Set audio gain
+     */
+    async setAudioGain(gain) {
+        this.audioGain = parseFloat(gain);
+        
+        // Update circular slider if it exists and value is different
+        if (this.audioGainKnob && this.audioGainKnob.getValue() !== this.audioGain) {
+            this.audioGainKnob.setValue(this.audioGain);
+        }
+        
+        console.log('🔊 Audio gain set to:', this.audioGain);
+        
+        // Send to backend and trigger session save
+        try {
+            await fetch('/api/audio/gain', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gain: this.audioGain })
+            });
+            
+            // Trigger session save
+            this.saveAudioAnalyzerToSession();
+        } catch (error) {
+            console.error('Error setting audio gain:', error);
+        }
+    }
+    
+    /**
+     * Save current audio analyzer state to session
+     */
+    async saveAudioAnalyzerToSession() {
+        try {
+            const state = this.getAudioAnalyzerState();
+            // The backend will automatically save this during next session save
+            // This just ensures the config is updated in the audio analyzer
+            await fetch('/api/audio/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(state)
+            });
+        } catch (error) {
+            // Silent fail - not critical
+            console.debug('Could not save audio analyzer state:', error);
+        }
+    }
+    
+    /**
+     * Start audio analyzer
+     */
+    async startAudioAnalyzer() {
+        try {
+            // Check if already running on backend
+            const statusResponse = await fetch('/api/audio/status');
+            if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                if (statusData.running) {
+                    console.log('✅ Audio analyzer already running on backend');
+                    this.audioAnalyzerRunning = true;
+                    this.updateAudioStatus();
+                    return;
+                }
+            }
+            
+            // Prepare start parameters
+            const startParams = {};
+            if (this.audioDevice !== null && this.audioDevice !== undefined) {
+                startParams.device = this.audioDevice;
+                console.log('🎤 Starting with device:', this.audioDevice, this.audioDeviceName);
+            }
+            
+            const response = await fetch('/api/audio/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(startParams)
+            });
+            
+            if (response.ok) {
+                this.audioAnalyzerRunning = true;
+                this.updateAudioStatus();
+                this.showNotification('Audio analyzer started', 'success');
+                console.log('✅ Audio analyzer started');
+            } else {
+                const error = await response.json();
+                this.showNotification(`Error: ${error.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error starting audio:', error);
+            this.showNotification('Failed to start audio analyzer', 'error');
+        }
+    }
+    
+    /**
+     * Stop audio analyzer
+     */
+    async stopAudioAnalyzer() {
+        try {
+            const response = await fetch('/api/audio/stop', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            });
+            
+            if (response.ok) {
+                this.audioAnalyzerRunning = false;
+                this.updateAudioStatus();
+                this.showNotification('Audio analyzer stopped', 'success');
+                console.log('✅ Audio analyzer stopped');
+            }
+        } catch (error) {
+            console.error('Error stopping audio:', error);
+        }
+    }
+    
+    /**
+     * Update audio status indicator
+     */
+    updateAudioStatus() {
+        const dot = document.getElementById('audioStatusDot');
+        const text = document.getElementById('audioStatusText');
+        const globalDot = document.getElementById('globalAudioStatus');
+        
+        if (this.audioAnalyzerRunning) {
+            if (dot) {
+                dot.classList.add('running');
+                text.textContent = 'Audio analyzer running';
+            }
+            if (globalDot) {
+                globalDot.classList.add('running');
+            }
+        } else {
+            if (dot) {
+                dot.classList.remove('running');
+                text.textContent = 'Audio analyzer stopped';
+            }
+            if (globalDot) {
+                globalDot.classList.remove('running');
+            }
+        }
+    }
+    
+    /**
+     * Setup WebSocket for real-time audio features
+     */
+    setupWebSocket() {
+        // Initialize Socket.IO connection if not already connected
+        if (!window.socket) {
+            window.socket = io();
+            console.log('🔌 Connecting to Socket.IO server...');
+        }
+        
+        // Listen for audio features
+        window.socket.on('audio_features', (data) => {
+            if (data.features) {
+                this.audioFeatures = data.features;
+                // Debug log first time
+                if (!this._audioFeaturesDebugLogged) {
+                    console.log('🎵 Audio features received via WebSocket:', this.audioFeatures);
+                    this._audioFeaturesDebugLogged = true;
+                }
+            }
+        });
+        
+        // Listen for parameter value updates (for triple slider feedback)
+        window.socket.on('parameter_update', (data) => {
+            console.log('📡 Received parameter_update (UID):', data);
+            if (data.parameter && data.value !== undefined) {
+                this.updateParameterVisualFeedbackByUID(data.parameter, data.value);
+            }
+        });
+        
+        window.socket.on('connect', () => {
+            console.log('✅ Socket.IO connected');
+        });
+        
+        window.socket.on('disconnect', () => {
+            console.log('❌ Socket.IO disconnected');
+        });
+    }
+    
+    /**
+     * Update visual feedback for parameter by UID (red line in triple slider)
+     */
+    updateParameterVisualFeedbackByUID(paramUid, value) {
+        // Find sequence button with this UID
+        const button = document.querySelector(`[data-param-uid="${paramUid}"]`);
+        if (!button) {
+            console.warn('⚠️ No button found for UID:', paramUid);
+            return;
+        }
+        
+        // Get triple slider from parent container
+        const paramControl = button.closest('.parameter-control');
+        if (!paramControl) {
+            console.warn('⚠️ No parameter control found');
+            return;
+        }
+        
+        const tripleSliderContainer = paramControl.querySelector('.triple-slider-container');
+        if (!tripleSliderContainer) {
+            console.warn('⚠️ No triple slider container found');
+            return;
+        }
+        
+        const slider = getTripleSlider(tripleSliderContainer.id);
+        
+        console.log('🎯 Updating visual feedback by UID:', { paramUid, value, sliderId: tripleSliderContainer.id, found: !!slider });
+        
+        if (slider && slider.updateCurrentValue) {
+            slider.updateCurrentValue(value);
+            console.log('✅ Updated triple slider red line to:', value);
+        } else {
+            console.warn('⚠️ Triple slider not found for UID:', paramUid);
+        }
+    }
+    
+    /**
+     * Update visual feedback for parameter (red line in triple slider) - Legacy path-based method
+     */
+    updateParameterVisualFeedback(parameterId, value) {
+        const controlId = this.parameterPathToControlId(parameterId);
+        const slider = getTripleSlider(controlId);
+        
+        console.log('🎯 Updating visual feedback:', { parameterId, controlId, value, found: !!slider });
+        
+        if (slider && slider.updateCurrentValue) {
+            slider.updateCurrentValue(value);
+            console.log('✅ Triple slider updated:', controlId, '=', value);
+        } else {
+            console.warn('⚠️ Triple slider not found:', controlId);
+        }
+    }
+    
+    /**
+     * Draw audio spectrum
+     */
+    drawAudioSpectrum() {
+        if (!this.spectrumCanvas) return;
+        
+        const ctx = this.spectrumCanvas.getContext('2d');
+        const width = this.spectrumCanvas.width;
+        const height = this.spectrumCanvas.height;
+        
+        // Clear
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        
+        if (!this.audioFeatures) return;
+        
+        // Draw bars for bass, mid, treble
+        const features = ['bass', 'mid', 'treble'];
+        const colors = ['#ff4444', '#44ff44', '#4444ff'];
+        const barWidth = width / features.length;
+        
+        features.forEach((feature, i) => {
+            const value = this.audioFeatures[feature] || 0;
+            const barHeight = value * height;
+            
+            ctx.fillStyle = colors[i];
+            ctx.fillRect(i * barWidth + 2, height - barHeight, barWidth - 4, barHeight);
+            
+            // Label
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(feature.toUpperCase(), i * barWidth + barWidth / 2, height - 5);
+        });
+    }
+    
+    /**
+     * Draw LFO preview
+     */
+    drawLFOPreview() {
+        if (!this.lfoCanvas) return;
+        
+        const ctx = this.lfoCanvas.getContext('2d');
+        const width = this.lfoCanvas.width;
+        const height = this.lfoCanvas.height;
+        
+        // Clear
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Get parameters
+        const waveform = document.getElementById('lfoWaveform')?.value || 'sine';
+        const frequency = parseFloat(document.getElementById('lfoFrequency')?.value || 1.0);
+        
+        // Draw waveform
+        ctx.strokeStyle = '#0d6efd';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        
+        for (let x = 0; x < width; x++) {
+            const t = (x / width) * 2 * frequency; // 2 cycles visible
+            let y;
+            
+            switch (waveform) {
+                case 'sine':
+                    y = Math.sin(t * Math.PI * 2);
+                    break;
+                case 'square':
+                    y = (t % 1) < 0.5 ? 1 : -1;
+                    break;
+                case 'triangle':
+                    y = 1 - 4 * Math.abs((t % 1) - 0.5);
+                    break;
+                case 'sawtooth':
+                    y = 2 * ((t % 1) - 0.5);
+                    break;
+                case 'random':
+                    y = Math.sin(t * Math.PI * 2); // Placeholder
+                    break;
+                default:
+                    y = 0;
+            }
+            
+            const py = height / 2 - (y * height / 2.5);
+            
+            if (x === 0) {
+                ctx.moveTo(x, py);
+            } else {
+                ctx.lineTo(x, py);
+            }
+        }
+        
+        ctx.stroke();
+        
+        // Center line
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, height / 2);
+        ctx.lineTo(width, height / 2);
+        ctx.stroke();
+    }
+    
+    /**
+     * Add timeline keyframe
+     */
+    addTimelineKeyframe() {
+        const time = parseFloat(document.getElementById('keyframeTime').value);
+        const value = parseFloat(document.getElementById('keyframeValue').value);
+        
+        if (isNaN(time) || isNaN(value)) {
+            this.showNotification('Invalid keyframe values', 'error');
+            return;
+        }
+        
+        // Add keyframe
+        this.timelineKeyframes = this.timelineKeyframes || [];
+        this.timelineKeyframes.push([time, value]);
+        
+        // Sort by time
+        this.timelineKeyframes.sort((a, b) => a[0] - b[0]);
+        
+        // Update UI
+        this.renderKeyframesList();
+        this.drawTimelinePreview();
+        
+        // Clear inputs
+        document.getElementById('keyframeTime').value = '';
+        document.getElementById('keyframeValue').value = '';
+    }
+    
+    /**
+     * Remove timeline keyframe
+     */
+    removeTimelineKeyframe(index) {
+        this.timelineKeyframes.splice(index, 1);
+        this.renderKeyframesList();
+        this.drawTimelinePreview();
+    }
+    
+    /**
+     * Render keyframes list
+     */
+    renderKeyframesList() {
+        const container = document.getElementById('timelineKeyframes');
+        
+        if (!this.timelineKeyframes || this.timelineKeyframes.length === 0) {
+            container.innerHTML = '<p style="color: #666; text-align: center;">No keyframes yet</p>';
+            return;
+        }
+        
+        container.innerHTML = this.timelineKeyframes.map((kf, i) => `
+            <div class="timeline-keyframe-item">
+                <span class="timeline-keyframe-info">t=${kf[0].toFixed(2)}s → ${kf[1].toFixed(2)}</span>
+                <span class="timeline-keyframe-remove" onclick="sequenceManager.removeTimelineKeyframe(${i})">✕</span>
+            </div>
+        `).join('');
+    }
+    
+    /**
+     * Draw timeline preview
+     */
+    drawTimelinePreview() {
+        if (!this.timelineCanvas) return;
+        
+        const ctx = this.timelineCanvas.getContext('2d');
+        const width = this.timelineCanvas.width;
+        const height = this.timelineCanvas.height;
+        
+        // Clear
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        
+        if (!this.timelineKeyframes || this.timelineKeyframes.length < 2) return;
+        
+        const duration = parseFloat(document.getElementById('timelineDuration')?.value || 10.0);
+        
+        // Draw interpolated curve
+        ctx.strokeStyle = '#0d6efd';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        
+        for (let x = 0; x < width; x++) {
+            const t = (x / width) * duration;
+            const value = this.interpolateTimeline(t);
+            const y = height - (value / 100) * height; // Assuming 0-100 range
+            
+            if (x === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.stroke();
+        
+        // Draw keyframe points
+        ctx.fillStyle = '#ff4444';
+        this.timelineKeyframes.forEach(kf => {
+            const x = (kf[0] / duration) * width;
+            const y = height - (kf[1] / 100) * height;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+    
+    /**
+     * Interpolate timeline value at time t
+     */
+    interpolateTimeline(t) {
+        if (!this.timelineKeyframes || this.timelineKeyframes.length === 0) return 0;
+        
+        // Find surrounding keyframes
+        let before = null;
+        let after = null;
+        
+        for (let i = 0; i < this.timelineKeyframes.length; i++) {
+            const kf = this.timelineKeyframes[i];
+            if (kf[0] <= t) {
+                before = kf;
+            }
+            if (kf[0] >= t && !after) {
+                after = kf;
+                break;
+            }
+        }
+        
+        if (!before) return this.timelineKeyframes[0][1];
+        if (!after) return this.timelineKeyframes[this.timelineKeyframes.length - 1][1];
+        if (before === after) return before[1];
+        
+        // Linear interpolation
+        const progress = (t - before[0]) / (after[0] - before[0]);
+        return before[1] + (after[1] - before[1]) * progress;
+    }
+    
+    /**
+     * Start preview loop
+     */
+    startPreviewLoop() {
+        // Prevent duplicate animation loops
+        if (this.animationFrame) {
+            return;
+        }
+        
+        const update = () => {
+            // Update canvases if visible
+            const modal = document.getElementById('sequenceModal');
+            if (modal && modal.classList.contains('show')) {
+                const activeType = document.querySelector('.sequence-type-btn.active')?.dataset.type;
+                
+                if (activeType === 'audio') {
+                    this.drawAudioSpectrum();
+                } else if (activeType === 'lfo') {
+                    this.drawLFOPreview();
+                }
+            }
+            
+            // Always draw global spectrum if audio is running
+            if (this.audioAnalyzerRunning) {
+                this.drawGlobalAudioSpectrum();
+            }
+            
+            this.animationFrame = requestAnimationFrame(update);
+        };
+        
+        update();
+    }
+    
+    /**
+     * Draw global audio spectrum (mini version)
+     */
+    drawGlobalAudioSpectrum() {
+        const canvas = document.getElementById('globalAudioSpectrum');
+        if (!canvas || !this.audioFeatures) return;
+        
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        // Clear
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Draw spectrum bars (simplified)
+        const features = ['bass', 'mid', 'treble'];
+        const barWidth = width / features.length;
+        
+        // Check if beat is triggered
+        const isBeat = this.audioFeatures['beat'] || false;
+        
+        // Normal colors vs beat colors (brighter/white when beat)
+        const normalColors = ['#ff6b6b', '#64c8ff', '#a8e6cf'];
+        const beatColors = ['#ffffff', '#ffffff', '#ffffff'];
+        const colors = isBeat ? beatColors : normalColors;
+        
+        features.forEach((feature, i) => {
+            // Get raw value
+            const rawValue = this.audioFeatures[feature] || 0;
+            
+            // Track peak for adaptive scaling
+            if (rawValue > this.audioFeaturePeaks[feature]) {
+                this.audioFeaturePeaks[feature] = rawValue;
+            } else {
+                // Slow decay to adapt to changing levels
+                this.audioFeaturePeaks[feature] *= this.peakDecayRate;
+            }
+            
+            // Normalize by peak with minimum threshold
+            const peak = Math.max(this.audioFeaturePeaks[feature], 0.00001);
+            const normalized = rawValue / peak;
+            
+            // Apply gain and clamp
+            const value = normalized * (this.audioGain || 1.0);
+            const barHeight = Math.min(Math.max(value * height, 0), height);
+            
+            ctx.fillStyle = colors[i];
+            ctx.fillRect(i * barWidth + 2, height - barHeight, barWidth - 4, barHeight);
+        });
+    }
+    
+    /**
+     * Set audio gain
+     */
+    setAudioGain(gain) {
+        this.audioGain = parseFloat(gain);
+        const display = document.getElementById('audioGainValue');
+        if (display) {
+            display.textContent = gain + 'x';
+        }
+        console.log('🔊 Audio gain set to:', this.audioGain);
+    }
+    
+    /**
+     * Setup context menu
+     */
+    setupContextMenu() {
+        const menu = document.getElementById('sequenceContextMenu');
+        if (!menu) return;
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.sequence-btn') && !e.target.closest('#sequenceContextMenu')) {
+                menu.classList.remove('show');
+            }
+        });
+    }
+    
+    /**
+     * Show notification
+     */
+    showNotification(message, type = 'info') {
+        // Simple console log for now - could implement toast notifications
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        
+        // If notification system exists in main app, use it
+        if (typeof showNotification === 'function') {
+            showNotification(message, type);
+        } else if (typeof showToast === 'function') {
+            // Try showToast as well
+            showToast(message, type);
+        }
+    }
+    
+    /**
+     * Show inline audio controls for a parameter
+     */
+    showInlineAudioControls(parameterId, sequence) {
+        console.log('🎛️ showInlineAudioControls called:', { parameterId, sequence });
+        
+        // Find the control container by parameter path
+        // Convert parameterId (e.g., "video.effects[0].parameters.scale_xy") to control ID
+        const controlId = this.parameterPathToControlId(parameterId);
+        console.log('🔍 Looking for control ID:', `${controlId}_audio_controls`);
+        
+        const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
+        
+        if (!controlsContainer) {
+            console.warn('⚠️ Audio controls container not found for:', parameterId);
+            console.warn('   Expected element ID:', `${controlId}_audio_controls`);
+            // List all elements with _audio_controls suffix to help debug
+            const allControls = document.querySelectorAll('[id$="_audio_controls"]');
+            console.log('   Available audio control elements:', Array.from(allControls).map(el => el.id));
+            return;
+        }
+        
+        console.log('✅ Found audio controls container');
+        
+        // Show the controls
+        controlsContainer.style.display = 'block';
+        
+        // Initialize attack/release knob if not already initialized
+        const knobContainer = document.getElementById(`${controlId}_attack_release`);
+        if (knobContainer && !knobContainer._circularSlider) {
+            const slider = new CircularSlider(knobContainer, {
+                min: 0.0,
+                max: 1.0,
+                value: sequence?.attack_release || 0.5,
+                step: 0.01,
+                arc: 270,
+                size: 'tiny',
+                label: '',
+                decimals: 2,
+                unit: '',
+                variant: 'primary',
+                showValue: false,
+                onChange: (value) => {
+                    // Update sequence when knob changes
+                    this.updateSequenceInline(parameterId, { attack_release: value });
+                }
+            });
+            knobContainer._circularSlider = slider;
+        }
+        
+        // Set active states from sequence
+        if (sequence) {
+            // Set active band
+            const bandButtons = controlsContainer.querySelectorAll('.audio-band-btn-inline');
+            bandButtons.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.band === sequence.band);
+                btn.onclick = () => this.updateSequenceInline(parameterId, { band: btn.dataset.band });
+            });
+            
+            // Set active direction
+            const dirButtons = controlsContainer.querySelectorAll('.audio-dir-btn-inline');
+            dirButtons.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.direction === sequence.direction);
+                btn.onclick = () => this.updateSequenceInline(parameterId, { direction: btn.dataset.direction });
+            });
+        }
+    }
+    
+    /**
+     * Hide inline audio controls for a parameter
+     */
+    hideInlineAudioControls(parameterId) {
+        const controlId = this.parameterPathToControlId(parameterId);
+        const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
+        
+        if (controlsContainer) {
+            controlsContainer.style.display = 'none';
+        }
+    }
+    
+    /**
+     * Convert parameter path to control ID
+     */
+    parameterPathToControlId(paramPath) {
+        // Convert parameter path to control ID matching the DOM element IDs
+        // 
+        // Formats:
+        //   Player level: "video.effects[0].parameters.scale_xy" -> "video_effect_0_scale_xy"
+        //   Clip level:   "clip.effects[1].parameters.scale_xy" -> "clip_effect_1_scale_xy"
+        //   Layer level:  "video.layers[0].effects[0].parameters.scale" -> "video_layer_0_effect_0_scale"
+        
+        // Convert path to controlId format
+        let converted = paramPath
+            .replace(/\./g, '_')           // dots to underscores
+            .replace(/\[/g, '_')            // [ to underscore  
+            .replace(/\]/g, '')             // remove ]
+            .replace(/effects_/, 'effect_') // effects -> effect (singular)
+            .replace(/layers_/, 'layer_')   // layers -> layer (singular)
+            .replace(/_parameters_/, '_');  // remove parameters segment
+        
+        console.log('🔄 Parameter path conversion:', paramPath, '->', converted);
+        return converted;
+    }
+    
+    /**
+     * Update sequence parameters inline (without opening modal)
+     */
+    async updateSequenceInline(parameterId, updates) {
+        const sequence = this.sequences.find(s => s.target_parameter === parameterId);
+        if (!sequence) {
+            console.warn('⚠️ No sequence found for:', parameterId);
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/sequences/${sequence.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config: { ...sequence.config, ...updates } })
+            });
+            
+            if (response.ok) {
+                await window.sessionStateLoader.reload(); // Force reload to get updated state
+                await this.loadSequencesFromSessionState();
+                
+                // Update UI to reflect changes
+                const controlId = this.parameterPathToControlId(parameterId);
+                const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
+                
+                if (controlsContainer && updates.band) {
+                    // Update active band button
+                    controlsContainer.querySelectorAll('.audio-band-btn-inline').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.band === updates.band);
+                    });
+                }
+                
+                if (controlsContainer && updates.direction) {
+                    // Update active direction button
+                    controlsContainer.querySelectorAll('.audio-dir-btn-inline').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.direction === updates.direction);
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error updating sequence inline:', error);
+        }
+    }
+}

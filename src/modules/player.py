@@ -583,6 +583,11 @@ class Player:
             
             loop_start = time.time()
             
+            # Update dynamic parameter sequences
+            if self.player_manager and hasattr(self.player_manager, 'sequence_manager'):
+                dt = frame_time if frame_time > 0 else 1.0 / 30.0
+                self.player_manager.update_sequences(dt)
+            
             # DEBUG: Log every 100 frames to monitor playback
             if self.current_frame % 100 == 0 and self.current_frame > 0:
                 debug_playback(logger, f"[{self.player_name}] Playing: frame {self.current_frame}, max_loops={self.max_loops}, current_loop={self.current_loop}")

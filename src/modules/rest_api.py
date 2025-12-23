@@ -192,6 +192,12 @@ class RestAPI:
         # Register Sequencer API
         from .api_sequencer import register_sequencer_routes
         register_sequencer_routes(self.app, self.player_manager, self.config, session_state)
+        
+        # Register Dynamic Parameter Sequences API
+        if hasattr(self.player_manager, 'sequence_manager') and hasattr(self.player_manager, 'audio_analyzer'):
+            from .api_sequences import register_sequence_routes
+            register_sequence_routes(self.app, self.player_manager.sequence_manager, self.player_manager.audio_analyzer, self.player_manager, self.socketio)
+            logger.info("Parameter Sequence API routes registered with audio streaming")
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""

@@ -22,14 +22,16 @@ logger = get_logger(__name__)
 class SessionStateManager:
     """Verwaltet persistenten Session-State für Player-Konfiguration."""
     
-    def __init__(self, state_file_path: str):
+    def __init__(self, state_file_path: str, sequence_manager=None):
         """
         Initialisiert SessionStateManager.
         
         Args:
             state_file_path: Pfad zur session_state.json Datei
+            sequence_manager: Optional SequenceManager for sequence persistence
         """
         self.state_file_path = state_file_path
+        self.sequence_manager = sequence_manager
         self._state = self._load_or_create()
         self._last_save_time = 0
         self._min_save_interval = 0.5  # Minimum 500ms zwischen Saves (Debouncing)
@@ -79,6 +81,11 @@ class SessionStateManager:
                     "clip_mapping": {}
                 },
                 "last_position": 0.0
+            },
+            "audio_analyzer": {
+                "device": None,
+                "running": False,
+                "config": {}
             }
         }
     
@@ -154,6 +161,28 @@ class SessionStateManager:
                             effect_copy = effect.copy()
                             if 'instance' in effect_copy:
                                 del effect_copy['instance']
+                            
+                            # Store parameter UIDs if they have sequences
+                            if self.sequence_manager and 'parameters' in effect_copy:
+                                for param_name, param_value in effect_copy['parameters'].items():
+                                    # Check if parameter has UID assigned (exists in any sequence)
+                                    param_uid = None
+                                    for seq in self.sequence_manager.get_all():
+                                        # If sequence target looks like a UID (starts with param_)
+                                        if seq.target_parameter.startswith('param_') and param_name in seq.target_parameter:
+                                            param_uid = seq.target_parameter
+                                            break
+                                    
+                                    # If parameter has UID, store it
+                                    if param_uid:
+                                        if not isinstance(param_value, dict):
+                                            effect_copy['parameters'][param_name] = {
+                                                '_value': param_value,
+                                                '_uid': param_uid
+                                            }
+                                        else:
+                                            effect_copy['parameters'][param_name]['_uid'] = param_uid
+                            
                             serializable_effects.append(effect_copy)
                         clip_item["effects"] = serializable_effects
                     else:
@@ -210,10 +239,27 @@ class SessionStateManager:
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to save sequencer state: {e}")
             
+            # Audio analyzer state speichern (device, gain werden im Frontend gespeichert)
+            # Hier speichern wir nur Backend-Konfiguration
+            if hasattr(player_manager, 'audio_analyzer') and player_manager.audio_analyzer:
+                try:
+                    audio_analyzer = player_manager.audio_analyzer
+                    state["audio_analyzer"] = {
+                        "device": audio_analyzer.device,
+                        "running": audio_analyzer._running,
+                        "config": audio_analyzer.config.copy() if audio_analyzer.config else {}
+                    }
+                    logger.debug(f"🎤 Audio analyzer state saved: device={audio_analyzer.device}, running={audio_analyzer._running}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to save audio analyzer state: {e}")
+            
             # Master/Slave state speichern
             state["master_playlist"] = player_manager.get_master_playlist()
             if state["master_playlist"]:
                 logger.debug(f"👑 Master playlist saved: {state['master_playlist']}")
+            
+            # Save flat sequences by UID
+            state["sequences"] = self._save_sequences()
             
             # State in Datei schreiben mit Retry-Logik für Windows File-Locking
             os.makedirs(os.path.dirname(self.state_file_path), exist_ok=True)
@@ -245,6 +291,21 @@ class SessionStateManager:
             import traceback
             logger.error(traceback.format_exc())
             return False
+    
+    def _save_sequences(self):
+        """Save all sequences flat by UID"""
+        if not self.sequence_manager:
+            return {}
+        
+        sequences_by_uid = {}
+        for seq in self.sequence_manager.get_all():
+            uid = seq.target_parameter
+            if uid not in sequences_by_uid:
+                sequences_by_uid[uid] = []
+            sequences_by_uid[uid].append(seq.serialize())
+        
+        logger.info(f"💾 Saved {len(sequences_by_uid)} parameter sequences (flat by UID)")
+        return sequences_by_uid
     
     def load(self) -> Dict[str, Any]:
         """
@@ -501,6 +562,8 @@ class SessionStateManager:
                         player.playlist_ids[item['path']] = item['id']
                     if item.get('type') == 'generator' and item.get('generator_id'):
                         player.playlist_params[item['generator_id']] = item.get('parameters', {})
+                    
+                    # Note: Sequences are now restored from flat structure at end, not nested in parameters
                 
                 # Restauriere Player-Settings
                 player.autoplay = player_state.get('autoplay', False)
@@ -510,6 +573,35 @@ class SessionStateManager:
                 # TODO: Globale Effekte restaurieren (wenn implementiert)
                 
                 logger.info(f"✅ Player '{player_id}' restauriert: {len(player.layers)} Layer")
+            
+            # ========== SEQUENCES RESTAURIEREN (FLAT BY UID) ==========
+            sequences_data = state.get('sequences', {})
+            if sequences_data and self.sequence_manager and player_manager.audio_analyzer:
+                logger.info(f"🔄 Restoring {len(sequences_data)} parameter sequences from flat structure...")
+                
+                for uid, seq_list in sequences_data.items():
+                    for seq_data in seq_list:
+                        try:
+                            seq_type = seq_data.get('type')
+                            
+                            if seq_type == 'audio':
+                                from .sequences import AudioSequence
+                                sequence = AudioSequence.deserialize(seq_data, player_manager.audio_analyzer)
+                            elif seq_type == 'lfo':
+                                from .sequences import LFOSequence
+                                sequence = LFOSequence.deserialize(seq_data)
+                            elif seq_type == 'timeline':
+                                from .sequences import TimelineSequence
+                                sequence = TimelineSequence.deserialize(seq_data)
+                            else:
+                                logger.warning(f"Unknown sequence type: {seq_type}")
+                                continue
+                            
+                            # Add to sequence manager
+                            self.sequence_manager.create(sequence)
+                            logger.info(f"✅ Restored sequence: {sequence.id} (UID: {uid})")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to restore sequence for UID {uid}: {e}")
             
             # ========== SEQUENCER RESTAURIEREN ==========
             sequencer_data = state.get('sequencer')
@@ -577,6 +669,16 @@ class SessionStateManager:
         except Exception as e:
             logger.error(f"❌ Fehler beim Löschen von session_state.json: {e}")
             return False
+    
+    def set_sequence_manager(self, sequence_manager):
+        """
+        Set the sequence manager for sequence persistence.
+        
+        Args:
+            sequence_manager: SequenceManager instance
+        """
+        self.sequence_manager = sequence_manager
+        logger.info("SequenceManager attached to SessionStateManager")
 
 
 # Singleton-Instanz

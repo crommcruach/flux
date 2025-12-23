@@ -252,6 +252,18 @@ def main():
     player_manager.init_sequencer()
     logger.info("Audio Sequencer initialisiert")
     
+    # Initialize Dynamic Parameter Sequences
+    from modules.sequences import SequenceManager, AudioAnalyzer
+    sequence_manager = SequenceManager()
+    audio_analyzer = AudioAnalyzer(config=config)
+    player_manager.sequence_manager = sequence_manager
+    player_manager.audio_analyzer = audio_analyzer
+    logger.info("Parameter Sequence System initialisiert")
+    
+    # Connect sequence_manager to session_state for persistence
+    session_state.set_sequence_manager(sequence_manager)
+    logger.info("SequenceManager connected to SessionState")
+    
     # Start both players to generate frames (even with DummySource for preview)
     player.start()
     artnet_player.start()
@@ -308,6 +320,11 @@ def main():
     
     # Set socketio reference in player_manager for WebSocket events
     player_manager.socketio = rest_api.socketio
+    
+    # Update SequenceManager with socketio reference for real-time parameter updates
+    if hasattr(player_manager, 'sequence_manager'):
+        player_manager.sequence_manager.socketio = rest_api.socketio
+        logger.info("SequenceManager connected to SocketIO for real-time updates")
     
     rest_api.start(host=config['api']['host'], port=config['api']['port'])
     

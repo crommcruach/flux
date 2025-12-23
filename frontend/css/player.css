@@ -452,6 +452,7 @@ body {
 .middle-section-right {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 0.5rem;
 }
 
@@ -860,9 +861,9 @@ body {
 /* Empty state variations */
 .empty-state.drop-zone {
     width: 100%;
-    padding: 2rem;
+    padding: 5px;
     text-align: center;
-    min-height: 150px;
+    min-height: 100px;
 }
 
 .empty-state-icon-large {

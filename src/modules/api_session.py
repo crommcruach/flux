@@ -161,6 +161,33 @@ def register_session_routes(app, session_state_manager):
             return jsonify({"success": False, "error": str(e)}), 500
     
     
+    @app.route('/api/session/state', methods=['GET'])
+    def get_session_state():
+        """Get current session state including audio analyzer settings."""
+        try:
+            session_state_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), '..', 'session_state.json'
+            )
+            
+            if not os.path.exists(session_state_path):
+                return jsonify({
+                    "success": True,
+                    "state": {"audio_analyzer": {"device": None, "running": False, "config": {}}}
+                })
+            
+            with open(session_state_path, 'r', encoding='utf-8') as f:
+                state = json.load(f)
+            
+            return jsonify({
+                "success": True,
+                "state": state
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting session state: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    
     @app.route('/api/session/snapshot/delete', methods=['POST'])
     def delete_snapshot():
         """Delete a snapshot."""
