@@ -138,6 +138,9 @@ class TransformEffect(PluginBase):
     
     def initialize(self, config):
         """Initialisiert Plugin mit Transform-Parametern."""
+        import traceback
+        caller = traceback.extract_stack()[-2]
+        print(f"🏗️ [Transform {id(self)}] Instance initialized for rendering (called from {caller.filename}:{caller.lineno})")
         # Use _get_param_value() from PluginBase to handle range metadata
         self.position_x = self._get_param_value('position_x', 0.0)
         self.position_y = self._get_param_value('position_y', 0.0)
@@ -167,6 +170,15 @@ class TransformEffect(PluginBase):
         Returns:
             Transformiertes Frame
         """
+        # Debug logging for scale (throttled) - log every 120 frames
+        if not hasattr(self, '_process_counter'):
+            self._process_counter = 0
+        self._process_counter += 1
+        if self._process_counter % 120 == 1:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"🖼️ [Transform {id(self)}] frame #{self._process_counter}: scale_xy={self.scale_xy:.1f}")
+        
         h, w = frame.shape[:2]
         
         # Wenn keine Transformation nötig, return original
@@ -358,7 +370,14 @@ class TransformEffect(PluginBase):
             self.position_y = float(value)
             return True
         elif name == 'scale_xy':
+            print(f"📥 [Transform {id(self)}] BEFORE update: self.scale_xy={self.scale_xy:.1f}, new_value={float(value):.1f}")
+            old_value = self.scale_xy
             self.scale_xy = float(value)
+            # Only log scale_xy updates with significant change (for debugging instance mismatch)
+            if abs(self.scale_xy - old_value) > 1.0:
+                import traceback
+                caller_info = traceback.extract_stack()[-3]  # Get caller 2 levels up
+                print(f"🔧 [Transform {id(self)}] scale_xy: {old_value:.1f} → {self.scale_xy:.1f} (from {caller_info.filename}:{caller_info.lineno})")
             return True
         elif name == 'scale_x':
             self.scale_x = float(value)

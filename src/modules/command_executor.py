@@ -486,11 +486,8 @@ class CommandExecutor:
     
     def _handle_scripts(self, args):
         """List all scripts."""
-        from .script_generator import ScriptGenerator
-        
-        scripts_dir = self.config['paths']['scripts_dir']
-        script_gen = ScriptGenerator(scripts_dir)
-        scripts = script_gen.list_scripts()
+        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system
+        return CommandResult(True, "Script system deprecated. Use generators plugin.", {"scripts": []})
         
         if not scripts:
             return CommandResult(True, "Keine Scripts gefunden", {"scripts": []})

@@ -861,11 +861,8 @@ def register_script_routes(app, player_manager, config):
     @app.route('/api/scripts', methods=['GET'])
     def list_scripts():
         """Listet alle verfügbaren Scripts."""
-        from .script_generator import ScriptGenerator
-        
-        scripts_dir = config['paths']['scripts_dir']
-        script_gen = ScriptGenerator(scripts_dir)
-        scripts = script_gen.list_scripts()
+        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system
+        return jsonify({'scripts': [], 'error': 'Script system deprecated, use generators plugin'})
         
         return jsonify({
             "status": "success",

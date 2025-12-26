@@ -395,6 +395,10 @@ class RestAPI:
             value = data.get('value')
             range_min = data.get('rangeMin')
             range_max = data.get('rangeMax')
+            uid = data.get('uid')  # Preserve UID for sequence restoration
+            
+            # CRITICAL: Log every WebSocket call to trace 121.0 source
+            logger.warning(f"🌐 WebSocket 'command.effect.param': clip={clip_id[:8]}..., effect[{effect_index}].{param_name} = {value}")
             
             try:
                 # Get player and update parameter
@@ -430,10 +434,20 @@ class RestAPI:
                                 '_rangeMin': range_min,
                                 '_rangeMax': range_max
                             }
+                            # Preserve UID if provided
+                            if uid:
+                                param_value_to_store['_uid'] = uid
                             effect['parameters'][param_name] = param_value_to_store
                             logger.debug(f"✅ WebSocket: Updated {player_id} clip {clip_id} effect[{effect_index}].{param_name} = {value} (range: {range_min}-{range_max})")
                         else:
-                            param_value_to_store = value
+                            # For simple values, store as dict if UID is present, otherwise plain value
+                            if uid:
+                                param_value_to_store = {
+                                    '_value': value,
+                                    '_uid': uid
+                                }
+                            else:
+                                param_value_to_store = value
                             effect['parameters'][param_name] = param_value_to_store
                             logger.debug(f"✅ WebSocket: Updated {player_id} clip {clip_id} effect[{effect_index}].{param_name} = {value}")
                         

@@ -9,7 +9,6 @@ import numpy as np
 import threading
 from abc import ABC, abstractmethod
 from .logger import get_logger
-from .script_generator import ScriptGenerator
 from .constants import DEFAULT_FPS
 
 logger = get_logger(__name__)

@@ -89,6 +89,9 @@ class AudioEngine:
         Raises:
             Exception: If no audio is loaded
         """
+        if not MINIAUDIO_AVAILABLE:
+            return
+        
         if not self.is_loaded:
             raise Exception("No audio loaded")
         
@@ -101,6 +104,9 @@ class AudioEngine:
     
     def pause(self):
         """Pause playback"""
+        if not MINIAUDIO_AVAILABLE:
+            return
+        
         with self._lock:
             if self.is_playing:
                 self.is_playing = False
@@ -109,6 +115,9 @@ class AudioEngine:
     
     def stop(self):
         """Stop playback and reset position"""
+        if not MINIAUDIO_AVAILABLE:
+            return
+        
         with self._lock:
             self.is_playing = False
             self._stop_stream = True
@@ -126,6 +135,9 @@ class AudioEngine:
         Args:
             position: Target position in seconds (clamped to valid range)
         """
+        if not MINIAUDIO_AVAILABLE:
+            return
+        
         if not self.is_loaded:
             raise Exception("No audio loaded")
         
@@ -164,6 +176,9 @@ class AudioEngine:
     
     def _start_stream(self):
         """Internal: Start audio streaming thread"""
+        if not MINIAUDIO_AVAILABLE:
+            return
+        
         if self._stream_thread and self._stream_thread.is_alive():
             return
         

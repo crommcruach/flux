@@ -29,7 +29,7 @@ def __getattr__(name):
         from .rest_api import RestAPI
         return RestAPI
     elif name == 'ScriptGenerator':
-        from .script_generator import ScriptGenerator
+        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system now
         return ScriptGenerator
     elif name == 'PointsLoader':
         from .points_loader import PointsLoader

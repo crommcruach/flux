@@ -59,6 +59,12 @@ function Download-Library {
     
     $fullPath = Join-Path $scriptDir $OutputPath
     
+    # Create directory if it doesn't exist
+    $directory = Split-Path -Parent $fullPath
+    if (-not (Test-Path $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    
     try {
         Write-Host "  Downloading: $OutputPath..." -NoNewline
         Invoke-WebRequest -Uri $Url -OutFile $fullPath -ErrorAction Stop
@@ -102,7 +108,7 @@ Write-Host "Failed: $failedFiles" -ForegroundColor $(if ($failedFiles -gt 0) { "
 Write-Host ""
 
 if ($failedFiles -eq 0) {
-    Write-Host "All libraries updated successfully! ✓" -ForegroundColor Green
+    Write-Host "All libraries updated successfully!" -ForegroundColor Green
 } else {
     Write-Host "Some libraries failed to update. Check errors above." -ForegroundColor Yellow
 }
@@ -110,4 +116,4 @@ if ($failedFiles -eq 0) {
 # Pause at the end
 Write-Host ""
 Write-Host "Press any key to exit..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')

@@ -194,10 +194,11 @@ class CLIHandler:
         if self.script_list_cache:
             return self.script_list_cache
         
-        from .script_generator import ScriptGenerator
-        scripts_dir = self.config['paths']['scripts_dir']
-        script_gen = ScriptGenerator(scripts_dir)
-        scripts = script_gen.list_scripts()
+        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system
+        # scripts_dir = self.config['paths']['scripts_dir']
+        # script_gen = ScriptGenerator(scripts_dir)
+        # scripts = script_gen.list_scripts()
+        scripts = []  # Script system deprecated
         
         self.script_list_cache = [s['filename'] for s in scripts]
         return self.script_list_cache
@@ -828,15 +829,9 @@ class CLIHandler:
     
     def _handle_scripts(self, args):
         """Verwaltet Scripts."""
-        from .script_generator import ScriptGenerator
-        
-        scripts_dir = self.config['paths']['scripts_dir']
-        script_gen = ScriptGenerator(scripts_dir)
-        
-        if not args or args == "list":
-            self._handle_scripts_list(script_gen)
-        else:
-            logger.info("Verwendung: scripts [list]")
+        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system
+        logger.info("Script system deprecated. Use generators plugin instead.")
+        return
     
     def _handle_scripts_list(self, script_gen):
         """Listet alle Scripts auf."""

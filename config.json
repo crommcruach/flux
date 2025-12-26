@@ -8,8 +8,8 @@
   },
   "app": {
     "default_player": "video",
-    "console_log_level": "WARNING",
-    "file_log_level": "WARNING",
+    "console_log_level": "INFO",
+    "file_log_level": "INFO",
     "_log_level_comment": "Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL"
   },
   "artnet": {

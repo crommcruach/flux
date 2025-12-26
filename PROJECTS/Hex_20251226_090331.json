@@ -1,0 +1,156 @@
+{
+  "projectName": "Hex",
+  "version": "1.0",
+  "savedAt": "2025-12-26T09:03:31.291720",
+  "canvas": {
+    "width": 1024,
+    "height": 768
+  },
+  "backgroundImage": null,
+  "shapes": [
+    {
+      "type": "line",
+      "id": "shape-2",
+      "x": 310,
+      "y": 210,
+      "size": 120,
+      "rotation": -1.0471975511965976,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-3",
+      "x": 410,
+      "y": 150,
+      "size": 120,
+      "rotation": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-4",
+      "x": 510,
+      "y": 210,
+      "size": 120,
+      "rotation": 1.0471975511965976,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-5",
+      "x": 510,
+      "y": 320,
+      "size": 120,
+      "rotation": 2.0943951023931953,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-6",
+      "x": 410,
+      "y": 380,
+      "size": 120,
+      "rotation": 3.141592653589793,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-7",
+      "x": 310,
+      "y": 320,
+      "size": 120,
+      "rotation": 4.1887902047863905,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-9",
+      "x": 350,
+      "y": 260,
+      "size": 120,
+      "rotation": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-11",
+      "x": 380,
+      "y": 210,
+      "size": 120,
+      "rotation": 4.1887902047863905,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-12",
+      "x": 440,
+      "y": 320,
+      "size": 120,
+      "rotation": 4.1887902047863905,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-13",
+      "x": 380,
+      "y": 320,
+      "size": 120,
+      "rotation": 2.0943951023931953,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-14",
+      "x": 470,
+      "y": 260,
+      "size": 120,
+      "rotation": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    },
+    {
+      "type": "line",
+      "id": "shape-15",
+      "x": 440,
+      "y": 210,
+      "size": 120,
+      "rotation": -1.0471975511965976,
+      "scaleX": 1,
+      "scaleY": 1,
+      "color": "cyan",
+      "pointCount": 30
+    }
+  ]
+}

@@ -398,6 +398,29 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                     except Exception as e:
                         logger.warning(f"Could not get live parameters from {effect.get('plugin_id')}: {e}")
                 
+                # Merge UIDs from stored parameters into live parameters
+                stored_params = effect.get('parameters', {})
+                if stored_params and 'parameters' in effect_copy:
+                    for param_name, param_value in stored_params.items():
+                        # If stored parameter has _uid, merge it with live value
+                        if isinstance(param_value, dict) and '_uid' in param_value:
+                            if param_name in effect_copy['parameters']:
+                                # Get current live value
+                                live_value = effect_copy['parameters'][param_name]
+                                
+                                # If live value is already a dict with metadata, preserve it
+                                if isinstance(live_value, dict):
+                                    effect_copy['parameters'][param_name] = {
+                                        **live_value,  # Keep existing metadata (_value, _rangeMin, _rangeMax)
+                                        '_uid': param_value['_uid']  # Add stored UID
+                                    }
+                                else:
+                                    # Live value is plain number, wrap with UID
+                                    effect_copy['parameters'][param_name] = {
+                                        '_value': live_value,
+                                        '_uid': param_value['_uid']
+                                    }
+                
                 # Remove instance from response
                 if 'instance' in effect_copy:
                     del effect_copy['instance']
@@ -602,6 +625,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             param_value = data.get('value')
             range_min = data.get('rangeMin')
             range_max = data.get('rangeMax')
+            uid = data.get('uid')  # Preserve UID for sequence restoration
             
             if not param_name:
                 return jsonify({"success": False, "error": "Missing parameter name"}), 400
@@ -620,11 +644,21 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                     '_rangeMin': range_min,
                     '_rangeMax': range_max
                 }
+                # Preserve UID if provided
+                if uid:
+                    param_data['_uid'] = uid
                 effect['parameters'][param_name] = param_data
                 logger.info(f"🎚️ API received triple-slider: {param_name}={param_value}, range=[{range_min}, {range_max}]")
             else:
-                param_data = param_value
-                effect['parameters'][param_name] = param_value
+                # For simple values, store as dict if UID is present, otherwise plain value
+                if uid:
+                    param_data = {
+                        '_value': param_value,
+                        '_uid': uid
+                    }
+                else:
+                    param_data = param_value
+                effect['parameters'][param_name] = param_data
             
             # Update LIVE plugin instance in active layer (not registry instance!)
             player = player_manager.get_player(player_id)
@@ -647,6 +681,13 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                         if index < len(layer.effects):
                             live_effect = layer.effects[index]
                             if 'instance' in live_effect and live_effect['instance']:
+                                # CRITICAL: Log the caller to trace where 121.0 is coming from
+                                import traceback
+                                caller_stack = traceback.extract_stack()
+                                # Get the API request origin (usually 5-6 frames up)
+                                callers = [f"{frame.filename.split('/')[-1]}:{frame.lineno}" for frame in caller_stack[-6:-1]]
+                                logger.warning(f"🔍 API CALL: update_parameter('{param_name}', {value_to_update}) from {' → '.join(callers)}")
+                                
                                 live_effect['instance'].update_parameter(param_name, value_to_update)
                                 updated_live = True
                                 logger.info(f"✅ Updated LIVE layer effect instance: Layer {layer.layer_id}, effect {index}, {param_name}")
@@ -910,6 +951,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             value = data.get('value')
             range_min = data.get('rangeMin')
             range_max = data.get('rangeMax')
+            uid = data.get('uid')  # Preserve UID for sequence restoration
             
             if param_name is None or value is None:
                 return jsonify({"success": False, "error": "name and value required"}), 400
@@ -918,8 +960,8 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
-            # Get appropriate chain
-            chain = player.artnet_effect_chain if player_id == 'artnet' else player.video_effect_chain
+            # Get appropriate chain from effect_processor
+            chain = player.effect_processor.artnet_effect_chain if player_id == 'artnet' else player.effect_processor.video_effect_chain
             
             if index < 0 or index >= len(chain):
                 return jsonify({"success": False, "error": "Invalid index"}), 400
@@ -935,8 +977,18 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                     '_rangeMin': range_min,
                     '_rangeMax': range_max
                 }
+                # Preserve UID if provided
+                if uid:
+                    effect['config'][param_name]['_uid'] = uid
             else:
-                effect['config'][param_name] = value
+                # For simple values, store as dict if UID is present, otherwise plain value
+                if uid:
+                    effect['config'][param_name] = {
+                        '_value': value,
+                        '_uid': uid
+                    }
+                else:
+                    effect['config'][param_name] = value
             
             logger.info(f"✅ Parameter '{param_name}' von Effect {index} auf {value} gesetzt ({player_id})")
             
@@ -1613,10 +1665,15 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                                     relative_path=relative_path,
                                     metadata={}
                                 )
-                            playlist_ids[first_item] = first_clip_id
+                            # Update the playlist_ids list with the new/registered clip_id
+                            if player.playlist_ids and len(player.playlist_ids) > 0:
+                                player.playlist_ids[0] = first_clip_id
+                            else:
+                                player.playlist_ids = [first_clip_id]
                         
                         # Setze current_clip_id
                         player.current_clip_id = first_clip_id
+                        logger.debug(f"🆔 [{player_id}] Set current_clip_id = {first_clip_id}, updated playlist_ids[0]")
                         
                         # Lade Layer für den Clip
                         if not player.load_clip_layers(first_clip_id, clip_registry, video_dir):

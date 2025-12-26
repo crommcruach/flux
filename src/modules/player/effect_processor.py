@@ -274,130 +274,7 @@ class EffectProcessor:
         """
         processed_frame = frame
         
-        # 1. Apply clip-level effects first (if current clip has effects)
-        # B3 Performance Optimization: Version-based cache invalidation
-        if self.clip_registry and current_clip_id:
-            current_version = self.clip_registry.get_effects_version(current_clip_id)
-            
-            # Cache check: clip_id AND version must match
-            if (self._cached_clip_id == current_clip_id and 
-                self._cached_version == current_version):
-                # Cache hit! Use cached effects (99.9% of frames)
-                clip_effects = self._cached_clip_effects
-            else:
-                # Cache miss: Reload effects (only on clip change or parameter change)
-                clip_effects = self.clip_registry.get_clip_effects(current_clip_id)
-                
-                # Pre-instantiate plugin instances (remove lazy-loading overhead)
-                for effect_data in clip_effects:
-                    if 'instance' not in effect_data:
-                        plugin_id = effect_data['plugin_id']
-                        if plugin_id in self.plugin_manager.registry:
-                            plugin_class = self.plugin_manager.registry[plugin_id]
-                            # Pass parameters as config
-                            config = effect_data.get('parameters', {})
-                            effect_data['instance'] = plugin_class(config)
-                            
-                            # Special handling for transport
-                            if plugin_id == 'transport' and hasattr(effect_data['instance'], '_initialize_state'):
-                                if source:
-                                    # Only call _initialize_state if transport has no valid trim yet
-                                    # (to avoid overwriting user's trim settings from config)
-                                    transport = effect_data['instance']
-                                    needs_init = (
-                                        transport._frame_source is None or
-                                        transport._total_frames is None
-                                    )
-                                    
-                                    if needs_init:
-                                        transport._initialize_state(source)
-                                        logger.info(f"🎬 [{player_name}] Transport initialized for clip {current_clip_id}: [{transport.in_point}, {transport.out_point}]")
-                                    else:
-                                        logger.info(f"🎬 [{player_name}] Transport already initialized, keeping trim: [{transport.in_point}, {transport.out_point}]")
-                                    
-                                    # Set WebSocket context for position updates
-                                    if player and hasattr(player, 'player_manager') and hasattr(player.player_manager, 'socketio'):
-                                        transport.socketio = player.player_manager.socketio
-                                        transport.player_id = player.player_id
-                                        transport.clip_id = current_clip_id
-                                        logger.info(f"📡 [{player_name}] Transport WebSocket context set: player_id={player.player_id}, clip_id={current_clip_id}, socketio={transport.socketio is not None}")
-                                    else:
-                                        logger.warning(f"⚠️ [{player_name}] Could not set Transport WebSocket context: player={player is not None}, has_manager={hasattr(player, 'player_manager') if player else False}, has_socketio={hasattr(player.player_manager, 'socketio') if player and hasattr(player, 'player_manager') else False}")
-                                    
-                                    # Sync parameters back to registry
-                                    effect_data['parameters']['transport_position'] = {
-                                        '_value': transport.current_position,
-                                        '_rangeMin': transport.in_point,
-                                        '_rangeMax': transport.out_point
-                                    }
-                            
-                            logger.info(f"✅ [{player_name}] Created clip effect instance: {plugin_id}")
-                        else:
-                            logger.warning(f"Plugin '{plugin_id}' not found in registry")
-                
-                # Update cache
-                self._cached_clip_effects = clip_effects
-                self._cached_clip_id = current_clip_id
-                self._cached_version = current_version
-                logger.debug(f"📦 [{player_name}] Effect cache updated for clip {current_clip_id}")
-            
-            if clip_effects:
-                for effect_data in clip_effects:
-                    # Skip disabled effects
-                    if not effect_data.get('enabled', True):
-                        continue
-                    
-                    try:
-                        plugin_instance = effect_data['instance']
-
-                        # Update parameters from effect_data EVERY frame
-                        for param_name, param_value in effect_data['parameters'].items():
-                            # Skip transport_position - it's managed internally
-                            if param_name == 'transport_position':
-                                # Only update if not initialized yet
-                                if hasattr(plugin_instance, 'in_point') and hasattr(plugin_instance, '_virtual_frame'):
-                                    # Already initialized - only update if trim range changed
-                                    if isinstance(param_value, dict):
-                                        new_in = param_value.get('_rangeMin', plugin_instance.in_point)
-                                        new_out = param_value.get('_rangeMax', plugin_instance.out_point)
-                                        if new_in != plugin_instance.in_point or new_out != plugin_instance.out_point:
-                                            if hasattr(plugin_instance, 'update_parameter'):
-                                                plugin_instance.update_parameter(param_name, param_value)
-                                else:
-                                    # First initialization
-                                    if hasattr(plugin_instance, 'update_parameter'):
-                                        plugin_instance.update_parameter(param_name, param_value)
-                                continue
-                            
-                            # Use update_parameter if available
-                            if hasattr(plugin_instance, 'update_parameter'):
-                                # Extract actual value from dict format if needed
-                                value_to_set = param_value
-                                if isinstance(param_value, dict) and '_value' in param_value:
-                                    value_to_set = param_value['_value']
-                                plugin_instance.update_parameter(param_name, value_to_set)
-                            else:
-                                # Fallback: direct setattr
-                                if isinstance(param_value, dict) and '_value' in param_value:
-                                    setattr(plugin_instance, param_name, param_value['_value'])
-                                else:
-                                    setattr(plugin_instance, param_name, param_value)
-
-                        # Process frame
-                        processed_frame = plugin_instance.process_frame(processed_frame, source=source, player=player)
-                        
-                        if processed_frame is None:
-                            logger.error(f"❌ [{player_name}] Clip effect '{effect_data['plugin_id']}' returned None")
-                            processed_frame = frame
-                            continue
-                            
-                    except Exception as e:
-                        logger.error(f"❌ [{player_name}] Error in clip effect '{effect_data.get('plugin_id', 'unknown')}': {e}")
-                        import traceback
-                        logger.error(traceback.format_exc())
-                        continue
-        
-        # 2. Apply player-level effects
+        # 1. Apply player-level effects FIRST (base layer)
         effect_chain = self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain
         
         if effect_chain:
@@ -419,6 +296,49 @@ class EffectProcessor:
                 except Exception as e:
                     logger.error(f"❌ Error in effect '{effect['id']}': {e}")
                     continue
+        
+        # 2. Apply clip-level effects AFTER (can override player effects)
+        # CRITICAL: Use layer.effects instances (which sequence manager updates)
+        # instead of creating separate instances from registry
+        if player and current_clip_id and hasattr(player, 'layers'):
+            # Find the layer with matching clip_id
+            clip_effects = None
+            for layer in player.layers:
+                if hasattr(layer, 'clip_id') and layer.clip_id == current_clip_id:
+                    if hasattr(layer, 'effects') and layer.effects:
+                        clip_effects = layer.effects
+                        logger.debug(f"✅ Using layer.effects for clip {current_clip_id} ({len(clip_effects)} effects)")
+                        break
+            
+            if clip_effects:
+                for effect_data in clip_effects:
+                    # Skip disabled effects
+                    if not effect_data.get('enabled', True):
+                        continue
+                    
+                    try:
+                        plugin_instance = effect_data['instance']
+                        plugin_id = effect_data.get('plugin_id', 'unknown')
+                        
+                        # Special handling for transport effect initialization
+                        if plugin_id == 'transport' and hasattr(plugin_instance, '_initialize_state'):
+                            if source and (not hasattr(plugin_instance, '_frame_source') or plugin_instance._frame_source is None):
+                                plugin_instance._initialize_state(source)
+                                logger.info(f"🎬 [{player_name}] Transport initialized for clip {current_clip_id}")
+                        
+                        # Process frame (parameters are already set by update_parameter calls from sequence manager)
+                        processed_frame = plugin_instance.process_frame(processed_frame, source=source, player=player)
+                        
+                        if processed_frame is None:
+                            logger.error(f"❌ [{player_name}] Clip effect '{effect_data['plugin_id']}' returned None")
+                            processed_frame = frame
+                            continue
+                            
+                    except Exception as e:
+                        logger.error(f"❌ [{player_name}] Error in clip effect '{effect_data.get('plugin_id', 'unknown')}': {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        continue
         
         return processed_frame
     

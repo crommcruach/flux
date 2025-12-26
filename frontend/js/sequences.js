@@ -458,7 +458,7 @@ class SequenceManager {
             return;
         }
         
-        // Show the controls
+        // Show the controls (param-dynamic-settings in new grid layout)
         controlsContainer.style.display = 'block';
         
         // Track selected band and direction
@@ -554,8 +554,9 @@ class SequenceManager {
         console.log('🔍 Slider instance:', tripleSlider);
         
         if (tripleSlider) {
-            minValue = tripleSlider.rangeMin;
-            maxValue = tripleSlider.rangeMax;
+            const range = tripleSlider.getRange();
+            minValue = range.min;
+            maxValue = range.max;
             console.log('📊 Using slider range:', { minValue, maxValue });
         } else {
             console.warn('⚠️ Triple slider not found, using defaults:', { minValue, maxValue });
@@ -615,19 +616,73 @@ class SequenceManager {
      * Remove sequence from context menu
      */
     async removeSequenceFromContext() {
-        if (!this.contextParameter) return;
+        if (!this.contextParameter) {
+            console.warn('⚠️ No context parameter set');
+            return;
+        }
+        
+        console.log('🗑️ Removing ALL sequences for:', this.contextParameter);
         
         // Close context menu
         document.getElementById('sequenceContextMenu').classList.remove('show');
         
-        // Find and delete sequence
-        const existing = this.sequences.find(s => s.target_parameter === this.contextParameter.id);
-        if (existing) {
-            this.currentSequence = existing;
-            await this.deleteSequence();
+        // Find ALL sequences for this parameter (there might be duplicates)
+        const existingSequences = this.sequences.filter(s => s.target_parameter === this.contextParameter.id);
+        
+        if (existingSequences.length > 0) {
+            console.log(`✅ Found ${existingSequences.length} sequence(s) to remove:`, existingSequences.map(s => s.id));
+            
+            // Delete all sequences for this parameter (skip confirmation since user already chose Remove from menu)
+            for (const seq of existingSequences) {
+                this.currentSequence = seq;
+                await this.deleteSequence(true); // skipConfirm=true
+            }
+            
+            this.showNotification(`Removed ${existingSequences.length} sequence(s)`, 'success');
+            
+            // Restore default triple slider UI (hide dynamic settings)
+            console.log('🔄 Restoring default UI for controlId:', this.contextParameter.controlId);
+            this.restoreDefaultTripleSlider(this.contextParameter.controlId);
         } else {
+            console.warn('⚠️ No sequence found for parameter:', this.contextParameter.id);
+            // Even if no sequence exists, hide the dynamic settings
+            this.restoreDefaultTripleSlider(this.contextParameter.controlId);
             this.showNotification('No sequence found for this parameter', 'warning');
         }
+    }
+    
+    /**
+     * Restore default triple slider (hide audio controls, show triple slider)
+     */
+    restoreDefaultTripleSlider(controlId) {
+        console.log('🔄 Restoring default triple slider for:', controlId);
+        
+        if (!controlId) {
+            console.warn('⚠️ No controlId provided for restoring triple slider');
+            return;
+        }
+        
+        // Hide audio controls (param-dynamic-settings in new grid layout)
+        const audioControls = document.getElementById(`${controlId}_audio_controls`);
+        if (audioControls) {
+            audioControls.style.display = 'none';
+            console.log('✅ Hidden audio controls');
+            
+            // Remove any active classes from inline buttons (cleanup)
+            const inlineButtons = audioControls.querySelectorAll('.audio-band-btn-inline, .audio-dir-btn-inline');
+            inlineButtons.forEach(btn => btn.classList.remove('active'));
+        }
+        
+        // Show triple slider container (inside param-slider in new grid layout)
+        const tripleSliderContainer = document.getElementById(controlId);
+        if (tripleSliderContainer) {
+            // The triple slider container should already be visible in grid layout
+            // Just ensure it's not hidden
+            tripleSliderContainer.style.display = '';
+            console.log('✅ Restored triple slider display');
+        }
+        
+        this.showNotification('Parameter reset to default', 'success');
     }
     
     /**
@@ -921,13 +976,13 @@ class SequenceManager {
     /**
      * Delete sequence
      */
-    async deleteSequence() {
+    async deleteSequence(skipConfirm = false) {
         if (!this.currentSequence) {
             this.showNotification('No sequence to delete', 'warning');
             return;
         }
         
-        if (!confirm('Delete this sequence?')) {
+        if (!skipConfirm && !confirm('Delete this sequence?')) {
             return;
         }
         
@@ -937,11 +992,13 @@ class SequenceManager {
             });
             
             if (response.ok) {
-                console.log('Sequence deleted');
+                console.log('✅ Sequence deleted:', this.currentSequence.id);
                 await window.sessionStateLoader.reload(); // Force reload to get updated state
                 await this.loadSequencesFromSessionState();
                 this.closeEditor();
-                this.showNotification('Sequence deleted', 'success');
+                if (!skipConfirm) {
+                    this.showNotification('Sequence deleted', 'success');
+                }
             } else {
                 const error = await response.json();
                 this.showNotification(`Error: ${error.error}`, 'error');
@@ -950,6 +1007,75 @@ class SequenceManager {
             console.error('Error deleting sequence:', error);
             this.showNotification('Failed to delete sequence', 'error');
         }
+    }
+    
+    /**
+     * Cleanup all sequences for a removed clip
+     * @param {string} clipId - The UUID of the removed clip
+     */
+    async cleanupSequencesForClip(clipId) {
+        if (!clipId) return;
+        
+        console.log(`🧹 Cleaning up sequences for removed clip: ${clipId}`);
+        
+        // Find all sequences whose target_parameter contains this clip_id
+        // Format: param_clip_{clip_id}_...
+        const clipSequences = this.sequences.filter(seq => 
+            seq.target_parameter && seq.target_parameter.includes(`_${clipId}_`)
+        );
+        
+        if (clipSequences.length === 0) {
+            console.log(`✅ No sequences found for clip ${clipId}`);
+            return;
+        }
+        
+        console.log(`🗑️ Found ${clipSequences.length} sequence(s) to delete for clip ${clipId}`);
+        
+        // Delete each sequence using existing deleteSequence method
+        for (const seq of clipSequences) {
+            this.currentSequence = seq;
+            await this.deleteSequence(true); // skipConfirm=true
+        }
+        
+        console.log(`✅ Cleanup complete for clip ${clipId}`);
+    }
+    
+    /**
+     * Cleanup all sequences for a specific effect on a clip
+     * @param {string} clipId - The UUID of the clip
+     * @param {string} pluginId - The plugin ID of the effect (e.g., 'transform', 'blur')
+     */
+    async cleanupSequencesForEffect(clipId, pluginId) {
+        if (!clipId || !pluginId) return;
+        
+        console.log(`🧹 Cleaning up sequences for effect ${pluginId} on clip: ${clipId}`);
+        
+        // Find all sequences whose target_parameter matches this clip and plugin
+        // Format: param_clip_{clip_id}_{param_name}_... where path includes plugin_id
+        const effectSequences = this.sequences.filter(seq => {
+            if (!seq.target_parameter || !seq.target_parameter.includes(`_${clipId}_`)) {
+                return false;
+            }
+            // Also check if the parameter path includes the plugin_id
+            // Path format: {player}.{clipId}.{pluginId}.{paramName}
+            const pathParts = seq.target_parameter.split('.');
+            return pathParts.length >= 3 && pathParts[2] === pluginId;
+        });
+        
+        if (effectSequences.length === 0) {
+            console.log(`✅ No sequences found for effect ${pluginId} on clip ${clipId}`);
+            return;
+        }
+        
+        console.log(`🗑️ Found ${effectSequences.length} sequence(s) to delete for effect ${pluginId}`);
+        
+        // Delete each sequence using existing deleteSequence method
+        for (const seq of effectSequences) {
+            this.currentSequence = seq;
+            await this.deleteSequence(true); // skipConfirm=true
+        }
+        
+        console.log(`✅ Cleanup complete for effect ${pluginId} on clip ${clipId}`);
     }
     
     /**
@@ -970,15 +1096,20 @@ class SequenceManager {
             for (const [uid, seqList] of Object.entries(sequencesData)) {
                 for (const seq of seqList) {
                     sequences.push(seq);
-                    console.log(`✅ Loaded sequence for UID ${uid}:`, seq);
+                    console.log(`✅ Loaded sequence for UID ${uid}:`, {
+                        type: seq.type,
+                        band: seq.band,
+                        mode: seq.mode,
+                        attack_release: seq.attack_release
+                    });
                 }
             }
             
             this.sequences = sequences;
             console.log(`📦 Loaded ${sequences.length} sequences from flat structure`);
             
-            // Schedule restoration after DOM is ready (buttons are rendered)
-            setTimeout(() => this.restoreInlineAudioControls(), 500);
+            // Don't restore controls here - wait for renderClipEffects() to call it
+            // when the DOM is actually ready (after clip is loaded and effects are rendered)
             
         } catch (error) {
             console.error('❌ Error loading sequences from session state:', error);
@@ -990,71 +1121,102 @@ class SequenceManager {
      */
     restoreInlineAudioControls() {
         console.log('🔄 Restoring inline audio controls for audio sequences...');
+        console.log('📊 Total sequences:', this.sequences.length);
         
         // Find all audio sequences
         const audioSequences = this.sequences.filter(seq => seq.type === 'audio');
         console.log(`📋 Found ${audioSequences.length} audio sequences to restore`);
         
-        audioSequences.forEach(seq => {
+        if (audioSequences.length === 0) {
+            console.log('✅ No audio sequences to restore');
+            return;
+        }
+        
+        audioSequences.forEach((seq, index) => {
+            console.log(`\n🔍 [${index + 1}/${audioSequences.length}] Processing sequence:`, {
+                uid: seq.target_parameter,
+                band: seq.band,
+                mode: seq.mode
+            });
+            
             // Find the button with matching UID
             const button = document.querySelector(`[data-param-uid="${seq.target_parameter}"]`);
             if (!button) {
-                console.warn('⚠️ No button found for UID:', seq.target_parameter);
+                console.log('❌ Button not found in DOM (parameter not visible)');
                 return;
             }
+            console.log('✅ Found button:', button);
             
-            // Get the parameter control container
-            const paramControl = button.closest('.parameter-control');
+            // Get the parameter control container (new grid layout)
+            const paramControl = button.closest('.parameter-grid-row');
             if (!paramControl) {
-                console.warn('⚠️ No parameter control found for button');
+                console.warn('❌ No parameter-grid-row found for button');
                 return;
             }
+            console.log('✅ Found parameter-grid-row');
             
             // Find the audio controls container
             const tripleSliderContainer = paramControl.querySelector('.triple-slider-container');
             if (!tripleSliderContainer) {
-                console.warn('⚠️ No triple slider container found');
+                console.warn('❌ No triple slider container found');
                 return;
             }
+            console.log('✅ Found triple-slider-container:', tripleSliderContainer.id);
             
             const controlId = tripleSliderContainer.id;
             const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
             
             if (!controlsContainer) {
-                console.warn('⚠️ No audio controls container found for:', controlId);
+                console.warn('❌ No audio controls container found for:', controlId);
                 return;
             }
+            console.log('✅ Found audio controls container');
+            console.log('📏 Current display style:', controlsContainer.style.display);
             
             // Show the controls
             controlsContainer.style.display = 'block';
+            console.log('✅ Set display to block, new value:', controlsContainer.style.display);
             
-            // Restore band selection
-            const bandBtn = controlsContainer.querySelector(`[data-band="${seq.config?.band}"]`);
+            // Restore band selection (inline buttons)
+            const bandButtons = controlsContainer.querySelectorAll('.audio-band-btn-inline');
+            console.log('🔘 Found band buttons:', bandButtons.length);
+            const bandBtn = controlsContainer.querySelector(`[data-band="${seq.band}"]`);
             if (bandBtn) {
-                controlsContainer.querySelectorAll('.audio-band-btn').forEach(btn => btn.classList.remove('active'));
+                bandButtons.forEach(btn => btn.classList.remove('active'));
                 bandBtn.classList.add('active');
+                console.log('✅ Restored band:', seq.band);
+            } else {
+                console.warn('❌ Band button not found for:', seq.band);
             }
             
-            // Restore direction selection
-            const directionBtn = controlsContainer.querySelector(`[data-direction="${seq.config?.direction}"]`);
+            // Restore direction selection (inline buttons) - seq.mode, not seq.config.direction
+            const dirButtons = controlsContainer.querySelectorAll('.audio-dir-btn-inline');
+            console.log('🔘 Found direction buttons:', dirButtons.length);
+            const directionBtn = controlsContainer.querySelector(`[data-direction="${seq.mode}"]`);
             if (directionBtn) {
-                controlsContainer.querySelectorAll('.audio-direction-btn').forEach(btn => btn.classList.remove('active'));
+                dirButtons.forEach(btn => btn.classList.remove('active'));
                 directionBtn.classList.add('active');
+                console.log('✅ Restored mode:', seq.mode);
+            } else {
+                console.warn('❌ Direction button not found for:', seq.mode);
             }
             
             // Restore attack/release knob value
             const knobContainer = document.getElementById(`${controlId}_attack_release`);
-            if (knobContainer?._circularSlider && seq.config?.attack_release !== undefined) {
-                knobContainer._circularSlider.setValue(seq.config.attack_release);
+            if (knobContainer) {
+                console.log('✅ Found knob container, has slider:', !!knobContainer._circularSlider);
+                if (knobContainer._circularSlider && seq.attack_release !== undefined) {
+                    knobContainer._circularSlider.setValue(seq.attack_release);
+                    console.log('✅ Restored attack_release:', seq.attack_release);
+                }
+            } else {
+                console.warn('❌ Knob container not found');
             }
             
-            console.log(`✅ Restored controls for UID ${seq.target_parameter}:`, {
-                controlId,
-                band: seq.config?.band,
-                direction: seq.config?.direction,
-                attackRelease: seq.config?.attack_release
-            });
+            console.log('✅ Successfully restored controls for:', seq.target_parameter);
         });
+        
+        console.log('\n✅ Restore complete');
     }
     
     /**
@@ -1375,9 +1537,18 @@ class SequenceManager {
         });
         
         // Listen for parameter value updates (for triple slider feedback)
+        // Track last values to only log when changed
+        this._lastParameterValues = this._lastParameterValues || {};
+        
         window.socket.on('parameter_update', (data) => {
-            console.log('📡 Received parameter_update (UID):', data);
             if (data.parameter && data.value !== undefined) {
+                // Only log if value actually changed
+                const lastValue = this._lastParameterValues[data.parameter];
+                if (lastValue !== data.value) {
+                    // console.log('📡 Parameter changed:', data.parameter, lastValue, '→', data.value);
+                    this._lastParameterValues[data.parameter] = data.value;
+                }
+                
                 this.updateParameterVisualFeedbackByUID(data.parameter, data.value);
             }
         });
@@ -1398,32 +1569,30 @@ class SequenceManager {
         // Find sequence button with this UID
         const button = document.querySelector(`[data-param-uid="${paramUid}"]`);
         if (!button) {
-            console.warn('⚠️ No button found for UID:', paramUid);
+            // This is normal - parameter might not be visible (e.g., clip not selected)
+            // Only log in verbose mode
+            console.debug('Parameter not currently visible in DOM:', paramUid);
             return;
         }
         
-        // Get triple slider from parent container
-        const paramControl = button.closest('.parameter-control');
+        // Get triple slider from parent container (new grid layout)
+        const paramControl = button.closest('.parameter-grid-row');
         if (!paramControl) {
-            console.warn('⚠️ No parameter control found');
+            console.debug('No parameter-grid-row found for:', paramUid);
             return;
         }
         
         const tripleSliderContainer = paramControl.querySelector('.triple-slider-container');
         if (!tripleSliderContainer) {
-            console.warn('⚠️ No triple slider container found');
+            console.debug('No triple slider container found for:', paramUid);
             return;
         }
         
         const slider = getTripleSlider(tripleSliderContainer.id);
         
-        console.log('🎯 Updating visual feedback by UID:', { paramUid, value, sliderId: tripleSliderContainer.id, found: !!slider });
-        
         if (slider && slider.updateCurrentValue) {
             slider.updateCurrentValue(value);
-            console.log('✅ Updated triple slider red line to:', value);
-        } else {
-            console.warn('⚠️ Triple slider not found for UID:', paramUid);
+            console.debug('✅ Updated triple slider red line to:', value);
         }
     }
     

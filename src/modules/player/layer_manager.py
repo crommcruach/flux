@@ -364,22 +364,26 @@ class LayerManager:
         """
         # Layer effects logging removed for performance
         
-        # Get latest parameters from registry (updated via API)
-        if self.clip_registry and layer.clip_id:
-            registry_effects = self.clip_registry.get_clip_effects(layer.clip_id)
-            
-            # Update parameters on instances from registry
-            for i, effect in enumerate(layer.effects):
-                if i < len(registry_effects):
-                    registry_params = registry_effects[i].get('parameters', {})
-                    instance = effect['instance']
-                    
-                    # Update each parameter on the instance
-                    for param_name, param_value in registry_params.items():
-                        # Extract actual value if it's a range metadata dict
-                        if isinstance(param_value, dict) and '_value' in param_value:
-                            param_value = param_value['_value']
-                        setattr(instance, param_name, param_value)
+        # REMOVED: Don't restore parameters from registry every frame!
+        # This was overwriting runtime parameter changes (e.g., from audio sequences).
+        # The live instance is the source of truth - parameters should only be updated via update_parameter().
+        # 
+        # # Get latest parameters from registry (updated via API)
+        # if self.clip_registry and layer.clip_id:
+        #     registry_effects = self.clip_registry.get_clip_effects(layer.clip_id)
+        #     
+        #     # Update parameters on instances from registry
+        #     for i, effect in enumerate(layer.effects):
+        #         if i < len(registry_effects):
+        #             registry_params = registry_effects[i].get('parameters', {})
+        #             instance = effect['instance']
+        #             
+        #             # Update each parameter on the instance
+        #             for param_name, param_value in registry_params.items():
+        #                 # Extract actual value if it's a range metadata dict
+        #                 if isinstance(param_value, dict) and '_value' in param_value:
+        #                     param_value = param_value['_value']
+        #                 setattr(instance, param_name, param_value)
         
         for effect in layer.effects:
             # Skip disabled effects
@@ -444,12 +448,14 @@ class LayerManager:
             
             # Add to layer effects
             try:
-                layer.effects.append({
-                    'id': plugin_id,
+                effect_dict = {
+                    'plugin_id': plugin_id,  # Use 'plugin_id' to match registry format
                     'instance': plugin_instance,
-                    'config': params,
+                    'parameters': effect_config.get('parameters', params),  # Use 'parameters' key, prefer from effect_config
                     'enabled': enabled
-                })
+                }
+                layer.effects.append(effect_dict)
+                logger.info(f"   ✅ Added {plugin_id} instance [{id(plugin_instance)}] to layer effects (index {len(layer.effects)-1})")
             except Exception as e:
                 logger.error(f"❌ [{player_name}] Error loading effect '{plugin_id}' for Layer {layer.layer_id}: {e}")
         

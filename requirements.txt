@@ -12,3 +12,4 @@ Pillow>=10.0.0
 aiortc>=1.6.0
 av>=10.0.0
 sounddevice>=0.4.0  # Audio input for parameter sequences
+miniaudio>=1.61  # Audio playback for sequencer (Windows: requires MSVC Build Tools + Windows 10/11 SDK)

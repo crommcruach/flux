@@ -130,6 +130,24 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
             
             # Create sequence based on type
             if seq_type == 'audio':
+                # Map frontend direction names to backend mode names (for backward compatibility)
+                mode_mapping = {
+                    'rise-from-min': 'rise-from-min',
+                    'rise-from-max': 'rise-from-max',
+                    'beat-forward': 'beat-forward',
+                    'beat-backward': 'beat-backward',
+                    # Legacy mappings
+                    'raise': 'rise-from-min',
+                    'lower': 'rise-from-max',
+                    'attack_release': 'rise-from-min',
+                    'inverted_attack_release': 'rise-from-max'
+                }
+                raw_mode = config.get('mode', config.get('direction', 'rise-from-min'))
+                mode = mode_mapping.get(raw_mode, 'rise-from-min')
+                
+                # Log received config for debugging
+                logger.info(f"🎵 Creating AudioSequence: raw_mode={raw_mode}, mapped_mode={mode}, band={config.get('band')}, config={config}")
+                
                 sequence = AudioSequence(
                     sequence_id=data.get('id'),
                     target_parameter=target,
@@ -140,7 +158,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                     smoothing=config.get('smoothing', 0.1),
                     invert=config.get('invert', False),
                     band=config.get('band', 'bass'),
-                    direction=config.get('direction', 'rise_from_min'),
+                    mode=mode,
                     attack_release=config.get('attack_release', 0.5)
                 )
             

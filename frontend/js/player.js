@@ -2388,6 +2388,11 @@ window.removeFromVideoPlaylist = async function(index) {
     const video = playerConfigs.video.files[index];
     const wasCurrentlyPlaying = (playerConfigs.video.currentFile === video.path);
     
+    // Cleanup audio sequences for this clip
+    if (video.id && window.sequenceManager) {
+        await window.sequenceManager.cleanupSequencesForClip(video.id);
+    }
+    
     playerConfigs.video.files.splice(index, 1);
     
     // If removed video was current, load next or stop
@@ -2750,6 +2755,11 @@ window.refreshArtnetPlaylist = async function() {
 window.removeFromArtnetPlaylist = async function(index) {
     const video = playerConfigs.artnet.files[index];
     const wasCurrentlyPlaying = (playerConfigs.artnet.currentFile === video.path);
+    
+    // Cleanup audio sequences for this clip
+    if (video.id && window.sequenceManager) {
+        await window.sequenceManager.cleanupSequencesForClip(video.id);
+    }
     
     playerConfigs.artnet.files.splice(index, 1);
     
@@ -3232,8 +3242,10 @@ function renderClipEffects() {
             </div>
         `;
     } else {
+        // Use layer's clip_id if layer is selected, otherwise use selected clip
+        const targetClipId = selectedLayerClipId || selectedClipId;
         html += clipEffects.map((effect, index) => 
-            renderEffectItem(effect, index, 'clip', selectedClipId)
+            renderEffectItem(effect, index, 'clip', targetClipId)
         ).join('');
     }
     
@@ -3254,8 +3266,11 @@ function renderClipEffects() {
     });
     
     // Restore inline audio controls for sequences
+    // Wait for next animation frame to ensure DOM is fully rendered and processed
     if (window.sequenceManager) {
-        window.sequenceManager.restoreInlineAudioControls();
+        requestAnimationFrame(() => {
+            window.sequenceManager.restoreInlineAudioControls();
+        });
     }
 }
 
@@ -3283,6 +3298,12 @@ window.clearClipEffects = async function() {
     clearClipEffectsClicks = 0;
     
     try {
+        // Cleanup all sequences for this clip before clearing effects
+        const targetClipId = selectedLayerClipId || selectedClipId;
+        if (targetClipId && window.sequenceManager) {
+            await window.sequenceManager.cleanupSequencesForClip(targetClipId);
+        }
+        
         // NEW: Unified API endpoint
         const endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/clear`;
         
@@ -3347,10 +3368,11 @@ function renderEffectItem(effect, index, player, clipId = null) {
                 </div>
             </div>
             <div class="effect-body">
-                ${parameters.length > 0 ? 
-                    parameters.map(param => renderParameterControl(param, effect.parameters[param.name], index, player, pluginId, clipId)).join('') :
-                    '<p class="text-muted">No configurable parameters</p>'
-                }
+                ${parameters.length > 0 ? `
+                    <div class="parameters-grid">
+                        ${parameters.map(param => renderParameterControl(param, effect.parameters[param.name], index, player, pluginId, clipId, isSystemPlugin)).join('')}
+                    </div>
+                ` : '<p class="text-muted">No configurable parameters</p>'}
             </div>
         </div>
     `;
@@ -3453,6 +3475,16 @@ window.removeEffect = async function(player, index, e) {
         clearTimeout(resetTimer);
         
         try {
+            // Get effect data before deleting (for sequence cleanup)
+            let effectToDelete = null;
+            if (player === 'clip') {
+                effectToDelete = clipEffects[index];
+            } else if (player === 'video') {
+                effectToDelete = videoEffects[index];
+            } else if (player === 'artnet') {
+                effectToDelete = artnetEffects[index];
+            }
+            
             let endpoint;
             let bodyData = null;
             
@@ -3481,6 +3513,16 @@ window.removeEffect = async function(player, index, e) {
             
             if (data.success) {
                 debug.log(`✅ ${player} effect removed:`, index);
+                
+                // Cleanup sequences for this effect (clip effects only)
+                if (player === 'clip' && effectToDelete && window.sequenceManager) {
+                    const targetClipId = selectedLayerClipId || selectedClipId;
+                    const pluginId = effectToDelete.plugin_id;
+                    if (targetClipId && pluginId) {
+                        await window.sequenceManager.cleanupSequencesForEffect(targetClipId, pluginId);
+                    }
+                }
+                
                 if (player === 'video') {
                     await refreshVideoEffects();
                 } else if (player === 'artnet') {
@@ -3502,9 +3544,12 @@ window.removeEffect = async function(player, index, e) {
 // PARAMETER CONTROLS
 // ========================================
 
-function renderParameterControl(param, currentValue, effectIndex, player, pluginId = '', clipId = null) {
+function renderParameterControl(param, currentValue, effectIndex, player, pluginId = '', clipId = null, isSystemPlugin = false) {
     const value = currentValue !== undefined ? currentValue : param.default;
-    const controlId = `${player}_effect_${effectIndex}_${param.name}`;
+    // Use plugin_id for stability (survives effect reordering)
+    const controlId = clipId 
+        ? `${player}_${clipId}_${pluginId}_${param.name}` 
+        : `${player}_${pluginId}_${effectIndex}_${param.name}`;
     
     // Construct parameter path for sequences following session state hierarchy
     // Format: {player_id}.{clip_id}.{plugin_id}.{param_name}
@@ -3517,17 +3562,48 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
         paramPath = `${player}.effects[${effectIndex}].parameters.${param.name}`;
     }
     
-    // Get UID from current value if it exists (_uid property), otherwise generate new one
+    // Get UID from current value if it exists (_uid property), otherwise generate new one and save it
     let paramUid;
+    let needsUidSave = false;
+    
     if (currentValue && typeof currentValue === 'object' && currentValue._uid) {
         paramUid = currentValue._uid;
         console.log(`♻️ Restoring UID for ${param.name}:`, paramUid);
     } else {
-        paramUid = `param_${player}_${effectIndex}_${param.name}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        console.log(`🆕 Generated new UID for ${param.name}:`, paramUid);
+        // Generate stable UUID (without timestamp/random - use crypto if available)
+        const uuidPart = crypto.randomUUID ? crypto.randomUUID().split('-')[0] : Math.random().toString(36).substr(2, 9);
+        
+        if (clipId) {
+            paramUid = `param_clip_${clipId}_${param.name}_${uuidPart}`;
+        } else {
+            // Legacy format for player-level effects
+            paramUid = `param_${player}_${effectIndex}_${param.name}_${uuidPart}`;
+        }
+        console.log(`🆕 Generated new stable UID for ${param.name}:`, paramUid);
+        needsUidSave = true;
     }
     
-    const sequenceBtn = `<button class="sequence-btn" onclick="window.sequenceManager && window.sequenceManager.showContextMenu('${paramPath}', '${param.label || param.name}', ${value}, event, '${paramUid}', '${controlId}'); event.stopPropagation();" title="Dynamic Parameter Sequence" data-param-uid="${paramUid}">⚙️</button>`;
+    // Save UID immediately if it was just generated (only for clip effects)
+    if (needsUidSave && clipId && player === 'clip') {
+        // Use a microtask to save after render
+        queueMicrotask(() => {
+            console.log(`💾 Saving new UID for ${param.name}:`, paramUid);
+            updateParameter(player, effectIndex, param.name, value, `${controlId}_value`, paramUid);
+        });
+    }
+    
+    // Hide sequence button for system plugins
+    const paramLabel = (param.label || param.name).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    // Extract actual value (handle metadata wrapper)
+    const actualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : value;
+    const sequenceBtn = isSystemPlugin ? '' : `<button class="sequence-btn" 
+        data-param-path="${paramPath}" 
+        data-param-label="${paramLabel}" 
+        data-param-value="${actualValue}" 
+        data-param-uid="${paramUid}" 
+        data-control-id="${controlId}"
+        onclick="event.stopPropagation(); if(window.sequenceManager) { const btn = event.currentTarget; window.sequenceManager.showContextMenu(btn.dataset.paramPath, btn.dataset.paramLabel, parseFloat(btn.dataset.paramValue), event, btn.dataset.paramUid, btn.dataset.controlId); }" 
+        title="Dynamic Parameter Sequence">⚙️</button>`;
     
     const paramType = (param.type || '').toUpperCase();
     
@@ -3575,19 +3651,23 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             }
             
             control = `
-                <div class="parameter-control">
-                    <div class="parameter-label">
+                <div class="parameter-grid-row">
+                    <div class="param-cogwheel">
                         ${sequenceBtn}
-                        <label>${param.label || param.name}</label>
+                    </div>
+                    <div class="param-name">
+                        <label title="UID: ${paramUid}">${param.label || param.name}</label>
                         <span class="parameter-value" id="${controlId}_value">${intDisplayValue}</span>
                     </div>
-                    <div id="${controlId}" class="triple-slider-container" 
-                         data-default="${intDefaultValue}" 
-                         data-decimals="${intDecimals}"
-                         oncontextmenu="resetParameterToDefaultTriple(event, '${player}', ${effectIndex}, '${param.name}', ${intDefaultValue}, '${controlId}', '${controlId}_value', ${intDecimals})"></div>
+                    <div class="param-slider">
+                        <div id="${controlId}" class="triple-slider-container" 
+                             data-default="${intDefaultValue}" 
+                             data-decimals="${intDecimals}"
+                             oncontextmenu="resetParameterToDefaultTriple(event, '${player}', ${effectIndex}, '${param.name}', ${intDefaultValue}, '${controlId}', '${controlId}_value', ${intDecimals})"></div>
+                    </div>
                     <!-- Audio Reactive Inline Controls (hidden by default) -->
-                    <div id="${controlId}_audio_controls" class="audio-inline-controls" style="display: none; margin-top: 8px;">
-                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <div id="${controlId}_audio_controls" class="param-dynamic-settings" style="display: none;">
+                        <div class="dynamic-settings-content">
                             <div class="audio-inline-bands">
                                 <button class="audio-band-btn-inline active" data-band="bass" data-param="${paramPath}" title="Bass">B</button>
                                 <button class="audio-band-btn-inline" data-band="mid" data-param="${paramPath}" title="Mid">M</button>
@@ -3663,7 +3743,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                         onChange: (newValue) => {
                             const finalValue = intDecimals === 0 ? Math.round(newValue) : newValue;
                             updateDisplayValue(finalValue);
-                            updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`);
+                            updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
                         },
                         onRangeChange: (rangeMin, rangeMax) => {
                             // Range changed - trigger update to save range
@@ -3671,7 +3751,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             if (slider) {
                                 const finalValue = intDecimals === 0 ? Math.round(slider.getValue()) : slider.getValue();
                                 updateDisplayValue(finalValue);
-                                updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`);
+                                updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
                             }
                         },
                         onDragStart: (handleType) => {
@@ -3693,18 +3773,23 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             
         case 'BOOL':
             control = `
-                <div class="parameter-control">
-                    <div class="form-check form-switch">
-                        <input 
-                            class="form-check-input" 
-                            type="checkbox" 
-                            id="${controlId}"
-                            ${value ? 'checked' : ''}
-                            onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.checked)"
-                        >
-                        <label class="form-check-label" for="${controlId}">
-                            ${param.name}
-                        </label>
+                <div class="parameter-grid-row">
+                    <div class="param-cogwheel">
+                        ${sequenceBtn}
+                    </div>
+                    <div class="param-name">
+                        <label title="UID: ${paramUid}">${param.label || param.name}</label>
+                    </div>
+                    <div class="param-slider">
+                        <div class="form-check form-switch">
+                            <input 
+                                class="form-check-input" 
+                                type="checkbox" 
+                                id="${controlId}"
+                                ${value ? 'checked' : ''}
+                                onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.checked)"
+                            >
+                        </div>
                     </div>
                 </div>
             `;
@@ -3712,15 +3797,22 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             
         case 'SELECT':
             control = `
-                <div class="parameter-control">
-                    <label for="${controlId}" class="parameter-label">${param.name}</label>
-                    <select 
-                        class="form-select" 
-                        id="${controlId}"
-                        onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.value)"
-                    >
-                        ${param.options.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
-                    </select>
+                <div class="parameter-grid-row">
+                    <div class="param-cogwheel">
+                        ${sequenceBtn}
+                    </div>
+                    <div class="param-name">
+                        <label title="UID: ${paramUid}">${param.label || param.name}</label>
+                    </div>
+                    <div class="param-slider">
+                        <select 
+                            class="form-select" 
+                            id="${controlId}"
+                            onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.value)"
+                        >
+                            ${param.options.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                        </select>
+                    </div>
                 </div>
             `;
             break;
@@ -3728,9 +3820,16 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
         case 'COLOR':
             const colorPickerId = `${controlId}_colorpicker`;
             control = `
-                <div class="parameter-control">
-                    <label class="parameter-label">${param.label || param.name}</label>
-                    <div id="${colorPickerId}" class="color-picker-wrapper"></div>
+                <div class="parameter-grid-row">
+                    <div class="param-cogwheel">
+                        ${sequenceBtn}
+                    </div>
+                    <div class="param-name">
+                        <label title="UID: ${paramUid}">${param.label || param.name}</label>
+                    </div>
+                    <div class="param-slider">
+                        <div id="${colorPickerId}" class="color-picker-wrapper"></div>
+                    </div>
                 </div>
             `;
             
@@ -3871,7 +3970,7 @@ window.resetGeneratorParameterToDefaultTriple = function(event, paramName, defau
     return false;
 };
 
-window.updateParameter = async function(player, effectIndex, paramName, value, valueDisplayId = null) {
+window.updateParameter = async function(player, effectIndex, paramName, value, valueDisplayId = null, paramUid = null) {
     try {
         // Sofort UI-Update für responsives Feedback mit korrekter Formatierung
         if (valueDisplayId) {
@@ -3892,7 +3991,7 @@ window.updateParameter = async function(player, effectIndex, paramName, value, v
         }
         
         parameterUpdateTimers[timerKey] = setTimeout(async () => {
-            await sendParameterUpdate(player, effectIndex, paramName, value, valueDisplayId);
+            await sendParameterUpdate(player, effectIndex, paramName, value, valueDisplayId, paramUid);
             delete parameterUpdateTimers[timerKey];
         }, WEBSOCKET_DEBOUNCE_MS); // Configurable from config.json (default: 50ms)
         
@@ -3901,11 +4000,21 @@ window.updateParameter = async function(player, effectIndex, paramName, value, v
     }
 };
 
-async function sendParameterUpdate(player, effectIndex, paramName, value, valueDisplayId = null) {
+async function sendParameterUpdate(player, effectIndex, paramName, value, valueDisplayId = null, providedParamUid = null) {
     try {
         // Check if this is a triple-slider and include range data
         const controlId = valueDisplayId ? valueDisplayId.replace('_value', '') : null;
         const tripleSlider = controlId ? getTripleSlider(controlId) : null;
+        
+        // Use provided UID or try to get from button
+        let paramUid = providedParamUid;
+        if (!paramUid && controlId) {
+            const paramControl = document.getElementById(controlId)?.closest('.parameter-grid-row');
+            const sequenceBtn = paramControl?.querySelector('.sequence-btn[data-param-uid]');
+            if (sequenceBtn) {
+                paramUid = sequenceBtn.getAttribute('data-param-uid');
+            }
+        }
         
         let endpoint;
         let body;
@@ -3931,6 +4040,10 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
                     console.log(`🎚️ Triple-slider range: min=${range.min}, max=${range.max}, value=${value}`);
                 }
             }
+            // Preserve UID for sequence restoration
+            if (paramUid) {
+                body.uid = paramUid;
+            }
             
             // Try WebSocket first for clip effects
             try {
@@ -3947,6 +4060,11 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
                     const range = tripleSlider.getRange();
                     wsParams.rangeMin = range.min;
                     wsParams.rangeMax = range.max;
+                }
+                
+                // Preserve UID for sequence restoration
+                if (paramUid) {
+                    wsParams.uid = paramUid;
                 }
                 
                 await executeCommand(
@@ -3980,6 +4098,10 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
                 body.rangeMin = range.min;
                 body.rangeMax = range.max;
             }
+            // Preserve UID for sequence restoration
+            if (paramUid) {
+                body.uid = paramUid;
+            }
             method = 'PUT';
         } else {
             playerId = 'artnet';
@@ -3989,6 +4111,10 @@ async function sendParameterUpdate(player, effectIndex, paramName, value, valueD
                 const range = tripleSlider.getRange();
                 body.rangeMin = range.min;
                 body.rangeMax = range.max;
+            }
+            // Preserve UID for sequence restoration
+            if (paramUid) {
+                body.uid = paramUid;
             }
             method = 'PUT';
         }

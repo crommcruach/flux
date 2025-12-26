@@ -102,20 +102,40 @@ class AudioAnalyzer:
                 else:  # 'microphone' or default
                     logger.info("Using microphone as input source")
             
-            # Get device info for logging
+            # Get device info and check supported sample rate
             device_info = sd.query_devices(self.device, 'input') if self.device is not None else sd.query_devices(kind='input')
             logger.info(f"Using audio device: {device_info['name']} (index: {self.device})")
+            
+            # Use device's default sample rate if our requested rate is not supported
+            device_sample_rate = int(device_info.get('default_samplerate', 44100))
+            actual_sample_rate = self.sample_rate
+            
+            # Try to use requested sample rate, fallback to device default if it fails
+            try:
+                sd.check_input_settings(device=self.device, channels=1, samplerate=self.sample_rate)
+                logger.info(f"Using requested sample rate: {self.sample_rate} Hz")
+            except sd.PortAudioError:
+                logger.warning(f"Sample rate {self.sample_rate} Hz not supported, using device default: {device_sample_rate} Hz")
+                actual_sample_rate = device_sample_rate
+                # Update internal sample rate and recalculate frequency indices
+                self.sample_rate = actual_sample_rate
+                freqs = np.fft.rfftfreq(self.block_size, 1 / self.sample_rate)
+                self._bass_idx = (freqs >= 20) & (freqs < 250)
+                self._mid_idx = (freqs >= 250) & (freqs < 4000)
+                self._treble_idx = (freqs >= 4000) & (freqs < 20000)
+                self._audio_buffer = deque(maxlen=self.sample_rate * 4)
+                self._peak_history = deque(maxlen=int(self.sample_rate / self.block_size * 2))
             
             self._stream = sd.InputStream(
                 device=self.device,
                 channels=1,
-                samplerate=self.sample_rate,
+                samplerate=actual_sample_rate,
                 blocksize=self.block_size,
                 callback=self._audio_callback
             )
             self._stream.start()
             self._running = True
-            logger.info(f"AudioAnalyzer started successfully (source: {audio_source})")
+            logger.info(f"AudioAnalyzer started successfully (source: {audio_source}, rate: {actual_sample_rate} Hz)")
         
         except Exception as e:
             logger.error(f"Failed to start AudioAnalyzer: {e}", exc_info=True)
@@ -204,6 +224,15 @@ class AudioAnalyzer:
             avg_peak = np.mean(self._peak_history) if self._peak_history else 0.0
             beat = peak > avg_peak * 1.5 and peak > 0.3  # Beat if significantly above average
             
+            # Log beat detection
+            if beat:
+                if not hasattr(self, '_beat_counter'):
+                    self._beat_counter = 0
+                self._beat_counter += 1
+                # Log every 5th beat to avoid spam
+                if self._beat_counter % 5 == 0:
+                    logger.info(f"🥁 BEAT detected! peak={peak:.3f}, avg={avg_peak:.3f}, bass={bass_norm:.3f}")
+            
             # Update features (thread-safe) - convert numpy types to Python native types
             with self._lock:
                 self._features['rms'] = float(rms)
@@ -213,6 +242,14 @@ class AudioAnalyzer:
                 self._features['treble'] = float(treble_norm)
                 self._features['beat'] = bool(beat)  # Convert numpy bool to Python bool
                 # BPM detection would go here (complex, optional for now)
+                
+                # Log audio features periodically
+                if not hasattr(self, '_feature_log_counter'):
+                    self._feature_log_counter = 0
+                self._feature_log_counter += 1
+                # Log every 100 callbacks (~2.3 seconds at 44100Hz/2048 block)
+                if self._feature_log_counter % 100 == 0:
+                    logger.debug(f"🎵 Audio features: rms={rms:.3f}, peak={peak:.3f}, bass={bass_norm:.3f}, mid={mid_norm:.3f}, treble={treble_norm:.3f}")
         
         except Exception as e:
             logger.error(f"Error in audio callback: {e}", exc_info=True)

@@ -512,6 +512,10 @@ class Player:
             
             self.current_loop = 0
             
+            # ✅ FIX: Set current_clip_id to prevent layer reload on loop
+            self.current_clip_id = clip_id
+            logger.debug(f"🆔 [{self.player_name}] Set current_clip_id = {clip_id}")
+            
             # Reset transport effect completely if present (ensure clean start for new clip)
             if self.layers:
                 for layer in self.layers:
@@ -758,6 +762,14 @@ class Player:
         source_name = self.layers[0].source.get_source_name() if self.layers else self.source.get_source_name()
         debug_playback(logger, f"Play-Loop gestartet: FPS={fps}, Source={source_name}")
         
+        # Check sequence manager setup (log every time play loop starts)
+        print(f"🎵🎵🎵 PLAY LOOP STARTED FOR: {source_name} 🎵🎵🎵")
+        logger.info(f"🎵 [SEQUENCE CHECK] player_manager exists: {hasattr(self, 'player_manager') and self.player_manager is not None}")
+        if hasattr(self, 'player_manager') and self.player_manager:
+            logger.info(f"🎵 [SEQUENCE CHECK] sequence_manager exists: {hasattr(self.player_manager, 'sequence_manager')}")
+            if hasattr(self.player_manager, 'sequence_manager'):
+                logger.info(f"🎵 [SEQUENCE CHECK] sequence count: {len(self.player_manager.sequence_manager.sequences)}")
+        
         while self.is_running and self.is_playing:
             # Pause-Handling (Event-basiert für low-latency)
             if self.is_paused:
@@ -767,6 +779,17 @@ class Player:
                 continue
             
             loop_start = time.time()
+            
+            # Update dynamic parameter sequences
+            if self.player_manager and hasattr(self.player_manager, 'sequence_manager'):
+                dt = frame_time if frame_time > 0 else 1.0 / 30.0
+                if not hasattr(self, '_sequence_update_logged'):
+                    logger.info(f"🎵 Calling update_sequences(dt={dt:.3f})")
+                    self._sequence_update_logged = True
+                self.player_manager.update_sequences(dt)
+            elif not hasattr(self, '_no_sequence_manager_logged'):
+                logger.warning(f"⚠️ No sequence_manager on player_manager!")
+                self._no_sequence_manager_logged = True
             
             # DEBUG: Log every 100 frames to monitor playback
             if self.current_frame % 100 == 0 and self.current_frame > 0:
@@ -1034,8 +1057,10 @@ class Player:
                                 )
                         
                         # Only reload layers if switching to a different clip
+                        logger.debug(f"🔍 [{self.player_name}] Comparing clips: current={self.current_clip_id}, next={next_clip_id}, equal={self.current_clip_id == next_clip_id}")
                         if self.current_clip_id != next_clip_id:
                             self.current_clip_id = next_clip_id
+                            logger.info(f"🔄 [{self.player_name}] Different clip detected, reloading layers")
                             
                             # 🎬 Check for custom transition effect on new clip
                             clip_data = self._find_clip_by_id(next_clip_id)
