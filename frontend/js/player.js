@@ -3270,6 +3270,7 @@ function renderClipEffects() {
     if (window.sequenceManager) {
         requestAnimationFrame(() => {
             window.sequenceManager.restoreInlineAudioControls();
+            window.sequenceManager.restoreInlineTimelineControls();
         });
     }
 }
@@ -3477,12 +3478,24 @@ window.removeEffect = async function(player, index, e) {
         try {
             // Get effect data before deleting (for sequence cleanup)
             let effectToDelete = null;
+            let targetClipId = null;
+            
             if (player === 'clip') {
                 effectToDelete = clipEffects[index];
+                targetClipId = selectedLayerClipId || selectedClipId;
             } else if (player === 'video') {
                 effectToDelete = videoEffects[index];
             } else if (player === 'artnet') {
                 effectToDelete = artnetEffects[index];
+            }
+            
+            // Cleanup sequences for this effect BEFORE deletion
+            if (player === 'clip' && effectToDelete && window.sequenceManager && targetClipId) {
+                const pluginId = effectToDelete.plugin_id;
+                if (pluginId) {
+                    console.log(`🧹 Cleaning up sequences for effect ${pluginId} on clip ${targetClipId}`);
+                    await window.sequenceManager.cleanupSequencesForEffect(targetClipId, pluginId);
+                }
             }
             
             let endpoint;
@@ -3490,7 +3503,6 @@ window.removeEffect = async function(player, index, e) {
             
             if (player === 'clip') {
                 // Layer-as-Clips Architecture: Use layer.clip_id if layer is selected
-                const targetClipId = selectedLayerClipId || selectedClipId;
                 endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${targetClipId}/effects/${index}`;
                 bodyData = null;
             } else {
@@ -3513,15 +3525,6 @@ window.removeEffect = async function(player, index, e) {
             
             if (data.success) {
                 debug.log(`✅ ${player} effect removed:`, index);
-                
-                // Cleanup sequences for this effect (clip effects only)
-                if (player === 'clip' && effectToDelete && window.sequenceManager) {
-                    const targetClipId = selectedLayerClipId || selectedClipId;
-                    const pluginId = effectToDelete.plugin_id;
-                    if (targetClipId && pluginId) {
-                        await window.sequenceManager.cleanupSequencesForEffect(targetClipId, pluginId);
-                    }
-                }
                 
                 if (player === 'video') {
                     await refreshVideoEffects();
@@ -3682,6 +3685,59 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             <div id="${controlId}_attack_release" class="audio-inline-knob"></div>
                         </div>
                     </div>
+                    <!-- Timeline Inline Controls (hidden by default) -->
+                    <div id="${controlId}_timeline_controls" class="param-dynamic-settings" style="display: none;">
+                        <div class="dynamic-settings-content">
+                            <div class="timeline-inline-playback">
+                                <button class="timeline-play-btn-inline" data-direction="backward" data-param="${paramPath}" title="Play Backward">◄</button>
+                                <button class="timeline-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">||</button>
+                                <button class="timeline-play-btn-inline" data-direction="forward" data-param="${paramPath}" title="Play Forward">►</button>
+                            </div>
+                            <div class="timeline-inline-loop">
+                                <select class="timeline-loop-dropdown-inline" data-param="${paramPath}">
+                                    <option value="once">Once</option>
+                                    <option value="loop">Loop</option>
+                                    <option value="ping_pong">Ping-Pong</option>
+                                    <option value="random">Random</option>
+                                </select>
+                            </div>
+                            <div class="timeline-inline-speed">
+                                <input type="number" class="timeline-speed-input-inline" data-param="${paramPath}" 
+                                       value="1.0" min="0.1" max="10" step="0.1" title="Speed (0.1x - 10x)">×
+                            </div>
+                        </div>
+                    </div>
+                    <!-- BPM Inline Controls (hidden by default) -->
+                    <div id="${controlId}_bpm_controls" class="param-dynamic-settings" style="display: none;">
+                        <div class="dynamic-settings-content">
+                            <div class="bpm-inline-playback">
+                                <button class="bpm-play-btn-inline" data-direction="backward" data-param="${paramPath}" title="Play Backward">◄</button>
+                                <button class="bpm-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">||</button>
+                                <button class="bpm-play-btn-inline" data-direction="forward" data-param="${paramPath}" title="Play Forward">►</button>
+                            </div>
+                            <div class="bpm-inline-loop">
+                                <select class="bpm-loop-dropdown-inline" data-param="${paramPath}">
+                                    <option value="once">Once</option>
+                                    <option value="loop">Loop</option>
+                                    <option value="ping_pong">Ping-Pong</option>
+                                    <option value="random">Random</option>
+                                </select>
+                            </div>
+                            <div class="bpm-inline-speed">
+                                <input type="number" class="bpm-speed-input-inline" data-param="${paramPath}" 
+                                       value="1.0" min="0.1" max="10" step="0.1" title="Speed (0.1x - 10x)">×
+                            </div>
+                            <div class="bpm-inline-division">
+                                <select class="bpm-division-dropdown-inline" data-param="${paramPath}" title="Beat Division">
+                                    <option value="1">1</option>
+                                    <option value="4">4</option>
+                                    <option value="8" selected>8</option>
+                                    <option value="16">16</option>
+                                    <option value="32">32</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
             // Initialize triple-slider after DOM is updated
@@ -3752,6 +3808,18 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                                 const finalValue = intDecimals === 0 ? Math.round(slider.getValue()) : slider.getValue();
                                 updateDisplayValue(finalValue);
                                 updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
+                                
+                                // Update audio reactive sequence min/max if exists
+                                if (window.sequenceManager && paramUid) {
+                                    const sequence = window.sequenceManager.sequences.find(s => s.target_parameter === paramUid);
+                                    if (sequence && sequence.type === 'audio') {
+                                        console.log(`🔄 Updating audio sequence range: ${rangeMin} - ${rangeMax}`);
+                                        window.sequenceManager.updateSequenceInline(paramUid, { 
+                                            min_value: rangeMin, 
+                                            max_value: rangeMax 
+                                        });
+                                    }
+                                }
                             }
                         },
                         onDragStart: (handleType) => {
@@ -3896,7 +3964,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             onChange: (newValue) => {
                                 const finalValue = fallbackDecimals === 0 ? Math.round(newValue) : newValue;
                                 document.getElementById(`${controlId}_value`).textContent = fallbackDecimals === 0 ? Math.round(finalValue) : finalValue.toFixed(fallbackDecimals);
-                                updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`);
+                                updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
                             }
                         });
                     }
@@ -5283,6 +5351,11 @@ window.removeLayerFromClip = async function(clipId, layerId, e) {
         clearTimeout(resetTimer);
         
         try {
+            // Cleanup sequences for this layer BEFORE removing it
+            if (window.sequenceManager) {
+                await window.sequenceManager.cleanupSequencesForLayer(clipId, layerId);
+            }
+            
             const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
                 method: 'DELETE'
             });

@@ -126,7 +126,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                 return jsonify({'error': 'Missing type or target_parameter'}), 400
             
             # Import sequence classes
-            from .sequences import AudioSequence, LFOSequence, TimelineSequence
+            from .sequences import AudioSequence, LFOSequence, TimelineSequence, BPMSequence
             
             # Create sequence based on type
             if seq_type == 'audio':
@@ -182,11 +182,33 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                     keyframes=config.get('keyframes', []),
                     interpolation=config.get('interpolation', 'linear'),
                     loop_mode=config.get('loop_mode', 'once'),
-                    duration=config.get('duration', 10.0)
+                    duration=config.get('duration', 10.0),
+                    playback_state=config.get('playback_state', 'pause'),
+                    speed=config.get('speed', 1.0)
+                )
+            
+            elif seq_type == 'bpm':
+                sequence = BPMSequence(
+                    sequence_id=data.get('id'),
+                    target_parameter=target,
+                    audio_analyzer=audio_analyzer,
+                    beat_division=config.get('beat_division', 8),
+                    keyframes=config.get('keyframes'),
+                    clip_duration=config.get('clip_duration', 10.0),
+                    playback_state=config.get('playback_state', 'forward'),
+                    loop_mode=config.get('loop_mode', 'loop'),
+                    speed=config.get('speed', 1.0)
                 )
             
             else:
                 return jsonify({'error': f'Unknown sequence type: {seq_type}'}), 400
+            
+            # Remove any existing sequences for this parameter (only one sequence per parameter allowed)
+            existing_sequences = [s for s in sequence_manager.get_all() if s.target_parameter == target]
+            if existing_sequences:
+                logger.info(f"🗑️ Removing {len(existing_sequences)} existing sequence(s) for {target}")
+                for existing_seq in existing_sequences:
+                    sequence_manager.delete(existing_seq.id)
             
             # Add to manager
             sequence_id = sequence_manager.create(sequence)
@@ -195,7 +217,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
             # Save session state to persist sequences
             session_state = get_session_state()
             logger.info(f"💾 Saving session state with {len(sequence_manager.sequences)} sequences...")
-            session_state.save(player_manager, get_clip_registry(), force=True)
+            session_state.save_async(player_manager, get_clip_registry(), force=True)
             logger.info(f"✅ Session state saved successfully")
             
             return jsonify({
@@ -223,13 +245,32 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
             # Update sequence properties
             config = data.get('config', {})
             
-            for key, value in config.items():
-                if hasattr(sequence, key):
-                    setattr(sequence, key, value)
+            # Log the received config for debugging
+            logger.info(f"📝 Updating sequence {sequence_id} with config: {config}")
+            
+            # Handle BPM-specific updates with proper setters
+            if sequence.type == 'bpm':
+                if 'beat_division' in config:
+                    sequence.set_beat_division(config['beat_division'])
+                if 'playback_state' in config:
+                    sequence.set_playback_state(config['playback_state'])
+                if 'loop_mode' in config:
+                    sequence.set_loop_mode(config['loop_mode'])
+                if 'speed' in config:
+                    sequence.set_speed(config['speed'])
+                # Handle other properties generically
+                for key, value in config.items():
+                    if key not in ['beat_division', 'playback_state', 'loop_mode', 'speed'] and hasattr(sequence, key):
+                        setattr(sequence, key, value)
+            else:
+                # Generic update for other sequence types
+                for key, value in config.items():
+                    if hasattr(sequence, key):
+                        setattr(sequence, key, value)
             
             # Save session state to persist changes
             session_state = get_session_state()
-            session_state.save(player_manager, get_clip_registry(), force=True)
+            session_state.save_async(player_manager, get_clip_registry(), force=True)
             
             logger.info(f"Updated sequence: {sequence_id}")
             return jsonify({
@@ -252,7 +293,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
             
             # Save session state to persist deletion
             session_state = get_session_state()
-            session_state.save(player_manager, get_clip_registry(), force=True)
+            session_state.save_async(player_manager, get_clip_registry(), force=True)
             
             logger.info(f"Deleted sequence: {sequence_id}")
             return jsonify({'message': 'Sequence deleted successfully'})
@@ -318,15 +359,21 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
             
             if device is not None:
                 audio_analyzer.set_device(device)
+                logger.info(f"Audio device set to: {device}")
             
             # Set audio source if provided
             if source:
                 audio_analyzer.config['audio_source'] = source
                 logger.info(f"Audio source set to: {source}")
             
+            # Start the analyzer
             audio_analyzer.start()
             
-            logger.info(f"Audio analyzer started: device={device}, source={source}")
+            # Verify it started successfully
+            if not audio_analyzer._running:
+                raise RuntimeError("Audio analyzer failed to start (check device availability)")
+            
+            logger.info(f"Audio analyzer started successfully: device={device}, source={source}")
             return jsonify({'message': 'Audio analyzer started successfully'})
         except Exception as e:
             logger.error(f"Error starting audio analyzer: {e}", exc_info=True)

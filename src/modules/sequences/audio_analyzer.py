@@ -9,8 +9,16 @@ import sounddevice as sd
 import numpy as np
 import threading
 import logging
+import time
 from collections import deque
 from typing import Dict, Optional, Any
+
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
+    logging.warning("librosa not available - BPM detection disabled")
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +50,29 @@ class AudioAnalyzer:
             'mid': 0.0,       # 250-4000 Hz
             'treble': 0.0,    # 4000-20000 Hz
             'bpm': 0.0,
-            'beat': False
+            'beat': False,
+            'beat_phase': 0.0,
+            'beat_count': 0,
+            'bpm_confidence': 0.0
         }
         self._lock = threading.Lock()
+        
+        # BPM Detection
+        self._bpm_enabled = False
+        self._current_bpm = 0.0
+        self._bpm_confidence = 0.0
+        self._bpm_history = deque(maxlen=10)
+        self._beat_times = deque(maxlen=100)
+        self._last_beat_time = 0.0
+        self._beat_count = 0
+        
+        # Tap tempo
+        self._tap_times = deque(maxlen=8)
+        self._tap_timeout = 3.0
+        
+        # Manual BPM (overrides detection)
+        self._manual_bpm = None
+        self._bpm_mode = 'auto'  # 'auto', 'manual', 'tap'
         
         # Audio buffer for BPM detection (4 seconds)
         self._audio_buffer = deque(maxlen=sample_rate * 4)
@@ -135,6 +163,12 @@ class AudioAnalyzer:
             )
             self._stream.start()
             self._running = True
+            
+            # Enable BPM detection by default on startup
+            if LIBROSA_AVAILABLE and not self._bpm_enabled:
+                self._bpm_enabled = True
+                logger.info("🎵 BPM detection enabled by default")
+            
             logger.info(f"AudioAnalyzer started successfully (source: {audio_source}, rate: {actual_sample_rate} Hz)")
         
         except Exception as e:
@@ -177,14 +211,14 @@ class AudioAnalyzer:
             logger.error(f"Error finding loopback device: {e}")
             return None
     
-    def _audio_callback(self, indata, frames, time, status):
+    def _audio_callback(self, indata, frames, time_info, status):
         """
         Audio thread callback (DO NOT BLOCK!)
         
         Args:
             indata: Input audio data
             frames: Number of frames
-            time: Timestamp info
+            time_info: Timestamp info
             status: Status flags
         """
         if status:
@@ -231,7 +265,18 @@ class AudioAnalyzer:
                 self._beat_counter += 1
                 # Log every 5th beat to avoid spam
                 if self._beat_counter % 5 == 0:
-                    logger.info(f"🥁 BEAT detected! peak={peak:.3f}, avg={avg_peak:.3f}, bass={bass_norm:.3f}")
+                    logger.debug(f"🥁 BEAT detected! peak={peak:.3f}, avg={avg_peak:.3f}, bass={bass_norm:.3f}")
+            
+            # BPM Detection (if enabled)
+            if self._bpm_enabled and LIBROSA_AVAILABLE and len(self._audio_buffer) >= self.sample_rate * 2:
+                # Run BPM detection every ~1 second to avoid overhead
+                if not hasattr(self, '_bpm_last_analysis'):
+                    self._bpm_last_analysis = time.time()
+                
+                if time.time() - self._bpm_last_analysis >= 1.0:
+                    self._bpm_last_analysis = time.time()
+                    # Run in callback is okay since it's infrequent
+                    self._detect_bpm_from_buffer()
             
             # Update features (thread-safe) - convert numpy types to Python native types
             with self._lock:
@@ -241,7 +286,10 @@ class AudioAnalyzer:
                 self._features['mid'] = float(mid_norm)
                 self._features['treble'] = float(treble_norm)
                 self._features['beat'] = bool(beat)  # Convert numpy bool to Python bool
-                # BPM detection would go here (complex, optional for now)
+                self._features['bpm'] = float(self._current_bpm)
+                self._features['bpm_confidence'] = float(self._bpm_confidence)
+                self._features['beat_phase'] = float(self._get_beat_phase())
+                self._features['beat_count'] = int(self._beat_count)
                 
                 # Log audio features periodically
                 if not hasattr(self, '_feature_log_counter'):
@@ -312,6 +360,181 @@ class AudioAnalyzer:
             self.start()
         
         logger.info(f"Audio device changed to: {device}")
+    
+    def enable_bpm_detection(self, enabled: bool = True):
+        """Enable or disable BPM detection
+        
+        Args:
+            enabled: True to enable, False to disable
+        """
+        if not LIBROSA_AVAILABLE and enabled:
+            logger.error("Cannot enable BPM detection: librosa not installed")
+            return
+        
+        self._bpm_enabled = enabled
+        if enabled:
+            logger.info("🎵 BPM detection enabled")
+        else:
+            logger.info("🎵 BPM detection disabled")
+    
+    def _detect_bpm_from_buffer(self):
+        """Detect BPM from audio buffer using librosa"""
+        try:
+            # Convert buffer to numpy array
+            audio_data = np.array(list(self._audio_buffer))
+            
+            # Onset detection
+            onset_env = librosa.onset.onset_strength(
+                y=audio_data,
+                sr=self.sample_rate,
+                aggregate=np.median
+            )
+            
+            # Tempo estimation
+            tempo = librosa.beat.beat_track(
+                onset_envelope=onset_env,
+                sr=self.sample_rate
+            )[0]
+            
+            # Calculate confidence (simple heuristic)
+            confidence = 0.7 if tempo > 0 else 0.0
+            
+            # Update BPM with smoothing
+            self._update_bpm(float(tempo), confidence)
+            
+        except Exception as e:
+            logger.debug(f"BPM detection error: {e}")
+    
+    def _update_bpm(self, bpm: float, confidence: float):
+        """Update BPM with smoothing
+        
+        Args:
+            bpm: Detected BPM value
+            confidence: Confidence level (0-1)
+        """
+        if self._bpm_mode != 'auto':
+            return  # Don't update if manual or tap mode
+        
+        # Add to history
+        self._bpm_history.append(bpm)
+        
+        # Smooth BPM (weighted average)
+        if len(self._bpm_history) >= 3:
+            weights = np.linspace(0.5, 1.0, len(self._bpm_history))
+            smoothed_bpm = np.average(list(self._bpm_history), weights=weights)
+        else:
+            smoothed_bpm = bpm
+        
+        self._current_bpm = float(smoothed_bpm)
+        self._bpm_confidence = confidence
+    
+    def _get_beat_phase(self) -> float:
+        """Get current beat phase (0.0 to 1.0)
+        
+        Returns:
+            Phase within current beat (0.0 = on beat, 0.5 = half beat)
+        """
+        if self._current_bpm == 0 or (self._manual_bpm is None and self._bpm_mode == 'manual'):
+            return 0.0
+        
+        bpm = self._manual_bpm if self._manual_bpm is not None else self._current_bpm
+        beat_duration = 60.0 / bpm
+        current_time = time.time()
+        
+        # Use last beat time if available
+        if self._last_beat_time > 0:
+            phase = (current_time - self._last_beat_time) % beat_duration / beat_duration
+            return float(phase)
+        
+        # Fallback: use current time
+        phase = (current_time % beat_duration) / beat_duration
+        return float(phase)
+    
+    def tap_tempo(self) -> float:
+        """Record a tap for tap tempo
+        
+        Returns:
+            Current tap tempo BPM (0 if not enough taps)
+        """
+        now = time.time()
+        
+        # Check for timeout (reset if too long since last tap)
+        if len(self._tap_times) > 0:
+            if now - self._tap_times[-1] > self._tap_timeout:
+                self._tap_times.clear()
+                logger.debug("🥁 Tap tempo reset (timeout)")
+        
+        # Add tap
+        self._tap_times.append(now)
+        
+        # Calculate BPM if we have enough taps
+        if len(self._tap_times) >= 2:
+            intervals = [
+                self._tap_times[i] - self._tap_times[i-1]
+                for i in range(1, len(self._tap_times))
+            ]
+            
+            # Average interval
+            avg_interval = np.mean(intervals)
+            
+            # Convert to BPM
+            bpm = 60.0 / avg_interval if avg_interval > 0 else 0.0
+            
+            # Update
+            self._current_bpm = float(bpm)
+            self._bpm_confidence = min(len(self._tap_times) / 8.0, 1.0)
+            self._bpm_mode = 'tap'
+            self._last_beat_time = now
+            self._beat_count += 1
+            
+            logger.debug(f"🥁 Tap tempo: {bpm:.1f} BPM ({len(self._tap_times)} taps)")
+            
+            return float(bpm)
+        
+        return 0.0
+    
+    def set_manual_bpm(self, bpm: float):
+        """Set manual BPM value
+        
+        Args:
+            bpm: BPM value (20-300)
+        """
+        if not (20 <= bpm <= 300):
+            logger.error(f"Invalid BPM value: {bpm} (must be 20-300)")
+            return
+        
+        self._manual_bpm = float(bpm)
+        self._current_bpm = float(bpm)
+        self._bpm_confidence = 1.0
+        self._bpm_mode = 'manual'
+        self._last_beat_time = time.time()
+        logger.info(f"🎹 Manual BPM set: {bpm}")
+    
+    def resync_bpm(self):
+        """Resync to auto BPM detection (overwrite manual/tap)"""
+        self._manual_bpm = None
+        self._bpm_mode = 'auto'
+        self._tap_times.clear()
+        self._beat_count = 0
+        self._last_beat_time = time.time()
+        logger.info("🔄 BPM resynced to auto detection")
+    
+    def get_bpm_status(self) -> Dict[str, Any]:
+        """Get BPM status information
+        
+        Returns:
+            Dictionary with BPM status
+        """
+        with self._lock:
+            return {
+                'bpm': float(self._current_bpm),
+                'confidence': float(self._bpm_confidence),
+                'mode': self._bpm_mode,
+                'enabled': self._bpm_enabled,
+                'beat_phase': float(self._get_beat_phase()),
+                'beat_count': int(self._beat_count),
+                'tap_count': len(self._tap_times)
+            }
     
     def __del__(self):
         """Cleanup on destruction"""

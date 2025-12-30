@@ -8,6 +8,7 @@ Manages lifecycle, applies modulation, and handles parameter resolution.
 import logging
 from typing import Dict, List, Optional, Any
 from .base_sequence import BaseSequence
+from ..uid_registry import get_uid_registry
 
 logger = logging.getLogger(__name__)
 
@@ -99,12 +100,24 @@ class SequenceManager:
             self._frame_counter = 0
         self._frame_counter += 1
         
+        # Initialize frame-level parameter update buffer
+        if not hasattr(self, '_frame_updates'):
+            self._frame_updates = {}
+        if not hasattr(self, '_frame_updates_frame'):
+            self._frame_updates_frame = -1
+        
+        # Clear frame buffer at start of new frame
+        if self._frame_updates_frame != self._frame_counter:
+            self._frame_updates = {}
+            self._frame_updates_frame = self._frame_counter
+        
         if self._update_counter % 60 == 0:
             logger.debug(f"🔄 Updating {len(self.sequences)} sequences (dt={dt:.3f}s)")
             # Log all sequences and their targets
             for seq_id, seq in self.sequences.items():
                 logger.debug(f"  📋 Sequence {seq_id}: type={seq.type}, target={seq.target_parameter[:50] if seq.target_parameter else 'None'}..., enabled={seq.enabled}")
         
+        # Collect all parameter updates for this frame (deduplication)
         for sequence in self.sequences.values():
             if not sequence.enabled:
                 if self._update_counter % 60 == 0:
@@ -115,35 +128,57 @@ class SequenceManager:
                 # Update sequence state
                 sequence.update(dt)
                 
-                # Apply modulation to target parameter
+                # Collect parameter update for this frame
                 if player_manager and sequence.target_parameter:
                     value = sequence.get_value()
                     
-                    # Only update if value has changed (avoid unnecessary calls)
+                    # Store in frame buffer (last write wins if multiple sequences target same parameter)
+                    self._frame_updates[sequence.target_parameter] = {
+                        'value': value,
+                        'sequence_id': sequence.id,
+                        'sequence_type': sequence.type
+                    }
+                    
+                    # Track last value per sequence for change detection
                     if not hasattr(self, '_last_values'):
                         self._last_values = {}
-                    
-                    last_value = self._last_values.get(sequence.id)
-                    if last_value is None or abs(value - last_value) > 1.0:  # Changed by more than 1.0
-                        if self._update_counter % 60 == 0:
-                            logger.debug(f"🎵 [{sequence.type}] {sequence.target_parameter} = {value:.2f} (changed from {last_value})")
-                        self._apply_modulation(sequence.target_parameter, value, player_manager)
-                        self._last_values[sequence.id] = value
-                    
-                    # Emit parameter update via WebSocket for visual feedback
-                    if self.socketio:
-                        self.socketio.emit('parameter_update', {
-                            'parameter': sequence.target_parameter,
-                            'value': value
-                        })
-                        logger.debug(f"📡 Emitted parameter_update: {sequence.target_parameter} = {value:.2f}")
+                    self._last_values[sequence.id] = value
             
             except Exception as e:
                 logger.error(f"Error updating sequence {sequence.id}: {e}", exc_info=True)
+        
+        # Apply all buffered updates ONCE per parameter per frame
+        for param_uid, update_info in self._frame_updates.items():
+            value = update_info['value']
+            sequence_type = update_info['sequence_type']
+            
+            # Apply modulation
+            self._apply_modulation(param_uid, value, player_manager)
+            
+            # Emit parameter update via WebSocket for visual feedback (red line)
+            if not hasattr(self, '_last_emitted_values'):
+                self._last_emitted_values = {}
+            
+            last_emitted = self._last_emitted_values.get(param_uid)
+            # Emit if value changed by more than 0.1 OR every 5 frames for timeline sequences
+            should_emit = (last_emitted is None or 
+                           abs(value - last_emitted) > 0.1 or 
+                           (sequence_type == 'timeline' and self._frame_counter % 5 == 0))
+            
+            if should_emit and self.socketio:
+                self.socketio.emit('parameter_update', {
+                    'parameter': param_uid,
+                    'value': value
+                })
+                self._last_emitted_values[param_uid] = value
+                if self._update_counter % 120 == 0:  # Log less frequently
+                    logger.debug(f"📡 Emitted parameter_update: {param_uid[:50]}... = {value:.2f}")
     
     def _resolve_uid_to_path(self, uid: str, player_manager):
         """
         Resolve UID to actual parameter location (player, effect instance, param name)
+        
+        Uses global UID registry for O(1) lookup instead of O(n×m×k) nested loops.
         
         Args:
             uid: Parameter UID (e.g., "param_clip_1_scale_xy_1766570567525_hj1djcp9w")
@@ -153,6 +188,19 @@ class SequenceManager:
             Tuple of (player, effect_instance, param_name) or None if not found
         """
         try:
+            # Try global UID registry first (O(1) lookup)
+            uid_registry = get_uid_registry()
+            result = uid_registry.resolve(uid)
+            
+            if result:
+                # Found in registry - blazing fast!
+                return result
+            
+            # Fallback: Manual search (slow, but needed for UIDs registered before registry existed)
+            # This also populates the registry for future lookups
+            logger.debug(f"🔍 UID not in registry, performing fallback search: {uid[:50]}...")
+            
+            # OLD SLOW METHOD - kept as fallback only
             # Cache successful resolutions to avoid excessive logging
             if hasattr(self, '_uid_resolution_cache') and uid in self._uid_resolution_cache:
                 return self._uid_resolution_cache[uid]
@@ -200,15 +248,34 @@ class SequenceManager:
                         if param_name in effect_params:
                             stored_param = effect_params[param_name]
                             
+                            # Debug: Show what we're looking for vs what we found
+                            logger.debug(f"🔍 Checking param '{param_name}' in effect {plugin_id}: type={type(stored_param).__name__}, has_uid={'_uid' in stored_param if isinstance(stored_param, dict) else False}")
+                            if isinstance(stored_param, dict) and '_uid' in stored_param:
+                                logger.debug(f"   Stored UID: {stored_param.get('_uid')[:50]}...")
+                                logger.debug(f"   Looking for: {uid[:50]}...")
+                            
                             # Check if stored parameter has matching UID
                             if isinstance(stored_param, dict) and stored_param.get('_uid') == uid:
-                                logger.info(f"🎯 UID resolved: {plugin_id} effect #{effect_idx} instance [{id(instance)}] on layer {layer_idx}, clip {clip_id[:8]}...")
+                                logger.debug(f"🎯 UID resolved: {plugin_id} effect #{effect_idx} instance [{id(instance)}] on layer {layer_idx}, clip {clip_id[:8]}...")
                                 result = (player, instance, param_name)
                                 # Cache successful resolution
                                 if not hasattr(self, '_uid_resolution_cache'):
                                     self._uid_resolution_cache = {}
                                 self._uid_resolution_cache[uid] = result
-                                logger.info(f"✅ Resolved UID: {param_name} [{effect.get('plugin_id')}]")
+                                
+                                # Also register in global registry for future O(1) lookups
+                                uid_registry = get_uid_registry()
+                                uid_registry.register(uid, player, instance, param_name)
+                                
+                                logger.debug(f"✅ Resolved UID: {param_name} [{effect.get('plugin_id')}]")
+                                return result
+                            elif param_name in effect_params:
+                                # Parameter exists but UID doesn't match - register it anyway for this sequence
+                                logger.warning(f"⚠️ Parameter '{param_name}' found but UID mismatch or missing. Registering UID: {uid[:50]}...")
+                                result = (player, instance, param_name)
+                                # Register in global registry
+                                uid_registry = get_uid_registry()
+                                uid_registry.register(uid, player, instance, param_name)
                                 return result
             
             # Only warn once per UID
@@ -231,23 +298,6 @@ class SequenceManager:
             value: Value to apply
             player_manager: PlayerManager instance
         """
-        # Count calls per UID
-        if not hasattr(self, '_apply_call_counter'):
-            self._apply_call_counter = {}
-            self._apply_call_frame = {}
-            self._frame_counter = 0
-        
-        current_frame = self._frame_counter
-        if target_path not in self._apply_call_frame or self._apply_call_frame[target_path] != current_frame:
-            self._apply_call_counter[target_path] = 0
-            self._apply_call_frame[target_path] = current_frame
-        
-        self._apply_call_counter[target_path] += 1
-        call_count = self._apply_call_counter[target_path]
-        
-        if call_count > 3:
-            logger.warning(f"🚨 _apply_modulation called {call_count} times THIS FRAME for {target_path[:40]}... (value={value:.1f})")
-        
         try:
             # Check if target_path is a UID (starts with "param_")
             if target_path.startswith('param_'):
@@ -290,13 +340,13 @@ class SequenceManager:
                             should_log = True  # First time
                         
                         if should_log:
-                            logger.info(f"🎚️ [{id(effect_instance)}] {param_name} = {scaled_value:.1f}")
+                            logger.debug(f"🎚️ [{id(effect_instance)}] {param_name} = {scaled_value:.1f}")
                             self._last_logged_values[target_path] = scaled_value
                     else:
                         logger.warning(f"❌ update_parameter failed for {param_name}")
                 elif hasattr(effect_instance, param_name):
                     setattr(effect_instance, param_name, scaled_value)
-                    logger.info(f"✅ Applied: {param_name} = {scaled_value:.2f} via setattr [{player.__class__.__name__}]")
+                    logger.debug(f"✅ Applied: {param_name} = {scaled_value:.2f} via setattr [{player.__class__.__name__}]")
                     logger.debug(f"✅ Applied via setattr: {param_name} = {scaled_value:.4f}")
                 else:
                     logger.warning(f"Parameter not found on effect instance: {param_name}")

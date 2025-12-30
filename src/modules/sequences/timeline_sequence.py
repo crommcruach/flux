@@ -5,6 +5,7 @@ Keyframe-based timeline animation with interpolation.
 """
 
 import bisect
+import random
 import logging
 from typing import Dict, Any, List, Tuple
 from .base_sequence import BaseSequence
@@ -16,10 +17,13 @@ class TimelineSequence(BaseSequence):
     """Keyframe-based timeline animation"""
     
     INTERPOLATIONS = ['linear', 'ease_in', 'ease_out', 'ease_in_out', 'step']
-    LOOP_MODES = ['once', 'loop', 'ping_pong']
+    LOOP_MODES = ['once', 'loop', 'ping_pong', 'random']
+    
+    PLAYBACK_STATES = ['pause', 'forward', 'backward']
     
     def __init__(self, sequence_id: str, target_parameter: str, keyframes: List[Tuple[float, float]] = None,
-                 interpolation: str = 'linear', loop_mode: str = 'once', duration: float = 10.0):
+                 interpolation: str = 'linear', loop_mode: str = 'once', duration: float = 10.0, 
+                 playback_state: str = 'pause', speed: float = 1.0):
         """
         Initialize timeline sequence
         
@@ -30,6 +34,8 @@ class TimelineSequence(BaseSequence):
             interpolation: Interpolation type ('linear', 'ease_in', 'ease_out', 'ease_in_out', 'step')
             loop_mode: Loop mode ('once', 'loop', 'ping_pong')
             duration: Total timeline duration in seconds
+            playback_state: Playback state ('pause', 'forward', 'backward')
+            speed: Speed multiplier (1.0 = normal, 2.0 = 2x faster, 0.5 = half speed)
         """
         super().__init__(sequence_id, 'timeline', target_parameter)
         
@@ -37,9 +43,12 @@ class TimelineSequence(BaseSequence):
         self.interpolation = interpolation
         self.loop_mode = loop_mode
         self.duration = duration
+        self.playback_state = playback_state if playback_state in self.PLAYBACK_STATES else 'pause'
+        self.speed = max(0.1, min(10.0, speed))  # Clamp between 0.1x and 10x
         
         self._time = 0.0
-        self._direction = 1  # 1 = forward, -1 = backward (for ping_pong)
+        self._direction = 1  # 1 = forward, -1 = backward (for ping_pong or backward playback)
+        self._current_keyframe_index = 0  # For random mode
         
         # Sort keyframes by time
         self.keyframes.sort(key=lambda k: k[0])
@@ -59,23 +68,78 @@ class TimelineSequence(BaseSequence):
         Args:
             dt: Delta time in seconds
         """
-        self._time += dt * self._direction
+        # Don't update if paused
+        if self.playback_state == 'pause':
+            return
         
-        # Handle loop modes
+        # Determine direction based on playback state
+        if self.playback_state == 'forward':
+            direction = 1
+        elif self.playback_state == 'backward':
+            direction = -1
+        else:
+            direction = self._direction  # Use ping_pong direction
+        
+        # Calculate time increment as fraction of duration (0-1 range)
+        # This makes the timeline scale with duration automatically
+        # Apply speed multiplier: higher speed = faster playback
+        time_increment = (dt / self.duration) * direction * self.speed
+        
+        # Update normalized time (0-1)
+        normalized_time = self._time / self.duration if self.duration > 0 else 0
+        normalized_time += time_increment
+        
+        # Handle loop modes with normalized time
         if self.loop_mode == 'once':
-            self._time = min(self._time, self.duration)
+            if self.playback_state == 'forward':
+                normalized_time = min(normalized_time, 1.0)
+            elif self.playback_state == 'backward':
+                normalized_time = max(normalized_time, 0.0)
         
         elif self.loop_mode == 'loop':
-            if self._time >= self.duration:
-                self._time = self._time % self.duration
+            if normalized_time >= 1.0:
+                normalized_time = normalized_time % 1.0
+            elif normalized_time < 0:
+                normalized_time = 1.0 + (normalized_time % 1.0)
         
         elif self.loop_mode == 'ping_pong':
-            if self._time >= self.duration:
-                self._time = self.duration
+            if normalized_time >= 1.0:
+                normalized_time = 1.0
                 self._direction = -1
-            elif self._time <= 0:
-                self._time = 0
+            elif normalized_time <= 0:
+                normalized_time = 0
                 self._direction = 1
+        
+        elif self.loop_mode == 'random':
+            # Jump randomly to ANY keyframe when reaching current keyframe
+            if not self.keyframes or len(self.keyframes) < 2:
+                # Convert back to absolute time
+                self._time = normalized_time * self.duration
+                return
+            
+            # Check if we've reached the current target keyframe
+            current_kf_time = self.keyframes[self._current_keyframe_index][0]
+            
+            # Check if we've passed the keyframe (depends on direction)
+            if (self.playback_state == 'forward' and self._time >= current_kf_time) or \
+               (self.playback_state == 'backward' and self._time <= current_kf_time):
+                
+                # Pick ANY random keyframe
+                new_index = random.randint(0, len(self.keyframes) - 1)
+                
+                # Avoid staying on same keyframe if possible
+                if len(self.keyframes) > 1:
+                    while new_index == self._current_keyframe_index:
+                        new_index = random.randint(0, len(self.keyframes) - 1)
+                
+                self._current_keyframe_index = new_index
+                
+                # Jump to new keyframe time
+                self._time = self.keyframes[self._current_keyframe_index][0]
+                return
+        
+        # Convert normalized time back to absolute time
+        self._time = normalized_time * self.duration
     
     def get_value(self) -> float:
         """Interpolate value at current time"""
@@ -172,6 +236,8 @@ class TimelineSequence(BaseSequence):
             'interpolation': self.interpolation,
             'loop_mode': self.loop_mode,
             'duration': self.duration,
+            'playback_state': self.playback_state,
+            'speed': self.speed,
             'enabled': self.enabled
         }
     
@@ -184,5 +250,7 @@ class TimelineSequence(BaseSequence):
             keyframes=data.get('keyframes', []),
             interpolation=data.get('interpolation', 'linear'),
             loop_mode=data.get('loop_mode', 'once'),
-            duration=data.get('duration', 10.0)
+            duration=data.get('duration', 10.0),
+            playback_state=data.get('playback_state', 'pause'),
+            speed=data.get('speed', 1.0)
         )

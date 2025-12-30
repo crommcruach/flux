@@ -55,7 +55,7 @@ def register_artnet_effects_api(app, player_manager):
                 session_state = get_session_state()
                 if session_state:
                     clip_registry = get_clip_registry()
-                    session_state.save(player_manager, clip_registry)
+                    session_state.save_async(player_manager, clip_registry)
                 
                 return jsonify({"success": True, "message": message})
             else:
@@ -80,7 +80,7 @@ def register_artnet_effects_api(app, player_manager):
                 session_state = get_session_state()
                 if session_state:
                     clip_registry = get_clip_registry()
-                    session_state.save(player_manager, clip_registry)
+                    session_state.save_async(player_manager, clip_registry)
                 
                 return jsonify({"success": True, "message": message})
             else:
@@ -104,7 +104,7 @@ def register_artnet_effects_api(app, player_manager):
             session_state = get_session_state()
             if session_state:
                 clip_registry = get_clip_registry()
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({"success": True, "message": message})
         except Exception as e:
@@ -145,7 +145,7 @@ def register_artnet_effects_api(app, player_manager):
                 session_state = get_session_state()
                 if session_state:
                     clip_registry = get_clip_registry()
-                    session_state.save(player_manager, clip_registry)
+                    session_state.save_async(player_manager, clip_registry)
                 
                 return jsonify({"success": True, "message": f"Parameter '{param_name}' updated"})
             else:

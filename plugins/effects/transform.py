@@ -3,7 +3,10 @@ Transform Effect Plugin - 2D transformations (position, scale, rotation)
 """
 import cv2
 import numpy as np
+import logging
 from plugins import PluginBase, PluginType, ParameterType
+
+logger = logging.getLogger(__name__)
 
 
 class TransformEffect(PluginBase):
@@ -370,14 +373,14 @@ class TransformEffect(PluginBase):
             self.position_y = float(value)
             return True
         elif name == 'scale_xy':
-            print(f"📥 [Transform {id(self)}] BEFORE update: self.scale_xy={self.scale_xy:.1f}, new_value={float(value):.1f}")
+            logger.debug(f"📥 [Transform {id(self)}] BEFORE update: self.scale_xy={self.scale_xy:.1f}, new_value={float(value):.1f}")
             old_value = self.scale_xy
             self.scale_xy = float(value)
             # Only log scale_xy updates with significant change (for debugging instance mismatch)
             if abs(self.scale_xy - old_value) > 1.0:
                 import traceback
                 caller_info = traceback.extract_stack()[-3]  # Get caller 2 levels up
-                print(f"🔧 [Transform {id(self)}] scale_xy: {old_value:.1f} → {self.scale_xy:.1f} (from {caller_info.filename}:{caller_info.lineno})")
+                logger.debug(f"🔧 [Transform {id(self)}] scale_xy: {old_value:.1f} → {self.scale_xy:.1f} (from {caller_info.filename}:{caller_info.lineno})")
             return True
         elif name == 'scale_x':
             self.scale_x = float(value)

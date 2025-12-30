@@ -12,9 +12,13 @@ Speichert automatisch:
 
 import os
 import json
+import time
+import queue
+import threading
 from datetime import datetime
 from typing import Dict, Any, Optional
 from .logger import get_logger
+from .uid_registry import get_uid_registry
 
 logger = get_logger(__name__)
 
@@ -35,7 +39,16 @@ class SessionStateManager:
         self._state = self._load_or_create()
         self._last_save_time = 0
         self._min_save_interval = 0.5  # Minimum 500ms zwischen Saves (Debouncing)
-        logger.info(f"SessionStateManager initialisiert: {state_file_path}")
+        
+        # Async save infrastructure
+        self._save_queue = queue.Queue()
+        self._pending_save = False
+        self._pending_save_data = None
+        self._shutdown = False
+        self._save_thread = threading.Thread(target=self._save_worker, daemon=True, name="SessionStateSaver")
+        self._save_thread.start()
+        
+        logger.info(f"SessionStateManager initialisiert: {state_file_path} (async mode)")
     
     def _load_or_create(self) -> Dict[str, Any]:
         """Lädt existierenden State oder erstellt leeren."""
@@ -51,6 +64,64 @@ class SessionStateManager:
         else:
             logger.info("📄 Keine session_state.json gefunden - erstelle neue")
             return self._create_empty_state()
+    
+    def _save_worker(self):
+        """Background thread for async file I/O with debouncing."""
+        debounce_interval = 1.0  # Wait 1 second after last change before writing
+        
+        while not self._shutdown:
+            try:
+                # Check for pending save with timeout
+                if self._pending_save and self._pending_save_data:
+                    # Wait for debounce interval
+                    time.sleep(debounce_interval)
+                    
+                    # Check if still pending (no new changes arrived)
+                    if self._pending_save and self._pending_save_data:
+                        save_data = self._pending_save_data
+                        self._pending_save = False
+                        self._pending_save_data = None
+                        
+                        # Perform the actual file write
+                        self._do_file_write(save_data)
+                else:
+                    # No pending save, wait a bit before checking again
+                    time.sleep(0.1)
+                    
+            except Exception as e:
+                logger.error(f"❌ Background save worker error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+    
+    def _do_file_write(self, state: Dict[str, Any]):
+        """Perform the actual file write operation."""
+        try:
+            # State in Datei schreiben mit Retry-Logik für Windows File-Locking
+            os.makedirs(os.path.dirname(self.state_file_path), exist_ok=True)
+            
+            # Versuche bis zu 3x zu speichern (Windows kann Dateien kurzzeitig locken)
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    with open(self.state_file_path, 'w', encoding='utf-8') as f:
+                        json.dump(state, f, indent=2, ensure_ascii=False)
+                    break  # Erfolg - raus aus Retry-Loop
+                except PermissionError as perm_err:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ Permission denied beim Speichern (Versuch {attempt + 1}/{max_retries}), retry in 0.5s...")
+                        time.sleep(0.5)
+                    else:
+                        logger.warning(f"⚠️ Session State konnte nicht gespeichert werden (Datei gesperrt): {perm_err}")
+                        logger.info("💡 Tipp: Schließe alle Programme die session_state.json geöffnet haben")
+                        return
+            
+            self._last_save_time = time.time()
+            logger.debug(f"💾 Session State async saved: {len(state.get('players', {}))} Player")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim async Speichern von session_state.json: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _create_empty_state(self) -> Dict[str, Any]:
         """Erstellt leere State-Struktur."""
@@ -85,212 +156,238 @@ class SessionStateManager:
             "audio_analyzer": {
                 "device": None,
                 "running": False,
-                "config": {}
+                "config": {},
+                "bpm": {
+                    "enabled": False,
+                    "bpm": 0.0,
+                    "mode": "auto",
+                    "manual_bpm": None
+                }
             }
         }
     
-    def save(self, player_manager, clip_registry, force: bool = False) -> bool:
+    def save_async(self, player_manager, clip_registry, force: bool = False) -> bool:
         """
-        Speichert aktuellen Player-Status (mit Debouncing).
+        Speichert aktuellen Player-Status asynchron (mit Debouncing).
+        Updates in-memory state immediately, queues file write for background thread.
         
         Args:
             player_manager: PlayerManager-Instanz
             clip_registry: ClipRegistry-Instanz
-            force: Ignoriere Debouncing (für kritische Saves)
+            force: If True, skip debouncing and write immediately (blocks until complete)
             
         Returns:
             True bei Erfolg
         """
-        # Debouncing: Skip wenn zu kurz nach letztem Save (außer force=True)
-        import time
-        current_time = time.time()
-        if not force and (current_time - self._last_save_time) < self._min_save_interval:
-            logger.debug(f"⏭️ Save übersprungen (Debouncing: {current_time - self._last_save_time:.2f}s < {self._min_save_interval}s)")
-            return True  # Kein Fehler, nur übersprungen
-        
         try:
-            state = {
-                "last_updated": datetime.now().isoformat(),
-                "players": {}
-            }
+            # Build state dict (same as synchronous save)
+            state = self._build_state_dict(player_manager, clip_registry)
             
-            # Für beide Player (video + artnet)
-            for player_id in ['video', 'artnet']:
-                player = player_manager.get_player(player_id)
-                if not player:
-                    logger.warning(f"Player '{player_id}' nicht gefunden beim Speichern")
-                    continue
-                
-                # Baue Playlist mit vollständigen Clip-Informationen
-                playlist = []
-                for path in player.playlist:
-                    clip_item = {"path": path}
-                    clip_id = None  # Initialize clip_id
-                    
-                    # Hole UUID aus player.playlist_ids (wenn vorhanden)
-                    playlist_ids = getattr(player, 'playlist_ids', {})
-                    if path in playlist_ids:
-                        clip_id = playlist_ids[path]
-                        clip_item["id"] = clip_id
-                    else:
-                        # Fallback: Hole Clip-ID aus Registry
-                        clip_id = clip_registry.find_clip_by_path(player_id, path)
-                        if clip_id:
-                            clip_item["id"] = clip_id
-                    
-                    # Typ erkennen
-                    if path.startswith('generator:'):
-                        clip_item["type"] = "generator"
-                        clip_item["generator_id"] = path.replace('generator:', '')
-                        
-                        # Generator-Parameter aus player.playlist_params holen
-                        gen_id = clip_item["generator_id"]
-                        if gen_id in player.playlist_params:
-                            clip_item["parameters"] = player.playlist_params[gen_id].copy()
-                        else:
-                            clip_item["parameters"] = {}
-                    else:
-                        clip_item["type"] = "video"
-                    
-                    # Effekte vom Clip (falls vorhanden)
-                    if clip_id:
-                        effects = clip_registry.get_clip_effects(clip_id)
-                        # Filtere 'instance' aus effects (nicht JSON-serialisierbar)
-                        serializable_effects = []
-                        for effect in effects:
-                            effect_copy = effect.copy()
-                            if 'instance' in effect_copy:
-                                del effect_copy['instance']
-                            
-                            # Store parameter UIDs if they have sequences
-                            if self.sequence_manager and 'parameters' in effect_copy:
-                                for param_name, param_value in effect_copy['parameters'].items():
-                                    # Check if parameter has UID assigned (exists in any sequence)
-                                    param_uid = None
-                                    for seq in self.sequence_manager.get_all():
-                                        # If sequence target looks like a UID (starts with param_)
-                                        if seq.target_parameter.startswith('param_') and param_name in seq.target_parameter:
-                                            param_uid = seq.target_parameter
-                                            break
-                                    
-                                    # If parameter has UID, store it
-                                    if param_uid:
-                                        if not isinstance(param_value, dict):
-                                            effect_copy['parameters'][param_name] = {
-                                                '_value': param_value,
-                                                '_uid': param_uid
-                                            }
-                                        else:
-                                            effect_copy['parameters'][param_name]['_uid'] = param_uid
-                            
-                            serializable_effects.append(effect_copy)
-                        clip_item["effects"] = serializable_effects
-                    else:
-                        clip_item["effects"] = []
-                    
-                    # Layers vom Clip (falls vorhanden)
-                    if clip_id:
-                        layers = clip_registry.get_clip_layers(clip_id)
-                        clip_item["layers"] = layers
-                    else:
-                        clip_item["layers"] = []
-                    
-                    playlist.append(clip_item)
-                
-                # Globale Player-Effekte
-                global_effects = []
-                # Video-Effect-Chain speichern (für Video Player)
-                if hasattr(player, 'video_effect_chain') and player.video_effect_chain:
-                    for effect_dict in player.video_effect_chain:
-                        effect_data = {
-                            "plugin_id": effect_dict['id'],
-                            "parameters": effect_dict.get('config', {})
-                        }
-                        global_effects.append(effect_data)
-                # Art-Net-Effect-Chain speichern (für Art-Net Player)
-                elif hasattr(player, 'artnet_effect_chain') and player.artnet_effect_chain:
-                    for effect_dict in player.artnet_effect_chain:
-                        effect_data = {
-                            "plugin_id": effect_dict['id'],
-                            "parameters": effect_dict.get('config', {})
-                        }
-                        global_effects.append(effect_data)
-                
-                # Player-State speichern (Layer-Stack wird jetzt pro Clip gespeichert, nicht global)
-                state["players"][player_id] = {
-                    "playlist": playlist,
-                    "current_index": player.playlist_index,
-                    "autoplay": player.autoplay,
-                    "loop": player.loop_playlist,
-                    "global_effects": global_effects
-                }
-            
-            # Sequencer state speichern
-            if player_manager.sequencer:
-                try:
-                    sequencer_state = {
-                        "mode_active": player_manager.sequencer_mode_active,
-                        "audio_file": player_manager.sequencer.timeline.audio_file,
-                        "timeline": player_manager.sequencer.timeline.to_dict(),
-                        "last_position": player_manager.sequencer.get_position()
-                    }
-                    state["sequencer"] = sequencer_state
-                    logger.debug(f"🎵 Sequencer state saved: mode={sequencer_state['mode_active']}, audio={sequencer_state['audio_file']}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to save sequencer state: {e}")
-            
-            # Audio analyzer state speichern (device, gain werden im Frontend gespeichert)
-            # Hier speichern wir nur Backend-Konfiguration
-            if hasattr(player_manager, 'audio_analyzer') and player_manager.audio_analyzer:
-                try:
-                    audio_analyzer = player_manager.audio_analyzer
-                    state["audio_analyzer"] = {
-                        "device": audio_analyzer.device,
-                        "running": audio_analyzer._running,
-                        "config": audio_analyzer.config.copy() if audio_analyzer.config else {}
-                    }
-                    logger.debug(f"🎤 Audio analyzer state saved: device={audio_analyzer.device}, running={audio_analyzer._running}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to save audio analyzer state: {e}")
-            
-            # Master/Slave state speichern
-            state["master_playlist"] = player_manager.get_master_playlist()
-            if state["master_playlist"]:
-                logger.debug(f"👑 Master playlist saved: {state['master_playlist']}")
-            
-            # Save flat sequences by UID
-            state["sequences"] = self._save_sequences()
-            
-            # State in Datei schreiben mit Retry-Logik für Windows File-Locking
-            os.makedirs(os.path.dirname(self.state_file_path), exist_ok=True)
-            
-            # Versuche bis zu 3x zu speichern (Windows kann Dateien kurzzeitig locken)
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    with open(self.state_file_path, 'w', encoding='utf-8') as f:
-                        json.dump(state, f, indent=2, ensure_ascii=False)
-                    break  # Erfolg - raus aus Retry-Loop
-                except PermissionError as perm_err:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"⚠️ Permission denied beim Speichern (Versuch {attempt + 1}/{max_retries}), retry in 0.5s...")
-                        time.sleep(0.5)
-                    else:
-                        # Letzter Versuch fehlgeschlagen - logge nur als Warning, nicht als Error
-                        logger.warning(f"⚠️ Session State konnte nicht gespeichert werden (Datei gesperrt): {perm_err}")
-                        logger.info("💡 Tipp: Schließe alle Programme die session_state.json geöffnet haben")
-                        return False  # Gebe False zurück aber stoppe nicht die Anwendung
-            
+            # Update in-memory state immediately
             self._state = state
-            self._last_save_time = time.time()
-            logger.debug(f"💾 Session State gespeichert: {len(state['players'])} Player")
-            return True
             
+            if force:
+                # Force immediate write (blocks current thread)
+                self._do_file_write(state)
+                return True
+            else:
+                # Queue for async write with debouncing
+                self._pending_save = True
+                self._pending_save_data = state
+                logger.debug(f"📝 Session State queued for async save (debouncing: 1s)")
+                return True
+                
         except Exception as e:
-            logger.error(f"❌ Fehler beim Speichern von session_state.json: {e}")
+            logger.error(f"❌ Fehler beim Vorbereiten des async Save: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False
+    
+    def save(self, player_manager, clip_registry, force: bool = False) -> bool:
+        """
+        Speichert aktuellen Player-Status synchron (DEPRECATED - use save_async instead).
+        This method is kept for backward compatibility and critical operations only.
+        
+        Args:
+            player_manager: PlayerManager-Instanz
+            clip_registry: ClipRegistry-Instanz
+            force: Ignored (always synchronous)
+            
+        Returns:
+            True bei Erfolg
+        """
+        try:
+            state = self._build_state_dict(player_manager, clip_registry)
+            self._state = state
+            self._do_file_write(state)
+            return True
+        except Exception as e:
+            logger.error(f"❌ Fehler beim synchronen Speichern: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
+    def _build_state_dict(self, player_manager, clip_registry) -> Dict[str, Any]:
+        """Build the complete state dictionary for saving."""
+        state = {
+            "last_updated": datetime.now().isoformat(),
+            "players": {}
+        }
+        
+        # Für beide Player (video + artnet)
+        for player_id in ['video', 'artnet']:
+            player = player_manager.get_player(player_id)
+            if not player:
+                logger.warning(f"Player '{player_id}' nicht gefunden beim Speichern")
+                continue
+            
+            # Baue Playlist mit vollständigen Clip-Informationen
+            playlist = []
+            for path in player.playlist:
+                clip_item = {"path": path}
+                clip_id = None  # Initialize clip_id
+                
+                # Hole UUID aus player.playlist_ids (wenn vorhanden)
+                playlist_ids = getattr(player, 'playlist_ids', {})
+                if path in playlist_ids:
+                    clip_id = playlist_ids[path]
+                    clip_item["id"] = clip_id
+                else:
+                    # Fallback: Hole Clip-ID aus Registry
+                    clip_id = clip_registry.find_clip_by_path(player_id, path)
+                    if clip_id:
+                        clip_item["id"] = clip_id
+                
+                # Typ erkennen
+                if path.startswith('generator:'):
+                    clip_item["type"] = "generator"
+                    clip_item["generator_id"] = path.replace('generator:', '')
+                    
+                    # Generator-Parameter aus player.playlist_params holen
+                    gen_id = clip_item["generator_id"]
+                    if gen_id in player.playlist_params:
+                        clip_item["parameters"] = player.playlist_params[gen_id].copy()
+                    else:
+                        clip_item["parameters"] = {}
+                else:
+                    clip_item["type"] = "video"
+                
+                # Effekte vom Clip (falls vorhanden)
+                if clip_id:
+                    effects = clip_registry.get_clip_effects(clip_id)
+                    # Filtere 'instance' aus effects (nicht JSON-serialisierbar)
+                    serializable_effects = []
+                    for effect in effects:
+                        effect_copy = effect.copy()
+                        if 'instance' in effect_copy:
+                            del effect_copy['instance']
+                        
+                        # Store parameter UIDs if they have sequences
+                        if self.sequence_manager and 'parameters' in effect_copy:
+                            for param_name, param_value in effect_copy['parameters'].items():
+                                # Check if parameter has UID assigned (exists in any sequence)
+                                param_uid = None
+                                for seq in self.sequence_manager.get_all():
+                                    # If sequence target looks like a UID (starts with param_)
+                                    if seq.target_parameter.startswith('param_') and param_name in seq.target_parameter:
+                                        param_uid = seq.target_parameter
+                                        break
+                                
+                                # If parameter has UID, store it
+                                if param_uid:
+                                    if not isinstance(param_value, dict):
+                                        effect_copy['parameters'][param_name] = {
+                                            '_value': param_value,
+                                            '_uid': param_uid
+                                        }
+                                    else:
+                                        effect_copy['parameters'][param_name]['_uid'] = param_uid
+                        
+                        serializable_effects.append(effect_copy)
+                    clip_item["effects"] = serializable_effects
+                else:
+                    clip_item["effects"] = []
+                
+                # Layers vom Clip (falls vorhanden)
+                if clip_id:
+                    layers = clip_registry.get_clip_layers(clip_id)
+                    clip_item["layers"] = layers
+                else:
+                    clip_item["layers"] = []
+                
+                playlist.append(clip_item)
+            
+            # Globale Player-Effekte
+            global_effects = []
+            # Video-Effect-Chain speichern (für Video Player)
+            if hasattr(player, 'video_effect_chain') and player.video_effect_chain:
+                for effect_dict in player.video_effect_chain:
+                    effect_data = {
+                        "plugin_id": effect_dict['id'],
+                        "parameters": effect_dict.get('config', {})
+                    }
+                    global_effects.append(effect_data)
+            # Art-Net-Effect-Chain speichern (für Art-Net Player)
+            elif hasattr(player, 'artnet_effect_chain') and player.artnet_effect_chain:
+                for effect_dict in player.artnet_effect_chain:
+                    effect_data = {
+                        "plugin_id": effect_dict['id'],
+                        "parameters": effect_dict.get('config', {})
+                    }
+                    global_effects.append(effect_data)
+            
+            # Player-State speichern (Layer-Stack wird jetzt pro Clip gespeichert, nicht global)
+            state["players"][player_id] = {
+                "playlist": playlist,
+                "current_index": player.playlist_index,
+                "autoplay": player.autoplay,
+                "loop": player.loop_playlist,
+                "global_effects": global_effects
+            }
+        
+        # Sequencer state speichern
+        if player_manager.sequencer:
+            try:
+                sequencer_state = {
+                    "mode_active": player_manager.sequencer_mode_active,
+                    "audio_file": player_manager.sequencer.timeline.audio_file,
+                    "timeline": player_manager.sequencer.timeline.to_dict(),
+                    "last_position": player_manager.sequencer.get_position()
+                }
+                state["sequencer"] = sequencer_state
+                logger.debug(f"🎵 Sequencer state saved: mode={sequencer_state['mode_active']}, audio={sequencer_state['audio_file']}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to save sequencer state: {e}")
+        
+        # Audio analyzer state speichern (device, gain werden im Frontend gespeichert)
+        if hasattr(player_manager, 'audio_analyzer') and player_manager.audio_analyzer:
+            try:
+                audio_analyzer = player_manager.audio_analyzer
+                bpm_status = audio_analyzer.get_bpm_status()
+                state["audio_analyzer"] = {
+                    "device": audio_analyzer.device,
+                    "running": audio_analyzer._running,
+                    "config": audio_analyzer.config.copy() if audio_analyzer.config else {},
+                    "bpm": {
+                        "enabled": bpm_status.get('enabled', False),
+                        "bpm": bpm_status.get('bpm', 0.0),
+                        "mode": bpm_status.get('mode', 'auto'),
+                        "manual_bpm": audio_analyzer._manual_bpm if hasattr(audio_analyzer, '_manual_bpm') else None
+                    }
+                }
+                logger.debug(f"🎤 Audio analyzer state saved: device={audio_analyzer.device}, running={audio_analyzer._running}, bpm_enabled={bpm_status.get('enabled')}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to save audio analyzer state: {e}")
+        
+        # Master/Slave state speichern
+        state["master_playlist"] = player_manager.get_master_playlist()
+        if state["master_playlist"]:
+            logger.debug(f"👑 Master playlist saved: {state['master_playlist']}")
+        
+        # Save flat sequences by UID
+        state["sequences"] = self._save_sequences()
+        
+        return state
     
     def _save_sequences(self):
         """Save all sequences flat by UID"""
@@ -593,6 +690,9 @@ class SessionStateManager:
                             elif seq_type == 'timeline':
                                 from .sequences import TimelineSequence
                                 sequence = TimelineSequence.deserialize(seq_data)
+                            elif seq_type == 'bpm':
+                                from .sequences import BPMSequence
+                                sequence = BPMSequence.deserialize(seq_data, player_manager.audio_analyzer)
                             else:
                                 logger.warning(f"Unknown sequence type: {seq_type}")
                                 continue
@@ -632,8 +732,43 @@ class SessionStateManager:
                         logger.debug("🎵 Sequencer audio file not found, skipping restore")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to restore sequencer: {e}")
-            
-            # ========== MASTER/SLAVE STATE RESTAURIEREN ==========
+                        # ========== AUDIO ANALYZER BPM STATE RESTAURIEREN ==========
+            audio_analyzer_data = state.get('audio_analyzer')
+            if audio_analyzer_data and hasattr(player_manager, 'audio_analyzer') and player_manager.audio_analyzer:
+                try:
+                    bpm_data = audio_analyzer_data.get('bpm', {})
+                    if bpm_data:
+                        audio_analyzer = player_manager.audio_analyzer
+                        
+                        # Restore manual BPM if set
+                        manual_bpm = bpm_data.get('manual_bpm')
+                        if manual_bpm and bpm_data.get('mode') == 'manual':
+                            audio_analyzer.set_manual_bpm(manual_bpm)
+                            logger.debug(f"🎵 Restored manual BPM: {manual_bpm}")
+                        
+                        # Restore BPM enabled state
+                        # If 'enabled' key doesn't exist in saved data, default to True (enabled by default)
+                        if 'enabled' in bpm_data:
+                            # Explicitly saved state exists - respect it
+                            enabled = bpm_data['enabled']
+                        else:
+                            # No explicit enabled state saved - default to enabled
+                            enabled = True
+                            
+                        if enabled:
+                            audio_analyzer.enable_bpm_detection(True)
+                            logger.info(f"🎵 BPM detection restored: enabled=True, mode={bpm_data.get('mode', 'auto')}")
+                        else:
+                            audio_analyzer.enable_bpm_detection(False)
+                            logger.info("🎵 BPM detection disabled (from saved state)")
+                    else:
+                        # No saved BPM data - enable by default
+                        audio_analyzer = player_manager.audio_analyzer
+                        audio_analyzer.enable_bpm_detection(True)
+                        logger.info("🎵 BPM detection enabled by default (no saved state)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to restore BPM state: {e}")
+                        # ========== MASTER/SLAVE STATE RESTAURIEREN ==========
             master_playlist = state.get('master_playlist')
             if master_playlist:
                 try:

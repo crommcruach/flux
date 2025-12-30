@@ -5,6 +5,7 @@ Provides automated parameter modulation through:
 - Audio Reactive: Bind parameters to audio features (Bass, RMS, Peak, etc.)
 - LFO: Low Frequency Oscillator with multiple waveforms
 - Timeline: Keyframe-based animation
+- BPM: Beat-synchronized keyframe animation
 - Envelope: ADSR envelope modulation
 """
 
@@ -14,6 +15,7 @@ from .audio_analyzer import AudioAnalyzer
 from .audio_sequence import AudioSequence
 from .lfo_sequence import LFOSequence
 from .timeline_sequence import TimelineSequence
+from .bpm_sequence import BPMSequence
 
 __all__ = [
     'BaseSequence',
@@ -22,4 +24,5 @@ __all__ = [
     'AudioSequence',
     'LFOSequence',
     'TimelineSequence',
+    'BPMSequence',
 ]

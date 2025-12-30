@@ -108,7 +108,7 @@ class AudioSequence(BaseSequence):
         self._log_counter += 1
         
         if band_value > 0.01 and self._log_counter % 30 == 0:  # Log every 30 frames if audio detected
-            logger.info(f"🎤 Audio detected: {self.band}={band_value:.3f} (beat={features.get('beat', False)})")
+            logger.debug(f"🎤 Audio detected: {self.band}={band_value:.3f} (beat={features.get('beat', False)})")
         
         audio_value = features.get(self.feature, band_value)
         
@@ -125,17 +125,22 @@ class AudioSequence(BaseSequence):
         
         # Log mode and values for debugging (only when significant activity)
         if beat_detected or audio_value > 0.3:  # Only log when there's significant activity
-            logger.info(f"🔊 Mode: {self.mode} | Audio: {audio_value:.2f} | Beat: {beat_detected} | Band[{self.band}]: {band_value:.2f}")
+            logger.debug(f"🔊 Mode: {self.mode} | Audio: {audio_value:.2f} | Beat: {beat_detected} | Band[{self.band}]: {band_value:.2f}")
         
         # Apply modulation mode
         if self.mode == 'rise-from-min':
             # Start at rangeMin, rise to calculated value on audio, fall back to rangeMin
-            if audio_value > 0.01:  # Audio detected → attack (rise)
-                attack_speed = self.attack_release * 10.0
-                self._envelope_value += audio_value * attack_speed * dt
+            # Use attack_release to control threshold and speed
+            threshold = max(0.05, 0.2 * (1.0 - self.attack_release))  # Higher threshold for lower sensitivity
+            
+            if audio_value > threshold:  # Audio detected → attack (rise)
+                # Faster attack: scale by audio intensity
+                attack_speed = (5.0 + self.attack_release * 20.0) * audio_value
+                self._envelope_value += attack_speed * dt
                 self._envelope_value = min(1.0, self._envelope_value)
-            else:  # No audio → release (decay back to min)
-                release_speed = self.attack_release * 5.0
+            else:  # No significant audio → release (decay back to min)
+                # Faster release: controlled by attack_release
+                release_speed = 2.0 + self.attack_release * 8.0
                 self._envelope_value -= release_speed * dt
                 self._envelope_value = max(0.0, self._envelope_value)
             
@@ -143,12 +148,16 @@ class AudioSequence(BaseSequence):
             
         elif self.mode == 'rise-from-max':
             # Start at rangeMax, fall to calculated value on audio, rise back to rangeMax
-            if audio_value > 0.01:  # Audio detected → attack (drop)
-                attack_speed = self.attack_release * 10.0
-                self._envelope_value += audio_value * attack_speed * dt
+            threshold = max(0.05, 0.2 * (1.0 - self.attack_release))  # Higher threshold for lower sensitivity
+            
+            if audio_value > threshold:  # Audio detected → attack (drop)
+                # Faster attack: scale by audio intensity
+                attack_speed = (5.0 + self.attack_release * 20.0) * audio_value
+                self._envelope_value += attack_speed * dt
                 self._envelope_value = min(1.0, self._envelope_value)
-            else:  # No audio → release (rise back to max)
-                release_speed = self.attack_release * 5.0
+            else:  # No significant audio → release (rise back to max)
+                # Faster release: controlled by attack_release
+                release_speed = 2.0 + self.attack_release * 8.0
                 self._envelope_value -= release_speed * dt
                 self._envelope_value = max(0.0, self._envelope_value)
             
@@ -163,7 +172,7 @@ class AudioSequence(BaseSequence):
                 # Wrap around at max
                 if self._current_value > self.max_value:
                     self._current_value = self.min_value + (self._current_value - self.max_value)
-                logger.info(f"🥁 BEAT forward: +{increment:.1f} -> {self._current_value:.1f}")
+                logger.debug(f"🥁 BEAT forward: +{increment:.1f} -> {self._current_value:.1f}")
             target_value = self._current_value
             
         elif self.mode == 'beat-backward':
@@ -175,17 +184,19 @@ class AudioSequence(BaseSequence):
                 # Wrap around at min
                 if self._current_value < self.min_value:
                     self._current_value = self.max_value - (self.min_value - self._current_value)
-                logger.info(f"🥁 BEAT backward: -{decrement:.1f} -> {self._current_value:.1f}")
+                logger.debug(f"🥁 BEAT backward: -{decrement:.1f} -> {self._current_value:.1f}")
             target_value = self._current_value
         
         else:
-            # Fallback to rise-from-min mode
-            if audio_value > 0.01:
-                attack_speed = self.attack_release * 10.0
-                self._envelope_value += audio_value * attack_speed * dt
+            # Fallback to rise-from-min mode with improved sensitivity
+            threshold = max(0.05, 0.2 * (1.0 - self.attack_release))
+            
+            if audio_value > threshold:
+                attack_speed = (5.0 + self.attack_release * 20.0) * audio_value
+                self._envelope_value += attack_speed * dt
                 self._envelope_value = min(1.0, self._envelope_value)
             else:
-                release_speed = self.attack_release * 5.0
+                release_speed = 2.0 + self.attack_release * 8.0
                 self._envelope_value -= release_speed * dt
                 self._envelope_value = max(0.0, self._envelope_value)
             target_value = self.min_value + (self._envelope_value * (self.max_value - self.min_value))
@@ -237,7 +248,7 @@ class AudioSequence(BaseSequence):
             should_log = True
         
         if should_log:
-            logger.info(f"🎚️ [{self.name}] {self.target_parameter.split('_')[3] if '_' in self.target_parameter else 'param'} = {self._current_value:.2f} (range: {self.min_value:.1f}-{self.max_value:.1f}, {self.band}={band_value:.3f})")
+            logger.debug(f"🎚️ [{self.name}] {self.target_parameter.split('_')[3] if '_' in self.target_parameter else 'param'} = {self._current_value:.2f} (range: {self.min_value:.1f}-{self.max_value:.1f}, {self.band}={band_value:.3f})")
             self._last_logged_value = self._current_value
     
     def get_value(self) -> float:

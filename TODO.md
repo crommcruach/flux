@@ -23,56 +23,9 @@
 
 ---
 
-## 🔥 P1 - CRITICAL FEATURES (~28-40h)
+## 🔥 P1 - CRITICAL FEATURES (~6-10h)
 
-### 1.1 🎵 Audio-Driven Sequencer (~12-16h) 🔥 TOP PRIORITY
-
-**Why Critical:** Music-synced visual shows are core VJ functionality. Without this, users must manually trigger clips.
-
-**Concept:**
-```
-Audio Waveform Timeline
-├─ User clicks waveform → create split point
-├─ Time Slots (segments between splits)
-│  └─ Slot 0: 0.0-2.5s  → Clip 0
-│  └─ Slot 1: 2.5-4.0s  → Clip 1
-│  └─ Slot 2: 4.0-7.2s  → Clip 2
-├─ Backend audio playback (miniaudio)
-└─ Drives Master playlist → Slaves follow
-```
-
-**Implementation:**
-- [ ] **Phase 1: Backend Audio (3-4h)**
-  - `AudioTimeline` class: load audio, extract waveform, manage splits
-  - `AudioSequencer`: miniaudio playback, 50ms monitoring loop
-  - REST API: `/api/sequencer/*` (load, play, pause, stop, split management)
-  
-- [ ] **Phase 2: Frontend Waveform (4-5h)**
-  - WaveSurfer.js v7+ integration (RegionsPlugin, TimelinePlugin)
-  - Click to add splits, right-click to remove
-  - Slot visualization with clip mapping
-  - Playback controls & current slot highlighting
-  
-- [ ] **Phase 3: Master Integration (3-4h)**
-  - Audio position triggers `master_advance_to_clip(slot_index)`
-  - Transport `loop_count` controls loops within slots
-  - Slot boundary detection with 50ms precision
-  
-- [ ] **Phase 4: UI Polish (2-3h)**
-  - Visual feedback, beat markers (optional)
-  - Export/import timeline JSON
-  - Info display: current time, slot, BPM
-
-**Key Decisions:**
-- ✅ Backend audio playback (miniaudio) - runs headless
-- ✅ WaveSurfer.js - battle-tested waveform library
-- ✅ 50ms monitoring loop - responsive without CPU overhead
-
-**Dependencies:** miniaudio (`pip install miniaudio`)
-
----
-
-### 1.2 🎹 MIDI Control (~6-10h) 🔥
+### 1.1 🎹 MIDI Control (~6-10h) 🔥
 
 **Why Critical:** External hardware control is essential for live performance. Enables physical faders, buttons, and pad controllers.
 
@@ -106,50 +59,9 @@ Audio Waveform Timeline
 
 ---
 
-### 1.3 🎛️ Dynamic Parameter Sequences (~6-10h) 🔥
+## ⚡ P2 - HIGH VALUE FEATURES (~90-137h)
 
-**Why Critical:** Automated parameter modulation creates dynamic, evolving visuals without manual control.
-
-**Architecture Decision:** ⚠️ **Audio detection MUST run in backend** (not frontend) for headless operation and reliability.
-
-**Sequence Types:**
-- [ ] **Audio Reactive (2-3h)**
-  - **Backend audio analysis:** sounddevice + numpy FFT (runs without browser)
-  - **Audio source selection:** Configurable in config.json (microphone, line-in, system audio/speaker loopback)
-  - Bind parameter to audio feature (RMS, Peak, Bass, Mid, Treble, BPM)
-  - Range mapping: Audio level (0-1) → Parameter range
-  - Smoothing: Attack/Release for smooth transitions
-  - Real-time analysis in monitoring thread (similar to AudioSequencer)
-  
-- [ ] **LFO - Low Frequency Oscillator (2-3h)**
-  - Waveforms: Sine, Triangle, Square, Sawtooth, Random
-  - Frequency (Hz) & Amplitude control
-  - Phase offset for multi-LFO sync
-  
-- [ ] **Timeline Keyframes (2-3h)**
-  - Time → Value pairs with interpolation
-  - Linear, Bezier, Step curves
-  - Loop modes: Once, Loop, Ping-Pong
-  
-- [ ] **ADSR Envelope (1-2h, optional)**
-  - Attack, Decay, Sustain, Release phases
-  - Trigger modes: On-Load, On-Beat, Manual
-
-**UI Components:**
-- Sequence button (⚙️) next to each parameter
-- Modal editor with type selector
-- Live preview showing modulated value
-- Visual waveform/curve display
-
-**Use Cases:**
-- Blur pulsing with bass
-- Color cycling with LFO
-- Brightness envelope on beat drops
-- Timeline-based color shifts for precise timing
-
----
-
-### 1.4 🔍 File Browser Thumbnails & Multi-Select (~8-14h) 🎯
+### 2.1 🖥️ Multi-Network Adapter Support (~4-6h) ⚡
 
 **Why High Priority:** Visual file browsing and batch operations dramatically speed up workflow.
 
@@ -202,69 +114,7 @@ Audio Waveform Timeline
 
 ## ⚡ P2 - HIGH VALUE FEATURES (~32-46h)
 
-### 2.1 🎵 Audio-Reactive Effects (~10-14h) ⚡
-
-**Why High Value:** Real-time audio analysis enables reactive visuals that respond to music dynamics.
-
-**Architecture:** ⚠️ **Backend audio analysis** (headless, no frontend dependency)
-
-**Features:**
-- [ ] **Backend Audio Input (4h)**
-  - Microphone input via sounddevice (backend thread)
-  - System audio capture (WASAPI Loopback on Windows)
-  - Device selection API + UI
-  - Runs independently of browser
-  
-- [ ] **Backend Audio Analysis Engine (3-4h)**
-  - Real-time FFT in backend thread: Bass/Mid/Treble frequency bands
-  - BPM detection & tempo tracking (librosa or custom)
-  - Onset detection (beat triggers)
-  - RMS/Peak level calculation
-  - Analysis results cached and exposed via API
-  
-- [ ] **Parameter Binding System (3h)**
-  - Backend applies modulation to effect parameters
-  - Brightness ← RMS/Peak level
-  - Speed ← BPM
-  - Color ← Frequency mapping
-  - Effect intensity ← Audio level
-  - WebSocket broadcasts analysis data for UI visualization
-  
-- [ ] **UI & Visualization (2-3h)**
-  - Live spectrum display (receives data via WebSocket)
-  - Parameter mapping editor
-  - Sensitivity controls
-  - Device selection dropdown
-
-**Implementation:**
-```python
-# Backend: src/modules/audio_analyzer.py
-class AudioAnalyzer:
-    def __init__(self):
-        self.device = sounddevice.InputStream(callback=self._audio_callback)
-        self.fft_buffer = []
-        self.current_features = {
-            'rms': 0.0,
-            'bass': 0.0,
-            'mid': 0.0,
-            'treble': 0.0,
-            'bpm': 0.0
-        }
-    
-    def _audio_callback(self, indata, frames, time, status):
-        # FFT analysis in audio thread
-        # Update self.current_features
-        pass
-    
-    def get_features(self):
-        return self.current_features
-```
-
-**Dependencies:** sounddevice, numpy, librosa (optional for BPM)
-
----
-
-### 2.2 🖥️ Multi-Network Adapter Support (~4-6h) ⚡
+### 2.1 🖥️ Multi-Network Adapter Support (~4-6h) ⚡
 
 **Why High Value:** Separates control traffic from Art-Net output, essential for large installations.
 
@@ -337,46 +187,7 @@ class AudioAnalyzer:
 
 ---
 
-### 2.4 🎬 Playlist Slots with Compositing (~12-16h) ⚡
-
-**Why High Value:** Professional show structure with stacked alternatives and live compositing.
-
-**Concept:** "Card Deck" UI
-```
-Slot 1: [Intro Variations] 🎴
-  ├─ Clip A (base)          blend: normal    opacity: 100%
-  ├─ Clip B (overlay)       blend: multiply  opacity: 50%
-  └─ Clip C (generator)     blend: screen    opacity: 70%
-  → All play simultaneously, composited in real-time
-
-Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
-```
-
-**Implementation:**
-- [ ] **Slot Manager (3-4h)**
-  - Slot data structure with multi-clip support
-  - Trigger modes: Manual, Auto, Random, MIDI
-  - Transition between slots
-  
-- [ ] **Layer Compositor (3-4h)**
-  - Real-time compositing within slot
-  - Blend modes per clip
-  - Opacity per clip
-  - Layer order via drag & drop
-  
-- [ ] **UI Components (4-5h)**
-  - Card deck view (collapsed/expanded)
-  - Slot controls (play, name, duration)
-  - Clip stacking with visual feedback
-  - Transition settings
-  
-- [ ] **API Integration (2-3h)**
-  - REST endpoints: Slot CRUD, clip management
-  - Trigger API for external control
-
----
-
-### 2.4 🔮 ShaderToy Source (~8-12h) ⚡
+### 2.3 🔮 ShaderToy Source (~8-12h) ⚡
 
 **Why High Value:** Unlimited procedural graphics via GLSL shaders.
 
@@ -400,7 +211,7 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
 
 ---
 
-### 2.6 📹 Enhanced Live Sources (~8-12h) ⚡
+### 2.4 📹 Enhanced Live Sources (~8-12h) ⚡
 
 **Why High Value:** Professional live input with better control and metadata.
 
@@ -436,7 +247,7 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
 
 ---
 
-### 2.7 📡 SPOUT/NDI Input Plugin (~6-10h) ⚡
+### 2.5 📡 SPOUT/NDI Input Plugin (~6-10h) ⚡
 
 **Why High Value:** Professional video routing from other applications (Resolume, TouchDesigner, vMix, etc.).
 
@@ -471,7 +282,597 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
 
 ---
 
-## 🎯 P3 - ENHANCEMENT FEATURES (~30-42h)
+### 2.6 🎭 DMX Lighting Control System (~48-70h) ⚡ 💡 **USP FEATURE**
+
+**Why High Value:** Unified video + lighting control in one system. Competes with Resolume Arena ($699) at a fraction of the cost.
+
+**Output Method:** Art-Net (existing infrastructure) → DMX via hardware converters
+
+**Architecture:**
+```
+DMX Sequence Engine
+├─ Fixture Library (moving heads, LED pars, scanners, strobes)
+├─ Fixture Patching (DMX address, universe assignment)
+├─ Scene/Sequence Editor (timeline-based cues)
+└─ Art-Net Output (reuse existing ArtNetPlayer)
+```
+
+**Fixture Library:** ✨ **Open Fixture Library (OFL)** - https://open-fixture-library.org/
+- 1500+ professional fixture definitions (Martin, Chauvet, ADJ, Elation, Robe, etc.)
+- REST API for search & download
+- MIT License - free commercial use
+- Constantly updated by community
+
+**Features:**
+- [ ] **Phase 1: Fixture Library & Patching (6-10h)** ⬇️ *Reduced time - using OFL!*
+  - **OFL Integration (2-3h)**:
+    - Search fixtures via OFL API: `GET https://open-fixture-library.org/api/v1/fixtures`
+    - Download fixture definitions: `GET /api/v1/fixtures/{manufacturer}/{fixture-key}`
+    - Local cache in `data/dmx_fixtures/` (avoid repeated downloads)
+    - Convert OFL JSON → internal format
+    - Fixture browser UI with search (similar to file browser)
+  - **Fixture Patching UI (4-7h)**:
+    - Search & add fixtures from OFL catalog
+    - Assign DMX address (1-512)
+    - Assign Universe (1-32768)
+    - Select fixture mode (different channel counts)
+    - Multi-fixture patching (auto-increment addresses)
+    - Fixture groups (all moving heads, all PARs)
+    - **Patch Grid View** - Visual grid showing all patched fixtures with addresses
+    - **2D Stage Layout** - Position fixtures on stage plan (top-down view):
+      - Drag fixtures to physical positions
+      - Stage dimensions (width × depth in meters)
+      - Export/import stage layouts
+      - Visual reference for programming
+    - **LED Strip Integration** ✨ NEW (2-3h):
+      - Import existing LED strip configurations from Art-Net player
+      - Create "LED Strip" fixture type (custom fixture profile)
+      - Map LED strip universe/channels to DMX control
+      - Position LED strips on 3D stage layout
+      - Treat strips as addressable pixel fixtures
+      - Control via DMX sequences/FX engines
+      - Unified control: Video effects + DMX control
+  - **Movement Limits (2-3h)**:
+    - Per-fixture pan/tilt limits (prevent fixture collisions)
+    - Per-channel range limits (e.g., gobo wheel: only slots 1-5)
+    - Safety zones (avoid audience, rigging, walls)
+    - Invert pan/tilt per fixture
+  - Storage: `data/dmx_patched_fixtures.json` (user's patched fixtures)
+  
+- [ ] **Phase 2: Scene Editor with Steps & FX (10-14h)**
+  - **Static Scenes**:
+    - Set fixture parameters (pan: 127, tilt: 200, color: red, dimmer: 255)
+    - Save as named scene ("Intro Look", "Drop Red", "Chase Blue")
+    - Recall scene via UI or API
+  - **Multi-Step Scenes** ✨ NEW:
+    - Scene with multiple steps (Step 1 → Step 2 → Step 3)
+    - Per-step timing (hold duration, fade time)
+    - Step triggers: Auto-advance, manual, beat-synced
+    - Loop steps or run once
+  - **Scene FX Layers** ✨ NEW:
+    - Apply FX engine to scene parameters
+    - FX override static values (e.g., static red + color chase FX)
+    - Multiple FX per scene (dimmer chase + color cycle)
+  - Scene list UI (similar to playlist UI)
+  - Quick scene recall buttons
+  - Scene fading (crossfade duration)
+  
+- [ ] **Phase 3: FX Engines (12-18h)** ✨ NEW
+  - **Colour FX Engine (2-3h)**:
+    - RGB/CMY color cycling
+    - Rainbow effect
+    - Color bounce (2 colors alternating)
+    - Color fade (smooth transitions)
+    - Speed control (BPM-synced or free-running)
+  
+  - **Chaser FX Engine (2-3h)**:
+    - Step sequencer for any parameter
+    - Define s5eps with values & timing
+    - Direction: Forward, Backward, Bounce, Random
+    - Apply to: Dimmer, Shutter, Color wheel, Gobo wheel
+    - Beat-synced or time-based
+  
+  - **Movement FX Engine (2-3h)**:
+    - Pan/Tilt patterns: Circle, Figure-8, Square, Triangle, Random
+    - Size control (degrees of movement)
+    - Speed & direction
+    - Offset per fixture (staggered movements)
+    - Shape presets library
+  
+  - **Value FX Engine (1-2h)**:
+    - Sine wave oscillation for any channel
+    - Square wave (on/off pulsing)
+    - Sawtooth (ramp up/down)
+    - Random stepped values
+    - Min/max range, frequency
+  
+  - **Curve FX Engine (2-3h)**:
+    - Custom envelope curves (ADSR-style)
+    - Draw curve in UI (timeline with handles)
+    - Apply to any parameter
+    - Loop or one-shot
+    - Use cases: Dimmer fade curves, color transitions
+  
+  - **Mapping FX (2-3h)** ✨ ADVANCED:
+    - **Value Mapping**: Map input range → output range
+      - Audio level (0-1) → Dimmer (50-255)
+      - BPM (60-180) → Speed (10-100)
+    - **Colour Mapping**: Map external data to colors
+      - Frequency bands → RGB values
+      - Temperature data → Color temperature
+      - Custom lookup tables
+    - Bind external sources: Audio, MIDI, OSC, API
+  
+  - **FX Stack System**:
+    - Apply multiple FX to same fixture/channel
+    - Priority system (which FX wins on conflicts)
+    - FX groups (apply to fixture group)
+    - Enable/disable FX layers
+  
+- [ ] **Phase 4: DMX Sequence Timeline (12-16h)**
+  - Timeline editor (new page: `dmx.html`):
+    - Time-based keyframe editor
+    - Per-fixture parameter tracks
+    - Interpolation types (linear, step, ease)
+    - Loop modes (once, loop, ping-pong)
+  - Movement presets:
+    - Circle (pan/tilt)
+    - Figure-8
+    - Sweep (left-right, up-down)
+    - Bounce
+    - Random
+  - Color chase presets:
+    - RGB cycle
+    - Rainbow
+    - Strobe patterns
+  - BPM-synced movements (beat-aligned keyframes)
+  - Export/import sequences (JSON)
+  
+- [ ] **Phase 4: DMX Effect Plugin (4-6h)**
+  - New plugin: `plugins/effects/dmx_sequence.py`
+  - Parameters:
+    - `sequence_id`: Select DMX sequence
+    - `intensity`: Master dimmer (0-100%)
+    - `speed`: Playback speed multiplier (0.1-10x)
+    - `trigger_mode`: 
+      - `continuous` - Always playing
+      - `on_beat` - Advance on BPM beat
+      - `on_clip_start` - Trigger when clip starts
+      - `manual` - API/MIDI triggered
+  - Apply to video player (lighting follows video)
+  - Multiple DMX effects per player (layer sequences)
+  
+- [ ] **Phase 6: Integration & Sync (4-6h)**
+  - Master/Slave DMX sync:
+    - DMX sequences follow video master playlist
+    - Sync points: Clip boundaries, beats, timeline markers
+  - Audio-reactive DMX:
+    - Dimmer follows audio RMS
+    - Color follows frequency bands
+    - Strobe on beat detection
+  - MIDI triggering:
+    - Recall scenes via MIDI Note On
+    - Control dimmer via MIDI CC
+    - Sequence playback control
+
+**API Endpoints:**
+```python
+# Fixtures
+GET    /api/dmx/fixtures          # List all patched fixtures
+POST   /api/dmx/fixtures          # Add fixture
+PUT    /api/dmx/fixtures/{id}     # Update fixture
+DELETE /api/dmx/fixtures/{id}     # Remove fixture
+
+# Scenes
+GET    /api/dmx/scenes            # List all scenes
+POST   /api/dmx/scenes            # Create scene
+PUT    /api/dmx/scenes/{id}       # Update scene
+DELETE /api/dmx/scenes/{id}       # Delete scene
+POST   /api/dmx/scenes/{id}/recall # Recall scene
+
+# Sequences
+GET    /api/dmx/sequences         # List all sequences
+POST   /api/dmx/sequences         # Create sequence
+PUT    /api/dmx/sequences/{id}    # Update sequence
+DELETE /api/dmx/sequences/{id}    # Delete sequence
+POST   /api/dmx/sequences/{id}/play   # Play sequence
+POST   /api/dmx/sequences/{id}/stop   # Stop sequence
+
+# Output (reuse existing Art-Net infrastructure)
+GET    /api/dmx/output/status     # DMX output status
+POST   /api/dmx/output/blackout   # Emergency blackout
+```
+
+**UI Components:**
+- `frontend/dmx.html` - Main DMX control page:
+  - **Fixture Patcher** (left panel):
+    - Fixture library browser (OFL search)
+    - Patch grid view (universe/address grid)
+    - 2D stage layout editor (drag fixtures on stage plan)
+    - Movement limits editor
+  - **Scene Manager** (center top):
+    - Scene list with recall buttons
+    - Step editor (multi-step scenes)
+    - FX layer assignment
+  - **FX Engine Panel** (center right):
+    - FX type selector (Colour/Chaser/Move/Value/Curve/Mapping)
+    - FX parameter controls
+    - FX preview visualization
+    - Apply to fixtures/groups
+  - **Timeline Editor** (center bottom):
+    - Keyframe-based sequence programming
+    - Per-fixture parameter tracks
+  - **Live Output View** (right panel):
+    - Real-time DMX values (0-255)
+    - 2D visualization (fixtures highlight on stage)
+    - Active FX indicators
+- Fixture selector in effect parameters
+- Scene recall buttons in player UI
+- DMX output indicator in status bar
+
+**Data Structures:**
+```json
+// Patched fixture (user's installation)
+{
+  "id": "mh_001",
+  "name": "Moving Head 1",
+  "fixture_type": "dmx_fixture",  // or "led_strip"
+  "ofl_manufacturer": "chauvet",
+  "ofl_fixture_key": "intimidator-spot-360",
+  "mode": "14-Channel",  // Selected mode from OFL definition
+  "universe": 1,
+  "address": 1,
+  "channels": {
+    // Auto-generated from OFL definition + address offset
+    "pan": 1,
+    "pan_fine": 2,
+    "tilt": 3,
+    "tilt_fine": 4,
+    "color_wheel": 5,
+    "gobo_wheel": 6,
+    "gobo_rotation": 7,
+    "prism": 8,
+    "focus": 9,
+    "dimmer": 10,
+    "shutter": 11,
+    "control": 12,
+    "movement_speed": 13,
+    "dimmer_mode": 14
+  },
+  "_ofl_cache": {
+    // Cached OFL definition for offline use
+    "capabilities": {...},
+    "physical": {...}
+  }
+}
+
+// LED Strip as DMX Fixture ✨ NEW
+{
+  "id": "strip_001",
+  "name": "LED Strip Front Wall",
+  "fixture_type": "led_strip",
+  "universe": 2,
+  "address": 1,
+  "pixel_count": 150,
+  "pixel_spacing": 0.05,  // meters between pixels
+  "layout": "linear",  // or "matrix", "arc", "custom"
+  "position": {"x": 0, "y": 2.5, "z": 0},  // 3D position
+  "orientation": {"rotation": 0, "tilt": 0},
+  "channels": {
+    // 3 channels per pixel (RGB)
+    "pixels": [
+      {"r": 1, "g": 2, "b": 3},    // Pixel 0
+      {"r": 4, "g": 5, "b": 6},    // Pixel 1
+      // ... 150 pixels = 450 channels
+    ]
+  },
+  "control_mode": "dmx",  // or "video" (from Art-Net player)
+  "linked_artnet_object": "strip_front_wall"  // Reference to existing Art-Net config
+}
+
+// DMX Sequence
+{
+  "id": "seq_intro",
+  "name": "Intro Lights",
+  "duration": 30.0,
+  "keyframes": [
+    {
+      "time": 0.0,
+      "fixture_id": "mh_001",
+      "values": {"pan": 127, "tilt": 127, "dimmer": 0}
+    },
+    {
+      "time": 2.0,
+      "fixture_id": "mh_001",
+      "values": {"pan": 127, "tilt": 127, "dimmer": 255}
+    },
+    {
+      "time": 5.0,
+      "fixture_id": "mh_001",
+      "values": {"pan": 200, "tilt": 100, "dimmer": 255}
+    }
+  ],
+  "loop_mode": "loop"
+}
+```
+ + FX engines, much lower cost
+- ✅ **vs GrandMA onPC** (free): Similar FX engines, easier to use, integrated with video
+- ✅ **vs MadMapper** ($399): More affordable, unified system with FX
+- ✅ **vs QLC+** (free): Better video integration, modern UI, professional FX engines
+- ✅ **vs Chamsys MagicQ** (free): Comparable FX engines, simpler workflow
+- New `DMXSequenceEngine` class for sequence playback
+- DMX values (0-255) map directly to Art-Net pixel values
+- Each DMX universe = separate Art-Net universe
+- 512 channels per universe (standard DMX limit)
+
+**Use Cases:**
+- VJ with lighting control: Video + lights synchronized
+- Theater productions: Pre-programmed lighting cues
+- Clubs/bars: Music-reactive lighting
+- Live events: MIDI-controlled lighting scenes
+- Corporate events: Professional A/V control
+- **LED Strip Shows**: Video effects + DMX control on same strips
+- **Unified Installation**: Video walls + moving heads + LED strips - all synchronized
+
+**Competitive Analysis:**
+- ✅ **vs Resolume Arena** ($699): Similar features, much lower cost
+- ✅ **vs GrandMA onPC** (free): Easier to use, integrated with video
+- ✅ **vs MadMapper** ($399): More affordable, unified system
+- ✅ **vs QLC+** (free): Better video integration, modern UI
+
+**USP:** "All-in-one VJ + Lighting control - Video, LED strips, DMX fixtures, all synchronized"
+
+**Integration Benefits:** ✨
+- **Unified Control**: Switch between video effects and DMX control on LED strips
+- **Hybrid Shows**: Video content on strips + moving head effects simultaneously
+- **Single Interface**: Manage everything from one system
+- **3D Preview**: See LED strips + fixtures together in visualizer
+- **Cross-Control**: Apply DMX FX to LED strips, video effects to traditional fixtures
+
+**Dependencies:** 
+- None for core functionality (uses existing Art-Net infrastructure)
+- `requests` - For OFL API calls (already in requirements)
+- **Open Fixture Library API** - https://open-fixture-library.org/ (free, no auth required)
+
+**Implementation Notes:**
+- OFL API is free, no authentication needed
+- Cache fixtures locally to work offline
+- Fallback: Include 10-20 most common fixtures in `data/dmx_fixtures/builtin/`
+- OFL format conversion: Map OFL capabilities to simple DMX channel values (0-255)
+
+---
+
+### 2.7 🎭 3D DMX Visualizer (~10-17h) ⚡ 💡 **GAME CHANGER**
+
+**Why High Value:** Real-time 3D visualization is a **massive differentiator**. Most lighting consoles require expensive add-ons ($600-$2000+) or separate software.
+
+**Output Method:** HTML5/WebGL in browser (Three.js)
+
+**Open Source Leverage:** 🎁
+- **QLC+ Web Access** (Apache 2.0): Three.js setup, fixture rendering patterns
+- **Open Fixture Library** (MIT): GLTF 3D models for fixtures
+- **Proven code** from production lighting software
+
+**Features:**
+- [ ] **Phase 1: Three.js Core (1-2h)**
+  - Scene, camera, renderer setup
+  - Stage floor (grid with dimensions)
+  - OrbitControls (pan, zoom, rotate)
+  - Camera presets (top, front, side, isometric)
+  
+- [ ] **Phase 2: 3D Fixture Models (1-2h)** ⬇️ *Reduced - using OFL GLTF models!*
+  - Load GLTF models from OFL (when available)
+  - Fallback: Procedural models (inspired by QLC+):
+    - Moving head: Cone beam with pivot
+    - LED PAR: Cylindrical beam
+    - Scanner: Mirror rotation
+    - Strobe: Flash effect
+    - Generic: Simple cylinder
+  - **LED Strip Visualization** ✨ NEW:
+    - Linear array of small spheres/cubes (one per pixel)
+    - Real-time RGB color per pixel
+    - Positions based on LED strip layout
+    - Support for 2D matrices (grids)
+    - Show actual video content on strips
+  - **Display/Screen Models** ✨ NEW:
+    - 3D plane objects (TVs, projector screens, LED walls)
+    - Configurable size (width × height in meters)
+    - Position and rotation in 3D space
+    - Real-time video texture mapping
+    - Multiple displays per venue
+  
+- [ ] **Phase 3: DMX → 3D Mapping (2-3h)**
+  - Map DMX channels to 3D properties:
+    - Pan/Tilt → 3D rotation (accounting for movement limits)
+    - Dimmer → Beam opacity/intensity
+    - RGB/CMY → Beam color
+    - Gobo → Texture projection
+    - Shutter → Beam on/off
+    - Prism → Beam splitting
+  - Use OFL fixture definitions for channel mapping
+  - Calculate beam angles from fixture specs
+  
+- [ ] **Phase 4: Real-time Updates (1-2h)**
+  - WebSocket connection to backend DMX output
+  - Receive Art-Net universe data (512ch × N universes)
+  - **Video stream connection** ✨ NEW:
+    - Connect to video player WebSocket preview
+    - Receive video frames as base64/blob
+    - Update display textures in real-time
+    - 10-30 fps preview (adjustable quality)
+  - Update 3D scene at 30-60 fps
+  - Interpolation for smooth movements
+  - Only update changed fixtures (performance)
+  
+- [ ] **Phase 5: Visual Effects (2-3h)**
+  - Light beams (volumetric lighting)
+  - Bloom/glow post-processing
+  - Color mixing visualization
+  - Beam shapes (spot, wash, beam angle)
+  - Gobo projection onto surfaces
+  
+- [ **Display management** ✨ NEW:
+    - Add/remove displays (screens, projectors)
+    - Link display to video player output
+    - Adjust size, position, rotation
+    - Toggle video preview on/off (performance)
+  - ] **Phase 6: UI Integration (2-3h)**
+  - New page: `frontend/dmx-visualizer.html`
+  - Embedded view in `dmx.html` (side panel)
+  - View toggles: 3D perspective, top-down, front, side
+  - Show/hide fixtures
+  - Stage dimensions editor
+  - Fixture selection (click to highlight)
+  - DMX value inspector (hover fixture)
+  
+- [ ] **Phase 7: Performance Optimization (1-2h)**
+  - **Video texture optimization**:
+    - Reduce preview resolution for performance
+    - Pause video updates when display not visible
+    - Compressed frame streaming
+  - LOD (Level of Detail) for distant fixtures
+  - Frustum culling (only render visible)
+  - Update only moving fixtures
+  - WebGL optimization (batching, instancing)
+  - Frame rate limiter (30/60 fps toggle)
+
+**Advanced Features (Optional +8-12h):**
+- [ ] **Haze/Fog Effects (2-3h)**
+  - Volumetric fog rendering
+  - Beam visibility in fog
+  - Adjustable fog density
+  
+- [ ] **Stage Import (2-3h)**
+  - Import 3D models (OBJ, GLTF)
+  - Custom stage designs
+  - Truss structures
+  - Audience areas
+  
+- [ ] **Multiple Venues (1-2h)**
+  - Save/load venue configurations
+- [ ] **Projection Mapping Preview (2-3h)** ✨ NEW
+  - Import 3D building models
+  - Project video onto surfaces
+  - Preview projection mapping setup
+  - Adjust keystone/warping in 3D view
+
+  - Preset venues (club, theater, outdoor)
+  - Copy fixtures between venues
+  
+- [ ] **Light Spill & Shadows (3-4h)**
+  - Calculate light hitting floor/walls
+POST   /api/dmx/visualizer/display  # Add display/screen to scene
+PUT    /api/dmx/visualizer/display/{id} # Update display properties
+DELETE /api/dmx/visualizer/display/{id} # Remove display
+
+# Real-time data (WebSocket)
+ws://localhost:5000/dmx-output      # DMX universe stream
+ws://localhost:5000/video-preview   # Video frame stream for displays
+
+**API Endpoints:**
+```python
+# Visualizer
+GET    /api/dmx/visualizer/scene    # Get current 3D scene state
+POST   /api/dmx/visualizer/venue    # Save venue configuration
+GET    /api/dmx/visualizer/venue/{id} # Load venue
+
+# Real-time data (WebSocket)
+ws://localhost:5000/dmx-output      # DMX universe stream
+```
+
+**Technology Stack:**
+- **Three.js** (r160+) - WebGL 3D engine (MIT License)
+- **OrbitControls** - Camera navigation
+- **EffectComposer** - Post-processing effects
+- **GLTFLoader** - Load OFL 3D models
+- **WebSocket** - Real-time DMX data
+
+**Data Integration:**
+```javascript
+// Use patched fixtures from Phase 1
+fixtures.forEach(fixture => {
+    // 1. Load OFL 3D model (if available)
+    if (fixture._ofl_cache.physical?.model3d) {
+        loadGLTF(fixture._ofl_cache.physical.model3d);
+    }
+    
+
+// NEW: Add displays with live video ✨
+displays.forEach(display => {
+    // 1. Create 3D plane (screen)
+    const geometry = new THREE.PlaneGeometry(display.width, display.height);
+    const material = new THREE.MeshBasicMaterial();
+    const screen = new THREE.Mesh(geometry, material);
+    
+    // 2. Position screen
+    screen.position.set(display.x, display.y, display.z);
+    screen.rotation.set(display.rotX, display.rotY, display.rotZ);
+    
+    // 3. Video texture (real-time)
+  **Display management panel** ✨ NEW:
+  - Add screen/projector/LED wall
+  - Link to video player
+  - Adjust size, position, rotation
+  - Video quality settings (resolution, fps)
+- Stage grid toggle
+- Beam visibility toggle
+- Performance stats (FPS, fixture count, video streams
+    // 4. Connect to player WebSocket
+    connectVideoPreview(display.player_id, videoElement); + video preview
+- ✅ **vs Capture** ($600-$2000): Free, integrated, modern UI + real-time video
+- ✅ **vs WYSIWYG** ($2000+): Free, real-time, easier to use + video visualization
+- ✅ **vs MagicQ Visualizer** (free): Better integration, modern WebGL + video output preview
+- ✅ **vs Resolume Arena** ($699): Integrated lighting + video in one view
+
+**USP Enhancement:** "All-in-one VJ + Lighting + 3D Visualizer - See your entire show in real-time! Video content, LED strips, and lighting - all in one 3D view
+        fixture.stage_position.y
+    );
+    
+    // 3. Update from DMX data
+    updateFixtureFromDMX(fixture, dmxUniverseData);
+});
+```
+
+**UI Components:**
+- Main 3D viewport (fullscreen capable)
+- Camera controls (orbit, pan, zoom)
+- View presets (Top, Front, Side, 3D)
+- Fixture selection (click to inspect DMX values)
+- Stage grid toggle
+- Beam visibility toggle
+- Performance stats (FPS, fixture count)
+
+**Competitive Advantage:**
+- ✅ **vs MA3D** (GrandMA, $$$): Free, browser-based, no installation
+- ✅ **vs Capture** ($600-$2000): Free, integrated, modern UI
+- ✅ **vs WYSIWYG** ($2000+): Free, real-time, easier to use
+- ✅ **vs MagicQ Visualizer** (free): Better integration, modern WebGL
+
+**USP Enhancement:** "All-in-one VJ + Lighting + 3D Visualizer - See your entire show in real-time!"
+
+**Dependencies:**
+- Three.js (CDN: https://cdn.jsdelivr.net/npm/three@0.160.0/)
+- GLTFLoader (for OFL 3D models)
+- No backend dependencies (pure frontend)
+
+**Open Source Credits:**
+- QLC+ (Apache 2.0) - Inspiration for fixture rendering
+- Open Fixture Library (MIT) - GLTF 3D models & fixture data
+- **Video preview**: Use existing WebSocket streaming (already implemented!)
+- Performance: 50+ fixtures + 4 video displays @ 60fps achievable
+- Mobile support: Scale down effects, 30fps, reduce fixtures, disable video
+- **Display types supported**: TV screens, projectors, LED walls, video walls
+- **Use cases**: Pre-viz entire club/theater show before installation!
+**Implementation Notes:**
+- Start with OFL GLTF models (saves 4-6h of modeling)
+- Borrow rendering patterns from QLC+ Web Access
+- WebSocket reuses existing infrastructure
+- Performance: 50+ fixtures @ 60fps achievable
+- Mobile support: Scale down effects, 30fps, reduce fixtures
+
+---
+
+## 🎯 P3 - ENHANCEMENT FEATURES (~34-50h)
 
 ### 3.1 🎥 Video Wall Slicing (~8-12h) 🎯
 
@@ -512,54 +913,6 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
 
 ---
 
-### 3.1.5 🎨 New Generator Plugins (~10-14h) 🎯
-
-**Why Enhancement:** Expand procedural graphics library with geometric and noise-based patterns.
-
-**Geometric Generators (4-6h):**
-- [ ] **Lines Generator (1h)**
-  - Horizontal/Vertical/Diagonal lines
-  - Line width, spacing, angle
-  - Color per line or gradient
-  
-- [ ] **Circles Generator (1-2h)**
-  - Concentric circles or grid pattern
-  - Circle size, spacing, fill/stroke
-  - Animated pulsing/rotation
-  
-- [ ] **Static Color Generator (0.5h)**
-  - Single solid color output
-  - RGB color picker
-  - Useful for testing/backgrounds
-
-**Math/Noise Generators (4-6h):**
-- [ ] **Sine Wave Generator (1h)**
-  - 2D sine wave patterns
-  - Frequency, amplitude, phase controls
-  - Horizontal/vertical/radial modes
-  
-- [ ] **Noise Generator (2-3h)**
-  - Perlin/Simplex noise
-  - Fractal noise (multiple octaves)
-  - Animated noise scrolling
-  - Scale, octaves, persistence controls
-  
-- [ ] **Fractals Generator (2-3h)**
-  - Sierpiński Triangle
-  - Sierpiński Carpet (Quadrat)
-  - Hexagonal fractals
-  - Koch snowflake
-  - Recursion depth control
-  - Color schemes
-
-**Implementation Notes:**
-- All generators use existing GeneratorSource base class
-- 30s default duration (configurable 1-60s)
-- Real-time parameter updates
-- Compatible with Transport plugin
-
----
-
 ### 3.2 🎨 GUI Optimizations (~12-18h) 🎯
 
 **Why Enhancement:** Better UX and productivity improvements.
@@ -586,55 +939,6 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
   - Fuzzy search for effects
   - Filter by category/tag
   - Recent/favorites lists
-
----
-
-### 3.2.5 ❄️ New Effect Plugins (~8-12h) 🎯
-
-**Why Enhancement:** Creative visual effects for unique looks.
-
-**Visual Effects (5-7h):**
-- [ ] **Snow Effect (2-3h)**
-  - Falling snowflake particles
-  - Parameters: density, speed, size variation
-  - Wind direction (horizontal drift)
-  - Accumulation effect (optional)
-  - Depth layers (parallax)
-  
-- [ ] **ASCII Art Effect (3-4h)**
-  - Convert video to ASCII characters
-  - Character set: full/limited/custom
-  - Font size and color
-  - Invert option (black/white)
-  - Edge detection mode (Sobel filter)
-  - Preview with monospace font rendering
-
-**Oscillator Effects (3-5h):**
-- [ ] **Oscillator Effect Plugin (3-5h)**
-  - Modulate parameters with waveforms
-  - Waveform types:
-    - Sine (smooth oscillation)
-    - Square (on/off switching)
-    - Sawtooth (ramp up/down)
-    - Triangle (linear up/down)
-    - Random (stepped noise)
-  - Parameters:
-    - Frequency (Hz): 0.01-10Hz
-    - Amplitude (range): 0-100%
-    - Phase offset: 0-360°
-    - Target parameter selection
-  - Use cases:
-    - Pulsing brightness
-    - Color cycling
-    - Transform wobble
-    - Speed modulation
-
-**Implementation:**
-- Snow: Particle system with physics
-- ASCII: Pillow for text rendering, numpy for luminance
-- Oscillator: Time-based waveform calculation, applied to parameter values
-
-**Dependencies:** numpy (ASCII edge detection)
 
 ---
 
@@ -777,10 +1081,10 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
   - Alpha masks for zone boundaries
   
 - [ ] **UI: Mapping Editor (4-6h)**
-  - `projection-mapper.html` page
+  - `projection-mapper.h110-162h | DMX lighting control (with FX engines)
   - Live preview with warping
   - Test pattern generator
-  - Export/import setups
+  - Export/import60-382s
 
 **Use Cases:**
 - Building facade mapping
@@ -794,60 +1098,46 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
 
 | Priority | Total Hours | Focus | ROI |
 |----------|-------------|-------|-----|
-| **P1 - Critical** | 30-44h | Audio sequencer, MIDI, parameter sequences, thumbnails + multi-select | Very High |
-| **P2 - High Value** | 62-92h | Audio reactive, output routing, SPOUT/NDI, enhanced sources, multi-network, slots, shaders | High |
-| **P3 - Enhancement** | 60-86h | Video slicing, new generators (Lines, Circles, Noise, Fractals), new effects (Snow, ASCII, Oscillator), GUI polish, dynamic config | Medium |
+| **P1 - Critical** | 6-10h | MIDI control | High |
+| **P2 - High Value** | 90-137h | DMX lighting (FX + 3D visualizer), output routing, SPOUT/NDI, enhanced sources, multi-network, shaders | Very High |
+| **P3 - Enhancement** | 34-50h | Video slicing, GUI polish, dynamic config, testing | Medium |
 | **P4 - Advanced** | 60-90h | Render cluster, projection mapping | Low (specialized) |
-| **TOTAL** | **212-312h** | | |
+| **TOTAL** | **190-287h** | | |
 
 ---
 
 ## 🎯 Recommended Implementation Order
 
-### Phase 1: Core Workflow (P1) - 30-44h 🔥
-1. **Audio-Driven Sequencer** (12-16h) ← START HERE
-   - Enables music-synced shows
-   - Foundation for audio-reactive features
-   
-2. **MIDI Control** (6-10h)
+### Phase 1: Professional Control (P1) - 6-10h 🔥
+1. **MIDI Control** (6-10h) ← START HERE
    - Hardware control for live performance
    - Essential for professional VJs
-   
-3. **Dynamic Parameter Sequences** (6-10h)
-   - Automated modulation
-   - Creates evolving visuals
-   
-4. **File Browser Thumbnails & Multi-Select** (8-14h)
-   - Visual browsing + batch operations
-   - Multi-select: Add multiple clips/layers at once
-   - Dramatically speeds up workflow
+   - MIDI Learn system for rapid setup
 
-**Outcome:** Production-ready VJ system with audio sync and hardware control
+**Outcome:** External hardware control unlocked
 
 ---
 
-### Phase 2: Power Features (P2) - 62-92h ⚡
-1. **Audio-Reactive Effects** (10-14h)
-2. **Output Routing System** (6-10h) ← NEW: HDMI, Virtual, SPOUT
-3. **Enhanced Live Sources** (8-12h) ← NEW: Better Camera, Screen Capture, YouTube
-4. **SPOUT/NDI Input Plugin** (6-10h) ← NEW: Pro video routing
-5. **Multi-Network Adapter** (4-6h)
-6. **Playlist Slots with Compositing** (12-16h)
-7. **ShaderToy Source** (8-12h)
+### Phase 2: Power Features (P2) - 90-137h ⚡
+1. **DMX Lighting Control System** (48-70h) ← 💡 **MAJOR USP** - Pro lighting with FX engines!
+2. **3D DMX Visualizer** (10-17h) ← 🎭 **GAME CHANGER** - Real-time 3D visualization!
+3. **Output Routing System** (6-10h) - HDMI, Virtual outputs, SPOUT
+4. **Enhanced Live Sources** (8-12h) - Better Camera, Screen Capture, YouTube
+5. **SPOUT/NDI Input Plugin** (6-10h) - Pro video routing
+6. **Multi-Network Adapter** (4-6h) - Separate control/output networks
+7. **ShaderToy Source** (8-12h) - GLSL procedural graphics
 
-**Outcome:** Professional feature set with reactive visuals, flexible I/O, and procedural graphics
+**Outcome:** Professional feature set with lighting control, flexible I/O, and procedural graphics
 
 ---
 
-### Phase 3: Polish & Scale (P3) - 60-86h 🎯
-1. **Video Wall Slicing** (8-12h)
-2. **New Generator Plugins** (10-14h) ← NEW: Lines, Circles, Sine, Noise, Fractals
-3. **New Effect Plugins** (8-12h) ← NEW: Snow, ASCII, Oscillator
-4. **GUI Optimizations** (12-18h)
-5. **Dynamic Playlists** (8-12h)
-6. **Testing & Docs** (6-8h)
+### Phase 3: Polish & Scale (P3) - 34-50h 🎯
+1. **Video Wall Slicing** (8-12h) - Large LED wall support
+2. **GUI Optimizations** (12-18h) - Better UX, Art-Net preview, layouts
+3. **Dynamic Playlists** (8-12h) - Config-driven player types
+4. **Testing & Docs** (6-8h) - Quality assurance
 
-**Outcome:** Production-polished with expanded creative toolkit and improved UX
+**Outcome:** Production-polished with improved UX and scalability
 
 ---
 
@@ -872,11 +1162,8 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
 - ✅ Transition system
 
 **Dependencies to Install:**
-- `pip install miniaudio` - Audio sequencer
 - `pip install python-rtmidi` - MIDI control
-- `pip install sounddevice numpy` - Audio reactive
 - `pip install moderngl` - ShaderToy source
-- `pip install Pillow` - Thumbnail generation & ASCII effect
 - `pip install yt-dlp` - YouTube metadata extraction
 - `pip install pyvirtualcam` - Virtual camera output
 - `pip install SpoutGL` - SPOUT input/output (Windows)
@@ -886,13 +1173,11 @@ Slot 2: [Drop Section] → Transition (fade 1.5s) → Slot 3
 - None planned for P1-P3
 - P4 features are additive (optional)
 
-**New Features Summary (December 10, 2025):**
-- ✨ Output Routing: HDMI, Virtual outputs, SPOUT/NDI
-- ✨ Enhanced Sources: Improved Camera, Screen Capture, YouTube with duration
-- ✨ SPOUT/NDI Input: Professional video routing from external apps
-- ✨ New Generators: Lines, Circles, Static Color, Sine Wave, Noise (Fractal), Fractals (Sierpiński, etc.)
-- ✨ New Effects: Snow particle system, ASCII art conversion, Oscillator modulation
+**Completed Features (v2.4.0):**
+- ✅ Dynamic Parameter Sequences (Audio, LFO, Timeline, BPM)
+- ✅ Audio-reactive modulation with backend analysis
+- ✅ BPM detection and beat synchronization
 
 ---
 
-*Last Updated: December 10, 2025*
+*Last Updated: December 30, 2025*

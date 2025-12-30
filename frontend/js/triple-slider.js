@@ -96,7 +96,13 @@ class TripleSlider {
         if (!this.config.readOnly) {
             if (this.minHandle) this.bindDrag(this.minHandle, 'min');
             if (this.maxHandle) this.bindDrag(this.maxHandle, 'max');
-            this.bindDrag(this.valueHandle, 'value');
+            if (this.valueHandle) {
+                this.bindDrag(this.valueHandle, 'value');
+            } else {
+                console.error('❌ Triple-slider value handle not found for:', this.containerId);
+            }
+        } else {
+            debugLog('⚠️ Triple-slider is readOnly, skipping event binding for:', this.containerId);
         }
 
         // Bind hover events to pause auto-updates
@@ -115,9 +121,12 @@ class TripleSlider {
         const mouseDown = (e) => {
             if (this.config.readOnly) return;
             e.preventDefault();
+            e.stopPropagation();  // Prevent event bubbling
             this.isDragging = true;
             this.activeHandle = type;
             document.body.style.cursor = 'ew-resize';
+
+            debugLog(`🖱️ Triple-slider drag started: ${type} on ${this.containerId}`);
 
             // Call onDragStart callback
             if (this.config.onDragStart) {
@@ -132,6 +141,8 @@ class TripleSlider {
                 document.removeEventListener('mousemove', mouseMove);
                 document.removeEventListener('mouseup', mouseUp);
                 
+                debugLog(`🖱️ Triple-slider drag ended: ${type} on ${this.containerId}`);
+                
                 // Call onDragEnd callback
                 if (this.config.onDragEnd) {
                     this.config.onDragEnd(type);
@@ -143,6 +154,7 @@ class TripleSlider {
         };
 
         handle.addEventListener('mousedown', mouseDown);
+        debugLog(`✅ Drag handler bound for ${type} on ${this.containerId}`);
     }
 
     onDrag(clientX) {
@@ -193,7 +205,11 @@ class TripleSlider {
                 const clampedValue = Math.max(this.config.rangeMin, Math.min(this.config.rangeMax, value));
                 if (clampedValue !== this.config.value) {
                     this.config.value = clampedValue;
-                    this.config.onChange(this.config.value);
+                    if (typeof this.config.onChange === 'function') {
+                        this.config.onChange(this.config.value);
+                    } else {
+                        console.warn('⚠️ Triple-slider onChange is not a function:', this.config.onChange);
+                    }
                 }
                 break;
         }
@@ -208,17 +224,23 @@ class TripleSlider {
         const maxPercent = percentValue(this.config.rangeMax);
         const valuePercent = percentValue(this.config.value);
 
-        // Position handles
+        // Position handles with updated tooltips
         if (this.minHandle) {
             this.minHandle.style.left = `${minPercent}%`;
-            this.minHandle.title = `Min: ${this.formatValue(this.config.rangeMin)}`;
+            const formattedMin = this.formatValue(this.config.rangeMin);
+            this.minHandle.title = `Min: ${formattedMin}`;
+            this.minHandle.setAttribute('data-tooltip', formattedMin);
         }
         if (this.maxHandle) {
             this.maxHandle.style.left = `${maxPercent}%`;
-            this.maxHandle.title = `Max: ${this.formatValue(this.config.rangeMax)}`;
+            const formattedMax = this.formatValue(this.config.rangeMax);
+            this.maxHandle.title = `Max: ${formattedMax}`;
+            this.maxHandle.setAttribute('data-tooltip', formattedMax);
         }
+        const formattedValue = this.formatValue(this.config.value);
         this.valueHandle.style.left = `${valuePercent}%`;
-        this.valueHandle.title = `Value: ${this.formatValue(this.config.value)}`;
+        this.valueHandle.title = `Value: ${formattedValue}`;
+        this.valueHandle.setAttribute('data-tooltip', formattedValue);
 
         // Update range highlight
         if (this.config.showRangeHandles) {
@@ -257,6 +279,14 @@ class TripleSlider {
 
     getValue() {
         return this.config.value;
+    }
+
+    // Update current value for visual feedback only (red line) - doesn't trigger onChange
+    updateCurrentValue(value) {
+        const clamped = Math.max(this.config.rangeMin, Math.min(this.config.rangeMax, value));
+        // Update value without triggering onChange callback
+        this.config.value = clamped;
+        this.updateUI();
     }
 
     setRange(min, max) {

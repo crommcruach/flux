@@ -352,7 +352,7 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
                 # Save session state to persist splits
                 if session_state:
                     from .clip_registry import get_clip_registry
-                    session_state.save(player_manager, get_clip_registry(), force=True)
+                    session_state.save_async(player_manager, get_clip_registry(), force=True)
                     logger.debug("💾 Session state saved after split add")
                 
                 # Return updated timeline
@@ -386,7 +386,7 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
                 # Save session state to persist splits
                 if session_state:
                     from .clip_registry import get_clip_registry
-                    session_state.save(player_manager, get_clip_registry(), force=True)
+                    session_state.save_async(player_manager, get_clip_registry(), force=True)
                     logger.debug("💾 Session state saved after split remove")
                 
                 # Return updated timeline
@@ -430,7 +430,7 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
             # Save session state to persist clip mappings
             if session_state:
                 from .clip_registry import get_clip_registry
-                session_state.save(player_manager, get_clip_registry(), force=True)
+                session_state.save_async(player_manager, get_clip_registry(), force=True)
                 logger.debug("💾 Session state saved after clip mapping")
             
             return jsonify({'success': True})

@@ -159,7 +159,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 # Auto-save session state (force=True für kritische Clip-Änderung)
                 session_state = get_session_state()
                 if session_state:
-                    session_state.save(player_manager, clip_registry, force=True)
+                    session_state.save_async(player_manager, clip_registry, force=True)
                 
                 return jsonify({
                     "success": True,
@@ -277,7 +277,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 # Auto-save session state (force=True für kritische Clip-Änderung)
                 session_state = get_session_state()
                 if session_state:
-                    session_state.save(player_manager, clip_registry, force=True)
+                    session_state.save_async(player_manager, clip_registry, force=True)
                 
                 return jsonify({
                     "success": True,
@@ -550,7 +550,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             # Emit WebSocket event for effect list change
             if socketio:
@@ -595,7 +595,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             # Emit WebSocket event for effect list change
             if socketio:
@@ -710,7 +710,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({"success": True})
             
@@ -745,7 +745,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({
                 "success": True,
@@ -780,7 +780,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             # Emit WebSocket event for effect list change
             if socketio:
@@ -850,7 +850,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 # Auto-save session state
                 session_state = get_session_state()
                 if session_state:
-                    session_state.save(player_manager, clip_registry)
+                    session_state.save_async(player_manager, clip_registry)
                 
                 # Emit WebSocket event for player effect change
                 if socketio:
@@ -887,7 +887,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 # Auto-save session state
                 session_state = get_session_state()
                 if session_state:
-                    session_state.save(player_manager, clip_registry)
+                    session_state.save_async(player_manager, clip_registry)
                 
                 # Emit WebSocket event for player effect change
                 if socketio:
@@ -923,7 +923,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             # Emit WebSocket event for player effect change
             if socketio:
@@ -995,7 +995,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({"success": True, "player_id": player_id, "index": index, "parameter": param_name, "value": value})
             
@@ -1021,7 +1021,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 # Auto-save session state
                 session_state = get_session_state()
                 if session_state:
-                    session_state.save(player_manager, clip_registry)
+                    session_state.save_async(player_manager, clip_registry)
                 
                 return jsonify({"success": True, "enabled": enabled, "message": message})
             else:
@@ -1459,7 +1459,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 # Auto-save session state
                 session_state = get_session_state()
                 if session_state:
-                    session_state.save(player_manager, clip_registry)
+                    session_state.save_async(player_manager, clip_registry)
                 
                 return jsonify({
                     "success": True,
@@ -1696,7 +1696,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             # Auto-save session state (force=True für kritische Playlist-Änderung)
             session_state = get_session_state()
             if session_state:
-                session_state.save(player_manager, clip_registry, force=True)
+                session_state.save_async(player_manager, clip_registry, force=True)
             
             return jsonify({
                 "success": True,

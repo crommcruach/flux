@@ -22,6 +22,7 @@ from modules.frame_source import VideoSource
 from modules.cli_handler import CLIHandler
 from modules.logger import FluxLogger, get_logger
 from modules.default_effects import get_default_effects_manager
+from modules.api_bpm import bpm_bp, set_audio_analyzer
 
 logger = get_logger(__name__)
 
@@ -264,6 +265,21 @@ def main():
     session_state.set_sequence_manager(sequence_manager)
     logger.info("SequenceManager connected to SessionState")
     
+    # Auto-start audio analyzer if it was running in previous session
+    try:
+        if os.path.exists(session_state_path):
+            with open(session_state_path, 'r', encoding='utf-8') as f:
+                saved_state = json.load(f)
+                audio_state = saved_state.get('audio_analyzer', {})
+                if audio_state.get('running', False):
+                    device = audio_state.get('device')
+                    if device is not None:
+                        audio_analyzer.set_device(device)
+                    audio_analyzer.start()
+                    logger.info(f"🎤 Audio analyzer auto-started (device={device})")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to auto-start audio analyzer: {e}")
+    
     # Start both players to generate frames (even with DummySource for preview)
     player.start()
     artnet_player.start()
@@ -317,6 +333,11 @@ def main():
     
     # REST API initialisieren und automatisch starten
     rest_api = RestAPI(player_manager, dmx_controller, data_dir, video_dir, config, replay_manager=replay_manager)
+    
+    # Register BPM API blueprint
+    rest_api.app.register_blueprint(bpm_bp)
+    set_audio_analyzer(audio_analyzer)
+    logger.info("BPM API registered")
     
     # Set socketio reference in player_manager for WebSocket events
     player_manager.socketio = rest_api.socketio

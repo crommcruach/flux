@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Single Button Velocity Control</title>
+
+<style>
+  body {
+    margin: 0;
+    height: 100vh;
+    background: #0f0f0f;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-family: system-ui, sans-serif;
+    color: #fff;
+  }
+
+  .control {
+    background: #1c1c1c;
+    padding: 24px;
+    width: 220px;
+    border-radius: 14px;
+    text-align: center;
+    user-select: none;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+
+  .label {
+    font-size: 14px;
+    opacity: 0.6;
+  }
+
+  .value {
+    font-size: 44px;
+    font-weight: 600;
+    margin: 14px 0;
+  }
+
+  .button {
+    background: #2f2f2f;
+    border-radius: 12px;
+    padding: 16px;
+    cursor: ns-resize;
+    font-size: 14px;
+    opacity: 0.85;
+  }
+
+  .button:active {
+    background: #444;
+  }
+</style>
+</head>
+
+<body>
+
+<div class="control">
+  <div class="label">Parameter</div>
+  <div class="value" id="value">50</div>
+  <div class="button" id="dragButton">
+    Click + Drag
+  </div>
+</div>
+
+<script>
+  let value = 50;
+  const min = 1;
+  const max = 100;
+
+  const valueEl = document.getElementById("value");
+  const dragButton = document.getElementById("dragButton");
+
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  let lastTime = 0;
+
+  function clamp(v) {
+    return Math.max(min, Math.min(max, v));
+  }
+
+  function updateValue(delta) {
+    value = clamp(value + delta);
+    valueEl.textContent = Math.round(value);
+  }
+
+  dragButton.addEventListener("mousedown", (e) => {
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    lastTime = performance.now();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+
+    const now = performance.now();
+    const dt = now - lastTime;
+    if (dt <= 0) return;
+
+    const dx = e.clientX - lastX;
+    const dy = lastY - e.clientY; // up = positive
+
+    // dominant axis defines direction
+    const dominant = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+
+    // velocity (px / ms)
+    const velocity = Math.abs(dominant) / dt;
+
+    // tuning
+    const sensitivity = 14;
+    const acceleration = 1.7;
+
+    const delta =
+      Math.sign(dominant) *
+      Math.pow(velocity * sensitivity, acceleration);
+
+    if (Math.abs(delta) > 0.01) {
+      updateValue(delta);
+      lastX = e.clientX;
+      lastY = e.clientY;
+      lastTime = now;
+    }
+  });
+
+  window.addEventListener("mouseup", () => {
+    dragging = false;
+  });
+</script>
+
+</body>
+</html>

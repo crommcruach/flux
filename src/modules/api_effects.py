@@ -74,7 +74,7 @@ def register_effect_routes(app, player_manager):
             session_state = get_session_state()
             if session_state:
                 clip_registry = get_clip_registry()
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({
                 'success': True,
@@ -112,7 +112,7 @@ def register_effect_routes(app, player_manager):
             session_state = get_session_state()
             if session_state:
                 clip_registry = get_clip_registry()
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({
                 'success': True,
@@ -182,7 +182,7 @@ def register_effect_routes(app, player_manager):
             session_state = get_session_state()
             if session_state:
                 clip_registry = get_clip_registry()
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({
                 'success': True,
@@ -220,7 +220,7 @@ def register_effect_routes(app, player_manager):
             session_state = get_session_state()
             if session_state:
                 clip_registry = get_clip_registry()
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({
                 'success': True,
@@ -259,7 +259,7 @@ def register_effect_routes(app, player_manager):
             session_state = get_session_state()
             if session_state:
                 clip_registry = get_clip_registry()
-                session_state.save(player_manager, clip_registry)
+                session_state.save_async(player_manager, clip_registry)
             
             return jsonify({
                 'success': True,

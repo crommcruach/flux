@@ -1,0 +1,180 @@
+/* BPM Widget Container - Matching Audio Analyzer Style */
+.bpm-widget {
+    background: #2b2b2b;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin: 5px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    max-width: 100%;
+}
+
+/* Beat Indicator Dot */
+.bpm-beat-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.beat-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #666;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+/* Beat flash states */
+.beat-dot.beat-light-green {
+    background: #28a745;
+    transform: scale(1.2);
+}
+
+.beat-dot.beat-yellow {
+    background: #ffc107;
+    transform: scale(1.3);
+}
+
+/* Transport Controls */
+.bpm-transport {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.bpm-transport-btn {
+    width: 24px;
+    height: 24px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #aaa;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.bpm-transport-btn:hover {
+    background: #333;
+    border-color: #666;
+    color: #fff;
+}
+
+.bpm-transport-btn.active {
+    background: #28a745;
+    border-color: #28a745;
+    color: #fff;
+}
+
+.bpm-transport-btn:active {
+    transform: scale(0.95);
+}
+
+.bpm-transport-btn .icon {
+    font-size: 12px;
+}
+
+/* BPM Display & Input */
+.bpm-display-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.bpm-label {
+    font-size: 11px;
+    color: #aaa;
+    white-space: nowrap;
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.bpm-value-input {
+    width: 65px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #fff;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    padding: 3px 6px;
+    text-align: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.bpm-value-input:hover {
+    border-color: #666;
+    background: #222;
+}
+
+.bpm-value-input:focus {
+    outline: none;
+    border-color: #64c8ff;
+    background: #222;
+}
+
+/* Action Buttons */
+.bpm-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.bpm-action-btn {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #aaa;
+    font-size: 10px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.bpm-action-btn:hover {
+    background: #333;
+    border-color: #666;
+    color: #fff;
+}
+
+.bpm-action-btn:active {
+    transform: scale(0.95);
+}
+
+#bpm-tap-btn {
+    color: #64c8ff;
+}
+
+#bpm-tap-btn:hover {
+    background: #333;
+    border-color: #64c8ff;
+    color: #64c8ff;
+}
+
+#bpm-resync-btn {
+    color: #ff9800;
+}
+
+#bpm-resync-btn:hover {
+    background: #333;
+    border-color: #ff9800;
+    color: #ff9800;
+}

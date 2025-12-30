@@ -2,38 +2,57 @@
 
 ## Overview
 
-This document describes the implementation of a **comprehensive BPM (Beats Per Minute) detection system** for the Flux Art-Net system, supporting multiple input sources with all core logic in the backend.
+This document describes the implementation of **BPM (Beats Per Minute) detection algorithms** for the Flux Art-Net system. The audio infrastructure (sequencer, audio input/output, device selection) is already implemented.
+
+## Current Status
+
+✅ **Already Implemented:**
+- Audio sequencer with file playback (miniaudio backend)
+- Audio input capture (sounddevice) with device selection
+- Audio analyzer with FFT (Bass/Mid/Treble frequency bands)
+- Real-time audio monitoring thread
+- WebSocket streaming for audio data
+- Audio source selection UI and API
+
+🔧 **To Be Implemented:**
+- BPM detection algorithms (librosa onset detection & tempo estimation)
+- Tap tempo functionality
+- BPM smoothing and averaging
+- Beat phase calculation for effect synchronization
+- BPM WebSocket streaming
+- BPM UI display and beat indicators
 
 ## Goals
 
-- Detect BPM from **line-in/microphone** audio input (real-time)
-- Detect BPM from **sequencer audio** (loaded files)
+- Detect BPM from **existing audio input** (line-in/microphone)
+- Detect BPM from **sequencer audio files** (use existing AudioTimeline)
 - **Tap tempo** functionality (manual BPM input)
-- **All core logic in backend** (Python audio processing)
-- **Frontend visualization only** (BPM display, beat indicators, tap button)
-- Real-time updates via WebSocket
 - Smooth BPM averaging and stabilization
 - Beat synchronization for effects/transitions
+- Expose BPM as bindable parameter in Dynamic Parameter Sequences
 
 ## BPM Detection Methods
 
 ### 1. Audio Input Detection (Line-In/Mic)
-- Real-time audio capture from system audio devices
-- Onset detection algorithm (spectral flux, energy-based)
-- Tempo estimation using autocorrelation
-- Continuous monitoring with configurable latency
+- ✅ Real-time audio capture from system audio devices **[IMPLEMENTED]**
+- 🔧 **TO IMPLEMENT:** Onset detection algorithm (spectral flux, energy-based) using librosa
+- 🔧 **TO IMPLEMENT:** Tempo estimation using autocorrelation/beat tracking
+- ✅ Continuous monitoring thread **[IMPLEMENTED]**
+- **Integration Point:** Use existing `AudioAnalyzer` class from audio reactive sequences
 
 ### 2. Sequencer File Analysis
-- Analyze loaded audio file in sequencer
-- Full-file BPM detection (more accurate than real-time)
-- Cache BPM per file for instant recall
-- Beat grid generation for quantization
+- ✅ Audio file loading and playback **[IMPLEMENTED]** via `AudioTimeline` class
+- 🔧 **TO IMPLEMENT:** Full-file BPM detection using librosa.beat.beat_track()
+- 🔧 **TO IMPLEMENT:** Cache BPM per file in session state for instant recall
+- 🔧 **TO IMPLEMENT:** Beat grid generation for quantization
+- **Integration Point:** Add BPM detection to `AudioTimeline.load_audio()` method
 
 ### 3. Tap Tempo
-- Manual BPM entry by tapping beat
-- Average of last 4-8 taps
-- Smoothing algorithm for human timing variance
-- Auto-reset after timeout (>3 seconds)
+- 🔧 **TO IMPLEMENT:** Manual BPM entry by tapping beat
+- 🔧 **TO IMPLEMENT:** Average of last 4-8 taps
+- 🔧 **TO IMPLEMENT:** Smoothing algorithm for human timing variance
+- 🔧 **TO IMPLEMENT:** Auto-reset after timeout (>3 seconds)
+- **Integration Point:** New REST API endpoint + WebSocket event
 
 ## Architecture
 
@@ -103,124 +122,68 @@ This document describes the implementation of a **comprehensive BPM (Beats Per M
 
 **File:** `requirements.txt`
 
-Add audio processing libraries:
+Add BPM detection library (audio infrastructure already installed):
 
 ```txt
-librosa>=0.10.0
-sounddevice>=0.4.6
-numpy>=1.24.0
-scipy>=1.11.0
+librosa>=0.10.0  # BPM detection & beat tracking
 ```
+
+✅ Already installed:
+- sounddevice (audio input capture)
+- numpy (FFT analysis)
+- miniaudio (audio playback)
 
 Install:
 ```bash
-pip install librosa sounddevice numpy scipy
+pip install librosa
 ```
 
-#### 1.2 Create BPM Detection Module
+#### 1.2 Extend AudioAnalyzer with BPM Detection
 
-**File:** `src/modules/bpm_detector.py`
+**File:** `src/modules/audio_analyzer.py` (EXTEND EXISTING)
+
+Add BPM detection to the existing `AudioAnalyzer` class:
 
 ```python
-"""
-BPM Detection Module
-Detects BPM from audio input, files, and tap tempo.
-"""
-
+# Add to existing imports
 import librosa
-import numpy as np
-import sounddevice as sd
-import threading
-import time
-import logging
 from collections import deque
-from datetime import datetime
 
-logger = logging.getLogger(__name__)
-
-class BPMDetector:
-    """Core BPM detection engine."""
+class AudioAnalyzer:
+    """Audio analysis with FFT and BPM detection."""
     
     def __init__(self):
+        # ... existing initialization ...
+        
+        # BPM Detection (NEW)
         self.current_bpm = 0.0
-        self.beat_times = deque(maxlen=100)  # Last 100 beats
-        self.source = None  # 'input', 'sequencer', 'tap'
-        self.is_running = False
-        self.confidence = 0.0
-        
-        # Audio input detection
-        self.audio_thread = None
-        self.audio_buffer = deque(maxlen=88200)  # 2 seconds at 44.1kHz
-        self.sample_rate = 44100
-        
-        # Tap tempo
-        self.tap_times = deque(maxlen=8)
-        self.tap_timeout = 3.0  # Reset after 3 seconds
-        
-        # Smoothing
+        self.beat_times = deque(maxlen=100)
+        self.bpm_confidence = 0.0
         self.bpm_history = deque(maxlen=10)
+        self.bpm_enabled = False
+        
+        # Tap tempo (NEW)
+        self.tap_times = deque(maxlen=8)
+        self.tap_timeout = 3.0
     
-    def start_audio_input(self, device_id=None):
-        """Start real-time BPM detection from audio input."""
-        if self.is_running:
-            logger.warning("BPM detection already running")
-            return
-        
-        self.is_running = True
-        self.source = 'input'
-        self.audio_buffer.clear()
-        
-        # Start audio capture thread
-        self.audio_thread = threading.Thread(
-            target=self._audio_input_loop,
-            args=(device_id,),
-            daemon=True
-        )
-        self.audio_thread.start()
-        logger.info(f"🎵 Started audio input BPM detection (device: {device_id})")
+    def enable_bpm_detection(self, enabled=True):
+        """Enable/disable BPM detection."""
+        self.bpm_enabled = enabled
+        if enabled:
+            logger.info("🎵 BPM detection enabled")
+        else:
+            logger.info("🎵 BPM detection disabled")
     
-    def stop(self):
-        """Stop BPM detection."""
-        self.is_running = False
-        if self.audio_thread:
-            self.audio_thread.join(timeout=2)
-        logger.info("🎵 Stopped BPM detection")
-    
-    def _audio_input_loop(self, device_id):
-        """Audio input capture and analysis loop."""
-        def audio_callback(indata, frames, time_info, status):
-            if status:
-                logger.warning(f"Audio input status: {status}")
-            # Store audio data (mono, first channel)
-            self.audio_buffer.extend(indata[:, 0])
+    def _audio_callback(self, indata, frames, time_info, status):
+        """Audio callback (EXISTING - extend with BPM)."""
+        # ... existing FFT analysis code ...
         
-        try:
-            with sd.InputStream(
-                device=device_id,
-                channels=1,
-                samplerate=self.sample_rate,
-                blocksize=2048,
-                callback=audio_callback
-            ):
-                logger.info("🎤 Audio input stream started")
-                
-                while self.is_running:
-                    # Analyze buffer every 0.5 seconds
-                    time.sleep(0.5)
-                    
-                    if len(self.audio_buffer) >= self.sample_rate:
-                        # Convert to numpy array
-                        audio_data = np.array(list(self.audio_buffer))
-                        
-                        # Detect BPM
-                        bpm, confidence = self._detect_bpm_realtime(audio_data)
-                        
-                        if bpm > 0:
-                            self._update_bpm(bpm, confidence)
-        
-        except Exception as e:
-            logger.error(f"Audio input error: {e}")
-            self.is_running = False
+        # NEW: BPM Detection (if enabled)
+        if self.bpm_enabled and len(self.audio_buffer) >= self.sample_rate:
+            audio_data = np.array(list(self.audio_buffer))
+            bpm, confidence = self._detect_bpm_realtime(audio_data)
+            if bpm > 0:
+                self._update_bpm(bpm, confidence)
     
     def _detect_bpm_realtime(self, audio_data):
         """
@@ -597,96 +560,106 @@ def load_audio():
 
 ### Phase 2: Frontend UI
 
-#### 2.1 Create BPM Display Component
+#### 2.1 Create BPM Display Widget
 
-**File:** `frontend/components/bpm-display.html`
+**Location:** `middle-section-left` container in player.html
+
+**File:** `frontend/player.html` (add to middle-section-left)
 
 ```html
-<template id="bpm-display-template">
-    <div class="bpm-container">
-        <!-- BPM Value Display -->
-        <div class="bpm-display">
-            <div class="bpm-label">BPM</div>
-            <div class="bpm-value" id="bpm-value">--</div>
-            <div class="bpm-source" id="bpm-source">No source</div>
-        </div>
-        
-        <!-- Beat Indicator -->
-        <div class="beat-indicator">
-            <div class="beat-dot" id="beat-dot-1"></div>
-            <div class="beat-dot" id="beat-dot-2"></div>
-            <div class="beat-dot" id="beat-dot-3"></div>
-            <div class="beat-dot" id="beat-dot-4"></div>
-        </div>
-        
-        <!-- Source Selection -->
-        <div class="bpm-sources">
-            <label class="bpm-source-option">
-                <input type="radio" name="bpm-source" value="input" onchange="window.bpmDisplay.changeSource('input')">
-                <span>🎤 Audio Input</span>
-            </label>
-            <label class="bpm-source-option">
-                <input type="radio" name="bpm-source" value="sequencer" onchange="window.bpmDisplay.changeSource('sequencer')" checked>
-                <span>🎵 Sequencer</span>
-            </label>
-            <label class="bpm-source-option">
-                <input type="radio" name="bpm-source" value="tap" onchange="window.bpmDisplay.changeSource('tap')">
-                <span>🥁 Tap Tempo</span>
-            </label>
-        </div>
-        
-        <!-- Tap Tempo Button -->
-        <div class="tap-tempo-container" id="tap-tempo-container" style="display: none;">
-            <button class="tap-button" id="tap-button" onclick="window.bpmDisplay.tap()">
-                TAP
-            </button>
-            <div class="tap-guide">Tap the beat (min 2 taps)</div>
-        </div>
-        
-        <!-- Confidence Indicator -->
-        <div class="bpm-confidence">
-            <div class="confidence-label">Confidence:</div>
-            <div class="confidence-bar">
-                <div class="confidence-fill" id="confidence-fill" style="width: 0%"></div>
-            </div>
-            <div class="confidence-value" id="confidence-value">0%</div>
-        </div>
+<!-- BPM Detection Widget in middle-section-left -->
+<div id="bpm-widget" class="bpm-widget">
+    <!-- Beat Indicator Dot -->
+    <div class="bpm-beat-indicator">
+        <div class="beat-dot" id="bpm-beat-dot"></div>
     </div>
-</template>
+    
+    <!-- Transport Controls -->
+    <div class="bpm-transport">
+        <button class="bpm-transport-btn" id="bpm-play-btn" title="Enable BPM Detection">
+            <span class="icon">▶</span>
+        </button>
+        <button class="bpm-transport-btn" id="bpm-pause-btn" title="Pause BPM Detection">
+            <span class="icon">⏸</span>
+        </button>
+        <button class="bpm-transport-btn" id="bpm-stop-btn" title="Stop BPM Detection">
+            <span class="icon">⏹</span>
+        </button>
+    </div>
+    
+    <!-- BPM Display & Manual Input -->
+    <div class="bpm-display-row">
+        <label class="bpm-label">BPM:</label>
+        <input 
+            type="number" 
+            id="bpm-value-input" 
+            class="bpm-value-input" 
+            min="20" 
+            max="300" 
+            step="0.1" 
+            value="--" 
+            placeholder="--"
+        />
+    </div>
+    
+    <!-- Action Buttons -->
+    <div class="bpm-actions">
+        <button class="bpm-action-btn" id="bpm-tap-btn" title="Tap Tempo">
+            TAP
+        </button>
+        <button class="bpm-action-btn" id="bpm-resync-btn" title="Resync Auto Detection">
+            Resync
+        </button>
+    </div>
+</div>
 
-<script>
-class BPMDisplay {
+```
+
+**File:** `frontend/js/bpm-widget.js`
+
+```javascript
+/**
+ * BPM Detection Widget
+ * Real-time BPM display with WebSocket updates
+ */
+class BPMWidget {
     constructor() {
         this.ws = null;
         this.reconnectTimer = null;
-        self.currentSource = 'sequencer';
-        this.beatDots = [];
-        this.lastBeatPhase = 0;
+        this.currentBPM = 0;
+        this.beatCount = 0;
+        this.isRunning = false;
+        this.beatDot = null;
+        this.bpmInput = null;
     }
     
-    init(containerId) {
-        const container = document.getElementById(containerId);
-        if (!container) {
-            console.error('BPM container not found');
-            return;
-        }
+    init() {
+        // Get UI elements
+        this.beatDot = document.getElementById('bpm-beat-dot');
+        this.bpmInput = document.getElementById('bpm-value-input');
         
-        // Load template
-        const template = document.getElementById('bpm-display-template');
-        const content = template.content.cloneNode(true);
-        container.appendChild(content);
+        const playBtn = document.getElementById('bpm-play-btn');
+        const pauseBtn = document.getElementById('bpm-pause-btn');
+        const stopBtn = document.getElementById('bpm-stop-btn');
+        const tapBtn = document.getElementById('bpm-tap-btn');
+        const resyncBtn = document.getElementById('bpm-resync-btn');
         
-        // Get beat dots
-        this.beatDots = [
-            document.getElementById('beat-dot-1'),
-            document.getElementById('beat-dot-2'),
-            document.getElementById('beat-dot-3'),
-            document.getElementById('beat-dot-4')
-        ];
+        // Transport controls
+        playBtn.addEventListener('click', () => this.play());
+        pauseBtn.addEventListener('click', () => this.pause());
+        stopBtn.addEventListener('click', () => this.stop());
+        
+        // Action buttons
+        tapBtn.addEventListener('click', () => this.tap());
+        resyncBtn.addEventListener('click', () => this.resync());
+        
+        // Manual BPM input
+        this.bpmInput.addEventListener('change', () => this.setManualBPM());
         
         // Connect WebSocket
         this.connect();
     }
+    
     
     connect() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -697,15 +670,13 @@ class BPMDisplay {
         this.ws = new WebSocket(wsUrl);
         
         this.ws.onopen = () => {
-            console.log('🎵 BPM WebSocket connected');
+            console.log('✅ BPM WebSocket connected');
         };
         
         this.ws.onmessage = (event) => {
             try {
-                const message = JSON.parse(event.data);
-                if (message.type === 'bpm_update') {
-                    this.updateDisplay(message);
-                }
+                const data = JSON.parse(event.data);
+                this.handleBPMUpdate(data);
             } catch (e) {
                 console.error('Error parsing BPM message:', e);
             }
@@ -721,257 +692,316 @@ class BPMDisplay {
         };
     }
     
-    updateDisplay(data) {
-        // Update BPM value
-        const bpmValue = document.getElementById('bpm-value');
-        if (bpmValue) {
-            bpmValue.textContent = data.bpm > 0 ? data.bpm.toFixed(1) : '--';
-        }
-        
-        // Update source
-        const bpmSource = document.getElementById('bpm-source');
-        if (bpmSource) {
-            const sourceNames = {
-                'input': '🎤 Audio Input',
-                'sequencer': '🎵 Sequencer',
-                'tap': '🥁 Tap Tempo'
-            };
-            bpmSource.textContent = sourceNames[data.source] || 'No source';
-        }
-        
-        // Update confidence
-        const confidencePercent = Math.round(data.confidence * 100);
-        const confidenceFill = document.getElementById('confidence-fill');
-        const confidenceValue = document.getElementById('confidence-value');
-        
-        if (confidenceFill) {
-            confidenceFill.style.width = `${confidencePercent}%`;
-            
-            // Color based on confidence
-            if (confidencePercent >= 70) {
-                confidenceFill.style.background = 'linear-gradient(90deg, #4caf50, #66bb6a)';
-            } else if (confidencePercent >= 40) {
-                confidenceFill.style.background = 'linear-gradient(90deg, #ff9800, #ffb74d)';
-            } else {
-                confidenceFill.style.background = 'linear-gradient(90deg, #f44336, #e57373)';
-            }
-        }
-        
-        if (confidenceValue) {
-            confidenceValue.textContent = `${confidencePercent}%`;
+    
+    handleBPMUpdate(data) {
+        // Update BPM display (if not manually editing)
+        if (document.activeElement !== this.bpmInput && data.bpm > 0) {
+            this.currentBPM = data.bpm;
+            this.bpmInput.value = data.bpm.toFixed(1);
         }
         
         // Update beat indicator
-        this.updateBeatIndicator(data.beat_phase);
+        if (data.beat_phase !== undefined) {
+            this.updateBeatIndicator(data.beat_phase, data.beat_count);
+        }
     }
     
-    updateBeatIndicator(phase) {
-        // Determine which beat we're on (0-3)
-        const beatIndex = Math.floor(phase * 4);
+    updateBeatIndicator(phase, beatCount) {
+        if (!this.beatDot) return;
         
-        // Check if we crossed a beat boundary
-        if (Math.floor(this.lastBeatPhase * 4) !== beatIndex) {
-            // Flash the corresponding dot
-            this.flashBeat(beatIndex);
+        // Beat boundary detection (phase wraps from 0.99 to 0.0)
+        const prevPhase = this.lastBeatPhase || 0;
+        const beatOccurred = phase < prevPhase;
+        
+        if (beatOccurred) {
+            this.beatCount++;
+            
+            // Every beat: light green blink
+            // Every 16th beat: yellow blink
+            const isBar = (this.beatCount % 16) === 0;
+            
+            if (isBar) {
+                this.flashBeat('yellow');
+            } else {
+                this.flashBeat('light-green');
+            }
         }
         
         this.lastBeatPhase = phase;
     }
     
-    flashBeat(index) {
-        const dot = this.beatDots[index];
-        if (!dot) return;
+    flashBeat(color) {
+        if (!this.beatDot) return;
         
-        // Add active class
-        dot.classList.add('beat-active');
+        // Remove existing color classes
+        this.beatDot.classList.remove('beat-light-green', 'beat-yellow');
         
-        // Remove after 150ms
+        // Add color class
+        if (color === 'yellow') {
+            this.beatDot.classList.add('beat-yellow');
+        } else {
+            this.beatDot.classList.add('beat-light-green');
+        }
+        
+        // Remove after animation (200ms)
         setTimeout(() => {
-            dot.classList.remove('beat-active');
-        }, 150);
+            this.beatDot.classList.remove('beat-light-green', 'beat-yellow');
+        }, 200);
     }
     
-    async changeSource(source) {
-        this.currentSource = source;
-        
-        // Show/hide tap tempo UI
-        const tapContainer = document.getElementById('tap-tempo-container');
-        if (tapContainer) {
-            tapContainer.style.display = source === 'tap' ? 'block' : 'none';
-        }
-        
-        // Stop current detection
-        await fetch('/api/bpm/stop', { method: 'POST' });
-        
-        // Start new source
-        if (source === 'input') {
-            await fetch('/api/bpm/start-input', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
-        } else if (source === 'sequencer') {
-            // Sequencer BPM is auto-detected on file load
-            console.log('🎵 Switched to sequencer BPM');
-        }
+    // Transport controls
+    play() {
+        fetch('/api/bpm/start', {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                console.log('▶ BPM detection started');
+                this.isRunning = true;
+            })
+            .catch(e => console.error('Failed to start BPM detection:', e));
     }
     
-    async tap() {
-        try {
-            const response = await fetch('/api/bpm/tap', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            
-            const data = await response.json();
-            
-            // Visual feedback
-            const button = document.getElementById('tap-button');
-            if (button) {
-                button.classList.add('tap-active');
-                setTimeout(() => button.classList.remove('tap-active'), 100);
-            }
-            
-            console.log(`🥁 Tap recorded: ${data.bpm} BPM (${data.tap_count} taps)`);
-        } catch (e) {
-            console.error('Error sending tap:', e);
-        }
+    pause() {
+        fetch('/api/bpm/pause', {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                console.log('⏸ BPM detection paused');
+            })
+            .catch(e => console.error('Failed to pause BPM detection:', e));
     }
     
-    destroy() {
-        if (this.ws) {
-            this.ws.close();
+    stop() {
+        fetch('/api/bpm/stop', {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                console.log('⏹ BPM detection stopped');
+                this.isRunning = false;
+                this.currentBPM = 0;
+                this.bpmInput.value = '--';
+                this.beatCount = 0;
+            })
+            .catch(e => console.error('Failed to stop BPM detection:', e));
+    }
+    
+    // Manual BPM input
+    setManualBPM() {
+        const manualBPM = parseFloat(this.bpmInput.value);
+        
+        if (isNaN(manualBPM) || manualBPM < 20 || manualBPM > 300) {
+            alert('BPM must be between 20 and 300');
+            return;
         }
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-        }
+        
+        fetch('/api/bpm/manual', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({bpm: manualBPM})
+        })
+            .then(r => r.json())
+            .then(data => {
+                console.log(`🎹 Manual BPM set: ${manualBPM}`);
+                this.currentBPM = manualBPM;
+            })
+            .catch(e => console.error('Failed to set manual BPM:', e));
+    }
+    
+    // Tap tempo
+    tap() {
+        fetch('/api/bpm/tap', {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                console.log(`🥁 Tap registered: ${data.bpm} BPM`);
+                if (data.bpm > 0) {
+                    this.currentBPM = data.bpm;
+                    this.bpmInput.value = data.bpm.toFixed(1);
+                }
+            })
+            .catch(e => console.error('Failed to tap:', e));
+    }
     }
 }
 
 // Global instance
-window.bpmDisplay = new BPMDisplay();
-</script>
+window.bpmWidget = new BPMWidget();
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    window.bpmWidget.init();
+});
 ```
 
-#### 2.2 Add BPM Display Styles
+#### 2.2 Add BPM Widget Styles
 
-**File:** `frontend/css/bpm-display.css`
+**File:** `frontend/css/bpm-widget.css`
 
 ```css
-.bpm-container {
-    background: rgba(20, 20, 30, 0.8);
+/* BPM Widget Container */
+.bpm-widget {
+    background: rgba(20, 20, 30, 0.9);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
     padding: 15px;
     backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 200px;
 }
 
-/* BPM Value Display */
-.bpm-display {
-    text-align: center;
-    margin-bottom: 15px;
-}
-
-.bpm-label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    color: #999;
-    letter-spacing: 1px;
+/* Beat Indicator Dot */
+.bpm-beat-indicator {
+    display: flex;
+    justify-content: center;
+    align-items: center;
     margin-bottom: 5px;
 }
 
-.bpm-value {
-    font-size: 48px;
-    font-weight: 700;
-    color: #fff;
-    line-height: 1;
-    font-family: 'Courier New', monospace;
-    text-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
-}
-
-.bpm-source {
-    font-size: 12px;
-    color: #888;
-    margin-top: 5px;
-}
-
-/* Beat Indicator */
-.beat-indicator {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    margin-bottom: 15px;
-}
-
 .beat-dot {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
-    transition: all 0.1s ease;
+    background: #1a3a1a; /* Dark green default */
+    transition: all 0.15s ease;
+    box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
 }
 
-.beat-dot.beat-active {
-    background: #4caf50;
-    box-shadow: 0 0 15px rgba(76, 175, 80, 0.8);
-    transform: scale(1.3);
+/* Beat flash states */
+.beat-dot.beat-light-green {
+    background: #4caf50; /* Light green on beat */
+    box-shadow: 0 0 20px rgba(76, 175, 80, 0.8);
 }
 
-/* Source Selection */
-.bpm-sources {
+.beat-dot.beat-yellow {
+    background: #ffeb3b; /* Yellow on 16th beat */
+    box-shadow: 0 0 20px rgba(255, 235, 59, 0.8);
+}
+
+/* Transport Controls */
+.bpm-transport {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 15px;
+    gap: 6px;
+    justify-content: center;
 }
 
-.bpm-source-option {
+.bpm-transport-btn {
+    width: 32px;
+    height: 28px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
     display: flex;
     align-items: center;
-    padding: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-    cursor: pointer;
+    justify-content: center;
     transition: all 0.2s;
 }
 
-.bpm-source-option:hover {
-    background: rgba(255, 255, 255, 0.1);
+.bpm-transport-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.4);
 }
 
-.bpm-source-option input[type="radio"] {
-    margin-right: 8px;
+.bpm-transport-btn:active {
+    transform: scale(0.95);
 }
 
-.bpm-source-option span {
-    font-size: 13px;
+.bpm-transport-btn .icon {
+    font-size: 14px;
 }
 
-/* Tap Tempo */
-.tap-tempo-container {
-    text-align: center;
-    margin-bottom: 15px;
-    padding: 15px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 6px;
+/* BPM Display & Input */
+.bpm-display-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
-.tap-button {
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #4caf50, #66bb6a);
-    border: 3px solid rgba(255, 255, 255, 0.2);
+.bpm-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.bpm-value-input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
     color: #fff;
-    font-size: 24px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.1s ease;
-    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+    font-size: 18px;
+    font-weight: 600;
+    font-family: 'Courier New', monospace;
+    padding: 6px 10px;
+    text-align: center;
+    transition: all 0.2s;
 }
 
-.tap-button:hover {
+.bpm-value-input:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.bpm-value-input:focus {
+    outline: none;
+    border-color: #4caf50;
+    box-shadow: 0 0 8px rgba(76, 175, 80, 0.4);
+}
+
+/* Action Buttons */
+.bpm-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.bpm-action-btn {
+    flex: 1;
+    background: rgba(76, 175, 80, 0.2);
+    border: 1px solid rgba(76, 175, 80, 0.4);
+    border-radius: 4px;
+    color: #4caf50;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.bpm-action-btn:hover {
+    background: rgba(76, 175, 80, 0.3);
+    border-color: rgba(76, 175, 80, 0.6);
+    color: #66bb6a;
+}
+
+.bpm-action-btn:active {
+    transform: scale(0.98);
+}
+
+#bpm-tap-btn {
+    background: rgba(33, 150, 243, 0.2);
+    border-color: rgba(33, 150, 243, 0.4);
+    color: #2196f3;
+}
+
+#bpm-tap-btn:hover {
+    background: rgba(33, 150, 243, 0.3);
+    border-color: rgba(33, 150, 243, 0.6);
+    color: #42a5f5;
+}
+
+#bpm-resync-btn {
+    background: rgba(255, 152, 0, 0.2);
+    border-color: rgba(255, 152, 0, 0.4);
+    color: #ff9800;
+}
+
+#bpm-resync-btn:hover {
+    background: rgba(255, 152, 0, 0.3);
+    border-color: rgba(255, 152, 0, 0.6);
+    color: #ffb74d;
+}
     transform: scale(1.05);
     box-shadow: 0 6px 20px rgba(76, 175, 80, 0.5);
 }
@@ -1256,9 +1286,10 @@ function onBeat(beatIndex) {
 
 ## References
 
-- `src/modules/bpm_detector.py` - Core detection engine
+- `src/modules/sequences/audio_analyzer.py` - Audio analysis with BPM detection
+- `src/modules/sequences/bpm_sequence.py` - Beat-synchronized keyframe animation
 - `src/modules/api_bpm.py` - REST and WebSocket API
-- `frontend/components/bpm-display.html` - Display component
-- `frontend/css/bpm-display.css` - Styling
+- `frontend/js/bpm-widget.js` - BPM widget UI
+- `frontend/css/bpm-widget.css` - BPM widget styling
 - External: [librosa documentation](https://librosa.org/)
 - External: [sounddevice documentation](https://python-sounddevice.readthedocs.io/)

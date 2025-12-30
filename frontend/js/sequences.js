@@ -219,6 +219,8 @@ class SequenceManager {
             // Stop if running
             if (wasRunning) {
                 await this.stopAudioAnalyzer();
+                // Wait a bit for the device to be released
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
             
             console.log('🎚️ Switching to device:', deviceIndex, deviceName);
@@ -229,11 +231,17 @@ class SequenceManager {
             
             // Restart with new device if it was running
             if (wasRunning) {
-                await this.startAudioAnalyzer();
-                this.showNotification(`Audio device: ${deviceName}`, 'success');
-                
-                // Save to session
-                this.saveAudioAnalyzerToSession();
+                try {
+                    await this.startAudioAnalyzer();
+                    this.showNotification(`Audio device: ${deviceName}`, 'success');
+                    
+                    // Save to session
+                    this.saveAudioAnalyzerToSession();
+                } catch (startError) {
+                    console.error('Error starting audio analyzer with new device:', startError);
+                    this.showNotification(`Failed to start with device: ${deviceName}`, 'error');
+                    this.audioAnalyzerRunning = false;
+                }
             } else {
                 this.showNotification(`Device set to: ${deviceName}`, 'info');
                 
@@ -300,7 +308,33 @@ class SequenceManager {
      */
     async restoreAudioAnalyzerFromSession() {
         try {
-            // Use centralized session loader instead of fetching separately
+            // First check if audio analyzer is already running on backend
+            const statusResponse = await fetch('/api/audio/status');
+            if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                if (statusData.running) {
+                    console.log('✅ Audio analyzer already running on backend');
+                    this.audioAnalyzerRunning = true;
+                    this.updateAudioStatus();
+                    
+                    // Still restore device info and gain from session if available
+                    if (window.sessionStateLoader && window.sessionStateLoader.isLoaded()) {
+                        const audioState = window.sessionStateLoader.get('audio_analyzer');
+                        if (audioState) {
+                            if (audioState.device !== null && audioState.device !== undefined) {
+                                this.audioDevice = audioState.device;
+                            }
+                            if (audioState.config?.gain !== undefined && this.audioGainKnob) {
+                                this.audioGainKnob.setValue(audioState.config.gain);
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+            
+            // If not running, check session state to see if we should start it
+            // (This is a fallback - normally backend auto-starts if it was running)
             if (!window.sessionStateLoader) {
                 console.warn('⚠️ Session state loader not available');
                 return;
@@ -435,6 +469,14 @@ class SequenceManager {
         if (type === 'audio') {
             console.log('🎵 Showing audio inline controls for:', this.contextParameter.id);
             this.showInlineAudioControlsEmpty(this.contextParameter.id);
+        } else if (type === 'timeline') {
+            // For timeline type, show inline controls WITHOUT creating sequence yet
+            console.log('📈 Showing timeline inline controls for:', this.contextParameter.id);
+            this.showInlineTimelineControlsEmpty(this.contextParameter.id);
+        } else if (type === 'bpm') {
+            // For BPM type, show inline controls WITHOUT creating sequence yet
+            console.log('🥁 Showing BPM inline controls for:', this.contextParameter.id);
+            this.showInlineBPMControlsEmpty(this.contextParameter.id);
         } else {
             // For other types, open editor modal
             this.openEditor(this.contextParameter.id, this.contextParameter.label, this.contextParameter.value, type);
@@ -449,6 +491,11 @@ class SequenceManager {
         
         // Use controlId from context parameter (passed from button click)
         const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
+        
+        // FIRST: Hide all other inline controls to prevent stacking
+        this.hideInlineTimelineControls(parameterId);
+        this.hideInlineBPMControls(parameterId);
+        
         const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
         
         console.log('🔍 Looking for audio controls:', `${controlId}_audio_controls`);
@@ -512,6 +559,7 @@ class SequenceManager {
                 value: 0.5,
                 step: 0.01,
                 arc: 270,
+                startAngle: 135, // Start at 7:30, deadzone at bottom
                 size: 'tiny',
                 label: '',
                 decimals: 2,
@@ -541,9 +589,16 @@ class SequenceManager {
         // Use stored controlId from context parameter
         const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
         
-        // Get current knob value
+        // Get current knob value from CircularSlider instance
         const knobContainer = document.getElementById(`${controlId}_attack_release`);
-        const attackRelease = knobContainer?._circularSlider?.value || 0.5;
+        let attackRelease = 0.5; // Default
+        if (knobContainer && knobContainer._circularSlider) {
+            attackRelease = knobContainer._circularSlider.getValue ? 
+                           knobContainer._circularSlider.getValue() : 
+                           (knobContainer._circularSlider.value || 0.5);
+        }
+        
+        console.log('🎛️ Attack/Release value from knob:', attackRelease);
         
         // Get min/max from triple slider
         const tripleSlider = getTripleSlider(controlId);
@@ -652,7 +707,7 @@ class SequenceManager {
     }
     
     /**
-     * Restore default triple slider (hide audio controls, show triple slider)
+     * Restore default triple slider (hide audio/timeline controls, show triple slider)
      */
     restoreDefaultTripleSlider(controlId) {
         console.log('🔄 Restoring default triple slider for:', controlId);
@@ -671,6 +726,705 @@ class SequenceManager {
             // Remove any active classes from inline buttons (cleanup)
             const inlineButtons = audioControls.querySelectorAll('.audio-band-btn-inline, .audio-dir-btn-inline');
             inlineButtons.forEach(btn => btn.classList.remove('active'));
+        }
+        
+        // Hide timeline controls
+        const timelineControls = document.getElementById(`${controlId}_timeline_controls`);
+        if (timelineControls) {
+            timelineControls.style.display = 'none';
+            console.log('✅ Hidden timeline controls');
+        }
+    }
+    
+    /**
+     * Show inline timeline controls WITHOUT creating sequence (user will create by configuring first)
+     */
+    showInlineTimelineControlsEmpty(parameterId) {
+        console.log('📈 Showing empty timeline controls for:', parameterId);
+        
+        // Use controlId from context parameter (passed from button click)
+        const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
+        
+        // FIRST: Hide all other inline controls to prevent stacking
+        this.hideInlineAudioControls(parameterId);
+        this.hideInlineBPMControls(parameterId);
+        
+        const controlsContainer = document.getElementById(`${controlId}_timeline_controls`);
+        
+        console.log('🔍 Looking for timeline controls:', `${controlId}_timeline_controls`);
+        
+        if (!controlsContainer) {
+            console.warn('⚠️ Timeline controls container not found for:', parameterId, 'controlId:', controlId);
+            return;
+        }
+        
+        // Show the controls (param-dynamic-settings in new grid layout)
+        controlsContainer.style.display = 'block';
+        
+        // Get current clip duration automatically
+        const clipDuration = this.getCurrentClipDuration();
+        console.log('⏱️ Current clip duration:', clipDuration);
+        
+        // Track selected loop mode and playback state
+        let selectedLoopMode = 'once';
+        let playbackState = 'pause'; // 'forward', 'backward', 'pause'
+        
+        // Function to create sequence when configuration is complete
+        const createSequence = () => {
+            this.createTimelineSequenceWithConfig(parameterId, {
+                loop_mode: selectedLoopMode,
+                duration: clipDuration,
+                playback_state: playbackState
+            });
+        };
+        
+        // Set up playback buttons
+        const playButtons = controlsContainer.querySelectorAll('.timeline-play-btn-inline');
+        playButtons.forEach(btn => {
+            btn.classList.remove('active');
+            btn.onclick = () => {
+                // Toggle active state
+                playButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                playbackState = btn.dataset.direction;
+                console.log('📈 Playback state selected:', playbackState);
+                createSequence(); // Create/update sequence immediately
+            };
+        });
+        
+        // Set default pause button as active
+        const pauseBtn = controlsContainer.querySelector('.timeline-play-btn-inline[data-direction="pause"]');
+        if (pauseBtn) {
+            pauseBtn.classList.add('active');
+        }
+        
+        // Set up loop mode dropdown
+        const loopDropdown = controlsContainer.querySelector('.timeline-loop-dropdown-inline');
+        if (loopDropdown) {
+            loopDropdown.value = selectedLoopMode;
+            loopDropdown.onchange = () => {
+                selectedLoopMode = loopDropdown.value;
+                console.log('📈 Loop mode selected:', selectedLoopMode);
+                createSequence(); // Create/update sequence immediately
+            };
+        }
+        
+        // Set up speed input
+        const speedInput = controlsContainer.querySelector('.timeline-speed-input-inline');
+        if (speedInput) {
+            speedInput.value = 1.0;
+            speedInput.onchange = () => {
+                const speed = parseFloat(speedInput.value) || 1.0;
+                console.log('⚡ Speed changed:', speed);
+                createSequence(); // Create/update sequence immediately
+            };
+        }
+        
+        console.log('✅ Timeline controls shown (ready to configure)');
+    }
+    
+    /**
+     * Get current clip duration (in seconds) from active player/clip
+     */
+    getCurrentClipDuration() {
+        // Try to get duration from current video player clip
+        try {
+            // Check session state for current clip
+            const sessionState = window.sessionStateLoader?.cachedState;
+            if (!sessionState) {
+                console.warn('⚠️ No session state available');
+                return 10.0; // Default 10 seconds
+            }
+            
+            // Get video player state
+            const videoPlayer = sessionState.players?.video;
+            if (!videoPlayer) {
+                console.warn('⚠️ No video player state');
+                return 10.0;
+            }
+            
+            // Get current clip
+            const currentClipIndex = videoPlayer.current_clip_index || 0;
+            const currentClip = videoPlayer.clips?.[currentClipIndex];
+            
+            if (!currentClip) {
+                console.warn('⚠️ No current clip found');
+                return 10.0;
+            }
+            
+            // Try to get duration from clip config
+            const duration = currentClip.config?.duration;
+            if (duration && duration > 0) {
+                console.log('✅ Got clip duration from config:', duration);
+                return duration;
+            }
+            
+            // Fallback: Try to get from clip metadata
+            const metadata = currentClip.metadata;
+            if (metadata?.duration && metadata.duration > 0) {
+                console.log('✅ Got clip duration from metadata:', metadata.duration);
+                return metadata.duration;
+            }
+            
+            console.warn('⚠️ Could not determine clip duration, using default');
+            return 10.0;
+            
+        } catch (error) {
+            console.error('❌ Error getting clip duration:', error);
+            return 10.0; // Default 10 seconds
+        }
+    }
+    
+    /**
+     * Create timeline sequence with specific configuration (when user configures)
+     */
+    async createTimelineSequenceWithConfig(parameterId, updates) {
+        console.log('🎯 Creating timeline sequence with config:', { parameterId, updates });
+        
+        // Use stored controlId from context parameter
+        const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
+        
+        // Get speed from input
+        const speedInput = document.getElementById(`${controlId}_timeline_controls`)?.querySelector('.timeline-speed-input-inline');
+        const speed = speedInput ? (parseFloat(speedInput.value) || 1.0) : (updates.speed || 1.0);
+        
+        // Get min/max from triple slider
+        const tripleSlider = getTripleSlider(controlId);
+        let minValue = 0;
+        let maxValue = 100;
+        
+        console.log('🔍 Looking for triple slider:', controlId);
+        console.log('🔍 Slider instance:', tripleSlider);
+        
+        if (tripleSlider) {
+            const range = tripleSlider.getRange();
+            minValue = range.min;
+            maxValue = range.max;
+            console.log('📊 Using slider range:', { minValue, maxValue });
+        } else {
+            console.warn('⚠️ Triple slider not found, using defaults:', { minValue, maxValue });
+        }
+        
+        // Create keyframes for simple timeline: start and end
+        // This creates a linear transition from minValue to maxValue over the duration
+        const keyframes = [
+            [0, minValue],
+            [updates.duration, maxValue]
+        ];
+        
+        // Create config with values from UI
+        const config = {
+            keyframes: keyframes,
+            interpolation: 'linear',
+            loop_mode: updates.loop_mode,
+            duration: updates.duration,
+            playback_state: updates.playback_state || 'pause',
+            speed: updates.speed || 1.0
+        };
+        
+        const data = {
+            type: 'timeline',
+            target_parameter: this.contextParameter.uid || parameterId,
+            config: config
+        };
+        
+        console.log('📦 Creating timeline sequence with UID:', this.contextParameter.uid, 'config:', data);
+        
+        try {
+            // Check if sequence already exists and update it
+            const existingSequence = this.sequences.find(s => s.target_parameter === parameterId);
+            
+            let response;
+            if (existingSequence) {
+                // Update existing sequence
+                console.log('🔄 Updating existing timeline sequence:', existingSequence.id);
+                response = await fetch(`/api/sequences/${existingSequence.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config: config })
+                });
+            } else {
+                // Create new sequence
+                console.log('➕ Creating new timeline sequence');
+                response = await fetch('/api/sequences', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+            }
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ Timeline sequence saved:', result);
+                
+                await window.sessionStateLoader.reload();
+                await this.loadSequencesFromSessionState();
+                
+                const savedSequence = this.sequences.find(s => s.target_parameter === parameterId);
+                if (savedSequence) {
+                    this.showInlineTimelineControls(parameterId, savedSequence);
+                }
+                
+                if (!existingSequence) {
+                    this.showNotification('Timeline sequence created!', 'success');
+                }
+            } else {
+                const error = await response.json();
+                console.error('❌ Server error:', error);
+                this.showNotification(`Error: ${error.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error creating timeline sequence:', error);
+            this.showNotification('Failed to create timeline sequence', 'error');
+        }
+    }
+    
+    /**
+     * Show inline timeline controls with existing sequence
+     */
+    showInlineTimelineControls(parameterId, sequence) {
+        console.log('📈 showInlineTimelineControls called:', { parameterId, sequence });
+        
+        // Find the control container by parameter path
+        const controlId = this.parameterPathToControlId(parameterId);
+        console.log('🔍 Looking for control ID:', `${controlId}_timeline_controls`);
+        
+        const controlsContainer = document.getElementById(`${controlId}_timeline_controls`);
+        
+        if (!controlsContainer) {
+            console.warn('⚠️ Timeline controls container not found for:', parameterId);
+            console.warn('   Expected element ID:', `${controlId}_timeline_controls`);
+            const allControls = document.querySelectorAll('[id$="_timeline_controls"]');
+            console.log('   Available timeline control elements:', Array.from(allControls).map(el => el.id));
+            return;
+        }
+        
+        console.log('✅ Found timeline controls container');
+        
+        // Show the controls
+        controlsContainer.style.display = 'block';
+        
+        // Set active states from sequence
+        if (sequence && sequence.config) {
+            // Set loop mode
+            const loopDropdown = controlsContainer.querySelector('.timeline-loop-dropdown-inline');
+            if (loopDropdown) {
+                loopDropdown.value = sequence.config.loop_mode || 'once';
+                loopDropdown.onchange = () => {
+                    this.updateTimelineSequenceInline(parameterId, { loop_mode: loopDropdown.value });
+                };
+            }
+            
+            // Set speed
+            const speedInput = controlsContainer.querySelector('.timeline-speed-input-inline');
+            if (speedInput) {
+                speedInput.value = sequence.config.speed || 1.0;
+                speedInput.onchange = () => {
+                    const speed = parseFloat(speedInput.value) || 1.0;
+                    this.updateTimelineSequenceInline(parameterId, { speed: speed });
+                };
+            }
+            
+            // Set playback button handlers with API update
+            const playButtons = controlsContainer.querySelectorAll('.timeline-play-btn-inline');
+            playButtons.forEach(btn => {
+                btn.onclick = () => {
+                    playButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    // Update playback state in backend
+                    this.updateTimelineSequenceInline(parameterId, { playback_state: btn.dataset.direction });
+                };
+            });
+        }
+    }
+    
+    /**
+     * Hide inline timeline controls for a parameter
+     */
+    hideInlineTimelineControls(parameterId) {
+        const controlId = this.parameterPathToControlId(parameterId);
+        const controlsContainer = document.getElementById(`${controlId}_timeline_controls`);
+        
+        if (controlsContainer) {
+            controlsContainer.style.display = 'none';
+        }
+    }
+    
+    /**
+     * Show inline BPM controls WITHOUT creating sequence (user will create by configuring)
+     */
+    showInlineBPMControlsEmpty(parameterId) {
+        console.log('🥁 Showing empty BPM controls for:', parameterId);
+        
+        // Use controlId from context parameter (passed from button click)
+        const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
+        
+        // FIRST: Hide all other inline controls to prevent stacking
+        this.hideInlineAudioControls(parameterId);
+        this.hideInlineTimelineControls(parameterId);
+        
+        const controlsContainer = document.getElementById(`${controlId}_bpm_controls`);
+        
+        console.log('🔍 Looking for BPM controls:', `${controlId}_bpm_controls`);
+        
+        if (!controlsContainer) {
+            console.warn('⚠️ BPM controls container not found for:', parameterId, 'controlId:', controlId);
+            return;
+        }
+        
+        // Show the controls
+        controlsContainer.style.display = 'block';
+        
+        // Get current clip duration automatically
+        const clipDuration = this.getCurrentClipDuration();
+        console.log('⏱️ Current clip duration:', clipDuration);
+        
+        // Track selected settings
+        let beatDivision = 8;
+        let loopMode = 'once';
+        let playbackState = 'pause';
+        let speed = 1.0;
+        
+        // Function to create sequence when configuration changes
+        const createSequence = () => {
+            this.createBPMSequenceWithConfig(parameterId, {
+                beat_division: beatDivision,
+                clip_duration: clipDuration,
+                loop_mode: loopMode,
+                playback_state: playbackState,
+                speed: speed
+            });
+        };
+        
+        // Set up playback buttons
+        const playButtons = controlsContainer.querySelectorAll('.bpm-play-btn-inline');
+        playButtons.forEach(btn => {
+            btn.classList.remove('active');
+            btn.onclick = () => {
+                // Toggle active state
+                playButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                playbackState = btn.dataset.direction;
+                console.log('🥁 Playback state selected:', playbackState);
+                createSequence(); // Create/update sequence immediately
+            };
+        });
+        
+        // Set default pause button as active
+        const pauseBtn = controlsContainer.querySelector('.bpm-play-btn-inline[data-direction="pause"]');
+        if (pauseBtn) {
+            pauseBtn.classList.add('active');
+        }
+        
+        // Set up loop mode dropdown
+        const loopDropdown = controlsContainer.querySelector('.bpm-loop-dropdown-inline');
+        if (loopDropdown) {
+            loopDropdown.value = loopMode;
+            loopDropdown.onchange = () => {
+                loopMode = loopDropdown.value;
+                console.log('🥁 Loop mode selected:', loopMode);
+                createSequence(); // Create/update sequence immediately
+            };
+        }
+        
+        // Set up speed input
+        const speedInput = controlsContainer.querySelector('.bpm-speed-input-inline');
+        if (speedInput) {
+            speedInput.value = speed;
+            speedInput.onchange = () => {
+                speed = parseFloat(speedInput.value) || 1.0;
+                console.log('⚡ Speed changed:', speed);
+                createSequence(); // Create/update sequence immediately
+            };
+        }
+        
+        // Set up beat division dropdown
+        const divisionDropdown = controlsContainer.querySelector('.bpm-division-dropdown-inline');
+        if (divisionDropdown) {
+            divisionDropdown.value = beatDivision;
+            divisionDropdown.onchange = () => {
+                beatDivision = parseInt(divisionDropdown.value);
+                console.log('🥁 Beat division selected:', beatDivision);
+                createSequence(); // Create/update sequence immediately
+            };
+        }
+        
+        console.log('✅ BPM controls shown (ready to configure)');
+    }
+    
+    /**
+     * Create BPM sequence with specific configuration (when user configures)
+     */
+    async createBPMSequenceWithConfig(parameterId, updates) {
+        console.log('🎯 Creating BPM sequence with config:', { parameterId, updates });
+        
+        // Get controlId for accessing UI elements
+        const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
+        
+        // Get beat division from updates
+        const beatDivision = updates.beat_division || 8;
+        
+        // Get speed from input if not provided
+        const speedInput = document.getElementById(`${controlId}_bpm_controls`)?.querySelector('.bpm-speed-input-inline');
+        const speed = updates.speed !== undefined ? updates.speed : (speedInput ? parseFloat(speedInput.value) : 1.0);
+        
+        // Create default keyframes (linear ramp from 0 to 1)
+        const keyframes = [];
+        for (let i = 0; i < beatDivision; i++) {
+            keyframes.push(i / (beatDivision - 1));
+        }
+        
+        const data = {
+            type: 'bpm',
+            target_parameter: parameterId,
+            config: {
+                beat_division: beatDivision,
+                keyframes: keyframes,
+                clip_duration: updates.clip_duration || 10.0,
+                loop_mode: updates.loop_mode || 'once',
+                playback_state: updates.playback_state || 'pause',
+                speed: speed
+            }
+        };
+        
+        console.log('📦 Creating BPM sequence with UID:', this.contextParameter.uid, 'config:', data);
+        
+        try {
+            // Check if sequence already exists for this parameter
+            const existingSequence = this.getSequenceForParameter(parameterId);
+            
+            if (existingSequence) {
+                console.log('🔄 Updating existing BPM sequence:', existingSequence.id);
+                // Update existing sequence
+                const response = await fetch(`/api/sequences/${existingSequence.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config: data.config })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('✅ BPM sequence updated:', result);
+                    this.showInlineBPMControls(parameterId, result.sequence);
+                }
+            } else {
+                console.log('➕ Creating new BPM sequence');
+                const response = await fetch('/api/sequences', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    const savedSequence = result.sequence;
+                    console.log('✅ BPM sequence saved:', result);
+                    
+                    // Store sequence with parameter UID
+                    if (this.contextParameter && this.contextParameter.uid) {
+                        this.storeSequenceByUid(this.contextParameter.uid, savedSequence);
+                        // Update UI to show sequence is active
+                        this.showInlineBPMControls(parameterId, savedSequence);
+                    } else {
+                        console.warn('⚠️ No parameter UID available, cannot store sequence by UID');
+                        this.sequences.set(savedSequence.id, savedSequence);
+                    }
+                    
+                    this.showNotification('BPM sequence created!', 'success');
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error creating BPM sequence:', error);
+            this.showNotification('Failed to create BPM sequence', 'error');
+        }
+    }
+    
+    /**
+     * Show inline BPM controls with existing sequence
+     */
+    showInlineBPMControls(parameterId, sequence) {
+        console.log('🥁 showInlineBPMControls called:', { parameterId, sequence });
+        
+        // Find the control container by parameter path
+        const controlId = this.parameterPathToControlId(parameterId);
+        console.log('🔍 Looking for control ID:', `${controlId}_bpm_controls`);
+        
+        const controlsContainer = document.getElementById(`${controlId}_bpm_controls`);
+        
+        if (!controlsContainer) {
+            console.warn('⚠️ BPM controls container not found for:', parameterId);
+            return;
+        }
+        
+        // Show controls
+        controlsContainer.style.display = 'block';
+        
+        // Update playback buttons
+        const playButtons = controlsContainer.querySelectorAll('.bpm-play-btn-inline');
+        playButtons.forEach(btn => {
+            if (btn.dataset.direction === sequence.playback_state) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        
+        // Update loop mode dropdown
+        const loopDropdown = controlsContainer.querySelector('.bpm-loop-dropdown-inline');
+        if (loopDropdown && sequence.loop_mode) {
+            loopDropdown.value = sequence.loop_mode;
+            loopDropdown.onchange = () => {
+                this.updateBPMSequenceInline(parameterId, { 
+                    loop_mode: loopDropdown.value 
+                });
+            };
+        }
+        
+        // Update speed input
+        const speedInput = controlsContainer.querySelector('.bpm-speed-input-inline');
+        if (speedInput && sequence.speed !== undefined) {
+            speedInput.value = sequence.speed;
+            speedInput.onchange = () => {
+                this.updateBPMSequenceInline(parameterId, { 
+                    speed: parseFloat(speedInput.value) || 1.0 
+                });
+            };
+        }
+        
+        // Update beat division dropdown
+        const divisionDropdown = controlsContainer.querySelector('.bpm-division-dropdown-inline');
+        if (divisionDropdown && sequence.beat_division) {
+            divisionDropdown.value = sequence.beat_division;
+            divisionDropdown.onchange = () => {
+                this.updateBPMSequenceInline(parameterId, { 
+                    beat_division: parseInt(divisionDropdown.value) 
+                });
+            };
+        }
+        
+        // Set playback button handlers with API update
+        playButtons.forEach(btn => {
+            btn.onclick = () => {
+                playButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                // Update playback state in backend
+                this.updateBPMSequenceInline(parameterId, { playback_state: btn.dataset.direction });
+            };
+        });
+    }
+    
+    /**
+     * Hide inline BPM controls for a parameter
+     */
+    hideInlineBPMControls(parameterId) {
+        const controlId = this.parameterPathToControlId(parameterId);
+        const controlsContainer = document.getElementById(`${controlId}_bpm_controls`);
+        
+        if (controlsContainer) {
+            controlsContainer.style.display = 'none';
+        }
+    }
+    
+    /**
+     * Update BPM sequence parameters inline (without opening modal)
+     */
+    async updateBPMSequenceInline(parameterId, updates) {
+        const sequence = this.getSequenceForParameter(parameterId);
+        if (!sequence) {
+            console.warn('⚠️ No BPM sequence found for parameter:', parameterId);
+            return;
+        }
+        
+        console.log('🔄 Updating BPM sequence inline:', sequence.id, updates);
+        
+        try {
+            const response = await fetch(`/api/sequences/${sequence.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config: updates })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ BPM sequence updated:', result);
+                
+                // Update local cache
+                if (this.contextParameter && this.contextParameter.uid) {
+                    this.storeSequenceByUid(this.contextParameter.uid, result.sequence);
+                } else {
+                    this.sequences.set(sequence.id, result.sequence);
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error updating BPM sequence:', error);
+        }
+    }
+    
+    /**
+     * Update timeline sequence parameters inline (without opening modal)
+     */
+    async updateTimelineSequenceInline(parameterId, updates) {
+        const sequence = this.sequences.find(s => s.target_parameter === parameterId);
+        if (!sequence) {
+            console.warn('⚠️ No timeline sequence found for:', parameterId);
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/sequences/${sequence.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config: { ...sequence.config, ...updates } })
+            });
+            
+            if (response.ok) {
+                await window.sessionStateLoader.reload(); // Force reload to get updated state
+                await this.loadSequencesFromSessionState();
+                
+                // Update UI to reflect changes
+                const controlId = this.parameterPathToControlId(parameterId);
+                const controlsContainer = document.getElementById(`${controlId}_timeline_controls`);
+                
+                if (controlsContainer && updates.loop_mode) {
+                    // Update loop mode dropdown
+                    const loopDropdown = controlsContainer.querySelector('.timeline-loop-dropdown-inline');
+                    if (loopDropdown) {
+                        loopDropdown.value = updates.loop_mode;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error updating timeline sequence inline:', error);
+        }
+    }
+    
+    /**
+     * Restore default triple slider (hide audio/timeline controls, show triple slider)
+     */
+    restoreDefaultTripleSlider(controlId) {
+        console.log('🔄 Restoring default triple slider for:', controlId);
+        
+        if (!controlId) {
+            console.warn('⚠️ No controlId provided for restoring triple slider');
+            return;
+        }
+        
+        // Hide audio controls (param-dynamic-settings in new grid layout)
+        const audioControls = document.getElementById(`${controlId}_audio_controls`);
+        if (audioControls) {
+            audioControls.style.display = 'none';
+            console.log('✅ Hidden audio controls');
+            
+            // Remove any active classes from inline buttons (cleanup)
+            const inlineButtons = audioControls.querySelectorAll('.audio-band-btn-inline, .audio-dir-btn-inline');
+            inlineButtons.forEach(btn => btn.classList.remove('active'));
+        }
+        
+        // Hide timeline controls
+        const timelineControls = document.getElementById(`${controlId}_timeline_controls`);
+        if (timelineControls) {
+            timelineControls.style.display = 'none';
+            console.log('✅ Hidden timeline controls');
         }
         
         // Show triple slider container (inside param-slider in new grid layout)
@@ -1079,6 +1833,45 @@ class SequenceManager {
     }
     
     /**
+     * Cleanup all sequences for a specific layer
+     * Checks all parameters on the layer's clip for the given layer_id
+     * @param {string} clipId - The UUID of the clip
+     * @param {number} layerId - The layer ID within the clip
+     */
+    async cleanupSequencesForLayer(clipId, layerId) {
+        if (!clipId || layerId === undefined || layerId === null) return;
+        
+        console.log(`🧹 Cleaning up sequences for layer ${layerId} on clip: ${clipId}`);
+        
+        // Find all sequences whose target_parameter contains this clip_id and layer_id
+        // Format: param_clip_{clip_id}_{param_name}_{timestamp}_{random}
+        // We need to check if the sequence belongs to this specific layer
+        const layerSequences = this.sequences.filter(seq => {
+            if (!seq.target_parameter || !seq.target_parameter.includes(`_${clipId}_`)) {
+                return false;
+            }
+            // Additional check: layer sequences have layerId in their context or metadata
+            // For now, we'll remove all sequences for the clip+layer combination
+            return true;
+        });
+        
+        if (layerSequences.length === 0) {
+            console.log(`✅ No sequences found for layer ${layerId} on clip ${clipId}`);
+            return;
+        }
+        
+        console.log(`🗑️ Found ${layerSequences.length} sequence(s) to delete for layer ${layerId}`);
+        
+        // Delete each sequence using existing deleteSequence method
+        for (const seq of layerSequences) {
+            this.currentSequence = seq;
+            await this.deleteSequence(true); // skipConfirm=true
+        }
+        
+        console.log(`✅ Cleanup complete for layer ${layerId} on clip ${clipId}`);
+    }
+    
+    /**
      * Load sequences from centralized session state (flat by UID structure)
      */
     async loadSequencesFromSessionState() {
@@ -1220,6 +2013,120 @@ class SequenceManager {
     }
     
     /**
+     * Restore inline timeline controls for all timeline sequences on page reload
+     */
+    restoreInlineTimelineControls() {
+        console.log('🔄 Restoring inline timeline controls for timeline sequences...');
+        console.log('📊 Total sequences:', this.sequences.length);
+        
+        // Find all timeline sequences
+        const timelineSequences = this.sequences.filter(seq => seq.type === 'timeline');
+        console.log(`📋 Found ${timelineSequences.length} timeline sequences to restore`);
+        
+        if (timelineSequences.length === 0) {
+            console.log('✅ No timeline sequences to restore');
+            return;
+        }
+        
+        timelineSequences.forEach((seq, index) => {
+            console.log(`\n🔍 [${index + 1}/${timelineSequences.length}] Processing timeline sequence:`, {
+                uid: seq.target_parameter,
+                loop_mode: seq.config?.loop_mode
+            });
+            
+            // Find the button with matching UID
+            const button = document.querySelector(`[data-param-uid="${seq.target_parameter}"]`);
+            if (!button) {
+                console.log('❌ Button not found in DOM (parameter not visible)');
+                return;
+            }
+            console.log('✅ Found button:', button);
+            
+            // Get the parameter control container (new grid layout)
+            const paramControl = button.closest('.parameter-grid-row');
+            if (!paramControl) {
+                console.warn('❌ No parameter-grid-row found for button');
+                return;
+            }
+            console.log('✅ Found parameter-grid-row');
+            
+            // Find the timeline controls container
+            const tripleSliderContainer = paramControl.querySelector('.triple-slider-container');
+            if (!tripleSliderContainer) {
+                console.warn('❌ No triple slider container found');
+                return;
+            }
+            console.log('✅ Found triple-slider-container:', tripleSliderContainer.id);
+            
+            const controlId = tripleSliderContainer.id;
+            const controlsContainer = document.getElementById(`${controlId}_timeline_controls`);
+            
+            if (!controlsContainer) {
+                console.warn('❌ No timeline controls container found for:', controlId);
+                return;
+            }
+            console.log('✅ Found timeline controls container');
+            console.log('📏 Current display style:', controlsContainer.style.display);
+            
+            // Show the controls
+            controlsContainer.style.display = 'block';
+            console.log('✅ Set display to block, new value:', controlsContainer.style.display);
+            
+            // Restore loop mode selection
+            const loopDropdown = controlsContainer.querySelector('.timeline-loop-dropdown-inline');
+            if (loopDropdown && seq.config?.loop_mode) {
+                loopDropdown.value = seq.config.loop_mode;
+                console.log('✅ Restored loop mode:', seq.config.loop_mode);
+                
+                // Re-attach change handler
+                loopDropdown.onchange = () => {
+                    this.updateTimelineSequenceInline(seq.target_parameter, { loop_mode: loopDropdown.value });
+                };
+            } else {
+                console.warn('❌ Loop dropdown not found');
+            }
+            
+            // Restore speed
+            const speedInput = controlsContainer.querySelector('.timeline-speed-input-inline');
+            if (speedInput) {
+                speedInput.value = seq.config?.speed || 1.0;
+                console.log('✅ Restored speed:', seq.config?.speed || 1.0);
+                
+                // Re-attach change handler
+                speedInput.onchange = () => {
+                    const speed = parseFloat(speedInput.value) || 1.0;
+                    this.updateTimelineSequenceInline(seq.target_parameter, { speed: speed });
+                };
+            }
+            
+            // Restore playback state
+            const playButtons = controlsContainer.querySelectorAll('.timeline-play-btn-inline');
+            const playbackState = seq.config?.playback_state || 'pause';
+            const activePlayBtn = controlsContainer.querySelector(`.timeline-play-btn-inline[data-direction="${playbackState}"]`);
+            if (activePlayBtn) {
+                playButtons.forEach(btn => btn.classList.remove('active'));
+                activePlayBtn.classList.add('active');
+                console.log('✅ Restored playback state:', playbackState);
+            }
+            
+            // Attach playback button handlers with API update
+            playButtons.forEach(btn => {
+                btn.onclick = () => {
+                    playButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    console.log('📈 Playback state changed:', btn.dataset.direction);
+                    // Update playback state in backend
+                    this.updateTimelineSequenceInline(seq.target_parameter, { playback_state: btn.dataset.direction });
+                };
+            });
+            
+            console.log('✅ Successfully restored timeline controls for:', seq.target_parameter);
+        });
+        
+        console.log('\n✅ Timeline restore complete');
+    }
+    
+    /**
      * Update sequence buttons in UI
      */
     updateSequenceButtons() {
@@ -1246,14 +2153,27 @@ class SequenceManager {
             
             if (hasSequence) {
                 btn.classList.add('active');
-                // Show inline controls if it's an audio sequence
-                if (sequence && sequence.type === 'audio') {
-                    this.showInlineAudioControls(paramId, sequence);
+                // ALWAYS hide all inline controls first to prevent stacking
+                this.hideInlineAudioControls(paramId);
+                this.hideInlineTimelineControls(paramId);
+                this.hideInlineBPMControls(paramId);
+                
+                // Show inline controls based on sequence type
+                if (sequence) {
+                    if (sequence.type === 'audio') {
+                        this.showInlineAudioControls(paramId, sequence);
+                    } else if (sequence.type === 'timeline') {
+                        this.showInlineTimelineControls(paramId, sequence);
+                    } else if (sequence.type === 'bpm') {
+                        this.showInlineBPMControls(paramId, sequence);
+                    }
                 }
             } else {
                 btn.classList.remove('active');
-                // Hide inline controls
+                // Hide all inline controls
                 this.hideInlineAudioControls(paramId);
+                this.hideInlineTimelineControls(paramId);
+                this.hideInlineBPMControls(paramId);
             }
         });
     }
@@ -1296,6 +2216,7 @@ class SequenceManager {
             value: 1.0,
             step: 0.1,
             arc: 270,
+            startAngle: 135, // 135° = 7:30, +270° wraps to 45° = 4:30, deadzone at bottom
             size: 'tiny',
             label: '',
             decimals: 1,
@@ -2014,6 +2935,7 @@ class SequenceManager {
                 value: sequence?.attack_release || 0.5,
                 step: 0.01,
                 arc: 270,
+                startAngle: 135, // Start at 7:30, deadzone at bottom
                 size: 'tiny',
                 label: '',
                 decimals: 2,

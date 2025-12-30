@@ -34,6 +34,7 @@ class CircularSlider {
             value: options.value || 0,
             step: options.step || 1,
             arc: options.arc || 270, // 270° or 360°
+            startAngle: options.startAngle !== undefined ? options.startAngle : null, // Custom start angle (null = auto)
             size: options.size || 'medium', // 'small', 'medium', 'large'
             label: options.label || '',
             showValue: options.showValue !== false,
@@ -50,7 +51,12 @@ class CircularSlider {
         
         // State
         this.isDragging = false;
-        this.startAngle = this.config.arc === 360 ? 0 : (360 - this.config.arc) / 2;
+        // Use custom startAngle if provided, otherwise calculate centered arc
+        if (this.config.startAngle !== null) {
+            this.startAngle = this.config.startAngle;
+        } else {
+            this.startAngle = this.config.arc === 360 ? 0 : (360 - this.config.arc) / 2;
+        }
         this.endAngle = this.startAngle + this.config.arc;
         
         // Create DOM
@@ -74,42 +80,34 @@ class CircularSlider {
         const sizeMap = { tiny: 25, small: 40, medium: 60, large: 80 };
         const size = typeof this.config.size === 'number' ? this.config.size : (sizeMap[this.config.size] || 60);
         const radius = size / 2;
-        const strokeWidth = size < 30 ? 2 : 4;
+        const strokeWidth = size < 30 ? 3 : 4;
         const normalizedRadius = radius - strokeWidth / 2;
         const circumference = normalizedRadius * 2 * Math.PI;
         const arcLength = (this.config.arc / 360) * circumference;
         
-        // Background track
+        // Background track (using path for true arc, not full circle)
         const trackSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         trackSvg.setAttribute('class', 'circular-slider-track');
         trackSvg.setAttribute('width', size);
         trackSvg.setAttribute('height', size);
         
-        const trackCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        trackCircle.setAttribute('cx', radius);
-        trackCircle.setAttribute('cy', radius);
-        trackCircle.setAttribute('r', normalizedRadius);
-        trackCircle.setAttribute('stroke-dasharray', `${arcLength} ${circumference}`);
-        trackCircle.setAttribute('stroke-dashoffset', 0);
-        trackCircle.style.transform = `rotate(${this.startAngle}deg)`;
-        trackCircle.style.transformOrigin = 'center';
-        trackSvg.appendChild(trackCircle);
+        const trackPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        trackPath.setAttribute('d', this.createArcPath(radius, normalizedRadius, 0, this.config.arc));
+        trackPath.setAttribute('fill', 'none');
+        trackPath.setAttribute('stroke-width', strokeWidth);
+        trackSvg.appendChild(trackPath);
         
-        // Progress arc
+        // Progress arc (using path for true arc)
         const progressSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         progressSvg.setAttribute('class', 'circular-slider-progress');
         progressSvg.setAttribute('width', size);
         progressSvg.setAttribute('height', size);
         
-        const progressCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        progressCircle.setAttribute('cx', radius);
-        progressCircle.setAttribute('cy', radius);
-        progressCircle.setAttribute('r', normalizedRadius);
-        progressCircle.setAttribute('stroke-dasharray', `${arcLength} ${circumference}`);
-        progressCircle.setAttribute('stroke-dashoffset', arcLength);
-        progressCircle.style.transform = `rotate(${this.startAngle}deg)`;
-        progressCircle.style.transformOrigin = 'center';
-        progressSvg.appendChild(progressCircle);
+        const progressPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        progressPath.setAttribute('d', this.createArcPath(radius, normalizedRadius, 0, 0));
+        progressPath.setAttribute('fill', 'none');
+        progressPath.setAttribute('stroke-width', strokeWidth);
+        progressSvg.appendChild(progressPath);
         
         // Handle (indicator dot)
         const handle = document.createElement('div');
@@ -149,7 +147,7 @@ class CircularSlider {
         // Store references
         this.wrapper = wrapper;
         this.slider = slider;
-        this.progressCircle = progressCircle;
+        this.progressPath = progressPath;
         this.handle = handle;
         this.valueDisplay = valueDisplay;
         this.arcLength = arcLength;
@@ -157,6 +155,32 @@ class CircularSlider {
         this.normalizedRadius = normalizedRadius;
         
         this.container.appendChild(wrapper);
+    }
+    
+    /**
+     * Create SVG arc path
+     * SVG coordinate system: 0°=East (3 o'clock), angles increase clockwise
+     */
+    createArcPath(radius, arcRadius, startPercent, arcDegrees) {
+        const startAngle = this.startAngle + (this.config.arc * startPercent / 100);
+        const endAngle = startAngle + arcDegrees;
+        
+        // Convert to radians - no offset needed, angles already aligned correctly
+        const startRad = startAngle * Math.PI / 180;
+        const endRad = endAngle * Math.PI / 180;
+        
+        const x1 = radius + arcRadius * Math.cos(startRad);
+        const y1 = radius + arcRadius * Math.sin(startRad);
+        const x2 = radius + arcRadius * Math.cos(endRad);
+        const y2 = radius + arcRadius * Math.sin(endRad);
+        
+        const largeArc = arcDegrees > 180 ? 1 : 0;
+        
+        if (arcDegrees === 0) {
+            return `M ${x1} ${y1}`;
+        }
+        
+        return `M ${x1} ${y1} A ${arcRadius} ${arcRadius} 0 ${largeArc} 1 ${x2} ${y2}`;
     }
     
     /**
@@ -313,12 +337,14 @@ class CircularSlider {
     }
     
     /**
-     * Calculate angle from coordinates
+     * Calculate angle from mouse/touch coordinates
+     * Converts screen coordinates to our angle system
      */
     calculateAngle(x, y, centerX, centerY) {
         const dx = x - centerX;
         const dy = y - centerY;
-        let angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+        // atan2 gives angle from positive X-axis (3 o'clock = 0°)
+        let angle = Math.atan2(dy, dx) * 180 / Math.PI;
         if (angle < 0) angle += 360;
         return angle;
     }
@@ -372,14 +398,14 @@ class CircularSlider {
      */
     updateUI() {
         const percent = (this.config.value - this.config.min) / (this.config.max - this.config.min);
-        const offset = this.arcLength - (this.arcLength * percent);
+        const progressDegrees = this.config.arc * percent;
         
-        // Update progress circle
-        this.progressCircle.setAttribute('stroke-dashoffset', offset);
+        // Update progress arc path
+        this.progressPath.setAttribute('d', this.createArcPath(this.radius, this.normalizedRadius, 0, progressDegrees));
         
-        // Update handle position
-        const angle = this.startAngle + (this.config.arc * percent);
-        const rad = (angle - 90) * Math.PI / 180;
+        // Update handle position (use same angle system as arc path)
+        const angle = this.startAngle + progressDegrees;
+        const rad = angle * Math.PI / 180;
         const handleRadius = this.normalizedRadius;
         const x = this.radius + handleRadius * Math.cos(rad);
         const y = this.radius + handleRadius * Math.sin(rad);

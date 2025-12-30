@@ -50,6 +50,10 @@ class RestAPI:
         console_maxlen = self.config.get('api', {}).get('console_log_maxlen', CONSOLE_LOG_MAX_LENGTH)
         self.console_log = deque(maxlen=console_maxlen)
         
+        # BPM streaming
+        self._bpm_streaming_thread = None
+        self._bpm_streaming_active = False
+        
         # Flask App erstellen - static_folder muss absoluter Pfad sein
         # Pfad: src/modules -> src -> root -> frontend
         static_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'frontend')
@@ -232,6 +236,13 @@ class RestAPI:
                     "log": log_lines,
                     "total": len(self.console_log)
                 })
+        
+        # BPM WebSocket namespace
+        @self.socketio.on('connect', namespace='/bpm')
+        def handle_bpm_connect():
+            """Client connected to BPM WebSocket"""
+            logger.info(f"BPM WebSocket client connected")
+            emit('connected', {'status': 'ready'})
     
     def _setup_websocket_command_handlers(self):
         """Setup WebSocket command handlers for low-latency commands."""
@@ -453,15 +464,26 @@ class RestAPI:
                         
                         # Update LIVE effect instance in player layers (critical for transport trim!)
                         if player.layers and len(player.layers) > 0:
-                            for layer in player.layers:
+                            logger.debug(f"🔍 Searching {len(player.layers)} layers for clip_id={clip_id}, effect_index={effect_index}")
+                            for layer_idx, layer in enumerate(player.layers):
+                                logger.debug(f"  Layer {layer_idx}: clip_id={layer.clip_id}, effects={len(layer.effects)}")
                                 if layer.clip_id == clip_id and effect_index < len(layer.effects):
                                     live_effect = layer.effects[effect_index]
-                                    if live_effect.get('id') == effect.get('plugin_id'):
+                                    # Layer effects use 'plugin_id' key (not 'id')
+                                    live_plugin_id = live_effect.get('plugin_id')
+                                    registry_plugin_id = effect.get('plugin_id')
+                                    logger.debug(f"  ✓ Found matching layer! live_effect.plugin_id={live_plugin_id}, registry.plugin_id={registry_plugin_id}")
+                                    if live_plugin_id == registry_plugin_id:
                                         live_instance = live_effect.get('instance')
+                                        logger.debug(f"  ✓ IDs match! instance={type(live_instance).__name__ if live_instance else None}")
                                         if live_instance and hasattr(live_instance, 'update_parameter'):
-                                            live_instance.update_parameter(param_name, param_value_to_store)
-                                            logger.info(f"🔄 Updated LIVE instance: {effect.get('plugin_id')}.{param_name}")
+                                            result = live_instance.update_parameter(param_name, param_value_to_store)
+                                            logger.info(f"🔄 Updated LIVE instance: {registry_plugin_id}.{param_name} = {value} (result={result})")
+                                        else:
+                                            logger.warning(f"⚠️ Live instance missing or no update_parameter method!")
                                         break
+                                    else:
+                                        logger.warning(f"⚠️ Effect ID mismatch: live={live_plugin_id} vs registry={registry_plugin_id}")
                         
                         # Invalidate cache so changes are picked up
                         registry._invalidate_cache(clip_id)
@@ -1050,6 +1072,11 @@ class RestAPI:
         self.log_broadcast_thread = threading.Thread(target=self._log_broadcast_loop, daemon=True)
         self.log_broadcast_thread.start()
         
+        # BPM Broadcast Thread starten
+        self._bpm_streaming_active = True
+        self.bpm_broadcast_thread = threading.Thread(target=self._bpm_broadcast_loop, daemon=True)
+        self.bpm_broadcast_thread.start()
+        
         # Server Thread starten
         self.server_thread = threading.Thread(
             target=lambda: self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True),
@@ -1064,4 +1091,33 @@ class RestAPI:
     def stop(self):
         """Stoppt REST API Server."""
         self.is_running = False
+        self._bpm_streaming_active = False
         logger.info("REST API gestoppt")
+    
+    def _bpm_broadcast_loop(self):
+        """Background thread to broadcast BPM updates via WebSocket"""
+        import time
+        
+        logger.info("🎵 BPM broadcast thread started")
+        
+        while self._bpm_streaming_active and self.is_running:
+            try:
+                # Get BPM status from audio analyzer
+                if hasattr(self.player_manager, 'audio_analyzer') and self.player_manager.audio_analyzer:
+                    status = self.player_manager.audio_analyzer.get_bpm_status()
+                    
+                    # Broadcast to /bpm namespace
+                    self.socketio.emit(
+                        'bpm_update',
+                        status,
+                        namespace='/bpm'
+                    )
+                
+                # Update every 100ms for smooth beat indicator
+                time.sleep(0.1)
+                
+            except Exception as e:
+                logger.error(f"Error in BPM broadcast loop: {e}", exc_info=True)
+                time.sleep(1)  # Back off on error
+        
+        logger.info("🎵 BPM broadcast thread stopped")
