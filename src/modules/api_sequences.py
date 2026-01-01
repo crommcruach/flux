@@ -179,12 +179,12 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                 sequence = TimelineSequence(
                     sequence_id=data.get('id'),
                     target_parameter=target,
-                    keyframes=config.get('keyframes', []),
-                    interpolation=config.get('interpolation', 'linear'),
                     loop_mode=config.get('loop_mode', 'once'),
-                    duration=config.get('duration', 10.0),
+                    duration=config.get('duration', 5.0),
                     playback_state=config.get('playback_state', 'pause'),
-                    speed=config.get('speed', 1.0)
+                    speed=config.get('speed', 1.0),
+                    min_value=config.get('min_value', 0.0),
+                    max_value=config.get('max_value', 100.0)
                 )
             
             elif seq_type == 'bpm':
@@ -193,11 +193,12 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                     target_parameter=target,
                     audio_analyzer=audio_analyzer,
                     beat_division=config.get('beat_division', 8),
-                    keyframes=config.get('keyframes'),
                     clip_duration=config.get('clip_duration', 10.0),
                     playback_state=config.get('playback_state', 'forward'),
                     loop_mode=config.get('loop_mode', 'loop'),
-                    speed=config.get('speed', 1.0)
+                    speed=config.get('speed', 1.0),
+                    min_value=config.get('min_value', 0.0),
+                    max_value=config.get('max_value', 100.0)
                 )
             
             else:
@@ -286,16 +287,30 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
     def delete_sequence(sequence_id):
         """Delete a sequence"""
         try:
+            # Get sequence info before deletion for cleanup
+            sequence = sequence_manager.get(sequence_id)
+            if not sequence:
+                return jsonify({'error': 'Sequence not found'}), 404
+            
+            target_parameter = sequence.target_parameter
+            
+            # Delete the sequence
             success = sequence_manager.delete(sequence_id)
             
             if not success:
-                return jsonify({'error': 'Sequence not found'}), 404
+                return jsonify({'error': 'Failed to delete sequence'}), 500
             
             # Save session state to persist deletion
             session_state = get_session_state()
             session_state.save_async(player_manager, get_clip_registry(), force=True)
             
-            logger.info(f"Deleted sequence: {sequence_id}")
+            # Notify all clients that sequence was deleted
+            socketio.emit('sequence_deleted', {
+                'sequence_id': sequence_id,
+                'parameter': target_parameter
+            })
+            
+            logger.info(f"Deleted sequence: {sequence_id} (target: {target_parameter})")
             return jsonify({'message': 'Sequence deleted successfully'})
         
         except Exception as e:
@@ -366,18 +381,24 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                 audio_analyzer.config['audio_source'] = source
                 logger.info(f"Audio source set to: {source}")
             
-            # Start the analyzer
+            # Start the analyzer (this now has comprehensive error handling)
             audio_analyzer.start()
             
             # Verify it started successfully
             if not audio_analyzer._running:
-                raise RuntimeError("Audio analyzer failed to start (check device availability)")
+                # If still not running after start() completes, it should have raised an error
+                # but just in case, provide a fallback message
+                raise RuntimeError("Audio analyzer failed to start. Check logs for details.")
             
             logger.info(f"Audio analyzer started successfully: device={device}, source={source}")
             return jsonify({'message': 'Audio analyzer started successfully'})
-        except Exception as e:
-            logger.error(f"Error starting audio analyzer: {e}", exc_info=True)
+        except RuntimeError as e:
+            # Expected errors from start() method
+            logger.error(f"Could not start audio analyzer: {e}")
             return jsonify({'error': str(e)}), 500
+        except Exception as e:
+            logger.error(f"Unexpected error starting audio analyzer: {e}", exc_info=True)
+            return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
     
     @app.route('/api/audio/stop', methods=['POST'])
     def stop_audio_analyzer():
@@ -432,6 +453,9 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                 audio_analyzer.config['device'] = data['device']
             if 'deviceName' in data:
                 audio_analyzer.config['deviceName'] = data['deviceName']
+            if 'beat_sensitivity' in data:
+                audio_analyzer.config['beat_sensitivity'] = float(data['beat_sensitivity'])
+                logger.info(f"Beat sensitivity set to: {data['beat_sensitivity']}")
             
             logger.info(f"Audio config updated: {data}")
             return jsonify({'message': 'Audio config updated', 'config': audio_analyzer.config})

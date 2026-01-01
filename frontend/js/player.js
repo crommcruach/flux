@@ -3270,6 +3270,7 @@ function renderClipEffects() {
     if (window.sequenceManager) {
         requestAnimationFrame(() => {
             window.sequenceManager.restoreInlineAudioControls();
+            window.sequenceManager.restoreInlineBPMControls();
             window.sequenceManager.restoreInlineTimelineControls();
         });
     }
@@ -3690,7 +3691,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                         <div class="dynamic-settings-content">
                             <div class="timeline-inline-playback">
                                 <button class="timeline-play-btn-inline" data-direction="backward" data-param="${paramPath}" title="Play Backward">◄</button>
-                                <button class="timeline-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">||</button>
+                                <button class="timeline-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">⏸</button>
                                 <button class="timeline-play-btn-inline" data-direction="forward" data-param="${paramPath}" title="Play Forward">►</button>
                             </div>
                             <div class="timeline-inline-loop">
@@ -3701,10 +3702,11 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                                     <option value="random">Random</option>
                                 </select>
                             </div>
-                            <div class="timeline-inline-speed">
-                                <input type="number" class="timeline-speed-input-inline" data-param="${paramPath}" 
-                                       value="1.0" min="0.1" max="10" step="0.1" title="Speed (0.1x - 10x)">×
+                            <div class="timeline-inline-duration">
+                                <input type="number" class="timeline-duration-input-inline" data-param="${paramPath}" 
+                                       value="5.0" min="0.1" max="300" step="0.1" title="Duration (seconds)">s
                             </div>
+                            <div id="${controlId}_timeline_speed" class="timeline-inline-knob"></div>
                         </div>
                     </div>
                     <!-- BPM Inline Controls (hidden by default) -->
@@ -3712,7 +3714,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                         <div class="dynamic-settings-content">
                             <div class="bpm-inline-playback">
                                 <button class="bpm-play-btn-inline" data-direction="backward" data-param="${paramPath}" title="Play Backward">◄</button>
-                                <button class="bpm-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">||</button>
+                                <button class="bpm-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">⏸</button>
                                 <button class="bpm-play-btn-inline" data-direction="forward" data-param="${paramPath}" title="Play Forward">►</button>
                             </div>
                             <div class="bpm-inline-loop">
@@ -3723,19 +3725,23 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                                     <option value="random">Random</option>
                                 </select>
                             </div>
-                            <div class="bpm-inline-speed">
-                                <input type="number" class="bpm-speed-input-inline" data-param="${paramPath}" 
-                                       value="1.0" min="0.1" max="10" step="0.1" title="Speed (0.1x - 10x)">×
-                            </div>
                             <div class="bpm-inline-division">
                                 <select class="bpm-division-dropdown-inline" data-param="${paramPath}" title="Beat Division">
+                                    <option value="0.0625">1/16</option>
+                                    <option value="0.125">1/8</option>
+                                    <option value="0.25">1/4</option>
+                                    <option value="0.5">1/2</option>
                                     <option value="1">1</option>
+                                    <option value="2">2</option>
                                     <option value="4">4</option>
                                     <option value="8" selected>8</option>
                                     <option value="16">16</option>
                                     <option value="32">32</option>
+                                    <option value="64">64</option>
+                                    <option value="128">128</option>
                                 </select>
                             </div>
+                            <div id="${controlId}_bpm_speed" class="bpm-inline-knob"></div>
                         </div>
                     </div>
                 </div>
@@ -3815,6 +3821,22 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                                     if (sequence && sequence.type === 'audio') {
                                         console.log(`🔄 Updating audio sequence range: ${rangeMin} - ${rangeMax}`);
                                         window.sequenceManager.updateSequenceInline(paramUid, { 
+                                            min_value: rangeMin, 
+                                            max_value: rangeMax 
+                                        });
+                                    }
+                                    // Update BPM sequence min/max if exists
+                                    if (sequence && sequence.type === 'bpm') {
+                                        console.log(`🔄 Updating BPM sequence range: ${rangeMin} - ${rangeMax}`);
+                                        window.sequenceManager.updateBPMSequenceInline(paramUid, { 
+                                            min_value: rangeMin, 
+                                            max_value: rangeMax 
+                                        });
+                                    }
+                                    // Update timeline sequence min/max if exists
+                                    if (sequence && sequence.type === 'timeline') {
+                                        console.log(`🔄 Updating timeline sequence range: ${rangeMin} - ${rangeMax}`);
+                                        window.sequenceManager.updateTimelineSequenceInline(paramUid, { 
                                             min_value: rangeMin, 
                                             max_value: rangeMax 
                                         });

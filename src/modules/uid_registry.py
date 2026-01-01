@@ -83,7 +83,7 @@ class UIDRegistry:
         else:
             self._stats['misses'] += 1
             if self._stats['misses'] % 10 == 1:
-                logger.warning(f"❌ UID not found in registry: {uid[:50]}... [cache hit rate: {self.get_hit_rate():.1%}]")
+                logger.debug(f"❌ UID not found in registry: {uid[:50]}... [cache hit rate: {self.get_hit_rate():.1%}]")
         
         return result
     

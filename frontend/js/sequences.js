@@ -15,6 +15,7 @@ class SequenceManager {
         this.audioAnalyzerRunning = false;
         this.audioFeatures = {};
         this.audioGainKnob = null;
+        this.beatSensitivityKnob = null;
         this.audioDevice = null;
         this.audioDeviceName = null;
         this.cachedAudioDevices = null; // Cache for audio devices
@@ -59,9 +60,13 @@ class SequenceManager {
         
         // Initial gain
         this.audioGain = 1.0;
+        this.beatSensitivity = 1.0;
         
         // Initialize audio gain circular slider
         this.initAudioGainKnob();
+        
+        // Initialize beat sensitivity knob
+        this.initBeatSensitivityKnob();
     }
     
     /**
@@ -262,7 +267,8 @@ class SequenceManager {
             running: this.audioAnalyzerRunning,
             device: this.audioDevice || null,
             deviceName: this.audioDeviceName || null,
-            gain: this.audioGainKnob ? this.audioGainKnob.getValue() : 1.0
+            gain: this.audioGainKnob ? this.audioGainKnob.getValue() : 1.0,
+            beat_sensitivity: this.beatSensitivityKnob ? this.beatSensitivityKnob.getValue() : 1.0
         };
     }
     
@@ -326,6 +332,9 @@ class SequenceManager {
                             }
                             if (audioState.config?.gain !== undefined && this.audioGainKnob) {
                                 this.audioGainKnob.setValue(audioState.config.gain);
+                            }
+                            if (audioState.config?.beat_sensitivity !== undefined && this.beatSensitivityKnob) {
+                                this.beatSensitivityKnob.setValue(audioState.config.beat_sensitivity);
                             }
                         }
                     }
@@ -477,9 +486,12 @@ class SequenceManager {
             // For BPM type, show inline controls WITHOUT creating sequence yet
             console.log('🥁 Showing BPM inline controls for:', this.contextParameter.id);
             this.showInlineBPMControlsEmpty(this.contextParameter.id);
+        } else if (type === 'lfo') {
+            // For LFO type, show inline controls WITHOUT creating sequence yet
+            console.log('🌊 Showing LFO inline controls for:', this.contextParameter.id);
+            this.showInlineLFOControlsEmpty(this.contextParameter.id);
         } else {
-            // For other types, open editor modal
-            this.openEditor(this.contextParameter.id, this.contextParameter.label, this.contextParameter.value, type);
+            console.warn('⚠️ Unknown sequence type:', type);
         }
     }
     
@@ -552,11 +564,17 @@ class SequenceManager {
         
         // Initialize attack/release knob
         const knobContainer = document.getElementById(`${controlId}_attack_release`);
-        if (knobContainer && !knobContainer._circularSlider) {
+        if (knobContainer) {
+            // Destroy existing slider if present
+            if (knobContainer._circularSlider) {
+                knobContainer.innerHTML = '';
+                delete knobContainer._circularSlider;
+            }
+            
             const slider = new CircularSlider(knobContainer, {
-                min: 0.0,
+                min: 0.2,
                 max: 1.0,
-                value: 0.5,
+                value: 0.7,
                 step: 0.01,
                 arc: 270,
                 startAngle: 135, // Start at 7:30, deadzone at bottom
@@ -575,6 +593,9 @@ class SequenceManager {
                 }
             });
             knobContainer._circularSlider = slider;
+            console.log('🎛️ Initialized empty state attack/release knob');
+        } else {
+            console.warn('⚠️ Attack/release knob container not found in showInlineAudioControlsEmpty');
         }
         
         console.log('✅ Audio controls shown (no sequence created yet - select band + direction)');
@@ -681,8 +702,17 @@ class SequenceManager {
         // Close context menu
         document.getElementById('sequenceContextMenu').classList.remove('show');
         
-        // Find ALL sequences for this parameter (there might be duplicates)
-        const existingSequences = this.sequences.filter(s => s.target_parameter === this.contextParameter.id);
+        // Find ALL sequences for this parameter (use UID, not path)
+        const paramUid = this.contextParameter.uid || this.contextParameter.id;
+        console.log('🔍 Looking for sequences with target_parameter:', paramUid);
+        console.log('📋 Available sequences:', this.sequences.map(s => ({
+            id: s.id,
+            target_parameter: s.target_parameter,
+            type: s.type
+        })));
+        
+        const existingSequences = this.sequences.filter(s => s.target_parameter === paramUid);
+        console.log('✅ Found sequences:', existingSequences.length);
         
         if (existingSequences.length > 0) {
             console.log(`✅ Found ${existingSequences.length} sequence(s) to remove:`, existingSequences.map(s => s.id));
@@ -699,7 +729,7 @@ class SequenceManager {
             console.log('🔄 Restoring default UI for controlId:', this.contextParameter.controlId);
             this.restoreDefaultTripleSlider(this.contextParameter.controlId);
         } else {
-            console.warn('⚠️ No sequence found for parameter:', this.contextParameter.id);
+            console.warn('⚠️ No sequence found for parameter:', paramUid);
             // Even if no sequence exists, hide the dynamic settings
             this.restoreDefaultTripleSlider(this.contextParameter.controlId);
             this.showNotification('No sequence found for this parameter', 'warning');
@@ -734,6 +764,13 @@ class SequenceManager {
             timelineControls.style.display = 'none';
             console.log('✅ Hidden timeline controls');
         }
+        
+        // Hide BPM controls
+        const bpmControls = document.getElementById(`${controlId}_bpm_controls`);
+        if (bpmControls) {
+            bpmControls.style.display = 'none';
+            console.log('✅ Hidden BPM controls');
+        }
     }
     
     /**
@@ -761,19 +798,16 @@ class SequenceManager {
         // Show the controls (param-dynamic-settings in new grid layout)
         controlsContainer.style.display = 'block';
         
-        // Get current clip duration automatically
-        const clipDuration = this.getCurrentClipDuration();
-        console.log('⏱️ Current clip duration:', clipDuration);
-        
-        // Track selected loop mode and playback state
+        // Track selected loop mode, playback state, and duration
         let selectedLoopMode = 'once';
         let playbackState = 'pause'; // 'forward', 'backward', 'pause'
+        let duration = 5.0; // Default 5 seconds
         
         // Function to create sequence when configuration is complete
         const createSequence = () => {
             this.createTimelineSequenceWithConfig(parameterId, {
                 loop_mode: selectedLoopMode,
-                duration: clipDuration,
+                duration: duration,
                 playback_state: playbackState
             });
         };
@@ -809,15 +843,39 @@ class SequenceManager {
             };
         }
         
-        // Set up speed input
-        const speedInput = controlsContainer.querySelector('.timeline-speed-input-inline');
-        if (speedInput) {
-            speedInput.value = 1.0;
-            speedInput.onchange = () => {
-                const speed = parseFloat(speedInput.value) || 1.0;
-                console.log('⚡ Speed changed:', speed);
+        // Set up duration input
+        const durationInput = controlsContainer.querySelector('.timeline-duration-input-inline');
+        if (durationInput) {
+            durationInput.value = duration;
+            durationInput.onchange = () => {
+                duration = parseFloat(durationInput.value) || 5.0;
+                console.log('⏱️ Duration changed:', duration);
                 createSequence(); // Create/update sequence immediately
             };
+        }
+        
+        // Set up speed circular slider
+        const speedKnobContainer = document.getElementById(`${controlId}_timeline_speed`);
+        if (speedKnobContainer && !speedKnobContainer._circularSlider) {
+            const speedSlider = new CircularSlider(speedKnobContainer, {
+                min: 0.1,
+                max: 10.0,
+                value: 1.0,
+                step: 0.1,
+                arc: 270,
+                startAngle: 135,
+                size: 'tiny',
+                label: '',
+                decimals: 1,
+                unit: '×',
+                variant: 'primary',
+                showValue: true,
+                onChange: (value) => {
+                    console.log('⚡ Speed changed:', value);
+                    createSequence(); // Create/update sequence immediately
+                }
+            });
+            speedKnobContainer._circularSlider = speedSlider;
         }
         
         console.log('✅ Timeline controls shown (ready to configure)');
@@ -825,6 +883,8 @@ class SequenceManager {
     
     /**
      * Get current clip duration (in seconds) from active player/clip
+    /**
+     * Get current clip duration for BPM sequence
      */
     getCurrentClipDuration() {
         // Try to get duration from current video player clip
@@ -832,14 +892,14 @@ class SequenceManager {
             // Check session state for current clip
             const sessionState = window.sessionStateLoader?.cachedState;
             if (!sessionState) {
-                console.warn('⚠️ No session state available');
+                console.debug('⚠️ No session state available, using default duration');
                 return 10.0; // Default 10 seconds
             }
             
             // Get video player state
             const videoPlayer = sessionState.players?.video;
             if (!videoPlayer) {
-                console.warn('⚠️ No video player state');
+                console.debug('⚠️ No video player state, using default duration');
                 return 10.0;
             }
             
@@ -884,9 +944,13 @@ class SequenceManager {
         // Use stored controlId from context parameter
         const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
         
-        // Get speed from input
-        const speedInput = document.getElementById(`${controlId}_timeline_controls`)?.querySelector('.timeline-speed-input-inline');
-        const speed = speedInput ? (parseFloat(speedInput.value) || 1.0) : (updates.speed || 1.0);
+        // Get speed from circular slider
+        const speedKnobContainer = document.getElementById(`${controlId}_timeline_speed`);
+        const speed = speedKnobContainer?._circularSlider?.getValue() || updates.speed || 1.0;
+        
+        // Get duration from input field
+        const durationInput = document.getElementById(`${controlId}_timeline_controls`)?.querySelector('.timeline-duration-input-inline');
+        const duration = durationInput ? parseFloat(durationInput.value) || 5.0 : (updates.duration || 5.0);
         
         // Get min/max from triple slider
         const tripleSlider = getTripleSlider(controlId);
@@ -905,21 +969,14 @@ class SequenceManager {
             console.warn('⚠️ Triple slider not found, using defaults:', { minValue, maxValue });
         }
         
-        // Create keyframes for simple timeline: start and end
-        // This creates a linear transition from minValue to maxValue over the duration
-        const keyframes = [
-            [0, minValue],
-            [updates.duration, maxValue]
-        ];
-        
         // Create config with values from UI
         const config = {
-            keyframes: keyframes,
-            interpolation: 'linear',
             loop_mode: updates.loop_mode,
-            duration: updates.duration,
+            duration: duration,
             playback_state: updates.playback_state || 'pause',
-            speed: updates.speed || 1.0
+            speed: speed,
+            min_value: minValue,
+            max_value: maxValue
         };
         
         const data = {
@@ -1127,15 +1184,29 @@ class SequenceManager {
             };
         }
         
-        // Set up speed input
-        const speedInput = controlsContainer.querySelector('.bpm-speed-input-inline');
-        if (speedInput) {
-            speedInput.value = speed;
-            speedInput.onchange = () => {
-                speed = parseFloat(speedInput.value) || 1.0;
-                console.log('⚡ Speed changed:', speed);
-                createSequence(); // Create/update sequence immediately
-            };
+        // Set up speed knob (circular slider)
+        const speedKnobContainer = document.getElementById(`${controlId}_bpm_speed`);
+        if (speedKnobContainer && !speedKnobContainer._circularSlider) {
+            const speedSlider = new CircularSlider(speedKnobContainer, {
+                min: 0.1,
+                max: 10.0,
+                value: speed,
+                step: 0.1,
+                arc: 270,
+                startAngle: 135,
+                size: 'tiny',
+                label: '',
+                decimals: 1,
+                unit: '×',
+                variant: 'primary',
+                showValue: true,
+                onChange: (value) => {
+                    speed = value;
+                    console.log('⚡ Speed changed:', speed);
+                    createSequence(); // Create/update sequence immediately
+                }
+            });
+            speedKnobContainer._circularSlider = speedSlider;
         }
         
         // Set up beat division dropdown
@@ -1143,7 +1214,7 @@ class SequenceManager {
         if (divisionDropdown) {
             divisionDropdown.value = beatDivision;
             divisionDropdown.onchange = () => {
-                beatDivision = parseInt(divisionDropdown.value);
+                beatDivision = parseFloat(divisionDropdown.value);
                 console.log('🥁 Beat division selected:', beatDivision);
                 createSequence(); // Create/update sequence immediately
             };
@@ -1161,77 +1232,67 @@ class SequenceManager {
         // Get controlId for accessing UI elements
         const controlId = this.contextParameter?.controlId || this.parameterPathToControlId(parameterId);
         
-        // Get beat division from updates
+        // Get beat division from updates (supports fractional beats like 0.5)
         const beatDivision = updates.beat_division || 8;
         
         // Get speed from input if not provided
         const speedInput = document.getElementById(`${controlId}_bpm_controls`)?.querySelector('.bpm-speed-input-inline');
         const speed = updates.speed !== undefined ? updates.speed : (speedInput ? parseFloat(speedInput.value) : 1.0);
         
-        // Create default keyframes (linear ramp from 0 to 1)
-        const keyframes = [];
-        for (let i = 0; i < beatDivision; i++) {
-            keyframes.push(i / (beatDivision - 1));
+        // Get min/max from triple slider
+        const tripleSlider = getTripleSlider(controlId);
+        let minValue = 0;
+        let maxValue = 100;
+        
+        if (tripleSlider) {
+            const range = tripleSlider.getRange();
+            minValue = range.min;
+            maxValue = range.max;
+            console.log('📊 Using slider range:', { minValue, maxValue });
+        } else {
+            console.warn('⚠️ Triple slider not found, using defaults:', { minValue, maxValue });
         }
         
         const data = {
             type: 'bpm',
-            target_parameter: parameterId,
+            target_parameter: this.contextParameter.uid || parameterId,
             config: {
                 beat_division: beatDivision,
-                keyframes: keyframes,
                 clip_duration: updates.clip_duration || 10.0,
                 loop_mode: updates.loop_mode || 'once',
                 playback_state: updates.playback_state || 'pause',
-                speed: speed
+                speed: speed,
+                min_value: minValue,
+                max_value: maxValue
             }
         };
         
         console.log('📦 Creating BPM sequence with UID:', this.contextParameter.uid, 'config:', data);
         
         try {
-            // Check if sequence already exists for this parameter
-            const existingSequence = this.getSequenceForParameter(parameterId);
+            const response = await fetch('/api/sequences', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
             
-            if (existingSequence) {
-                console.log('🔄 Updating existing BPM sequence:', existingSequence.id);
-                // Update existing sequence
-                const response = await fetch(`/api/sequences/${existingSequence.id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ config: data.config })
-                });
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ BPM sequence created:', result);
                 
-                if (response.ok) {
-                    const result = await response.json();
-                    console.log('✅ BPM sequence updated:', result);
-                    this.showInlineBPMControls(parameterId, result.sequence);
+                await window.sessionStateLoader.reload();
+                await this.loadSequencesFromSessionState();
+                
+                const savedSequence = this.sequences.find(s => s.target_parameter === parameterId);
+                if (savedSequence) {
+                    this.showInlineBPMControls(parameterId, savedSequence);
                 }
+                
+                this.showNotification('BPM sequence applied!', 'success');
             } else {
-                console.log('➕ Creating new BPM sequence');
-                const response = await fetch('/api/sequences', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                
-                if (response.ok) {
-                    const result = await response.json();
-                    const savedSequence = result.sequence;
-                    console.log('✅ BPM sequence saved:', result);
-                    
-                    // Store sequence with parameter UID
-                    if (this.contextParameter && this.contextParameter.uid) {
-                        this.storeSequenceByUid(this.contextParameter.uid, savedSequence);
-                        // Update UI to show sequence is active
-                        this.showInlineBPMControls(parameterId, savedSequence);
-                    } else {
-                        console.warn('⚠️ No parameter UID available, cannot store sequence by UID');
-                        this.sequences.set(savedSequence.id, savedSequence);
-                    }
-                    
-                    this.showNotification('BPM sequence created!', 'success');
-                }
+                const error = await response.json();
+                console.error('❌ Server error:', error);
+                this.showNotification(`Error: ${error.error}`, 'error');
             }
         } catch (error) {
             console.error('❌ Error creating BPM sequence:', error);
@@ -1262,7 +1323,7 @@ class SequenceManager {
         // Update playback buttons
         const playButtons = controlsContainer.querySelectorAll('.bpm-play-btn-inline');
         playButtons.forEach(btn => {
-            if (btn.dataset.direction === sequence.playback_state) {
+            if (btn.dataset.direction === sequence.config?.playback_state) {
                 btn.classList.add('active');
             } else {
                 btn.classList.remove('active');
@@ -1271,8 +1332,8 @@ class SequenceManager {
         
         // Update loop mode dropdown
         const loopDropdown = controlsContainer.querySelector('.bpm-loop-dropdown-inline');
-        if (loopDropdown && sequence.loop_mode) {
-            loopDropdown.value = sequence.loop_mode;
+        if (loopDropdown && sequence.config?.loop_mode) {
+            loopDropdown.value = sequence.config.loop_mode;
             loopDropdown.onchange = () => {
                 this.updateBPMSequenceInline(parameterId, { 
                     loop_mode: loopDropdown.value 
@@ -1282,8 +1343,8 @@ class SequenceManager {
         
         // Update speed input
         const speedInput = controlsContainer.querySelector('.bpm-speed-input-inline');
-        if (speedInput && sequence.speed !== undefined) {
-            speedInput.value = sequence.speed;
+        if (speedInput && sequence.config?.speed !== undefined) {
+            speedInput.value = sequence.config.speed;
             speedInput.onchange = () => {
                 this.updateBPMSequenceInline(parameterId, { 
                     speed: parseFloat(speedInput.value) || 1.0 
@@ -1293,11 +1354,11 @@ class SequenceManager {
         
         // Update beat division dropdown
         const divisionDropdown = controlsContainer.querySelector('.bpm-division-dropdown-inline');
-        if (divisionDropdown && sequence.beat_division) {
-            divisionDropdown.value = sequence.beat_division;
+        if (divisionDropdown && sequence.config?.beat_division) {
+            divisionDropdown.value = sequence.config.beat_division;
             divisionDropdown.onchange = () => {
                 this.updateBPMSequenceInline(parameterId, { 
-                    beat_division: parseInt(divisionDropdown.value) 
+                    beat_division: parseFloat(divisionDropdown.value) 
                 });
             };
         }
@@ -1329,7 +1390,14 @@ class SequenceManager {
      * Update BPM sequence parameters inline (without opening modal)
      */
     async updateBPMSequenceInline(parameterId, updates) {
-        const sequence = this.getSequenceForParameter(parameterId);
+        // parameterId can be either UID or dot-notation path
+        // Try to find sequence by both
+        const sequence = this.sequences.find(s => 
+            s.target_parameter === parameterId || 
+            s.id === parameterId ||
+            (this.contextParameter && this.contextParameter.uid === parameterId)
+        );
+        
         if (!sequence) {
             console.warn('⚠️ No BPM sequence found for parameter:', parameterId);
             return;
@@ -1348,12 +1416,11 @@ class SequenceManager {
                 const result = await response.json();
                 console.log('✅ BPM sequence updated:', result);
                 
-                // Update local cache
-                if (this.contextParameter && this.contextParameter.uid) {
-                    this.storeSequenceByUid(this.contextParameter.uid, result.sequence);
-                } else {
-                    this.sequences.set(sequence.id, result.sequence);
-                }
+                await window.sessionStateLoader.reload();
+                await this.loadSequencesFromSessionState();
+            } else {
+                const error = await response.json();
+                console.error('❌ Server error:', error);
             }
         } catch (error) {
             console.error('❌ Error updating BPM sequence:', error);
@@ -1371,14 +1438,26 @@ class SequenceManager {
         }
         
         try {
+            // Merge updates with existing sequence data
+            const updatedConfig = {
+                loop_mode: updates.loop_mode !== undefined ? updates.loop_mode : sequence.loop_mode,
+                duration: updates.duration !== undefined ? updates.duration : sequence.duration,
+                playback_state: updates.playback_state !== undefined ? updates.playback_state : sequence.playback_state,
+                speed: updates.speed !== undefined ? updates.speed : sequence.speed,
+                min_value: updates.min_value !== undefined ? updates.min_value : sequence.min_value,
+                max_value: updates.max_value !== undefined ? updates.max_value : sequence.max_value
+            };
+            
+            console.log('🔄 Updating timeline sequence:', updatedConfig);
+            
             const response = await fetch(`/api/sequences/${sequence.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ config: { ...sequence.config, ...updates } })
+                body: JSON.stringify({ config: updatedConfig })
             });
             
             if (response.ok) {
-                await window.sessionStateLoader.reload(); // Force reload to get updated state
+                await window.sessionStateLoader.reload();
                 await this.loadSequencesFromSessionState();
                 
                 // Update UI to reflect changes
@@ -1386,7 +1465,6 @@ class SequenceManager {
                 const controlsContainer = document.getElementById(`${controlId}_timeline_controls`);
                 
                 if (controlsContainer && updates.loop_mode) {
-                    // Update loop mode dropdown
                     const loopDropdown = controlsContainer.querySelector('.timeline-loop-dropdown-inline');
                     if (loopDropdown) {
                         loopDropdown.value = updates.loop_mode;
@@ -1441,8 +1519,11 @@ class SequenceManager {
     
     /**
      * Open sequence editor for a parameter
+     * @deprecated Use inline controls instead (showInlineAudioControls, showInlineLFOControls, etc.)
      */
     openEditor(parameterId, parameterLabel, currentValue, presetType = null) {
+        console.warn('⚠️ openEditor is DEPRECATED - use inline controls instead');
+        return; // Modal disabled - use inline controls
         console.log('🔓 openEditor called:', { parameterId, parameterLabel, currentValue, presetType });
         
         this.currentParameter = {
@@ -1484,20 +1565,28 @@ class SequenceManager {
     
     /**
      * Close sequence editor
+     * @deprecated Modal no longer used
      */
     closeEditor() {
+        console.warn('⚠️ closeEditor is DEPRECATED - modal no longer used');
+        return; // Modal disabled
         console.log('🔒 closeEditor called');
         const modal = document.getElementById('sequenceModal');
-        modal.classList.remove('show');
-        modal.style.display = 'none';
+        if (modal) {
+            modal.classList.remove('show');
+            modal.style.display = 'none';
+        }
         this.currentParameter = null;
         this.currentSequence = null;
     }
     
     /**
      * Reset editor to default state
+     * @deprecated Modal no longer used
      */
     resetEditor() {
+        console.warn('⚠️ resetEditor is DEPRECATED - modal no longer used');
+        return; // Modal disabled
         // Select Audio type by default
         this.selectType('audio');
         
@@ -1581,8 +1670,11 @@ class SequenceManager {
     
     /**
      * Select sequence type
+     * @deprecated Modal no longer used
      */
     selectType(type) {
+        console.warn('⚠️ selectType is DEPRECATED - modal no longer used');
+        return; // Modal disabled
         // Update buttons
         document.querySelectorAll('.sequence-type-btn').forEach(btn => {
             btn.classList.remove('active');
@@ -1740,16 +1832,21 @@ class SequenceManager {
             return;
         }
         
+        // Save sequence ID before deletion (this.currentSequence may be cleared during the process)
+        const sequenceId = this.currentSequence.id;
+        
         try {
-            const response = await fetch(`/api/sequences/${this.currentSequence.id}`, {
+            const response = await fetch(`/api/sequences/${sequenceId}`, {
                 method: 'DELETE'
             });
             
             if (response.ok) {
-                console.log('✅ Sequence deleted:', this.currentSequence.id);
+                console.log('✅ Sequence deleted:', sequenceId);
                 await window.sessionStateLoader.reload(); // Force reload to get updated state
                 await this.loadSequencesFromSessionState();
-                this.closeEditor();
+                // Clear references (modal is deprecated)
+                this.currentSequence = null;
+                this.currentParameter = null;
                 if (!skipConfirm) {
                     this.showNotification('Sequence deleted', 'success');
                 }
@@ -1973,34 +2070,72 @@ class SequenceManager {
             // Restore band selection (inline buttons)
             const bandButtons = controlsContainer.querySelectorAll('.audio-band-btn-inline');
             console.log('🔘 Found band buttons:', bandButtons.length);
-            const bandBtn = controlsContainer.querySelector(`[data-band="${seq.band}"]`);
-            if (bandBtn) {
-                bandButtons.forEach(btn => btn.classList.remove('active'));
-                bandBtn.classList.add('active');
-                console.log('✅ Restored band:', seq.band);
-            } else {
-                console.warn('❌ Band button not found for:', seq.band);
-            }
+            bandButtons.forEach(btn => {
+                const isActive = btn.dataset.band === seq.band;
+                btn.classList.toggle('active', isActive);
+                // Attach onclick handler
+                btn.onclick = () => {
+                    // Update UI
+                    bandButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    // Update sequence
+                    this.updateSequenceInline(seq.target_parameter, { band: btn.dataset.band });
+                };
+                if (isActive) {
+                    console.log('✅ Restored band:', seq.band);
+                }
+            });
             
             // Restore direction selection (inline buttons) - seq.mode, not seq.config.direction
             const dirButtons = controlsContainer.querySelectorAll('.audio-dir-btn-inline');
             console.log('🔘 Found direction buttons:', dirButtons.length);
-            const directionBtn = controlsContainer.querySelector(`[data-direction="${seq.mode}"]`);
-            if (directionBtn) {
-                dirButtons.forEach(btn => btn.classList.remove('active'));
-                directionBtn.classList.add('active');
-                console.log('✅ Restored mode:', seq.mode);
-            } else {
-                console.warn('❌ Direction button not found for:', seq.mode);
-            }
+            dirButtons.forEach(btn => {
+                const isActive = btn.dataset.direction === seq.mode;
+                btn.classList.toggle('active', isActive);
+                // Attach onclick handler - send 'mode' to match backend
+                btn.onclick = () => {
+                    // Update UI
+                    dirButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    // Update sequence - use 'mode' key for backend
+                    this.updateSequenceInline(seq.target_parameter, { mode: btn.dataset.direction });
+                };
+                if (isActive) {
+                    console.log('✅ Restored mode:', seq.mode);
+                }
+            });
             
             // Restore attack/release knob value
             const knobContainer = document.getElementById(`${controlId}_attack_release`);
             if (knobContainer) {
                 console.log('✅ Found knob container, has slider:', !!knobContainer._circularSlider);
-                if (knobContainer._circularSlider && seq.attack_release !== undefined) {
+                
+                // Create slider if it doesn't exist
+                if (!knobContainer._circularSlider) {
+                    console.log('🎛️ Creating new CircularSlider for restore');
+                    const slider = new CircularSlider(knobContainer, {
+                        min: 0.2,
+                        max: 1.0,
+                        value: seq.attack_release || 0.7,
+                        step: 0.01,
+                        arc: 270,
+                        startAngle: 135,
+                        size: 'tiny',
+                        label: '',
+                        decimals: 2,
+                        unit: '',
+                        variant: 'primary',
+                        showValue: false,
+                        onChange: (value) => {
+                            this.updateSequenceInline(seq.target_parameter, { attack_release: value });
+                        }
+                    });
+                    knobContainer._circularSlider = slider;
+                    console.log('✅ Created and set attack_release:', seq.attack_release || 0.5);
+                } else if (seq.attack_release !== undefined) {
+                    // Update existing slider
                     knobContainer._circularSlider.setValue(seq.attack_release);
-                    console.log('✅ Restored attack_release:', seq.attack_release);
+                    console.log('✅ Updated attack_release:', seq.attack_release);
                 }
             } else {
                 console.warn('❌ Knob container not found');
@@ -2010,6 +2145,147 @@ class SequenceManager {
         });
         
         console.log('\n✅ Restore complete');
+    }
+    
+    /**
+     * Restore inline BPM controls for all BPM sequences on page reload
+     */
+    restoreInlineBPMControls() {
+        console.log('🔄 Restoring inline BPM controls for BPM sequences...');
+        console.log('📊 Total sequences:', this.sequences.length);
+        
+        // Find all BPM sequences
+        const bpmSequences = this.sequences.filter(seq => seq.type === 'bpm');
+        console.log(`📋 Found ${bpmSequences.length} BPM sequences to restore`);
+        
+        if (bpmSequences.length === 0) {
+            console.log('✅ No BPM sequences to restore');
+            return;
+        }
+        
+        bpmSequences.forEach((seq, index) => {
+            console.log(`\n🔍 [${index + 1}/${bpmSequences.length}] Processing BPM sequence:`, {
+                uid: seq.target_parameter,
+                beat_division: seq.beat_division,
+                loop_mode: seq.loop_mode,
+                speed: seq.speed,
+                playback_state: seq.playback_state
+            });
+            
+            // Find the button with matching UID
+            const button = document.querySelector(`[data-param-uid="${seq.target_parameter}"]`);
+            if (!button) {
+                console.log('❌ Button not found in DOM (parameter not visible)');
+                return;
+            }
+            console.log('✅ Found button');
+            
+            // Get the parameter control container (new grid layout)
+            const paramControl = button.closest('.parameter-grid-row');
+            if (!paramControl) {
+                console.warn('❌ No parameter-grid-row found for button');
+                return;
+            }
+            console.log('✅ Found parameter-grid-row');
+            
+            // Find the triple slider container
+            const tripleSliderContainer = paramControl.querySelector('.triple-slider-container');
+            if (!tripleSliderContainer) {
+                console.warn('❌ No triple slider container found');
+                return;
+            }
+            console.log('✅ Found triple-slider-container:', tripleSliderContainer.id);
+            
+            const controlId = tripleSliderContainer.id;
+            const controlsContainer = document.getElementById(`${controlId}_bpm_controls`);
+            
+            if (!controlsContainer) {
+                console.warn(`❌ BPM controls container not found for: ${controlId}`);
+                return;
+            }
+            console.log('✅ Found BPM controls container');
+            
+            // Show controls
+            controlsContainer.style.display = 'block';
+            console.log('✅ Set display to block');
+            
+            // Restore playback state buttons
+            const playButtons = controlsContainer.querySelectorAll('.bpm-play-btn-inline');
+            const playbackState = seq.playback_state || 'pause';
+            playButtons.forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.direction === playbackState) {
+                    btn.classList.add('active');
+                    console.log('✅ Set active playback state:', playbackState);
+                }
+                // Attach click handler
+                btn.onclick = () => {
+                    playButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    this.updateBPMSequenceInline(seq.target_parameter, { playback_state: btn.dataset.direction });
+                };
+            });
+            
+            // Restore loop mode dropdown
+            const loopDropdown = controlsContainer.querySelector('.bpm-loop-dropdown-inline');
+            if (loopDropdown) {
+                loopDropdown.value = seq.loop_mode || 'once';
+                console.log('✅ Set loop mode:', loopDropdown.value);
+                loopDropdown.onchange = () => {
+                    this.updateBPMSequenceInline(seq.target_parameter, { loop_mode: loopDropdown.value });
+                };
+            }
+            
+            // Restore speed knob (circular slider)
+            const speedKnobContainer = document.getElementById(`${controlId}_bpm_speed`);
+            if (speedKnobContainer) {
+                console.log('✅ Found speed knob container');
+                
+                // Create slider if it doesn't exist
+                if (!speedKnobContainer._circularSlider) {
+                    console.log('🎛️ Creating new CircularSlider for restore');
+                    const slider = new CircularSlider(speedKnobContainer, {
+                        min: 0.1,
+                        max: 10.0,
+                        value: seq.speed || 1.0,
+                        step: 0.1,
+                        arc: 270,
+                        startAngle: 135,
+                        size: 'tiny',
+                        label: '',
+                        decimals: 1,
+                        unit: '×',
+                        variant: 'primary',
+                        showValue: true,
+                        onChange: (value) => {
+                            this.updateBPMSequenceInline(seq.target_parameter, { speed: value });
+                        }
+                    });
+                    speedKnobContainer._circularSlider = slider;
+                    console.log('✅ Created and set speed:', seq.speed || 1.0);
+                } else if (seq.speed !== undefined) {
+                    // Update existing slider
+                    speedKnobContainer._circularSlider.setValue(seq.speed);
+                    console.log('✅ Updated speed:', seq.speed);
+                }
+            } else {
+                console.warn('❌ Speed knob container not found');
+            }
+            
+            // Restore beat division dropdown
+            const divisionDropdown = controlsContainer.querySelector('.bpm-division-dropdown-inline');
+            if (divisionDropdown) {
+                divisionDropdown.value = seq.beat_division || 8;
+                console.log('✅ Set beat division:', divisionDropdown.value);
+                divisionDropdown.onchange = () => {
+                    this.updateBPMSequenceInline(seq.target_parameter, { beat_division: parseFloat(divisionDropdown.value) });
+                };
+            }
+            
+            console.log('✅ Successfully restored BPM controls for:', seq.target_parameter);
+        });
+        
+        console.log('\n✅ BPM restore complete');
     }
     
     /**
@@ -2031,7 +2307,10 @@ class SequenceManager {
         timelineSequences.forEach((seq, index) => {
             console.log(`\n🔍 [${index + 1}/${timelineSequences.length}] Processing timeline sequence:`, {
                 uid: seq.target_parameter,
-                loop_mode: seq.config?.loop_mode
+                loop_mode: seq.loop_mode,
+                duration: seq.duration,
+                speed: seq.speed,
+                playback_state: seq.playback_state
             });
             
             // Find the button with matching UID
@@ -2074,9 +2353,9 @@ class SequenceManager {
             
             // Restore loop mode selection
             const loopDropdown = controlsContainer.querySelector('.timeline-loop-dropdown-inline');
-            if (loopDropdown && seq.config?.loop_mode) {
-                loopDropdown.value = seq.config.loop_mode;
-                console.log('✅ Restored loop mode:', seq.config.loop_mode);
+            if (loopDropdown && seq.loop_mode) {
+                loopDropdown.value = seq.loop_mode;
+                console.log('✅ Restored loop mode:', seq.loop_mode);
                 
                 // Re-attach change handler
                 loopDropdown.onchange = () => {
@@ -2086,22 +2365,58 @@ class SequenceManager {
                 console.warn('❌ Loop dropdown not found');
             }
             
-            // Restore speed
-            const speedInput = controlsContainer.querySelector('.timeline-speed-input-inline');
-            if (speedInput) {
-                speedInput.value = seq.config?.speed || 1.0;
-                console.log('✅ Restored speed:', seq.config?.speed || 1.0);
+            // Restore duration input
+            const durationInput = controlsContainer.querySelector('.timeline-duration-input-inline');
+            if (durationInput) {
+                durationInput.value = seq.duration || 5.0;
+                console.log('✅ Restored duration:', seq.duration || 5.0);
                 
                 // Re-attach change handler
-                speedInput.onchange = () => {
-                    const speed = parseFloat(speedInput.value) || 1.0;
-                    this.updateTimelineSequenceInline(seq.target_parameter, { speed: speed });
+                durationInput.onchange = () => {
+                    const duration = parseFloat(durationInput.value) || 5.0;
+                    this.updateTimelineSequenceInline(seq.target_parameter, { duration: duration });
                 };
+            }
+            
+            // Restore speed knob (circular slider)
+            const speedKnobContainer = document.getElementById(`${controlId}_timeline_speed`);
+            if (speedKnobContainer) {
+                console.log('✅ Found speed knob container');
+                
+                // Create slider if it doesn't exist
+                if (!speedKnobContainer._circularSlider) {
+                    console.log('🏛️ Creating new CircularSlider for restore');
+                    const slider = new CircularSlider(speedKnobContainer, {
+                        min: 0.1,
+                        max: 10.0,
+                        value: seq.speed || 1.0,
+                        step: 0.1,
+                        arc: 270,
+                        startAngle: 135,
+                        size: 'tiny',
+                        label: '',
+                        decimals: 1,
+                        unit: '×',
+                        variant: 'primary',
+                        showValue: true,
+                        onChange: (value) => {
+                            this.updateTimelineSequenceInline(seq.target_parameter, { speed: value });
+                        }
+                    });
+                    speedKnobContainer._circularSlider = slider;
+                    console.log('✅ Created and set speed:', seq.speed || 1.0);
+                } else if (seq.speed !== undefined) {
+                    // Update existing slider
+                    speedKnobContainer._circularSlider.setValue(seq.speed);
+                    console.log('✅ Updated speed:', seq.speed);
+                }
+            } else {
+                console.warn('❌ Speed knob container not found');
             }
             
             // Restore playback state
             const playButtons = controlsContainer.querySelectorAll('.timeline-play-btn-inline');
-            const playbackState = seq.config?.playback_state || 'pause';
+            const playbackState = seq.playback_state || 'pause';
             const activePlayBtn = controlsContainer.querySelector(`.timeline-play-btn-inline[data-direction="${playbackState}"]`);
             if (activePlayBtn) {
                 playButtons.forEach(btn => btn.classList.remove('active'));
@@ -2141,13 +2456,12 @@ class SequenceManager {
                 btn = document.createElement('button');
                 btn.className = 'sequence-btn';
                 btn.innerHTML = '⚙️';
-                btn.title = 'Parameter Sequence';
+                btn.title = 'Parameter Sequence (Deprecated - Use context menu)';
                 param.appendChild(btn);
                 
+                // DEPRECATED: Modal is disabled, button kept for backward compatibility but non-functional
                 btn.addEventListener('click', () => {
-                    const label = param.querySelector('label')?.textContent || paramId;
-                    const value = param.querySelector('input')?.value || 0;
-                    this.openEditor(paramId, label, value);
+                    console.warn('⚠️ ⚙️ button is DEPRECATED - use right-click context menu instead');
                 });
             }
             
@@ -2237,6 +2551,67 @@ class SequenceManager {
     }
     
     /**
+     * Initialize beat sensitivity circular slider
+     */
+    initBeatSensitivityKnob() {
+        const container = document.getElementById('beatSensitivityKnob');
+        if (!container) {
+            console.warn('⚠️ Beat sensitivity knob container not found');
+            return;
+        }
+        
+        // Prevent duplicate initialization
+        if (this.beatSensitivityKnob) {
+            console.log('⚠️ Beat sensitivity knob already initialized');
+            return;
+        }
+        
+        this.beatSensitivityKnob = new CircularSlider(container, {
+            min: 0.1,
+            max: 3.0,
+            value: 1.0,
+            step: 0.1,
+            arc: 270,
+            startAngle: 135,
+            size: 'tiny',
+            label: '',
+            decimals: 1,
+            unit: '',
+            variant: 'warning',  // Different color to distinguish from gain
+            showValue: true,
+            onChange: (value) => {
+                this.beatSensitivity = parseFloat(value);
+            },
+            onDragEnd: (value) => {
+                this.setBeatSensitivity(value);
+            }
+        });
+        
+        console.log('🥁 Beat sensitivity knob initialized');
+    }
+    
+    /**
+     * Set beat sensitivity
+     */
+    async setBeatSensitivity(sensitivity) {
+        try {
+            const response = await fetch('/api/audio/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ beat_sensitivity: parseFloat(sensitivity) })
+            });
+            
+            if (!response.ok) throw new Error('Failed to set beat sensitivity');
+            
+            this.beatSensitivity = parseFloat(sensitivity);
+            console.log(`🥁 Beat sensitivity: ${sensitivity}`);
+        } catch (error) {
+            console.error('Error setting beat sensitivity:', error);
+            showToast('Failed to set beat sensitivity', 'error');
+        }
+    }
+    
+    /**
      * Initialize audio attack/release knob
      */
     initAudioAttackReleaseKnob() {
@@ -2248,9 +2623,9 @@ class SequenceManager {
         }
         
         this.audioAttackReleaseKnob = new CircularSlider(container, {
-            min: 0.0,
+            min: 0.2,
             max: 1.0,
-            value: 0.1,
+            value: 0.7,
             step: 0.01,
             arc: 270,
             size: 'small',
@@ -2258,10 +2633,44 @@ class SequenceManager {
             decimals: 2,
             unit: '',
             variant: 'success',
-            showValue: true
+            showValue: true,
+            onDragEnd: (value) => {
+                // Update when drag ends
+                if (this.currentSequence && this.currentSequence.type === 'audio') {
+                    this.updateAudioSequenceAttackRelease(value);
+                }
+            }
         });
         
         console.log('🎛️ Audio attack/release knob initialized');
+    }
+    
+    /**
+     * Update audio sequence attack/release value
+     */
+    async updateAudioSequenceAttackRelease(value) {
+        if (!this.currentSequence) return;
+        
+        try {
+            const response = await fetch(`/api/sequences/${this.currentSequence.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    config: {
+                        ...this.currentSequence.config,
+                        attack_release: parseFloat(value)
+                    }
+                })
+            });
+            
+            if (response.ok) {
+                console.log(`🎛️ Attack/release updated: ${value}`);
+                // Update local sequence object
+                this.currentSequence.config.attack_release = parseFloat(value);
+            }
+        } catch (error) {
+            console.error('Error updating attack/release:', error);
+        }
     }
     
     /**
@@ -2480,6 +2889,23 @@ class SequenceManager {
         
         window.socket.on('disconnect', () => {
             console.log('❌ Socket.IO disconnected');
+        });
+        
+        // Listen for sequence deletion events
+        window.socket.on('sequence_deleted', async (data) => {
+            console.log('🗑️ Sequence deleted event:', data);
+            
+            // Reload sequences from session state to reflect deletion
+            await this.loadSequencesFromSessionState();
+            
+            // Clear current sequence references if it was the deleted one
+            if (this.currentSequence && this.currentSequence.id === data.sequence_id) {
+                this.currentSequence = null;
+                this.currentParameter = null;
+            }
+            
+            // Force refresh the UI to remove visual indicators
+            this.updateSequenceButtons();
         });
     }
     
@@ -2905,54 +3331,73 @@ class SequenceManager {
     showInlineAudioControls(parameterId, sequence) {
         console.log('🎛️ showInlineAudioControls called:', { parameterId, sequence });
         
-        // Find the control container by parameter path
-        // Convert parameterId (e.g., "video.effects[0].parameters.scale_xy") to control ID
-        const controlId = this.parameterPathToControlId(parameterId);
-        console.log('🔍 Looking for control ID:', `${controlId}_audio_controls`);
-        
-        const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
-        
-        if (!controlsContainer) {
-            console.warn('⚠️ Audio controls container not found for:', parameterId);
-            console.warn('   Expected element ID:', `${controlId}_audio_controls`);
-            // List all elements with _audio_controls suffix to help debug
-            const allControls = document.querySelectorAll('[id$="_audio_controls"]');
-            console.log('   Available audio control elements:', Array.from(allControls).map(el => el.id));
-            return;
-        }
-        
-        console.log('✅ Found audio controls container');
-        
-        // Show the controls
-        controlsContainer.style.display = 'block';
-        
-        // Initialize attack/release knob if not already initialized
-        const knobContainer = document.getElementById(`${controlId}_attack_release`);
-        if (knobContainer && !knobContainer._circularSlider) {
-            const slider = new CircularSlider(knobContainer, {
-                min: 0.0,
-                max: 1.0,
-                value: sequence?.attack_release || 0.5,
-                step: 0.01,
-                arc: 270,
-                startAngle: 135, // Start at 7:30, deadzone at bottom
-                size: 'tiny',
-                label: '',
-                decimals: 2,
-                unit: '',
-                variant: 'primary',
-                showValue: false,
-                onChange: (value) => {
-                    // Update sequence when knob changes
-                    this.updateSequenceInline(parameterId, { attack_release: value });
+        // Small delay to ensure DOM is fully rendered
+        setTimeout(() => {
+            // Find the control container by parameter path
+            // Convert parameterId (e.g., "video.effects[0].parameters.scale_xy") to control ID
+            const controlId = this.parameterPathToControlId(parameterId);
+            console.log('🔍 Looking for control ID:', `${controlId}_audio_controls`);
+            
+            const controlsContainer = document.getElementById(`${controlId}_audio_controls`);
+            
+            if (!controlsContainer) {
+                console.warn('⚠️ Audio controls container not found for:', parameterId);
+                console.warn('   Expected element ID:', `${controlId}_audio_controls`);
+                // List all elements with _audio_controls suffix to help debug
+                const allControls = document.querySelectorAll('[id$="_audio_controls"]');
+                console.log('   Available audio control elements:', Array.from(allControls).map(el => el.id));
+                return;
+            }
+            
+            console.log('✅ Found audio controls container');
+            
+            // Show the controls
+            controlsContainer.style.display = 'block';
+            
+            // Initialize attack/release knob if not already initialized
+            const knobContainer = document.getElementById(`${controlId}_attack_release`);
+            console.log('🔍 Looking for knob container:', `${controlId}_attack_release`, 'found:', !!knobContainer);
+            
+            if (knobContainer) {
+                // Destroy existing slider if present
+                if (knobContainer._circularSlider) {
+                    console.log('🧹 Cleaning up old slider instance');
+                    // Clean up old instance
+                    knobContainer.innerHTML = '';
+                    delete knobContainer._circularSlider;
                 }
-            });
-            knobContainer._circularSlider = slider;
-        }
-        
-        // Set active states from sequence
-        if (sequence) {
-            // Set active band
+                
+                console.log('🎛️ Creating new CircularSlider with value:', sequence?.attack_release || 0.5);
+                
+                const slider = new CircularSlider(knobContainer, {
+                    min: 0.2,
+                    max: 1.0,
+                    value: sequence?.attack_release || 0.7,
+                    step: 0.01,
+                    arc: 270,
+                    startAngle: 135, // Start at 7:30, deadzone at bottom
+                    size: 'tiny',
+                    label: '',
+                    decimals: 2,
+                    unit: '',
+                    variant: 'primary',
+                    showValue: false,
+                    onChange: (value) => {
+                        // Update sequence when knob changes
+                        this.updateSequenceInline(parameterId, { attack_release: value });
+                    }
+                });
+                knobContainer._circularSlider = slider;
+                console.log('✅ Initialized inline attack/release knob with value:', sequence?.attack_release || 0.5);
+            } else {
+                console.warn('⚠️ Attack/release knob container not found:', `${controlId}_attack_release`);
+                console.log('   All elements with attack_release in ID:',
+                    Array.from(document.querySelectorAll('[id*="attack_release"]')).map(el => el.id));
+            }
+            
+            // Set active states from sequence
+            if (sequence) {
+                // Set active band
             const bandButtons = controlsContainer.querySelectorAll('.audio-band-btn-inline');
             bandButtons.forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.band === sequence.band);
@@ -2963,9 +3408,10 @@ class SequenceManager {
             const dirButtons = controlsContainer.querySelectorAll('.audio-dir-btn-inline');
             dirButtons.forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.direction === sequence.direction);
-                btn.onclick = () => this.updateSequenceInline(parameterId, { direction: btn.dataset.direction });
+                btn.onclick = () => this.updateSequenceInline(parameterId, { mode: btn.dataset.direction });
             });
         }
+        }, 50); // 50ms delay to ensure DOM is ready
     }
     
     /**
@@ -3036,10 +3482,10 @@ class SequenceManager {
                     });
                 }
                 
-                if (controlsContainer && updates.direction) {
+                if (controlsContainer && updates.mode) {
                     // Update active direction button
                     controlsContainer.querySelectorAll('.audio-dir-btn-inline').forEach(btn => {
-                        btn.classList.toggle('active', btn.dataset.direction === updates.direction);
+                        btn.classList.toggle('active', btn.dataset.direction === updates.mode);
                     });
                 }
             }

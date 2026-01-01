@@ -1,26 +1,28 @@
 """
 BPM Sequence
 
-Beat-synchronized keyframe animation that jumps to keyframes on each beat.
+Beat-synchronized continuous animation that interpolates from min to max over N beats.
+Duration = beat_division / (BPM / 60) seconds
 """
 
-import random
+import time
 import logging
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, Optional
 from .base_sequence import BaseSequence
 
 logger = logging.getLogger(__name__)
 
 
 class BPMSequence(BaseSequence):
-    """Beat-synchronized keyframe animation"""
+    """Beat-synchronized continuous animation over N beats"""
     
-    BEAT_DIVISIONS = [1, 4, 8, 16, 32]  # Number of keyframes/beats
+    # Number of beats for animation duration (fractional and whole numbers)
+    BEAT_DIVISIONS = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128]
     
     def __init__(self, sequence_id: str, target_parameter: str, audio_analyzer,
-                 beat_division: int = 8, keyframes: List[float] = None,
-                 clip_duration: float = 10.0, playback_state: str = 'forward',
-                 loop_mode: str = 'loop', speed: float = 1.0):
+                 beat_division: int = 8, clip_duration: float = 10.0,
+                 playback_state: str = 'forward', loop_mode: str = 'loop',
+                 speed: float = 1.0, min_value: float = 0.0, max_value: float = 100.0):
         """
         Initialize BPM sequence
         
@@ -28,12 +30,13 @@ class BPMSequence(BaseSequence):
             sequence_id: Unique ID
             target_parameter: Target parameter path
             audio_analyzer: Reference to AudioAnalyzer for BPM data
-            beat_division: Number of beats/keyframes (1, 4, 8, 16, or 32)
-            keyframes: List of values (one per beat)
+            beat_division: Number of beats for full animation (0.0625=1/16, 0.125=1/8, 0.25=1/4, 0.5=1/2, 1, 4, 8, 16, 32, 64, 128)
             clip_duration: Total clip duration in seconds
             playback_state: 'forward', 'backward', or 'pause'
             loop_mode: 'once', 'loop', or 'ping_pong'
             speed: Speed multiplier (0.1 to 10.0)
+            min_value: Minimum parameter value (e.g., 0 for scale)
+            max_value: Maximum parameter value (e.g., 500 for scale)
         """
         super().__init__(sequence_id, 'bpm', target_parameter)
         
@@ -43,157 +46,136 @@ class BPMSequence(BaseSequence):
         self.playback_state = playback_state
         self.loop_mode = loop_mode
         self.speed = max(0.1, min(10.0, speed))
+        self.min_value = min_value
+        self.max_value = max_value
         
-        # Initialize keyframes (one value per beat)
-        if keyframes and len(keyframes) == beat_division:
-            self.keyframes = keyframes
-        else:
-            # Default: linear ramp from 0 to 1
-            self.keyframes = [i / (beat_division - 1) for i in range(beat_division)]
-        
-        # Current state
-        self._current_beat_index = 0
-        self._last_beat_count = 0
-        self._current_value = self.keyframes[0] if self.keyframes else 0.0
-        self._beat_accumulator = 0.0  # For speed multiplier
+        # Animation state
+        self._start_beat_count = None  # Beat count when animation started
+        self._progress = 0.0  # Current progress (0.0 to 1.0)
         self._direction = 1  # 1 for forward, -1 for backward (ping_pong)
+        self._last_beat_count = 0
+        self._animation_active = False
         
-        logger.info(f"Created BPM sequence: {beat_division} beats, {playback_state}, {loop_mode}, {speed}x")
+        logger.info(f"Created BPM sequence: {beat_division} beats, {playback_state}, {loop_mode}, {speed}x, range: {min_value}-{max_value}")
     
     def update(self, dt: float):
         """
-        Update beat index based on BPM
+        Update animation progress based on beat counting
         
         Args:
             dt: Delta time in seconds (not used, we sync to beats)
         """
+        # Add debug logging counter
+        if not hasattr(self, '_debug_counter'):
+            self._debug_counter = 0
+        self._debug_counter += 1
+        
         if not self.audio_analyzer:
+            if self._debug_counter % 60 == 1:
+                logger.warning(f"🚫 BPM sequence {self.id}: No audio analyzer!")
+            return
+        
+        # Pause: don't update
+        if self.playback_state == 'pause':
+            if self._debug_counter % 60 == 1:
+                logger.info(f"⏸️ BPM sequence {self.id}: Paused")
             return
         
         # Get BPM status
         bpm_status = self.audio_analyzer.get_bpm_status()
         
         if not bpm_status.get('enabled', False):
+            if self._debug_counter % 60 == 1:
+                logger.info(f"🚫 BPM sequence {self.id}: BPM not enabled")
             return
         
         current_beat_count = bpm_status.get('beat_count', 0)
         
-        # Check if a new beat occurred
+        # Log BPM status every 60 frames
+        if self._debug_counter % 60 == 1:
+            logger.info(f"🥁 BPM sequence {self.id}: beat_count={current_beat_count}, last={self._last_beat_count}, active={self._animation_active}, progress={self._progress:.3f}")
+        
+        # Start animation on first beat or when beat count changes
         if current_beat_count != self._last_beat_count:
-            self._on_beat()
+            if not self._animation_active:
+                self._start_beat_count = current_beat_count
+                self._animation_active = True
+                logger.info(f"🎬 BPM animation started at beat {current_beat_count}")
             self._last_beat_count = current_beat_count
-    
-    def _on_beat(self):
-        """Handle beat event - advance beat index based on playback state"""
-        if not self.keyframes:
+        
+        # If animation not started yet, return min value
+        if not self._animation_active or self._start_beat_count is None:
+            self._progress = 0.0 if self._direction > 0 else 1.0
+            if self._debug_counter % 60 == 1:
+                logger.info(f"⏳ BPM sequence {self.id}: Waiting for first beat...")
             return
         
-        # Pause: don't advance
-        if self.playback_state == 'pause':
-            return
+        # Calculate progress based on beat counting (always in sync!)
+        # Example: beat_division=8, speed=1.0, current_beat=5, start_beat=1 → 4 beats elapsed
+        #          progress = (4 * 1.0) / 8 = 0.5 (50% through animation)
+        beats_elapsed = (current_beat_count - self._start_beat_count) * self.speed
+        raw_progress = beats_elapsed / self.beat_division if self.beat_division > 0 else 0.0
         
-        # Apply speed: accumulate beat count
-        self._beat_accumulator += self.speed
-        
-        # Only advance if accumulated at least 1 beat
-        if self._beat_accumulator < 1.0:
-            return
-        
-        # Advance by integer number of beats
-        beats_to_advance = int(self._beat_accumulator)
-        self._beat_accumulator -= beats_to_advance
-        
-        # Determine direction
-        if self.playback_state == 'backward':
-            step = -beats_to_advance * self._direction
-        else:  # forward
-            step = beats_to_advance * self._direction
-        
-        # Calculate new index
-        new_index = self._current_beat_index + step
+        # Log progress every 60 frames
+        if self._debug_counter % 60 == 1:
+            logger.info(f"📊 BPM progress: beats_elapsed={beats_elapsed:.2f}, raw_progress={raw_progress:.3f}, beat_division={self.beat_division}")
         
         # Apply loop mode
         if self.loop_mode == 'once':
-            # Stop at boundaries
-            if new_index < 0:
-                new_index = 0
-            elif new_index >= len(self.keyframes):
-                new_index = len(self.keyframes) - 1
+            # Clamp to 0-1
+            self._progress = max(0.0, min(1.0, raw_progress))
+            if raw_progress >= 1.0:
+                self._animation_active = False  # Stop animation
                 
         elif self.loop_mode == 'loop':
             # Wrap around
-            new_index = new_index % len(self.keyframes)
+            self._progress = raw_progress % 1.0
+            # Restart beat count on loop
+            if raw_progress >= 1.0 and int(raw_progress) != int(raw_progress - self.speed):
+                self._start_beat_count = current_beat_count
             
         elif self.loop_mode == 'ping_pong':
-            # Bounce at boundaries
-            max_index = len(self.keyframes) - 1
-            
-            while new_index < 0 or new_index > max_index:
-                if new_index < 0:
-                    new_index = -new_index
-                    self._direction *= -1
-                elif new_index > max_index:
-                    new_index = 2 * max_index - new_index
-                    self._direction *= -1
+            # Bounce between 0 and 1
+            cycle = raw_progress % 2.0
+            if cycle < 1.0:
+                self._progress = cycle
+                self._direction = 1
+            else:
+                self._progress = 2.0 - cycle
+                self._direction = -1
         
-        self._current_beat_index = new_index
-        
-        # Update value immediately
-        self._current_value = self.keyframes[self._current_beat_index]
-        
-        logger.debug(f"Beat! Index: {self._current_beat_index}, Value: {self._current_value:.3f}, Direction: {self._direction}")
+        # Apply forward/backward direction
+        if self.playback_state == 'backward':
+            self._progress = 1.0 - self._progress
     
     def get_value(self) -> float:
-        """Get current keyframe value"""
-        return self._current_value
+        """Get current interpolated value scaled to parameter range"""
+        # Interpolate from min to max based on progress
+        value = self.min_value + self._progress * (self.max_value - self.min_value)
+        
+        # Debug log value every 60 calls
+        if not hasattr(self, '_get_value_counter'):
+            self._get_value_counter = 0
+        self._get_value_counter += 1
+        
+        if self._get_value_counter % 60 == 1:
+            logger.info(f"📈 BPM get_value(): progress={self._progress:.3f}, min={self.min_value}, max={self.max_value}, value={value:.2f}")
+        
+        return value
     
-    def set_keyframe(self, index: int, value: float):
+    def set_beat_division(self, beat_division: float):
         """
-        Set keyframe value
+        Change beat division (animation duration in beats)
         
         Args:
-            index: Keyframe index (0 to beat_division-1)
-            value: Value to set (0.0 to 1.0)
-        """
-        if 0 <= index < len(self.keyframes):
-            self.keyframes[index] = max(0.0, min(1.0, value))
-            logger.debug(f"Set keyframe {index}: {value:.3f}")
-        else:
-            logger.warning(f"Invalid keyframe index: {index} (max: {len(self.keyframes) - 1})")
-    
-    def set_beat_division(self, beat_division: int):
-        """
-        Change beat division and resize keyframes
-        
-        Args:
-            beat_division: New beat division (1, 4, 8, 16, or 32)
+            beat_division: New beat division (0.0625, 0.125, 0.25, 0.5, 1, 4, 8, 16, 32, 64, 128)
         """
         if beat_division not in self.BEAT_DIVISIONS:
             logger.warning(f"Invalid beat division: {beat_division}, keeping {self.beat_division}")
             return
         
-        # Interpolate existing keyframes to new count
-        old_keyframes = self.keyframes
-        new_keyframes = []
-        
-        for i in range(beat_division):
-            # Map new index to old index range
-            old_index_float = (i / (beat_division - 1)) * (len(old_keyframes) - 1) if beat_division > 1 else 0
-            old_index = int(old_index_float)
-            
-            if old_index >= len(old_keyframes) - 1:
-                new_keyframes.append(old_keyframes[-1])
-            else:
-                # Linear interpolation
-                t = old_index_float - old_index
-                value = old_keyframes[old_index] * (1 - t) + old_keyframes[old_index + 1] * t
-                new_keyframes.append(value)
-        
         self.beat_division = beat_division
-        self.keyframes = new_keyframes
-        self._current_beat_index = 0
-        
-        logger.info(f"Beat division changed to {beat_division}, keyframes resized")
+        logger.info(f"Beat division changed to {beat_division} beats")
     
     def set_playback_state(self, state: str):
         """Set playback state (forward, backward, pause)"""
@@ -218,13 +200,12 @@ class BPMSequence(BaseSequence):
         logger.info(f"Speed: {self.speed}x")
     
     def reset(self):
-        """Reset to first keyframe"""
-        self._current_beat_index = 0
-        self._last_beat_count = 0
-        self._beat_accumulator = 0.0
+        """Reset animation to start"""
+        self._start_beat_count = None
+        self._progress = 0.0
         self._direction = 1
-        if self.keyframes:
-            self._current_value = self.keyframes[0]
+        self._last_beat_count = 0
+        self._animation_active = False
     
     def serialize(self) -> Dict[str, Any]:
         """Serialize to dictionary"""
@@ -234,11 +215,12 @@ class BPMSequence(BaseSequence):
             'name': self.name,
             'target_parameter': self.target_parameter,
             'beat_division': self.beat_division,
-            'keyframes': self.keyframes,
             'clip_duration': self.clip_duration,
             'playback_state': self.playback_state,
             'loop_mode': self.loop_mode,
             'speed': self.speed,
+            'min_value': self.min_value,
+            'max_value': self.max_value,
             'enabled': self.enabled
         }
     
@@ -256,11 +238,12 @@ class BPMSequence(BaseSequence):
             target_parameter=data.get('target_parameter'),
             audio_analyzer=audio_analyzer,
             beat_division=data.get('beat_division', 8),
-            keyframes=data.get('keyframes'),
             clip_duration=data.get('clip_duration', 10.0),
             playback_state=data.get('playback_state', 'forward'),
             loop_mode=data.get('loop_mode', 'loop'),
-            speed=data.get('speed', 1.0)
+            speed=data.get('speed', 1.0),
+            min_value=data.get('min_value', 0.0),
+            max_value=data.get('max_value', 100.0)
         )
         sequence.enabled = data.get('enabled', True)
         return sequence

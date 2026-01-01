@@ -205,6 +205,7 @@ class AudioSequencer:
         Detects slot boundary crossings and triggers:
         1. Master/slave playlist advances via player_manager
         2. UI updates via callbacks
+        3. Playback state sync for sequences
         """
         logger.debug("🔄 Monitor loop started")
         
@@ -223,6 +224,16 @@ class AudioSequencer:
                 # Notify position update (for UI)
                 if self.on_position_update:
                     self.on_position_update(position, current_slot)
+                
+                # Emit playback state to sequence manager
+                if self.player_manager and hasattr(self.player_manager, 'sequence_manager'):
+                    slot_duration = self.timeline.get_slot_duration(current_slot) if current_slot is not None else 0.0
+                    self.player_manager.sequence_manager.update_playback_state(
+                        clip_duration=slot_duration,
+                        current_time=position,
+                        is_playing=self.engine.is_playing,
+                        clip_id=f"sequencer_slot_{current_slot}"
+                    )
                 
             except Exception as e:
                 logger.error(f"❌ Monitor loop error: {e}", exc_info=True)

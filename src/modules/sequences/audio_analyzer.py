@@ -89,6 +89,8 @@ class AudioAnalyzer:
         # Beat detection
         self._last_peak = 0.0
         self._peak_history = deque(maxlen=int(sample_rate / block_size * 2))  # 2 seconds
+        self._bass_history = deque(maxlen=int(sample_rate / block_size * 0.5))  # 0.5 seconds for bass energy
+        self._beat_cooldown = 0  # Prevent multiple triggers
         
         # Stream
         self._stream: Optional[sd.InputStream] = None
@@ -111,69 +113,145 @@ class AudioAnalyzer:
             logger.warning("AudioAnalyzer already running")
             return
         
-        try:
-            # Get audio source from config
-            audio_source = self.config.get('audio_source', 'microphone')
-            
-            # Configure device based on audio source (only if not explicitly set)
-            if self.device is None:
-                if audio_source == 'system_audio' or audio_source == 'speaker':
-                    # On Windows, use WASAPI loopback
-                    # This requires sounddevice with WASAPI support
-                    logger.info("Using system audio (loopback) as input source")
-                    # Note: Device configuration for loopback varies by platform
-                    # For Windows WASAPI, we need to find the loopback device
-                    self.device = self._find_loopback_device()
-                elif audio_source == 'line_in':
-                    logger.info("Using line-in as input source")
-                    # Use line-in device (usually separate from microphone)
-                else:  # 'microphone' or default
-                    logger.info("Using microphone as input source")
-            
-            # Get device info and check supported sample rate
-            device_info = sd.query_devices(self.device, 'input') if self.device is not None else sd.query_devices(kind='input')
-            logger.info(f"Using audio device: {device_info['name']} (index: {self.device})")
-            
-            # Use device's default sample rate if our requested rate is not supported
-            device_sample_rate = int(device_info.get('default_samplerate', 44100))
-            actual_sample_rate = self.sample_rate
-            
-            # Try to use requested sample rate, fallback to device default if it fails
-            try:
-                sd.check_input_settings(device=self.device, channels=1, samplerate=self.sample_rate)
-                logger.info(f"Using requested sample rate: {self.sample_rate} Hz")
-            except sd.PortAudioError:
-                logger.warning(f"Sample rate {self.sample_rate} Hz not supported, using device default: {device_sample_rate} Hz")
-                actual_sample_rate = device_sample_rate
-                # Update internal sample rate and recalculate frequency indices
-                self.sample_rate = actual_sample_rate
-                freqs = np.fft.rfftfreq(self.block_size, 1 / self.sample_rate)
-                self._bass_idx = (freqs >= 20) & (freqs < 250)
-                self._mid_idx = (freqs >= 250) & (freqs < 4000)
-                self._treble_idx = (freqs >= 4000) & (freqs < 20000)
-                self._audio_buffer = deque(maxlen=self.sample_rate * 4)
-                self._peak_history = deque(maxlen=int(self.sample_rate / self.block_size * 2))
-            
-            self._stream = sd.InputStream(
-                device=self.device,
-                channels=1,
-                samplerate=actual_sample_rate,
-                blocksize=self.block_size,
-                callback=self._audio_callback
-            )
-            self._stream.start()
-            self._running = True
-            
-            # Enable BPM detection by default on startup
-            if LIBROSA_AVAILABLE and not self._bpm_enabled:
-                self._bpm_enabled = True
-                logger.info("🎵 BPM detection enabled by default")
-            
-            logger.info(f"AudioAnalyzer started successfully (source: {audio_source}, rate: {actual_sample_rate} Hz)")
+        # Get audio source from config
+        audio_source = self.config.get('audio_source', 'microphone')
         
+        # Try multiple strategies to open audio stream
+        strategies = []
+        
+        # Strategy 1: User-specified or configured device
+        if self.device is not None:
+            strategies.append(('specified_device', self.device, None))
+        elif audio_source == 'system_audio' or audio_source == 'speaker':
+            loopback_device = self._find_loopback_device()
+            if loopback_device is not None:
+                strategies.append(('loopback', loopback_device, None))
+        
+        # Strategy 2: System default input device
+        strategies.append(('default_input', None, None))
+        
+        # Strategy 3: Try first available input device
+        try:
+            devices = sd.query_devices()
+            for idx, device in enumerate(devices):
+                if device['max_input_channels'] > 0:
+                    strategies.append(('first_available', idx, None))
+                    break
+        except:
+            pass
+        
+        # Strategy 4: Try with WASAPI on Windows (more reliable than DirectSound)
+        if hasattr(sd, '_api_id'):
+            try:
+                # List all hostapis and find WASAPI
+                hostapis = sd.query_hostapis()
+                for api_idx, api in enumerate(hostapis):
+                    if 'WASAPI' in api['name']:
+                        # Try default device with WASAPI
+                        strategies.append(('wasapi_default', None, api_idx))
+                        # Try to find WASAPI-specific devices
+                        try:
+                            for idx, device in enumerate(sd.query_devices()):
+                                if device['hostapi'] == api_idx and device['max_input_channels'] > 0:
+                                    strategies.append(('wasapi_device', idx, api_idx))
+                        except:
+                            pass
+                        break
+            except:
+                pass
+        
+        last_error = None
+        
+        for strategy_name, device_id, hostapi in strategies:
+            try:
+                logger.info(f"Trying audio strategy: {strategy_name} (device={device_id}, hostapi={hostapi})")
+                
+                # Get device info
+                if device_id is not None:
+                    device_info = sd.query_devices(device_id, 'input')
+                else:
+                    device_info = sd.query_devices(kind='input')
+                
+                logger.info(f"Testing device: {device_info['name']} (index: {device_id})")
+                
+                # Use device's default sample rate
+                device_sample_rate = int(device_info.get('default_samplerate', 44100))
+                actual_sample_rate = self.sample_rate
+                
+                # Check if requested sample rate is supported
+                try:
+                    sd.check_input_settings(device=device_id, channels=1, samplerate=self.sample_rate)
+                    actual_sample_rate = self.sample_rate
+                except sd.PortAudioError:
+                    logger.info(f"Using device default sample rate: {device_sample_rate} Hz")
+                    actual_sample_rate = device_sample_rate
+                
+                # Update internal sample rate if changed
+                if actual_sample_rate != self.sample_rate:
+                    self.sample_rate = actual_sample_rate
+                    freqs = np.fft.rfftfreq(self.block_size, 1 / self.sample_rate)
+                    self._bass_idx = (freqs >= 20) & (freqs < 250)
+                    self._mid_idx = (freqs >= 250) & (freqs < 4000)
+                    self._treble_idx = (freqs >= 4000) & (freqs < 20000)
+                    self._audio_buffer = deque(maxlen=self.sample_rate * 4)
+                    self._peak_history = deque(maxlen=int(self.sample_rate / self.block_size * 2))
+                
+                # Try to open stream with extra error handling
+                stream_kwargs = {
+                    'device': device_id,
+                    'channels': 1,
+                    'samplerate': actual_sample_rate,
+                    'blocksize': self.block_size,
+                    'callback': self._audio_callback
+                }
+                
+                # Add latency hints to improve reliability on Windows
+                stream_kwargs['latency'] = 'low'
+                
+                self._stream = sd.InputStream(**stream_kwargs)
+                self._stream.start()
+                self._running = True
+                self.device = device_id
+                
+                # Enable BPM detection by default on startup
+                if LIBROSA_AVAILABLE and not self._bpm_enabled:
+                    self._bpm_enabled = True
+                    logger.info("🎵 BPM detection enabled by default")
+                
+                logger.info(f"✓ AudioAnalyzer started successfully")
+                logger.info(f"  Strategy: {strategy_name}")
+                logger.info(f"  Device: {device_info['name']}")
+                logger.info(f"  Sample rate: {actual_sample_rate} Hz")
+                logger.info(f"  Source: {audio_source}")
+                return  # Success!
+                
+            except Exception as e:
+                last_error = e
+                logger.debug(f"Strategy '{strategy_name}' failed: {e}")
+                if self._stream:
+                    try:
+                        self._stream.close()
+                    except:
+                        pass
+                    self._stream = None
+                continue
+        
+        # All strategies failed
+        self._running = False
+        error_msg = f"Failed to start AudioAnalyzer after trying {len(strategies)} strategies. Last error: {last_error}"
+        logger.error(error_msg)
+        
+        # Log available devices for debugging
+        try:
+            logger.info("Available audio devices:")
+            devices = sd.query_devices()
+            for idx, device in enumerate(devices):
+                if device['max_input_channels'] > 0:
+                    logger.info(f"  [{idx}] {device['name']} (inputs: {device['max_input_channels']}, sr: {device['default_samplerate']}Hz, api: {device['hostapi']})")
         except Exception as e:
-            logger.error(f"Failed to start AudioAnalyzer: {e}", exc_info=True)
-            self._running = False
+            logger.error(f"Could not list audio devices: {e}")
+        
+        raise RuntimeError(f"Could not initialize audio device. {last_error}")
     
     def stop(self):
         """Stop audio capture"""
@@ -228,6 +306,11 @@ class AudioAnalyzer:
             # Convert to mono
             audio = indata[:, 0] if indata.shape[1] > 0 else indata.flatten()
             
+            # Apply gain multiplier (input level adjustment)
+            gain = self.config.get('gain', 1.0)
+            if gain != 1.0:
+                audio = audio * gain
+            
             # Add to buffer for BPM detection
             self._audio_buffer.extend(audio)
             
@@ -252,20 +335,56 @@ class AudioAnalyzer:
             mid_norm = np.clip(mid / 50, 0, 1)
             treble_norm = np.clip(treble / 20, 0, 1)
             
-            # Simple beat detection (threshold-based)
-            # Compare current peak to recent average
+            # Improved beat detection using bass energy and adaptive thresholds
             self._peak_history.append(peak)
-            avg_peak = np.mean(self._peak_history) if self._peak_history else 0.0
-            beat = peak > avg_peak * 1.5 and peak > 0.3  # Beat if significantly above average
+            self._bass_history.append(bass_norm)
+            
+            # Get beat sensitivity from config (0.1 = very sensitive, 3.0 = very insensitive)
+            beat_sensitivity = self.config.get('beat_sensitivity', 1.0)
+            
+            # Calculate averages
+            avg_peak = np.mean(self._peak_history) if len(self._peak_history) > 5 else 0.0
+            avg_bass = np.mean(self._bass_history) if len(self._bass_history) > 3 else 0.0
+            
+            # Adaptive threshold based on signal level
+            # For loud signals (avg > 0.5), use relative change
+            # For quiet signals (avg < 0.5), use absolute threshold
+            if avg_peak > 0.5:
+                # Loud signal: detect relative spikes
+                threshold_multiplier = 1.2 + (beat_sensitivity * 0.15)  # 1.2 to 1.65
+                peak_condition = peak > avg_peak * threshold_multiplier
+            else:
+                # Quiet signal: use absolute threshold
+                abs_threshold = 0.15 / beat_sensitivity  # 0.05 to 0.45 depending on sensitivity
+                peak_condition = peak > abs_threshold
+            
+            # Bass energy spike detection (beats usually have strong bass)
+            bass_spike = False
+            if len(self._bass_history) > 3 and avg_bass > 0.01:
+                bass_threshold = 1.3 + (beat_sensitivity * 0.1)
+                bass_spike = bass_norm > avg_bass * bass_threshold
+            
+            # Cooldown to prevent double-triggering (minimum 100ms between beats)
+            if self._beat_cooldown > 0:
+                self._beat_cooldown -= 1
+                beat = False
+            else:
+                # Beat detected if: peak spike OR bass spike
+                beat = peak_condition or bass_spike
+                
+                if beat:
+                    self._beat_cooldown = max(1, int(self.sample_rate / self.block_size * 0.1))  # 100ms cooldown
             
             # Log beat detection
             if beat:
                 if not hasattr(self, '_beat_counter'):
                     self._beat_counter = 0
                 self._beat_counter += 1
+                # Increment beat count for BPM sequences
+                self._beat_count += 1
                 # Log every 5th beat to avoid spam
                 if self._beat_counter % 5 == 0:
-                    logger.debug(f"🥁 BEAT detected! peak={peak:.3f}, avg={avg_peak:.3f}, bass={bass_norm:.3f}")
+                    logger.debug(f"🥁 BEAT detected! peak={peak:.3f} (avg={avg_peak:.3f}), bass={bass_norm:.3f} (avg={avg_bass:.3f}), sens={beat_sensitivity:.2f}, beat_count={self._beat_count}")
             
             # BPM Detection (if enabled)
             if self._bpm_enabled and LIBROSA_AVAILABLE and len(self._audio_buffer) >= self.sample_rate * 2:
@@ -322,19 +441,26 @@ class AudioAnalyzer:
         List available audio input devices
         
         Returns:
-            List of device dictionaries
+            List of device dictionaries with detailed information
         """
         try:
             devices = sd.query_devices()
+            hostapis = sd.query_hostapis()
             input_devices = []
             
             for idx, device in enumerate(devices):
                 if device['max_input_channels'] > 0:
+                    # Get hostapi name
+                    hostapi_idx = device.get('hostapi', 0)
+                    hostapi_name = hostapis[hostapi_idx]['name'] if hostapi_idx < len(hostapis) else 'Unknown'
+                    
                     input_devices.append({
                         'index': idx,
                         'name': device['name'],
                         'channels': device['max_input_channels'],
-                        'sample_rate': device['default_samplerate']
+                        'sample_rate': device['default_samplerate'],
+                        'hostapi': hostapi_name,
+                        'hostapi_index': hostapi_idx
                     })
             
             return input_devices

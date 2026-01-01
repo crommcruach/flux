@@ -241,7 +241,7 @@ class RestAPI:
         @self.socketio.on('connect', namespace='/bpm')
         def handle_bpm_connect():
             """Client connected to BPM WebSocket"""
-            logger.info(f"BPM WebSocket client connected")
+            logger.debug(f"BPM WebSocket client connected")
             emit('connected', {'status': 'ready'})
     
     def _setup_websocket_command_handlers(self):
@@ -253,7 +253,7 @@ class RestAPI:
         # ========================================
         @self.socketio.on('connect', namespace='/player')
         def handle_player_connect():
-            logger.info(f"Client connected to /player namespace: {request.sid}")
+            logger.debug(f"Client connected to /player namespace: {request.sid}")
             emit('connected', {'status': 'ready'})
         
         @self.socketio.on('disconnect', namespace='/player')
@@ -389,7 +389,7 @@ class RestAPI:
         # ========================================
         @self.socketio.on('connect', namespace='/effects')
         def handle_effects_connect():
-            logger.info(f"Client connected to /effects namespace: {request.sid}")
+            logger.debug(f"Client connected to /effects namespace: {request.sid}")
             emit('connected', {'status': 'ready'})
         
         @self.socketio.on('disconnect', namespace='/effects')
@@ -571,7 +571,7 @@ class RestAPI:
         # ========================================
         @self.socketio.on('connect', namespace='/layers')
         def handle_layers_connect():
-            logger.info(f"Client connected to /layers namespace: {request.sid}")
+            logger.debug(f"Client connected to /layers namespace: {request.sid}")
             emit('connected', {'status': 'ready'})
         
         @self.socketio.on('disconnect', namespace='/layers')

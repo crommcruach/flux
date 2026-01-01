@@ -1,69 +1,61 @@
 """
 Timeline Sequence
 
-Keyframe-based timeline animation with interpolation.
+Simple time-based animation that interpolates from min to max over a duration.
 """
 
-import bisect
 import random
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any
 from .base_sequence import BaseSequence
 
 logger = logging.getLogger(__name__)
 
 
 class TimelineSequence(BaseSequence):
-    """Keyframe-based timeline animation"""
+    """Time-based animation from min to max over duration"""
     
-    INTERPOLATIONS = ['linear', 'ease_in', 'ease_out', 'ease_in_out', 'step']
     LOOP_MODES = ['once', 'loop', 'ping_pong', 'random']
-    
     PLAYBACK_STATES = ['pause', 'forward', 'backward']
     
-    def __init__(self, sequence_id: str, target_parameter: str, keyframes: List[Tuple[float, float]] = None,
-                 interpolation: str = 'linear', loop_mode: str = 'once', duration: float = 10.0, 
-                 playback_state: str = 'pause', speed: float = 1.0):
+    def __init__(self, sequence_id: str, target_parameter: str,
+                 loop_mode: str = 'once', duration: float = 5.0, 
+                 playback_state: str = 'pause', speed: float = 1.0,
+                 min_value: float = 0.0, max_value: float = 100.0):
         """
         Initialize timeline sequence
         
         Args:
             sequence_id: Unique ID
             target_parameter: Target parameter path
-            keyframes: List of (time, value) tuples
-            interpolation: Interpolation type ('linear', 'ease_in', 'ease_out', 'ease_in_out', 'step')
-            loop_mode: Loop mode ('once', 'loop', 'ping_pong')
-            duration: Total timeline duration in seconds
+            loop_mode: Loop mode ('once', 'loop', 'ping_pong', 'random')
+            duration: Total animation duration in seconds
             playback_state: Playback state ('pause', 'forward', 'backward')
             speed: Speed multiplier (1.0 = normal, 2.0 = 2x faster, 0.5 = half speed)
+            min_value: Minimum parameter value
+            max_value: Maximum parameter value
         """
         super().__init__(sequence_id, 'timeline', target_parameter)
         
-        self.keyframes = keyframes or []
-        self.interpolation = interpolation
-        self.loop_mode = loop_mode
+        self.loop_mode = loop_mode if loop_mode in self.LOOP_MODES else 'once'
         self.duration = duration
         self.playback_state = playback_state if playback_state in self.PLAYBACK_STATES else 'pause'
         self.speed = max(0.1, min(10.0, speed))  # Clamp between 0.1x and 10x
+        self.min_value = min_value
+        self.max_value = max_value
         
         self._time = 0.0
-        self._direction = 1  # 1 = forward, -1 = backward (for ping_pong or backward playback)
-        self._current_keyframe_index = 0  # For random mode
+        self._progress = 0.0  # 0.0 to 1.0
+        self._direction = 1  # 1 = forward, -1 = backward (for ping_pong)
+        self._random_jump_interval = 0.15  # Jump every 0.15 seconds in random mode
+        self._time_since_last_jump = 0.0
+        self._current_random_value = min_value  # Current random value for random mode
         
-        # Sort keyframes by time
-        self.keyframes.sort(key=lambda k: k[0])
-        
-        if interpolation not in self.INTERPOLATIONS:
-            logger.warning(f"Unknown interpolation: {interpolation}, defaulting to 'linear'")
-            self.interpolation = 'linear'
-        
-        if loop_mode not in self.LOOP_MODES:
-            logger.warning(f"Unknown loop mode: {loop_mode}, defaulting to 'once'")
-            self.loop_mode = 'once'
+        logger.info(f"Created Timeline sequence: {duration}s, {playback_state}, {loop_mode}, {speed}x, range: {min_value}-{max_value}")
     
     def update(self, dt: float):
         """
-        Update timeline time
+        Update timeline progress
         
         Args:
             dt: Delta time in seconds
@@ -72,158 +64,92 @@ class TimelineSequence(BaseSequence):
         if self.playback_state == 'pause':
             return
         
-        # Determine direction based on playback state
-        if self.playback_state == 'forward':
+        # Determine direction based on loop mode and playback state
+        # For ping_pong, always use internal direction
+        if self.loop_mode == 'ping_pong':
+            direction = self._direction
+        elif self.playback_state == 'forward':
             direction = 1
         elif self.playback_state == 'backward':
             direction = -1
         else:
-            direction = self._direction  # Use ping_pong direction
+            direction = self._direction
         
-        # Calculate time increment as fraction of duration (0-1 range)
-        # This makes the timeline scale with duration automatically
-        # Apply speed multiplier: higher speed = faster playback
-        time_increment = (dt / self.duration) * direction * self.speed
+        # Handle random mode differently - jump at intervals
+        if self.loop_mode == 'random':
+            self._time_since_last_jump += dt
+            
+            # Check if it's time for a new random jump
+            if self._time_since_last_jump >= self._random_jump_interval:
+                # Pick random value between min and max
+                self._current_random_value = random.uniform(self.min_value, self.max_value)
+                self._time_since_last_jump = 0.0
+                logger.debug(f"Random jump to value: {self._current_random_value:.2f}")
+            
+            # Don't update time/progress in random mode
+            return
         
-        # Update normalized time (0-1)
-        normalized_time = self._time / self.duration if self.duration > 0 else 0
-        normalized_time += time_increment
+        # Calculate time increment (apply speed multiplier)
+        time_increment = dt * direction * self.speed
         
-        # Handle loop modes with normalized time
+        # Update time
+        self._time += time_increment
+        
+        # Calculate normalized progress (0-1)
+        normalized_progress = self._time / self.duration if self.duration > 0 else 0
+        
+        # Handle loop modes
         if self.loop_mode == 'once':
             if self.playback_state == 'forward':
-                normalized_time = min(normalized_time, 1.0)
+                self._progress = min(normalized_progress, 1.0)
             elif self.playback_state == 'backward':
-                normalized_time = max(normalized_time, 0.0)
+                self._progress = max(normalized_progress, 0.0)
         
         elif self.loop_mode == 'loop':
-            if normalized_time >= 1.0:
-                normalized_time = normalized_time % 1.0
-            elif normalized_time < 0:
-                normalized_time = 1.0 + (normalized_time % 1.0)
+            if normalized_progress >= 1.0:
+                self._time = 0.0
+                self._progress = 0.0
+            elif normalized_progress < 0:
+                self._time = self.duration
+                self._progress = 1.0
+            else:
+                self._progress = normalized_progress
         
         elif self.loop_mode == 'ping_pong':
-            if normalized_time >= 1.0:
-                normalized_time = 1.0
+            if normalized_progress >= 1.0:
+                # Reflect back from 1.0
+                over = normalized_progress - 1.0
+                self._time = self.duration - (over * self.duration)
+                self._progress = 1.0 - over
                 self._direction = -1
-            elif normalized_time <= 0:
-                normalized_time = 0
+            elif normalized_progress <= 0:
+                # Reflect back from 0.0
+                under = -normalized_progress
+                self._time = under * self.duration
+                self._progress = under
                 self._direction = 1
-        
-        elif self.loop_mode == 'random':
-            # Jump randomly to ANY keyframe when reaching current keyframe
-            if not self.keyframes or len(self.keyframes) < 2:
-                # Convert back to absolute time
-                self._time = normalized_time * self.duration
-                return
+            else:
+                self._progress = normalized_progress
             
-            # Check if we've reached the current target keyframe
-            current_kf_time = self.keyframes[self._current_keyframe_index][0]
-            
-            # Check if we've passed the keyframe (depends on direction)
-            if (self.playback_state == 'forward' and self._time >= current_kf_time) or \
-               (self.playback_state == 'backward' and self._time <= current_kf_time):
-                
-                # Pick ANY random keyframe
-                new_index = random.randint(0, len(self.keyframes) - 1)
-                
-                # Avoid staying on same keyframe if possible
-                if len(self.keyframes) > 1:
-                    while new_index == self._current_keyframe_index:
-                        new_index = random.randint(0, len(self.keyframes) - 1)
-                
-                self._current_keyframe_index = new_index
-                
-                # Jump to new keyframe time
-                self._time = self.keyframes[self._current_keyframe_index][0]
-                return
-        
-        # Convert normalized time back to absolute time
-        self._time = normalized_time * self.duration
+            # Clamp to valid range
+            self._progress = max(0.0, min(1.0, self._progress))
     
     def get_value(self) -> float:
-        """Interpolate value at current time"""
-        if not self.keyframes:
-            return 0.0
+        """Get interpolated value at current progress"""
+        # Random mode returns the current random value
+        if self.loop_mode == 'random':
+            return self._current_random_value
         
-        # Find surrounding keyframes
-        times = [k[0] for k in self.keyframes]
-        idx = bisect.bisect_left(times, self._time)
-        
-        # Before first keyframe
-        if idx == 0:
-            return self.keyframes[0][1]
-        
-        # After last keyframe
-        if idx >= len(self.keyframes):
-            return self.keyframes[-1][1]
-        
-        # Between keyframes
-        k1_time, k1_value = self.keyframes[idx - 1]
-        k2_time, k2_value = self.keyframes[idx]
-        
-        # Normalize time (0-1 between keyframes)
-        if k2_time == k1_time:
-            return k1_value
-        
-        t = (self._time - k1_time) / (k2_time - k1_time)
-        
-        # Apply interpolation
-        if self.interpolation == 'linear':
-            t_interp = t
-        
-        elif self.interpolation == 'ease_in':
-            t_interp = t * t
-        
-        elif self.interpolation == 'ease_out':
-            t_interp = 1 - (1 - t) * (1 - t)
-        
-        elif self.interpolation == 'ease_in_out':
-            # Smoothstep
-            t_interp = 3 * t * t - 2 * t * t * t
-        
-        elif self.interpolation == 'step':
-            # Hold value until next keyframe
-            t_interp = 0
-        
-        else:
-            t_interp = t
-        
-        # Interpolate value
-        return k1_value + (k2_value - k1_value) * t_interp
-    
-    def add_keyframe(self, time: float, value: float):
-        """
-        Add keyframe and resort
-        
-        Args:
-            time: Time in seconds
-            value: Value at this time
-        """
-        self.keyframes.append((time, value))
-        self.keyframes.sort(key=lambda k: k[0])
-        logger.debug(f"Added keyframe: t={time}, v={value}")
-    
-    def remove_keyframe(self, index: int) -> bool:
-        """
-        Remove keyframe by index
-        
-        Args:
-            index: Index of keyframe to remove
-            
-        Returns:
-            True if removed, False if invalid index
-        """
-        if 0 <= index < len(self.keyframes):
-            removed = self.keyframes.pop(index)
-            logger.debug(f"Removed keyframe: {removed}")
-            return True
-        return False
+        # Linear interpolation from min to max
+        return self.min_value + (self.max_value - self.min_value) * self._progress
     
     def reset(self):
         """Reset timeline to beginning"""
         self._time = 0.0
+        self._progress = 0.0
         self._direction = 1
+        self._time_since_last_jump = 0.0
+        self._current_random_value = self.min_value
     
     def serialize(self) -> Dict[str, Any]:
         """Serialize to dictionary"""
@@ -232,12 +158,12 @@ class TimelineSequence(BaseSequence):
             'type': self.type,
             'name': self.name,
             'target_parameter': self.target_parameter,
-            'keyframes': self.keyframes,
-            'interpolation': self.interpolation,
             'loop_mode': self.loop_mode,
             'duration': self.duration,
             'playback_state': self.playback_state,
             'speed': self.speed,
+            'min_value': self.min_value,
+            'max_value': self.max_value,
             'enabled': self.enabled
         }
     
@@ -247,10 +173,10 @@ class TimelineSequence(BaseSequence):
         return cls(
             sequence_id=data.get('id'),
             target_parameter=data.get('target_parameter'),
-            keyframes=data.get('keyframes', []),
-            interpolation=data.get('interpolation', 'linear'),
             loop_mode=data.get('loop_mode', 'once'),
-            duration=data.get('duration', 10.0),
+            duration=data.get('duration', 5.0),
             playback_state=data.get('playback_state', 'pause'),
-            speed=data.get('speed', 1.0)
+            speed=data.get('speed', 1.0),
+            min_value=data.get('min_value', 0.0),
+            max_value=data.get('max_value', 100.0)
         )

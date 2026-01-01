@@ -122,6 +122,12 @@
     justify-content: center;
 }
 
+#beatSensitivityKnob {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: center;
+}
+
 .audio-analyzer-controls .audio-analyzer-status {
     width: 10px;
     height: 10px;
@@ -197,6 +203,7 @@
 }
 
 /* Sequence Modal */
+/* DEPRECATED: Modal no longer used - inline controls are now primary interface */
 #sequenceModal {
     display: none;
     position: fixed;
@@ -842,7 +849,7 @@ input[type="range"].sequence-slider::-moz-range-thumb {
 }
 
 .timeline-play-btn-inline {
-    width: 32px;
+    width: 26px;
     height: 26px;
     border: 1px solid #444;
     background: #2a2a2a;
@@ -850,7 +857,7 @@ input[type="range"].sequence-slider::-moz-range-thumb {
     border-radius: 3px;
     cursor: pointer;
     transition: all 0.15s;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     display: flex;
     align-items: center;
@@ -871,7 +878,7 @@ input[type="range"].sequence-slider::-moz-range-thumb {
 
 .timeline-loop-dropdown-inline {
     height: 26px;
-    padding: 0 8px;
+    padding: 0 6px;
     border: 1px solid #444;
     background: #2a2a2a;
     color: #aaa;
@@ -880,7 +887,7 @@ input[type="range"].sequence-slider::-moz-range-thumb {
     transition: all 0.15s;
     font-size: 11px;
     font-weight: 500;
-    min-width: 90px;
+    min-width: 75px;
 }
 
 .timeline-loop-dropdown-inline:hover {
@@ -924,10 +931,181 @@ input[type="range"].sequence-slider::-moz-range-thumb {
     color: #fff;
 }
 
+.timeline-duration-input-inline {
+    width: 45px;
+    height: 26px;
+    padding: 0 4px;
+    border: 1px solid #444;
+    background: #2a2a2a;
+    color: #aaa;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    text-align: center;
+}
+
+.timeline-duration-input-inline:hover {
+    background: #3a3a3a;
+    border-color: #555;
+}
+
+.timeline-duration-input-inline:focus {
+    outline: none;
+    border-color: #8b5cf6;
+    background: #3a3a3a;
+    color: #fff;
+}
+
+.timeline-inline-duration {
+    display: inline-flex;
+    align-items: center;
+    font-size: 11px;
+    color: #666;
+    margin-left: 4px;
+}
+
+.timeline-inline-knob {
+    display: inline-flex;
+    margin-left: 4px;
+}
+
 .timeline-inline-speed {
     align-items: center;
     font-size: 11px;
     color: #666;
+}
+
+/* BPM Inline Controls */
+.bpm-inline-playback,
+.bpm-inline-loop,
+.bpm-inline-speed,
+.bpm-inline-division {
+    display: flex;
+    gap: 4px;
+}
+
+.bpm-play-btn-inline {
+    width: 26px;
+    height: 26px;
+    border: 1px solid #444;
+    background: #2a2a2a;
+    color: #aaa;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.bpm-play-btn-inline:hover {
+    background: #3a3a3a;
+    border-color: #555;
+}
+
+.bpm-play-btn-inline.active {
+    background: rgba(251, 146, 60, 0.3);
+    border-color: #fb923c;
+    color: #fdba74;
+}
+
+.bpm-inline-knob {
+    display: inline-flex;
+    margin-left: 4px;
+}
+
+.bpm-loop-dropdown-inline {
+    height: 26px;
+    padding: 0 6px;
+    border: 1px solid #444;
+    background: #2a2a2a;
+    color: #aaa;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 11px;
+    font-weight: 500;
+    min-width: 75px;
+}
+
+.bpm-loop-dropdown-inline:hover {
+    background: #3a3a3a;
+    border-color: #555;
+}
+
+.bpm-loop-dropdown-inline:focus {
+    outline: none;
+    border-color: #fb923c;
+    background: #3a3a3a;
+}
+
+.bpm-loop-dropdown-inline option {
+    background: #1a1a1a;
+    color: #fff;
+}
+
+.bpm-speed-input-inline {
+    width: 50px;
+    height: 26px;
+    padding: 0 4px;
+    border: 1px solid #444;
+    background: #2a2a2a;
+    color: #aaa;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    text-align: center;
+}
+
+.bpm-speed-input-inline:hover {
+    background: #3a3a3a;
+    border-color: #555;
+}
+
+.bpm-speed-input-inline:focus {
+    outline: none;
+    border-color: #fb923c;
+    background: #3a3a3a;
+    color: #fff;
+}
+
+.bpm-inline-speed {
+    align-items: center;
+    font-size: 11px;
+    color: #666;
+}
+
+.bpm-division-dropdown-inline {
+    height: 26px;
+    padding: 0 6px;
+    border: 1px solid #444;
+    background: #2a2a2a;
+    color: #aaa;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 11px;
+    font-weight: 500;
+    min-width: 45px;
+}
+
+.bpm-division-dropdown-inline:hover {
+    background: #3a3a3a;
+    border-color: #555;
+}
+
+.bpm-division-dropdown-inline:focus {
+    outline: none;
+    border-color: #fb923c;
+    background: #3a3a3a;
+}
+
+.bpm-division-dropdown-inline option {
+    background: #1a1a1a;
+    color: #fff;
 }
 
 

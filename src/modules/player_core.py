@@ -1123,7 +1123,7 @@ class Player:
                             debug_layers(logger, f"🔁 [{self.player_name}] Same clip {next_clip_id}, reusing existing layers")
                         
                         item_name = generator_id if next_item_path.startswith('generator:') else os.path.basename(next_item_path)
-                        logger.info(f"✅ [{self.player_name}] Nächstes Item geladen: {item_name} (clip_id={next_clip_id})")
+                        logger.debug(f"✅ [{self.player_name}] Nächstes Item geladen: {item_name} (clip_id={next_clip_id})")
                         continue
                     except Exception as e:
                         logger.error(f"❌ [{self.player_name}] Fehler beim Laden des nächsten Items: {e}")

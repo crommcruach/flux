@@ -102,6 +102,10 @@ class TransportEffect(PluginBase):
         self.player_id = None  # Will be set by player
         self.clip_id = None  # Will be set by player
         
+        # Playback state sync (from sequence manager)
+        self._sync_enabled = False  # True when receiving position updates from sequences
+        self._last_sync_time = 0.0
+        
         # Now call parent init
         super().__init__(config)
         
@@ -257,6 +261,18 @@ class TransportEffect(PluginBase):
     
     def _calculate_next_frame(self):
         """Berechnet nächsten Frame basierend auf Speed, Direction und Mode."""
+        # Check if we're being controlled by sequence sync
+        # If we received a sync update recently (< 1 second ago), don't auto-advance
+        import time
+        if self._sync_enabled and (time.time() - self._last_sync_time) < 1.0:
+            # Sequence is controlling position - return current frame without advancing
+            return self.current_position
+        else:
+            # No recent sync - disable sync mode and resume normal playback
+            if self._sync_enabled:
+                self._sync_enabled = False
+                logger.debug("🎬 Transport: Sequence sync timed out, resuming normal playback")
+        
         clip_length = self.out_point - self.in_point + 1
         
         if clip_length <= 0:
@@ -478,6 +494,48 @@ class TransportEffect(PluginBase):
             return True
         
         return False
+    
+    def sync_from_playback_state(self, current_time: float, clip_duration: float):
+        """Receive playback state update from sequence manager
+        
+        This allows sequences (timeline, BPM) to control transport position.
+        When sequences are active, they become the source of truth for playback position.
+        
+        Args:
+            current_time: Current playback position in seconds
+            clip_duration: Total clip duration in seconds
+        """
+        if not self._total_frames or not self._fps:
+            return
+        
+        # Convert time to frame number
+        frame_number = int(current_time * self._fps)
+        
+        # Clamp to valid range (consider trim points)
+        frame_number = max(self.in_point, min(self.out_point, frame_number))
+        
+        # Update position if it changed
+        if abs(frame_number - self.current_position) > 0:
+            self._virtual_frame = float(frame_number)
+            self.current_position = frame_number
+            
+            # Update frame source
+            if self._frame_source and hasattr(self._frame_source, 'current_frame'):
+                self._frame_source.current_frame = frame_number
+            
+            # Update parameter for frontend display
+            self.update_parameter('transport_position', {
+                '_value': self.current_position,
+                '_rangeMin': self.in_point,
+                '_rangeMax': self.out_point
+            })
+            
+            # Mark as synced (prevents auto-advance in _calculate_next_frame)
+            self._sync_enabled = True
+            import time
+            self._last_sync_time = time.time()
+            
+            logger.debug(f"🎬 Transport synced from playback state: {current_time:.2f}s → frame {frame_number}")
     
     def _emit_position_update(self):
         """Emit WebSocket update for transport position (rate-limited by config)."""

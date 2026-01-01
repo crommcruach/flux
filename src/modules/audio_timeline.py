@@ -142,6 +142,22 @@ class AudioTimeline:
         
         return None
     
+    def get_slot_duration(self, slot_index: int) -> float:
+        """Get duration of a specific slot
+        
+        Args:
+            slot_index: Slot index (0-based)
+            
+        Returns:
+            Slot duration in seconds, or 0.0 if slot doesn't exist
+        """
+        slots = self.get_slots()
+        
+        if slot_index < 0 or slot_index >= len(slots):
+            return 0.0
+        
+        return slots[slot_index]['duration']
+    
     def set_clip_mapping(self, slot_index: int, clip_name: str):
         """Map slot to clip name
         

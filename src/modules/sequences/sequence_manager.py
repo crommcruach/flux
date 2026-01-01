@@ -58,7 +58,29 @@ class SequenceManager:
         """
         if sequence_id in self.sequences:
             sequence = self.sequences.pop(sequence_id)
-            logger.info(f"Deleted sequence: {sequence_id}")
+            
+            # Clean up cached values for this sequence
+            if hasattr(self, '_last_values') and sequence_id in self._last_values:
+                del self._last_values[sequence_id]
+            
+            # Clean up frame updates for this parameter
+            if hasattr(self, '_frame_updates') and sequence.target_parameter in self._frame_updates:
+                # Only remove if this sequence was the last one controlling this parameter
+                if self._frame_updates[sequence.target_parameter]['sequence_id'] == sequence_id:
+                    del self._frame_updates[sequence.target_parameter]
+            
+            # Clean up emitted values for this parameter
+            if hasattr(self, '_last_emitted_values') and sequence.target_parameter in self._last_emitted_values:
+                # Check if any other sequence targets this parameter
+                other_seq_exists = any(
+                    s.target_parameter == sequence.target_parameter 
+                    for s in self.sequences.values()
+                )
+                # Only remove if no other sequence targets this parameter
+                if not other_seq_exists:
+                    del self._last_emitted_values[sequence.target_parameter]
+            
+            logger.info(f"Deleted sequence: {sequence_id} (target: {sequence.target_parameter})")
             return True
         return False
     
@@ -171,7 +193,7 @@ class SequenceManager:
                     'value': value
                 })
                 self._last_emitted_values[param_uid] = value
-                if self._update_counter % 120 == 0:  # Log less frequently
+                if self._update_counter % 120 == 0 and value is not None:  # Log less frequently
                     logger.debug(f"📡 Emitted parameter_update: {param_uid[:50]}... = {value:.2f}")
     
     def _resolve_uid_to_path(self, uid: str, player_manager):
@@ -356,7 +378,12 @@ class SequenceManager:
             parts = target_path.split('.')
             
             if len(parts) < 4 or parts[0] != 'player':
-                logger.warning(f"Invalid target path: {target_path}")
+                # Likely a UID format, not legacy path - log once per session
+                if not hasattr(self, '_invalid_path_cache'):
+                    self._invalid_path_cache = set()
+                if target_path not in self._invalid_path_cache:
+                    logger.debug(f"Skipping non-legacy path format: {target_path}")
+                    self._invalid_path_cache.add(target_path)
                 return
             
             player_id = parts[1]
