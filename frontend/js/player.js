@@ -342,23 +342,9 @@ async function init() {
             
             // Listen for transport position updates (REPLACES polling)
             effectsSocket.on('transport.position', (data) => {
-                debug.log('📡 WebSocket: transport.position event received', data);
-                
                 // Only update if this is the currently selected clip
                 if (data.clip_id === selectedClipId && data.player_id === selectedClipPlayerType) {
-                    debug.log('🎯 Updating transport for current clip:', {
-                        selectedClipId,
-                        selectedClipPlayerType,
-                        position: data.position
-                    });
                     updateTransportPositionDisplay(data);
-                } else {
-                    debug.log('⏭️ Skipping transport update - not current clip:', {
-                        eventClipId: data.clip_id,
-                        selectedClipId,
-                        eventPlayerId: data.player_id,
-                        selectedPlayerType: selectedClipPlayerType
-                    });
                 }
             });
         }
@@ -402,54 +388,67 @@ async function init() {
  */
 function updateTransportPositionDisplay(data) {
     try {
-        const { position, in_point, out_point, total_frames, fps } = data;
-        
-        debug.log('🎬 updateTransportPositionDisplay called:', {
-            position,
-            in_point,
-            out_point,
-            total_frames,
-            fps,
-            clipEffectsLength: clipEffects.length
-        });
+        const { player_id, clip_id, position, in_point, out_point, total_frames, fps } = data;
         
         // Find the transport effect in clip effects
         const transportIndex = clipEffects.findIndex(e => e.plugin_id === 'transport');
+        
         if (transportIndex === -1) {
-            debug.log('⚠️ Transport effect not found in clipEffects');
             return;
         }
         
-        debug.log('✅ Found transport at index:', transportIndex);
+        // Use the new hierarchical controlId format
+        const controlId = `clip_${clip_id}_transport_transport_position`;
         
-        const controlId = `clip_effect_${transportIndex}_transport_position`;
+        // Direct DOM-based approach: Calculate and render red line position
+        // Find the triple slider container
+        const sliderContainer = document.getElementById(controlId);
+        
+        if (!sliderContainer) {
+            return;
+        }
+        
+        // Calculate position percentage based on TOTAL frame range (not trimmed range)
+        // The slider's full range is 0 to total_frames, and the value handle moves across it
+        // The range handles (min/max) show the trim, but value position is absolute
+        const positionPercent = total_frames > 0 ? (position / total_frames) * 100 : 0;
+        
+        // Clamp to 0-100%
+        const clampedPercent = Math.max(0, Math.min(100, positionPercent));
+        
+        // Find the existing triple slider value handle (red line)
+        const valueHandle = sliderContainer.querySelector('.handle-value');
+        if (!valueHandle) {
+            return;
+        }
+        
+        // Update the existing red line position directly (no CSS transition - backend handles smoothness)
+        valueHandle.style.left = `${clampedPercent}%`;
+        
+        // IMPORTANT: Also try to get the slider instance and update its internal value
+        // This prevents the slider from fighting our updates (especially in random mode)
         const slider = getTripleSlider(controlId);
+        if (slider && slider.config) {
+            // Update the slider's internal value without triggering onChange
+            slider.config.value = position;
+            // Note: We don't call slider.updateValues() because that would trigger
+            // onChange callbacks and create a feedback loop
+        }
         
-        debug.log('🎚️ Slider lookup:', { controlId, sliderFound: !!slider });
-        
-        if (slider) {
-            // Determine if we should auto-scale
-            const shouldScale = total_frames && out_point === (total_frames - 1);
-            debug.log('📊 Updating slider values:', { position, in_point, out_point, shouldScale });
-            slider.updateValues(position, in_point, out_point, shouldScale);
+        // Update time display
+        const displayElem = document.getElementById(`${controlId}_value`);
+        if (displayElem && fps) {
+            const totalSeconds = position / fps;
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = Math.floor(totalSeconds % 60);
+            const milliseconds = Math.floor((totalSeconds % 1) * 1000);
             
-            // Update time display
-            const displayElem = document.getElementById(`${controlId}_value`);
-            if (displayElem && fps) {
-                const totalSeconds = Math.floor(position / fps);
-                const hours = Math.floor(totalSeconds / 3600);
-                const minutes = Math.floor((totalSeconds % 3600) / 60);
-                const seconds = totalSeconds % 60;
-                
-                if (hours > 0) {
-                    displayElem.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                } else {
-                    displayElem.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                }
-                debug.log('🕐 Time display updated:', displayElem.textContent);
+            if (hours > 0) {
+                displayElem.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+            } else {
+                displayElem.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
             }
-        } else {
-            debug.log('❌ Triple slider not found for controlId:', controlId);
         }
     } catch (error) {
         console.error('❌ Failed to update transport position display:', error);
@@ -3569,21 +3568,43 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
     // Get UID from current value if it exists (_uid property), otherwise generate new one and save it
     let paramUid;
     let needsUidSave = false;
+    let oldUidToCleanup = null;
     
     if (currentValue && typeof currentValue === 'object' && currentValue._uid) {
-        paramUid = currentValue._uid;
-        console.log(`♻️ Restoring UID for ${param.name}:`, paramUid);
-    } else {
-        // Generate stable UUID (without timestamp/random - use crypto if available)
-        const uuidPart = crypto.randomUUID ? crypto.randomUUID().split('-')[0] : Math.random().toString(36).substr(2, 9);
+        // Validate that the UID matches this parameter name AND clip_id
+        // Fix for linked parameters (scale_xy/scale_x/scale_y) getting wrong UIDs
+        const uidEndsWithParamName = currentValue._uid.endsWith(`_${param.name}`);
+        const uidHasCorrectClipId = !clipId || currentValue._uid.includes(`_${clipId}_`);
+        
+        if (uidEndsWithParamName && uidHasCorrectClipId) {
+            paramUid = currentValue._uid;
+            console.log(`♻️ Restoring UID for ${param.name}:`, paramUid);
+        } else {
+            // UID doesn't match parameter name or clip_id - regenerate
+            console.warn(`⚠️ UID mismatch for ${param.name}: ${currentValue._uid} (regenerating)`);
+            oldUidToCleanup = currentValue._uid;  // Save for cleanup
+            paramUid = null;  // Will be generated below
+        }
+    }
+    
+    if (!paramUid) {
+        // NEW ARCHITECTURE: Generate UID with effect index for proper hierarchy
+        // Format: param_clip_{clip_id}_effect_{effect_idx}_{param_name}
+        // For layers: param_clip_{clip_id}_layer_{layer_idx}_effect_{effect_idx}_{param_name}
         
         if (clipId) {
-            paramUid = `param_clip_${clipId}_${param.name}_${uuidPart}`;
+            // TODO: Detect if this is a layer effect and include layer_index
+            // For now, all clip effects use this format (layer support pending)
+            // To add layer support:
+            // 1. Pass layerIndex parameter to renderParameterControl()
+            // 2. If layerIndex !== null: paramUid = `param_clip_${clipId}_layer_${layerIndex}_effect_${effectIndex}_${param.name}`
+            paramUid = `param_clip_${clipId}_effect_${effectIndex}_${param.name}`;
         } else {
-            // Legacy format for player-level effects
+            // Legacy format for player-level effects (backward compatibility)
+            const uuidPart = crypto.randomUUID ? crypto.randomUUID().split('-')[0] : Math.random().toString(36).substr(2, 9);
             paramUid = `param_${player}_${effectIndex}_${param.name}_${uuidPart}`;
         }
-        console.log(`🆕 Generated new stable UID for ${param.name}:`, paramUid);
+        console.log(`🆕 Generated new hierarchical UID for ${param.name}:`, paramUid);
         needsUidSave = true;
     }
     
@@ -3592,8 +3613,38 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
         // Use a microtask to save after render
         queueMicrotask(() => {
             console.log(`💾 Saving new UID for ${param.name}:`, paramUid);
-            updateParameter(player, effectIndex, param.name, value, `${controlId}_value`, paramUid);
+            // Extract actual value if it's a dict (currentValue might have _value property)
+            const actualValue = (currentValue && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : value;
+            updateParameter(player, effectIndex, param.name, actualValue, `${controlId}_value`, paramUid);
         });
+        
+        // Clean up sequences for old mismatched UID
+        if (oldUidToCleanup && window.sequenceManager) {
+            queueMicrotask(() => {
+                console.log(`🗑️ Cleaning up sequences for old mismatched UID: ${oldUidToCleanup}`);
+                // Find and remove sequences with the old UID
+                const sequencesToRemove = window.sequenceManager.sequences.filter(s => s.target_parameter === oldUidToCleanup);
+                if (sequencesToRemove.length > 0) {
+                    console.log(`🗑️ Removing ${sequencesToRemove.length} sequence(s) with old UID from frontend only (not sending DELETE)`);
+                    sequencesToRemove.forEach(seq => {
+                        // Remove from manager's array only
+                        const index = window.sequenceManager.sequences.indexOf(seq);
+                        if (index > -1) {
+                            window.sequenceManager.sequences.splice(index, 1);
+                        }
+                        // Don't send DELETE to backend - sequences should already be deleted or updated
+                        // Sending DELETE here causes 404 errors when user deletes sequence manually
+                    });
+                    
+                    // Update UI to remove sequence indicators
+                    if (window.sessionStateLoader) {
+                        window.sessionStateLoader.reload().catch(() => {
+                            // Ignore reload errors
+                        });
+                    }
+                }
+            });
+        }
     }
     
     // Hide sequence button for system plugins
@@ -3627,6 +3678,36 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             const intMin = param.min || 0;
             const intMax = param.max || 100;
             
+            // Check if parameter should be rendered as input field instead of slider
+            if (param.control_type === 'input') {
+                const inputActualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : value;
+                
+                control = `
+                    <div class="parameter-grid-row">
+                        <div class="param-cogwheel">
+                            ${sequenceBtn}
+                        </div>
+                        <div class="param-name">
+                            <label title="UID: ${paramUid}">${param.label || param.name}</label>
+                        </div>
+                        <div class="param-slider">
+                            <input 
+                                type="number" 
+                                id="${controlId}"
+                                class="form-control form-control-sm"
+                                value="${inputActualValue}"
+                                min="${intMin}"
+                                max="${intMax}"
+                                step="${intStep}"
+                                onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', parseFloat(this.value), '${controlId}_value', '${paramUid}')"
+                                style="width: 100%; text-align: center;"
+                            >
+                        </div>
+                    </div>
+                `;
+                break;
+            }
+            
             // Restore saved range if available, otherwise use full range
             const intSavedRangeMin = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMin !== undefined ? currentValue._rangeMin : intMin;
             const intSavedRangeMax = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMax !== undefined ? currentValue._rangeMax : intMax;
@@ -3641,14 +3722,15 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             let intDisplayValue;
             
             if (displayFormat === 'time') {
-                const totalSeconds = Math.floor(intActualValue / fps);
+                const totalSeconds = intActualValue / fps;
                 const hours = Math.floor(totalSeconds / 3600);
                 const minutes = Math.floor((totalSeconds % 3600) / 60);
-                const seconds = totalSeconds % 60;
+                const seconds = Math.floor(totalSeconds % 60);
+                const milliseconds = Math.floor((totalSeconds % 1) * 1000);
                 if (hours > 0) {
-                    intDisplayValue = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                    intDisplayValue = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
                 } else {
-                    intDisplayValue = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                    intDisplayValue = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
                 }
             } else {
                 intDisplayValue = intDecimals === 0 ? Math.round(intActualValue) : intActualValue.toFixed(intDecimals);
@@ -3670,7 +3752,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                              oncontextmenu="resetParameterToDefaultTriple(event, '${player}', ${effectIndex}, '${param.name}', ${intDefaultValue}, '${controlId}', '${controlId}_value', ${intDecimals})"></div>
                     </div>
                     <!-- Audio Reactive Inline Controls (hidden by default) -->
-                    <div id="${controlId}_audio_controls" class="param-dynamic-settings" style="display: none;">
+                    <div id="${controlId}_audio_controls" class="param-dynamic-settings audio-sequence" style="display: none;">
                         <div class="dynamic-settings-content">
                             <div class="audio-inline-bands">
                                 <button class="audio-band-btn-inline active" data-band="bass" data-param="${paramPath}" title="Bass">B</button>
@@ -3687,7 +3769,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                         </div>
                     </div>
                     <!-- Timeline Inline Controls (hidden by default) -->
-                    <div id="${controlId}_timeline_controls" class="param-dynamic-settings" style="display: none;">
+                    <div id="${controlId}_timeline_controls" class="param-dynamic-settings timeline-sequence" style="display: none;">
                         <div class="dynamic-settings-content">
                             <div class="timeline-inline-playback">
                                 <button class="timeline-play-btn-inline" data-direction="backward" data-param="${paramPath}" title="Play Backward">◄</button>
@@ -3710,7 +3792,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                         </div>
                     </div>
                     <!-- BPM Inline Controls (hidden by default) -->
-                    <div id="${controlId}_bpm_controls" class="param-dynamic-settings" style="display: none;">
+                    <div id="${controlId}_bpm_controls" class="param-dynamic-settings bpm-sequence" style="display: none;">
                         <div class="dynamic-settings-content">
                             <div class="bpm-inline-playback">
                                 <button class="bpm-play-btn-inline" data-direction="backward" data-param="${paramPath}" title="Play Backward">◄</button>
@@ -3747,7 +3829,9 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                 </div>
             `;
             // Initialize triple-slider after DOM is updated
-            setTimeout(() => {
+            // Special handling for transport position - needs immediate init to avoid race condition
+            const isTransportPosition = pluginId === 'transport' && param.name === 'transport_position';
+            const initFunction = () => {
                 // Use the same metadata extraction as above (already extracted)
                 
                 // Helper function to update display value
@@ -3755,14 +3839,15 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                     const displayElem = document.getElementById(`${controlId}_value`);
                     if (displayElem) {
                         if (displayFormat === 'time') {
-                            const totalSeconds = Math.floor(val / fps);
+                            const totalSeconds = val / fps;
                             const hours = Math.floor(totalSeconds / 3600);
                             const minutes = Math.floor((totalSeconds % 3600) / 60);
-                            const seconds = totalSeconds % 60;
+                            const seconds = Math.floor(totalSeconds % 60);
+                            const milliseconds = Math.floor((totalSeconds % 1) * 1000);
                             if (hours > 0) {
-                                displayElem.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                                displayElem.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
                             } else {
-                                displayElem.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                                displayElem.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
                             }
                         } else {
                             displayElem.textContent = intDecimals === 0 ? Math.round(val) : val.toFixed(intDecimals);
@@ -3858,7 +3943,16 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                         }
                     });
                 }
-            }, 0);
+            };
+            
+            // Use queueMicrotask for transport (synchronous) or setTimeout for others (async)
+            if (isTransportPosition) {
+                // Transport position needs immediate initialization to receive WebSocket updates
+                queueMicrotask(initFunction);
+            } else {
+                // Regular parameters use setTimeout to avoid blocking
+                setTimeout(initFunction, 0);
+            }
             break;
             
         case 'BOOL':
@@ -5988,6 +6082,127 @@ async function removePlaylistItem(playlistId, index) {
         await window.removeFromArtnetPlaylist(index);
     }
 }
+
+// ========================================
+// VIDEO PLAYER SETTINGS
+// ========================================
+
+// Initialize video player settings on page load
+document.addEventListener('DOMContentLoaded', () => {
+    // Add right-click handler to video preview
+    const videoPreview = document.getElementById('videoPreview');
+    if (videoPreview) {
+        videoPreview.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showVideoPlayerSettingsModal();
+        });
+    }
+    
+    // Handle resolution preset change
+    const presetSelect = document.getElementById('videoResolutionPreset');
+    if (presetSelect) {
+        presetSelect.addEventListener('change', () => {
+            const customGroup = document.getElementById('videoCustomResolutionGroup');
+            if (presetSelect.value === 'custom') {
+                customGroup.style.display = 'block';
+            } else {
+                customGroup.style.display = 'none';
+            }
+        });
+    }
+    
+    // Load saved settings
+    loadVideoPlayerSettings();
+});
+
+async function showVideoPlayerSettingsModal() {
+    const modal = new bootstrap.Modal(document.getElementById('videoPlayerSettingsModal'));
+    modal.show();
+}
+
+async function loadVideoPlayerSettings() {
+    try {
+        const response = await fetch('/api/player/video/settings');
+        const data = await response.json();
+        
+        if (data.success && data.settings) {
+            const settings = data.settings;
+            
+            // Set resolution preset
+            const presetSelect = document.getElementById('videoResolutionPreset');
+            if (presetSelect) {
+                presetSelect.value = settings.preset || '1080p';
+                
+                // Trigger change event to show/hide custom fields
+                if (settings.preset === 'custom') {
+                    document.getElementById('videoCustomResolutionGroup').style.display = 'block';
+                    document.getElementById('videoCustomWidth').value = settings.custom_width || 1920;
+                    document.getElementById('videoCustomHeight').value = settings.custom_height || 1080;
+                }
+            }
+            
+            // Set autosize mode
+            const autosizeSelect = document.getElementById('videoAutosizeMode');
+            if (autosizeSelect) {
+                autosizeSelect.value = settings.autosize || 'off';
+            }
+            
+            debug.log('✅ Video player settings loaded:', settings);
+        }
+    } catch (error) {
+        console.error('Failed to load video player settings:', error);
+    }
+}
+
+async function saveVideoPlayerSettings() {
+    try {
+        const presetSelect = document.getElementById('videoResolutionPreset');
+        const autosizeSelect = document.getElementById('videoAutosizeMode');
+        const customWidth = document.getElementById('videoCustomWidth');
+        const customHeight = document.getElementById('videoCustomHeight');
+        
+        const settings = {
+            preset: presetSelect.value,
+            autosize: autosizeSelect.value
+        };
+        
+        // Add custom resolution if selected
+        if (presetSelect.value === 'custom') {
+            settings.custom_width = parseInt(customWidth.value) || 1920;
+            settings.custom_height = parseInt(customHeight.value) || 1080;
+        }
+        
+        const response = await fetch('/api/player/video/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(settings)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('✅ Video player resolution updated', 'success');
+            
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('videoPlayerSettingsModal'));
+            if (modal) {
+                modal.hide();
+            }
+            
+            debug.log('✅ Video player settings saved:', settings);
+        } else {
+            showToast('❌ Failed to save settings: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        console.error('Failed to save video player settings:', error);
+        showToast('❌ Failed to save settings', 'error');
+    }
+}
+
+// Make functions globally accessible
+window.showVideoPlayerSettingsModal = showVideoPlayerSettingsModal;
+window.saveVideoPlayerSettings = saveVideoPlayerSettings;
 
 // Cleanup
 window.addEventListener('beforeunload', () => {

@@ -1,0 +1,1827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slice Editor Prototype</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Left Panel - Controls */
+        .left-panel {
+            width: 300px;
+            background: #151515;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        /* Center Panel - Canvas */
+        .canvas-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #0a0a0a;
+            padding: 20px;
+        }
+
+        .canvas-header {
+            margin-bottom: 15px;
+        }
+
+        .canvas-header h1 {
+            font-size: 24px;
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+
+        .canvas-info {
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            flex: 1;
+            background: #000;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #canvasContainer {
+            position: relative;
+            background: #222;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        #videoCanvas {
+            display: block;
+            background: linear-gradient(45deg, #1a1a1a 25%, #2a2a2a 25%, #2a2a2a 50%, #1a1a1a 50%, #1a1a1a 75%, #2a2a2a 75%, #2a2a2a);
+            background-size: 40px 40px;
+        }
+
+        #sliceCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: default;
+        }
+
+        /* Right Panel - Slices */
+        .right-panel {
+            width: 350px;
+            background: #151515;
+            border-left: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-section {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .panel-section h2 {
+            font-size: 16px;
+            color: #4CAF50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .slices-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .slice-item {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .slice-item:hover {
+            border-color: #4CAF50;
+            background: #222;
+        }
+
+        .slice-item.active {
+            border-color: #4CAF50;
+            background: #1a2a1a;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.2);
+        }
+
+        .slice-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .slice-item-title {
+            font-weight: bold;
+            color: #4CAF50;
+            font-size: 14px;
+        }
+
+        .slice-item-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .slice-item-info {
+            font-size: 11px;
+            color: #888;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+        }
+
+        .slice-properties {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #2a2a2a;
+        }
+
+        .slice-properties input {
+            width: 100%;
+            padding: 4px 6px;
+            font-size: 11px;
+            margin-top: 3px;
+        }
+
+        .slice-color-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            border: 1px solid #555;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .screen-group {
+            margin-bottom: 20px;
+        }
+
+        .screen-group-header {
+            background: #0a0a0a;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #4CAF50;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .screen-group-slices {
+            padding-left: 10px;
+        }
+
+        /* Buttons */
+        button {
+            background: #333;
+            color: #e0e0e0;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #444;
+            border-color: #4CAF50;
+        }
+
+        button.primary {
+            background: #4CAF50;
+            border-color: #4CAF50;
+            color: #fff;
+        }
+
+        button.primary:hover {
+            background: #45a049;
+        }
+
+        button.danger {
+            background: #d32f2f;
+            border-color: #d32f2f;
+            color: #fff;
+        }
+
+        button.danger:hover {
+            background: #c62828;
+        }
+
+        button.small {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.screen-btn {
+            background: #1a1a1a;
+            border-color: #555;
+            text-align: left;
+            padding-left: 20px;
+        }
+
+        button.screen-btn:hover {
+            background: #2a2a2a;
+        }
+
+        button.screen-btn.active {
+            background: #2a4a2a;
+            border-color: #4CAF50;
+        }
+
+        .screen-checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #1a1a1a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .screen-checkbox-item:hover {
+            background: #2a2a2a;
+            border-color: #4CAF50;
+        }
+
+        .screen-checkbox-item input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #4CAF50;
+        }
+
+        .screen-checkbox-item label {
+            flex: 1;
+            cursor: pointer;
+            user-select: none;
+            margin: 0;
+        }
+
+        .screen-checkbox-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .screen-checkbox-item.disabled input,
+        .screen-checkbox-item.disabled label {
+            cursor: not-allowed;
+        }
+
+        .shape-tools {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin: 10px 0;
+        }
+
+        .shape-btn {
+            padding: 12px 8px;
+            background: #2a2a2a;
+            border: 2px solid #444;
+            border-radius: 6px;
+            color: #e0e0e0;
+            cursor: pointer;
+            font-size: 20px;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .shape-btn:hover {
+            background: #333;
+            border-color: #4CAF50;
+        }
+
+        .shape-btn.active {
+            background: #2a4a2a;
+            border-color: #4CAF50;
+        }
+
+        .type-toggle {
+            display: flex;
+            gap: 8px;
+            margin: 10px 0;
+        }
+
+        .type-btn {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #444;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .type-btn.slice {
+            background: #1a3a1a;
+            color: #4CAF50;
+        }
+
+        .type-btn.slice.active {
+            border-color: #4CAF50;
+            font-weight: bold;
+        }
+
+        .type-btn.mask {
+            background: #3a1a1a;
+            color: #f44336;
+        }
+
+        .type-btn.mask.active {
+            border-color: #f44336;
+            font-weight: bold;
+        }
+
+        /* Input Fields */
+        input[type="text"],
+        input[type="number"] {
+            background: #1a1a1a;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            width: 100%;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        .input-group {
+            margin-bottom: 12px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #999;
+        }
+
+        .input-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            padding: 8px 20px;
+            background: #0a0a0a;
+            border-top: 1px solid #333;
+            font-size: 11px;
+            color: #666;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Instructions */
+        .instructions {
+            background: #1a2a1a;
+            border: 1px solid #2a4a2a;
+            border-radius: 4px;
+            padding: 12px;
+            font-size: 12px;
+            color: #8bc34a;
+            line-height: 1.6;
+        }
+
+        .instructions strong {
+            color: #4CAF50;
+        }
+
+        /* File input styling */
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Toast notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #4CAF50;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .toast.error {
+            background: #d32f2f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Left Panel: Controls & Settings -->
+        <div class="left-panel">
+            <div class="panel-section">
+                <h2>📋 Instructions</h2>
+                <div class="instructions">
+                    <strong>Create:</strong> Click "Add Slice" to create new slice<br>
+                    <strong>Select:</strong> Click on any slice to select<br>
+                    <strong>Move:</strong> Drag selected slice<br>
+                    <strong>Resize:</strong> Drag corners/edges of selected slice<br>
+                    <strong>Delete:</strong> Select slice and press Delete or click button
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>⚙️ Canvas Settings</h2>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Width</label>
+                        <input type="number" id="canvasWidth" value="1920" onchange="app.updateCanvasSize()">
+                    </div>
+                    <div class="input-group">
+                        <label>Height</label>
+                        <input type="number" id="canvasHeight" value="1080" onchange="app.updateCanvasSize()">
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>🛠️ Tools</h2>
+                
+                <div class="type-toggle">
+                    <div class="type-btn slice active" onclick="app.setType('slice')" id="typeSliceBtn">
+                        ✓ Content Slice
+                    </div>
+                    <div class="type-btn mask" onclick="app.setType('mask')" id="typeMaskBtn">
+                        ✕ Mask
+                    </div>
+                </div>
+
+                <div style="font-size: 11px; color: #999; margin: 10px 0;">Shape Type:</div>
+                <div class="shape-tools">
+                    <button class="shape-btn active" onclick="app.setShape('rectangle')" id="shapeRectangleBtn" title="Rectangle">▭</button>
+                    <button class="shape-btn" onclick="app.setShape('circle')" id="shapeCircleBtn" title="Circle">○</button>
+                    <button class="shape-btn" onclick="app.setShape('triangle')" id="shapeTriangleBtn" title="Triangle">△</button>
+                    <button class="shape-btn" onclick="app.setShape('polygon')" id="shapePolygonBtn" title="Polygon">⬡</button>
+                    <button class="shape-btn" onclick="app.setShape('freehand')" id="shapeFreehandBtn" title="Freehand">✏️</button>
+                </div>
+
+                <div style="display: flex; gap: 8px; flex-direction: column;">
+                    <button class="primary" onclick="app.startDrawing()" id="addShapeBtn">➕ Add Rectangle</button>
+                    <button onclick="app.finishDrawing()" id="finishDrawBtn" style="display: none; background: #4CAF50;">✓ Finish Drawing</button>
+                    <button onclick="app.cancelDrawing()" id="cancelDrawBtn" style="display: none;">✕ Cancel</button>
+                    <button onclick="app.deleteSelected()">🗑️ Delete Selected</button>
+                    <button onclick="app.toggleSnap()" id="snapBtn">📐 Snap: OFF</button>
+                    <button onclick="app.toggleLivePreview()" id="liveBtn" style="margin-top: 10px;">📺 Live Preview: OFF</button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>🖥️ Output Screens</h2>
+                <div style="font-size: 11px; color: #999; margin-bottom: 10px;">Assign selected slice to (multi-select):</div>
+                <div id="screenButtonsContainer" style="display: flex; gap: 6px; flex-direction: column;">
+                    <!-- Checkboxes will be dynamically generated -->
+                </div>
+                <button class="primary" onclick="app.addOutput()" style="margin-top: 10px; width: 100%;">➕ Add Output</button>
+            </div>
+        </div>
+
+        <!-- Center Panel: Canvas -->
+        <div class="canvas-panel">
+            <div class="canvas-header">
+                <h1>🎬 Slice Editor Prototype</h1>
+                <div class="canvas-info">
+                    <span>Canvas: <strong id="canvasDimensions">1920x1080</strong></span>
+                    <span>Mouse: <strong id="mousePosition">--, --</strong></span>
+                    <span>Selected: <strong id="selectedSlice">None</strong></span>
+                </div>
+            </div>
+
+            <div class="canvas-wrapper">
+                <div id="canvasContainer">
+                    <canvas id="videoCanvas"></canvas>
+                    <canvas id="sliceCanvas"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Slices & Export -->
+        <div class="right-panel">
+            <div class="slices-list">
+                <h2>📦 Output Assignment (<span id="sliceCount">0</span> slices)</h2>
+                <div id="slicesList"></div>
+            </div>
+
+            <div class="panel-section">
+                <h2>💾 Export / Import</h2>
+                <div style="display: flex; gap: 8px; flex-direction: column;">
+                    <button class="primary" onclick="app.exportJSON()">📥 Export JSON</button>
+                    <div class="file-input-wrapper">
+                        <button>📤 Import JSON</button>
+                        <input type="file" id="importFile" accept=".json" onchange="app.importJSON(event)">
+                    </div>
+                    <button onclick="app.clearAll()" class="danger">🗑️ Clear All</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <span>Flux Output Routing System - Prototype v1.0</span>
+        <span id="statusText">Ready</span>
+    </div>
+
+    <script>
+        // Slice Editor v1.1 - Fixed syntax errors
+        // Application State
+        const app = {
+            canvas: null,
+            ctx: null,
+            videoCanvas: null,
+            videoCtx: null,
+            canvasWidth: 1920,
+            canvasHeight: 1080,
+            scale: 1,
+            slices: [],
+            selectedSlice: null,
+            isDragging: false,
+            isResizing: false,
+            isRotating: false,
+            dragStart: { x: 0, y: 0 },
+            resizeHandle: null,
+            snapToGrid: false,
+            gridSize: 10,
+            livePreview: false,
+            screens: ['HDMI1', 'HDMI2', 'HDMI3', 'Virtual'],
+            customScreens: [],
+            colors: [
+                '#4CAF50', '#2196F3', '#FF9800', '#E91E63', 
+                '#9C27B0', '#00BCD4', '#FFEB3B', '#FF5722'
+            ],
+            colorIndex: 0,
+
+            setType(type) {
+                this.currentType = type;
+                document.getElementById('typeSliceBtn').classList.toggle('active', type === 'slice');
+                document.getElementById('typeMaskBtn').classList.toggle('active', type === 'mask');
+                this.updateAddButton();
+            },
+
+            setShape(shape) {
+                this.currentShape = shape;
+                ['rectangle', 'circle', 'triangle', 'polygon', 'freehand'].forEach(s => {
+                    document.getElementById(`shape${s.charAt(0).toUpperCase() + s.slice(1)}Btn`).classList.toggle('active', s === shape);
+                });
+                this.updateAddButton();
+            },
+
+            updateAddButton() {
+                const typeLabel = this.currentType === 'slice' ? 'Add' : 'Add Mask';
+                const shape = this.currentShape || 'rectangle';
+                const shapeLabel = shape.charAt(0).toUpperCase() + shape.slice(1);
+                const btn = document.getElementById('addShapeBtn');
+                if (btn) {
+                    btn.textContent = `➕ ${typeLabel} ${shapeLabel}`;
+                }
+            },
+
+            init() {
+                this.canvas = document.getElementById('sliceCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.videoCanvas = document.getElementById('videoCanvas');
+                this.videoCtx = this.videoCanvas.getContext('2d');
+
+                this.updateCanvasSize();
+                this.setupEventListeners();
+                this.drawTestPattern();
+                this.render();
+
+                // Load from localStorage if available
+                this.loadFromLocalStorage();
+            },
+
+            setupEventListeners() {
+                this.canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
+                this.canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
+                this.canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
+                this.canvas.addEventListener('mouseleave', this.onMouseUp.bind(this));
+                
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Delete' && this.selectedSlice) {
+                        this.deleteSelected();
+                    }
+                    if (e.key === 'Escape') {
+                        this.clearSelection();
+                    }
+                });
+
+                // Prevent context menu
+                this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            },
+
+            updateCanvasSize() {
+                this.canvasWidth = parseInt(document.getElementById('canvasWidth').value);
+                this.canvasHeight = parseInt(document.getElementById('canvasHeight').value);
+
+                // Calculate scale to fit canvas in viewport
+                const container = document.getElementById('canvasContainer');
+                const maxWidth = container.parentElement.clientWidth - 40;
+                const maxHeight = container.parentElement.clientHeight - 40;
+                
+                const scaleX = maxWidth / this.canvasWidth;
+                const scaleY = maxHeight / this.canvasHeight;
+                this.scale = Math.min(scaleX, scaleY, 1);
+
+                const displayWidth = this.canvasWidth * this.scale;
+                const displayHeight = this.canvasHeight * this.scale;
+
+                this.canvas.width = this.canvasWidth;
+                this.canvas.height = this.canvasHeight;
+                this.canvas.style.width = displayWidth + 'px';
+                this.canvas.style.height = displayHeight + 'px';
+
+                this.videoCanvas.width = this.canvasWidth;
+                this.videoCanvas.height = this.canvasHeight;
+                this.videoCanvas.style.width = displayWidth + 'px';
+                this.videoCanvas.style.height = displayHeight + 'px';
+
+                container.style.width = displayWidth + 'px';
+                container.style.height = displayHeight + 'px';
+
+                document.getElementById('canvasDimensions').textContent = 
+                    `${this.canvasWidth}x${this.canvasHeight}`;
+
+                this.drawTestPattern();
+                this.render();
+            },
+
+            drawTestPattern() {
+                const ctx = this.videoCtx;
+                ctx.fillStyle = '#1a1a1a';
+                ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
+
+                // Draw grid
+                ctx.strokeStyle = '#2a2a2a';
+                ctx.lineWidth = 1;
+                const gridSize = 100;
+                
+                for (let x = 0; x <= this.canvasWidth; x += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, this.canvasHeight);
+                    ctx.stroke();
+                }
+                
+                for (let y = 0; y <= this.canvasHeight; y += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(this.canvasWidth, y);
+                    ctx.stroke();
+                }
+
+                // Draw center cross
+                ctx.strokeStyle = '#444';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(this.canvasWidth / 2, 0);
+                ctx.lineTo(this.canvasWidth / 2, this.canvasHeight);
+                ctx.moveTo(0, this.canvasHeight / 2);
+                ctx.lineTo(this.canvasWidth, this.canvasHeight / 2);
+                ctx.stroke();
+
+                // Draw label
+                ctx.fillStyle = '#444';
+                ctx.font = '48px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('VIDEO CANVAS', this.canvasWidth / 2, this.canvasHeight / 2);
+            },
+
+            getMousePos(e) {
+                const rect = this.canvas.getBoundingClientRect();
+                return {
+                    x: (e.clientX - rect.left) / this.scale,
+                    y: (e.clientY - rect.top) / this.scale
+                };
+            },
+
+            snapToGridPos(pos) {
+                if (!this.snapToGrid) return pos;
+                return {
+                    x: Math.round(pos.x / this.gridSize) * this.gridSize,
+                    y: Math.round(pos.y / this.gridSize) * this.gridSize
+                };
+            },
+
+            onMouseDown(e) {
+                const pos = this.getMousePos(e);
+
+                // Drawing mode
+                if (this.drawingMode) {
+                    if (this.currentShape === 'rectangle') {
+                        this.tempShape = { x: pos.x, y: pos.y, width: 0, height: 0 };
+                        this.isDragging = true;
+                    } else if (this.currentShape === 'circle') {
+                        if (!this.tempShape) {
+                            this.tempShape = { centerX: pos.x, centerY: pos.y, radius: 0 };
+                            this.isDragging = true;
+                        }
+                    } else if (this.currentShape === 'triangle') {
+                        this.drawingPoints.push({x: pos.x, y: pos.y});
+                        if (this.drawingPoints.length === 3) {
+                            this.createShapeFromDrawing();
+                            this.cancelDrawing();
+                        }
+                        this.render();
+                    } else if (this.currentShape === 'polygon') {
+                        this.drawingPoints.push({x: pos.x, y: pos.y});
+                        this.render();
+                    } else if (this.currentShape === 'freehand') {
+                        this.drawingPoints = [{x: pos.x, y: pos.y}];
+                        this.isDragging = true;
+                    }
+                    return;
+                }
+
+                // Check if clicking on rotation handle
+                if (this.selectedSlice && this.isOnRotationHandle(pos, this.selectedSlice)) {
+                    this.isRotating = true;
+                    this.dragStart = pos;
+                    return;
+                }
+
+                // Check if clicking on resize handle (only for rectangles)
+                if (this.selectedSlice && this.selectedSlice.shape === 'rectangle') {
+                    const handle = this.getResizeHandle(pos, this.selectedSlice);
+                    if (handle) {
+                        this.isResizing = true;
+                        this.resizeHandle = handle;
+                        this.dragStart = pos;
+                        return;
+                    }
+                }
+
+                // Check if clicking on shape
+                const clickedSlice = this.getSliceAt(pos);
+                if (clickedSlice) {
+                    this.selectedSlice = clickedSlice;
+                    this.isDragging = true;
+                    if (clickedSlice.shape === 'rectangle') {
+                        this.dragStart = {
+                            x: pos.x - clickedSlice.x,
+                            y: pos.y - clickedSlice.y
+                        };
+                    } else {
+                        this.dragStart = pos;
+                    }
+                } else {
+                    this.selectedSlice = null;
+                }
+
+                this.updateUI();
+                this.render();
+            },
+
+            onMouseMove(e) {
+                const pos = this.getMousePos(e);
+                
+                document.getElementById('mousePosition').textContent = 
+                    `${Math.round(pos.x)}, ${Math.round(pos.y)}`;
+
+                // Drawing mode
+                if (this.drawingMode && this.isDragging) {
+                    if (this.currentShape === 'rectangle' && this.tempShape) {
+                        this.tempShape.width = pos.x - this.tempShape.x;
+                        this.tempShape.height = pos.y - this.tempShape.y;
+                        this.render();
+                    } else if (this.currentShape === 'circle' && this.tempShape) {
+                        const dx = pos.x - this.tempShape.centerX;
+                        const dy = pos.y - this.tempShape.centerY;
+                        this.tempShape.radius = Math.sqrt(dx * dx + dy * dy);
+                        this.render();
+                    } else if (this.currentShape === 'freehand') {
+                        this.drawingPoints.push({x: pos.x, y: pos.y});
+                        this.render();
+                    }
+                    return;
+                }
+
+                if (this.isRotating && this.selectedSlice) {
+                    this.rotateSlice(pos);
+                    this.render();
+                } else if (this.isDragging && this.selectedSlice) {
+                    if (this.selectedSlice.shape === 'rectangle') {
+                        let newPos = this.snapToGridPos({
+                            x: pos.x - this.dragStart.x,
+                            y: pos.y - this.dragStart.y
+                        });
+                        this.selectedSlice.x = Math.max(0, Math.min(newPos.x, this.canvasWidth - this.selectedSlice.width));
+                        this.selectedSlice.y = Math.max(0, Math.min(newPos.y, this.canvasHeight - this.selectedSlice.height));
+                    } else {
+                        // Move other shapes by offset
+                        const dx = pos.x - this.dragStart.x;
+                        const dy = pos.y - this.dragStart.y;
+                        this.moveShape(this.selectedSlice, dx, dy);
+                        this.dragStart = pos;
+                    }
+                    this.render();
+                } else if (this.isResizing && this.selectedSlice) {
+                    this.resizeSlice(pos);
+                    this.render();
+                } else {
+                    // Update cursor based on hover
+                    this.updateCursor(pos);
+                }
+            },
+
+            onMouseUp(e) {
+                if (this.drawingMode && this.isDragging) {
+                    if (this.currentShape === 'rectangle' || this.currentShape === 'circle') {
+                        this.createShapeFromDrawing();
+                        this.cancelDrawing();
+                    } else if (this.currentShape === 'freehand' && this.drawingPoints.length > 2) {
+                        // Auto-finish freehand on mouse up
+                        this.createShapeFromDrawing();
+                        this.cancelDrawing();
+                    }
+                }
+
+                this.isDragging = false;
+                this.isResizing = false;
+                this.isRotating = false;
+                this.resizeHandle = null;
+
+                if (!this.drawingMode) {
+                    this.saveToLocalStorage();
+                }
+                this.updateUI();
+                this.render();
+            },
+
+            updateCursor(pos) {
+                if (this.selectedSlice) {
+                    if (this.isOnRotationHandle(pos, this.selectedSlice)) {
+                        this.canvas.style.cursor = 'grab';
+                        return;
+                    }
+                    const handle = this.getResizeHandle(pos, this.selectedSlice);
+                    if (handle) {
+                        this.canvas.style.cursor = handle + '-resize';
+                        return;
+                    }
+                }
+
+                const slice = this.getSliceAt(pos);
+                this.canvas.style.cursor = slice ? 'move' : 'default';
+            },
+
+            getSliceAt(pos) {
+                for (let i = this.slices.length - 1; i >= 0; i--) {
+                    const s = this.slices[i];
+                    if (this.isPointInShape(pos, s)) {
+                        return s;
+                    }
+                }
+                return null;
+            },
+
+            isPointInShape(pos, shape) {
+                if (shape.shape === 'rectangle') {
+                    return pos.x >= shape.x && pos.x <= shape.x + shape.width &&
+                           pos.y >= shape.y && pos.y <= shape.y + shape.height;
+                } else if (shape.shape === 'circle') {
+                    const dx = pos.x - shape.centerX;
+                    const dy = pos.y - shape.centerY;
+                    return (dx * dx + dy * dy) <= (shape.radius * shape.radius);
+                } else if (shape.shape === 'triangle' || shape.shape === 'polygon' || shape.shape === 'freehand') {
+                    // Point in polygon test
+                    const points = shape.points;
+                    let inside = false;
+                    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+                        const xi = points[i].x, yi = points[i].y;
+                        const xj = points[j].x, yj = points[j].y;
+                        const intersect = ((yi > pos.y) !== (yj > pos.y)) &&
+                            (pos.x < (xj - xi) * (pos.y - yi) / (yj - yi) + xi);
+                        if (intersect) inside = !inside;
+                    }
+                    return inside;
+                }
+                return false;
+            },
+
+            getResizeHandle(pos, slice) {
+                const handleSize = 10 / this.scale;
+                const handles = {
+                    'nw': { x: slice.x, y: slice.y },
+                    'ne': { x: slice.x + slice.width, y: slice.y },
+                    'sw': { x: slice.x, y: slice.y + slice.height },
+                    'se': { x: slice.x + slice.width, y: slice.y + slice.height },
+                    'n': { x: slice.x + slice.width / 2, y: slice.y },
+                    's': { x: slice.x + slice.width / 2, y: slice.y + slice.height },
+                    'w': { x: slice.x, y: slice.y + slice.height / 2 },
+                    'e': { x: slice.x + slice.width, y: slice.y + slice.height / 2 }
+                };
+
+                for (let [handle, hPos] of Object.entries(handles)) {
+                    if (Math.abs(pos.x - hPos.x) < handleSize && Math.abs(pos.y - hPos.y) < handleSize) {
+                        return handle;
+                    }
+                }
+                return null;
+            },
+
+            moveShape(shape, dx, dy) {
+                if (shape.shape === 'circle') {
+                    shape.centerX += dx;
+                    shape.centerY += dy;
+                } else if (shape.shape === 'triangle' || shape.shape === 'polygon' || shape.shape === 'freehand') {
+                    shape.points.forEach(p => {
+                        p.x += dx;
+                        p.y += dy;
+                    });
+                }
+            },
+
+            resizeSlice(pos) {
+                const slice = this.selectedSlice;
+                const snappedPos = this.snapToGridPos(pos);
+
+                switch (this.resizeHandle) {
+                    case 'se':
+                        slice.width = Math.max(10, snappedPos.x - slice.x);
+                        slice.height = Math.max(10, snappedPos.y - slice.y);
+                        break;
+                    case 'sw':
+                        const newWidth = slice.width + (slice.x - snappedPos.x);
+                        if (newWidth >= 10) {
+                            slice.x = snappedPos.x;
+                            slice.width = newWidth;
+                        }
+                        slice.height = Math.max(10, snappedPos.y - slice.y);
+                        break;
+                    case 'ne':
+                        slice.width = Math.max(10, snappedPos.x - slice.x);
+                        const newHeight = slice.height + (slice.y - snappedPos.y);
+                        if (newHeight >= 10) {
+                            slice.y = snappedPos.y;
+                            slice.height = newHeight;
+                        }
+                        break;
+                    case 'nw':
+                        const newW = slice.width + (slice.x - snappedPos.x);
+                        const newH = slice.height + (slice.y - snappedPos.y);
+                        if (newW >= 10 && newH >= 10) {
+                            slice.x = snappedPos.x;
+                            slice.y = snappedPos.y;
+                            slice.width = newW;
+                            slice.height = newH;
+                        }
+                        break;
+                    case 'n':
+                        const nHeight = slice.height + (slice.y - snappedPos.y);
+                        if (nHeight >= 10) {
+                            slice.y = snappedPos.y;
+                            slice.height = nHeight;
+                        }
+                        break;
+                    case 's':
+                        slice.height = Math.max(10, snappedPos.y - slice.y);
+                        break;
+                    case 'w':
+                        const wWidth = slice.width + (slice.x - snappedPos.x);
+                        if (wWidth >= 10) {
+                            slice.x = snappedPos.x;
+                            slice.width = wWidth;
+                        }
+                        break;
+                    case 'e':
+                        slice.width = Math.max(10, snappedPos.x - slice.x);
+                        break;
+                }
+            },
+
+            startDrawing() {
+                this.drawingMode = true;
+                this.drawingPoints = [];
+                this.tempShape = null;
+                document.getElementById('finishDrawBtn').style.display = (this.currentShape === 'polygon' || this.currentShape === 'freehand') ? 'block' : 'none';
+                document.getElementById('cancelDrawBtn').style.display = 'block';
+                this.canvas.style.cursor = 'crosshair';
+                this.showToast(`Click to draw ${this.currentShape}`);
+            },
+
+            finishDrawing() {
+                if (this.drawingPoints.length < 3 && (this.currentShape === 'polygon' || this.currentShape === 'triangle')) {
+                    this.showToast('Need at least 3 points', 'error');
+                    return;
+                }
+                if (this.drawingPoints.length < 2 && this.currentShape === 'freehand') {
+                    this.showToast('Draw a path first', 'error');
+                    return;
+                }
+                this.createShapeFromDrawing();
+                this.cancelDrawing();
+            },
+
+            cancelDrawing() {
+                this.drawingMode = false;
+                this.drawingPoints = [];
+                this.tempShape = null;
+                document.getElementById('finishDrawBtn').style.display = 'none';
+                document.getElementById('cancelDrawBtn').style.display = 'none';
+                this.canvas.style.cursor = 'default';
+                this.render();
+            },
+
+            createShapeFromDrawing() {
+                const id = 'shape_' + Date.now();
+                const color = this.colors[this.colorIndex % this.colors.length];
+                this.colorIndex++;
+                
+                let shape = {
+                    id: id,
+                    type: this.currentType,
+                    shape: this.currentShape,
+                    rotation: 0,
+                    screens: ['HDMI1'],
+                    color: color,
+                    label: `${this.currentType === 'mask' ? 'Mask' : 'Slice'} ${this.slices.length + 1}`
+                };
+
+                // Set shape-specific data
+                if (this.currentShape === 'rectangle' && this.tempShape) {
+                    shape.x = this.tempShape.x;
+                    shape.y = this.tempShape.y;
+                    shape.width = this.tempShape.width;
+                    shape.height = this.tempShape.height;
+                } else if (this.currentShape === 'circle' && this.tempShape) {
+                    shape.centerX = this.tempShape.centerX;
+                    shape.centerY = this.tempShape.centerY;
+                    shape.radius = this.tempShape.radius;
+                } else if (this.currentShape === 'triangle' || this.currentShape === 'polygon' || this.currentShape === 'freehand') {
+                    shape.points = [...this.drawingPoints];
+                }
+
+                this.slices.push(shape);
+                this.selectedSlice = shape;
+                this.updateUI();
+                this.render();
+                this.saveToLocalStorage();
+                this.showToast(`${this.currentType === 'mask' ? 'Mask' : 'Shape'} created`);
+            },
+
+            createSlice(x, y, width, height, label = null) {
+                const id = 'slice_' + Date.now();
+                const slice = {
+                    id: id,
+                    x: x,
+                    y: y,
+                    width: width,
+                    height: height,
+                    rotation: 0,
+                    screens: ['HDMI1'],
+                    color: this.colors[this.colorIndex % this.colors.length],
+                    label: label || `Slice ${this.slices.length + 1}`
+                };
+                this.colorIndex++;
+                this.slices.push(slice);
+                this.updateUI();
+                return slice;
+            },
+
+            isOnRotationHandle(pos, slice) {
+                const centerX = slice.x + slice.width / 2;
+                const rotHandleY = slice.y - 30;
+                const distance = Math.sqrt(Math.pow(pos.x - centerX, 2) + Math.pow(pos.y - rotHandleY, 2));
+                return distance <= 15;
+            },
+
+            rotateSlice(pos) {
+                const slice = this.selectedSlice;
+                const centerX = slice.x + slice.width / 2;
+                const centerY = slice.y + slice.height / 2;
+                const angle = Math.atan2(pos.y - centerY, pos.x - centerX) * 180 / Math.PI + 90;
+                slice.rotation = angle % 360;
+            },
+
+            updateSliceProperty(id, property, value) {
+                const slice = this.slices.find(s => s.id === id);
+                if (slice) {
+                    slice[property] = parseFloat(value) || 0;
+                    this.render();
+                    this.saveToLocalStorage();
+                }
+            },
+
+            updateSliceLabel(id, value) {
+                const slice = this.slices.find(s => s.id === id);
+                if (slice) {
+                    slice.label = value || `Slice ${this.slices.indexOf(slice) + 1}`;
+                    this.updateUI();
+                    this.render();
+                    this.saveToLocalStorage();
+                }
+            },
+
+            toggleLivePreview() {
+                this.livePreview = !this.livePreview;
+                document.getElementById('liveBtn').textContent = 
+                    `📺 Live Preview: ${this.livePreview ? 'ON' : 'OFF'}`;
+                if (this.livePreview) {
+                    this.showToast('Live preview enabled (placeholder)');
+                    // TODO: Implement actual live video preview
+                } else {
+                    this.showToast('Live preview disabled');
+                }
+            },
+
+            toggleScreen(screen) {
+                if (this.selectedSlice) {
+                    const screens = this.selectedSlice.screens || [];
+                    const index = screens.indexOf(screen);
+                    if (index > -1) {
+                        // Remove screen
+                        screens.splice(index, 1);
+                        this.showToast(`Removed from ${screen}`);
+                    } else {
+                        // Add screen
+                        screens.push(screen);
+                        this.showToast(`Assigned to ${screen}`);
+                    }
+                    this.selectedSlice.screens = screens;
+                    this.updateUI();
+                    this.saveToLocalStorage();
+                } else {
+                    this.showToast('Please select a slice first', 'error');
+                }
+            },
+
+            addOutput() {
+                const name = prompt('Enter output screen name (e.g., HDMI4, DisplayPort1, etc.):');
+                if (name && name.trim()) {
+                    const screenName = name.trim();
+                    const allScreens = [...this.screens, ...this.customScreens];
+                    if (allScreens.includes(screenName)) {
+                        this.showToast('Screen name already exists', 'error');
+                        return;
+                    }
+                    this.customScreens.push(screenName);
+                    this.updateScreenButtons();
+                    this.updateUI();
+                    this.saveToLocalStorage();
+                    this.showToast(`Added output: ${screenName}`);
+                }
+            },
+
+            removeOutput(screen) {
+                if (confirm(`Remove output "${screen}"? It will be unassigned from all slices.`)) {
+                    // Remove screen from all slices
+                    this.slices.forEach(slice => {
+                        const screens = slice.screens || [];
+                        const index = screens.indexOf(screen);
+                        if (index > -1) {
+                            screens.splice(index, 1);
+                        }
+                        // Ensure at least one screen is assigned
+                        if (screens.length === 0) {
+                            screens.push('HDMI1');
+                        }
+                        slice.screens = screens;
+                    });
+                    this.customScreens = this.customScreens.filter(s => s !== screen);
+                    this.updateScreenButtons();
+                    this.updateUI();
+                    this.saveToLocalStorage();
+                    this.showToast(`Removed output: ${screen}`);
+                }
+            },
+
+            updateScreenButtons() {
+                const container = document.getElementById('screenButtonsContainer');
+                const allScreens = [...this.screens, ...this.customScreens];
+                const selectedScreens = this.selectedSlice ? (this.selectedSlice.screens || []) : [];
+                const disabled = !this.selectedSlice ? 'disabled' : '';
+                
+                let html = '';
+                this.screens.forEach(screen => {
+                    const displayName = screen === 'Virtual' ? 'Virtual (Dummy)' : screen;
+                    const checked = selectedScreens.includes(screen) ? 'checked' : '';
+                    html += `
+                        <div class="screen-checkbox-item ${disabled}">
+                            <input type="checkbox" id="screen_${screen}" data-screen="${screen}" 
+                                   ${checked} ${disabled ? 'disabled' : ''}
+                                   onchange="app.toggleScreen('${screen}')">
+                            <label for="screen_${screen}">${displayName}</label>
+                        </div>
+                    `;
+                });
+                
+                this.customScreens.forEach(screen => {
+                    const checked = selectedScreens.includes(screen) ? 'checked' : '';
+                    html += `
+                        <div style="display: flex; gap: 5px; align-items: stretch;">
+                            <div class="screen-checkbox-item ${disabled}" style="flex: 1;">
+                                <input type="checkbox" id="screen_${screen}" data-screen="${screen}" 
+                                       ${checked} ${disabled ? 'disabled' : ''}
+                                       onchange="app.toggleScreen('${screen}')">
+                                <label for="screen_${screen}">${screen}</label>
+                            </div>
+                            <button class="small danger" onclick="app.removeOutput('${screen}'); event.stopPropagation();" style="padding: 8px;">×</button>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+            },
+
+            deleteSelected() {
+                if (this.selectedSlice) {
+                    this.slices = this.slices.filter(s => s !== this.selectedSlice);
+                    this.selectedSlice = null;
+                    this.updateUI();
+                    this.render();
+                    this.saveToLocalStorage();
+                    this.showToast('Slice deleted');
+                }
+            },
+
+            clearSelection() {
+                this.selectedSlice = null;
+                this.updateUI();
+                this.render();
+            },
+
+            toggleSnap() {
+                this.snapToGrid = !this.snapToGrid;
+                this.updateUI();
+                this.showToast(`Snap to grid: ${this.snapToGrid ? 'ON' : 'OFF'}`);
+            },
+
+            clearAll() {
+                if (confirm('Clear all slices?')) {
+                    this.slices = [];
+                    this.selectedSlice = null;
+                    this.updateUI();
+                    this.render();
+                    this.saveToLocalStorage();
+                    this.showToast('All slices cleared');
+                }
+            },
+
+            render() {
+                this.ctx.clearRect(0, 0, this.canvasWidth, this.canvasHeight);
+
+                // Draw all slices
+                this.slices.forEach(slice => {
+                    const isSelected = slice === this.selectedSlice;
+                    const centerX = slice.x + slice.width / 2;
+                    const centerY = slice.y + slice.height / 2;
+                    
+                    this.ctx.save();
+                    
+                    // Apply rotation
+                    if (slice.rotation) {
+                        this.ctx.translate(centerX, centerY);
+                        this.ctx.rotate(slice.rotation * Math.PI / 180);
+                        this.ctx.translate(-centerX, -centerY);
+                    }
+                    
+                    // Fill
+                    this.ctx.fillStyle = slice.color + '11';
+                    this.ctx.fillRect(slice.x, slice.y, slice.width, slice.height);
+
+                    // Border
+                    this.ctx.strokeStyle = isSelected ? '#ffffff' : slice.color;
+                    this.ctx.lineWidth = isSelected ? 3 : 2;
+                    this.ctx.strokeRect(slice.x, slice.y, slice.width, slice.height);
+
+                    // Label
+                    this.ctx.fillStyle = isSelected ? '#ffffff' : slice.color;
+                    this.ctx.font = '16px Arial';
+                    this.ctx.fillText(slice.label, slice.x + 10, slice.y + 25);
+
+                    // Dimensions
+                    this.ctx.fillStyle = '#ffffff';
+                    this.ctx.font = '12px monospace';
+                    const dimText = `${Math.round(slice.width)}x${Math.round(slice.height)}`;
+                    if (slice.rotation) {
+                        this.ctx.fillText(dimText + ` ${Math.round(slice.rotation)}°`, slice.x + 10, slice.y + slice.height - 10);
+                    } else {
+                        this.ctx.fillText(dimText, slice.x + 10, slice.y + slice.height - 10);
+                    }
+
+                    this.ctx.restore();
+
+                    // Resize and rotation handles (if selected) - drawn without rotation
+                    if (isSelected) {
+                        this.drawResizeHandles(slice);
+                        this.drawRotationHandle(slice);
+                    }
+                });
+            },
+
+            drawShapePath(shape) {
+                this.ctx.beginPath();
+                if (shape.shape === 'rectangle') {
+                    this.ctx.rect(shape.x, shape.y, shape.width, shape.height);
+                } else if (shape.shape === 'circle') {
+                    this.ctx.arc(shape.centerX, shape.centerY, shape.radius, 0, Math.PI * 2);
+                } else if (shape.shape === 'triangle' || shape.shape === 'polygon' || shape.shape === 'freehand') {
+                    if (shape.points && shape.points.length > 0) {
+                        this.ctx.moveTo(shape.points[0].x, shape.points[0].y);
+                        for (let i = 1; i < shape.points.length; i++) {
+                            this.ctx.lineTo(shape.points[i].x, shape.points[i].y);
+                        }
+                        this.ctx.closePath();
+                    }
+                }
+            },
+
+            drawShape(tempShape, shapeType, fill = true) {
+                this.ctx.beginPath();
+                if (shapeType === 'rectangle') {
+                    this.ctx.rect(tempShape.x, tempShape.y, tempShape.width, tempShape.height);
+                } else if (shapeType === 'circle') {
+                    this.ctx.arc(tempShape.centerX, tempShape.centerY, tempShape.radius, 0, Math.PI * 2);
+                }
+                if (fill) this.ctx.fill();
+                this.ctx.stroke();
+            },
+
+            getShapeBounds(shape) {
+                if (shape.shape === 'rectangle') {
+                    return { x: shape.x, y: shape.y, width: shape.width, height: shape.height };
+                } else if (shape.shape === 'circle') {
+                    return {
+                        x: shape.centerX - shape.radius,
+                        y: shape.centerY - shape.radius,
+                        width: shape.radius * 2,
+                        height: shape.radius * 2
+                    };
+                } else if (shape.points && shape.points.length > 0) {
+                    const xs = shape.points.map(p => p.x);
+                    const ys = shape.points.map(p => p.y);
+                    const minX = Math.min(...xs);
+                    const maxX = Math.max(...xs);
+                    const minY = Math.min(...ys);
+                    const maxY = Math.max(...ys);
+                    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+                }
+                return { x: 0, y: 0, width: 0, height: 0 };
+            },
+
+            getShapeLabelPosition(shape) {
+                const bounds = this.getShapeBounds(shape);
+                return { x: bounds.x + 5, y: bounds.y + 5 };
+            },
+
+            drawCircleHandle(shape) {
+                // Draw radius handle
+                const handleX = shape.centerX + shape.radius;
+                const handleY = shape.centerY;
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.fillRect(handleX - 4, handleY - 4, 8, 8);
+                
+                // Draw center
+                this.ctx.beginPath();
+                this.ctx.arc(shape.centerX, shape.centerY, 4, 0, Math.PI * 2);
+                this.ctx.fill();
+            },
+
+            drawPointHandles(shape) {
+                if (!shape.points) return;
+                this.ctx.fillStyle = '#ffffff';
+                shape.points.forEach(p => {
+                    this.ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+                });
+            },
+
+            drawResizeHandles(slice) {
+                const handleSize = 8;
+                const handles = [
+                    { x: slice.x, y: slice.y },
+                    { x: slice.x + slice.width, y: slice.y },
+                    { x: slice.x, y: slice.y + slice.height },
+                    { x: slice.x + slice.width, y: slice.y + slice.height },
+                    { x: slice.x + slice.width / 2, y: slice.y },
+                    { x: slice.x + slice.width / 2, y: slice.y + slice.height },
+                    { x: slice.x, y: slice.y + slice.height / 2 },
+                    { x: slice.x + slice.width, y: slice.y + slice.height / 2 }
+                ];
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.strokeStyle = '#000000';
+                this.ctx.lineWidth = 1;
+
+                handles.forEach(handle => {
+                    this.ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+                    this.ctx.strokeRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+                });
+            },
+
+            drawRotationHandle(slice) {
+                const centerX = slice.x + slice.width / 2;
+                const rotHandleY = slice.y - 30;
+                
+                // Draw line from top center to rotation handle
+                this.ctx.beginPath();
+                this.ctx.strokeStyle = '#4CAF50';
+                this.ctx.lineWidth = 2;
+                this.ctx.moveTo(centerX, slice.y);
+                this.ctx.lineTo(centerX, rotHandleY);
+                this.ctx.stroke();
+                
+                // Draw rotation handle circle
+                this.ctx.beginPath();
+                this.ctx.arc(centerX, rotHandleY, 8, 0, Math.PI * 2);
+                this.ctx.fillStyle = '#4CAF50';
+                this.ctx.fill();
+                this.ctx.strokeStyle = '#ffffff';
+                this.ctx.lineWidth = 2;
+                this.ctx.stroke();
+                
+                // Draw rotation icon
+                this.ctx.strokeStyle = '#ffffff';
+                this.ctx.lineWidth = 1.5;
+                this.ctx.beginPath();
+                this.ctx.arc(centerX, rotHandleY, 4, 0.5, Math.PI * 1.5);
+                this.ctx.stroke();
+            },
+
+            updateUI() {
+                // Update slice count
+                document.getElementById('sliceCount').textContent = this.slices.length;
+
+                // Update selected slice info
+                document.getElementById('selectedSlice').textContent = 
+                    this.selectedSlice ? this.selectedSlice.label : 'None';
+
+                // Update snap button
+                document.getElementById('snapBtn').textContent = 
+                    `📐 Snap: ${this.snapToGrid ? 'ON' : 'OFF'}`;
+
+                // Update screen checkboxes
+                this.updateScreenButtons();
+
+                // Group slices by screen (slices can appear in multiple groups)
+                const allScreens = [...this.screens, ...this.customScreens];
+                const slicesByScreen = {};
+                allScreens.forEach(screen => {
+                    slicesByScreen[screen] = this.slices.filter(s => {
+                        const screens = s.screens || [s.screen] || ['HDMI1'];
+                        return screens.includes(screen);
+                    });
+                });
+
+                // Update slices list organized by screen
+                let listHtml = '';
+                allScreens.forEach(screen => {
+                    const screenSlices = slicesByScreen[screen];
+                    const screenName = screen === 'Virtual' ? 'Virtual (Dummy)' : screen;
+                    const sliceCount = screenSlices.length;
+                    
+                    listHtml += `
+                        <div class="screen-group">
+                            <div class="screen-group-header">
+                                <span>🖥️ ${screenName}</span>
+                                <span style="margin-left: auto; font-size: 11px; color: #888;">${sliceCount} slice${sliceCount !== 1 ? 's' : ''}</span>
+                            </div>
+                            <div class="screen-group-slices">
+                    `;
+
+                    if (screenSlices.length === 0) {
+                        listHtml += '<div style="color: #666; font-size: 11px; padding: 10px; text-align: center;">No slices assigned</div>';
+                    } else {
+                        screenSlices.forEach(slice => {
+                            const isActive = slice === this.selectedSlice ? 'active' : '';
+                            const sliceScreens = slice.screens || [slice.screen] || ['HDMI1'];
+                            const screenCountBadge = sliceScreens.length > 1 ? `<span style="background: #4CAF50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; margin-left: 5px;">${sliceScreens.length} outputs</span>` : '';
+                            listHtml += `
+                                <div class="slice-item ${isActive}" onclick="app.selectSlice('${slice.id}')">
+                                    <div class="slice-item-header">
+                                        <div style="display: flex; align-items: center;">
+                                            <span class="slice-color-indicator" style="background: ${slice.color}"></span>
+                                            <span class="slice-item-title">${slice.label}</span>
+                                            ${screenCountBadge}
+                                        </div>
+                                        <div class="slice-item-actions">
+                                            <button class="small danger" onclick="app.deleteSliceById('${slice.id}'); event.stopPropagation();">Del</button>
+                                        </div>
+                                    </div>
+                                    <div class="slice-item-info">
+                                        <span>Position: ${Math.round(slice.x)}, ${Math.round(slice.y)}</span>
+                                        <span>Size: ${Math.round(slice.width)}x${Math.round(slice.height)}</span>
+                                    </div>
+                            ${isActive ? `
+                            <div class="slice-properties">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+                                    <div style="grid-column: 1 / -1;">
+                                        <label style="font-size: 10px; color: #999;">Label</label>
+                                        <input type="text" value="${slice.label}" 
+                                               onchange="app.updateSliceLabel('${slice.id}', this.value)" 
+                                               onclick="event.stopPropagation()">
+                                    </div>
+                                    <div>
+                                        <label style="font-size: 10px; color: #999;">X</label>
+                                        <input type="number" value="${Math.round(slice.x)}" 
+                                               onchange="app.updateSliceProperty('${slice.id}', 'x', this.value)" 
+                                               onclick="event.stopPropagation()">
+                                    </div>
+                                    <div>
+                                        <label style="font-size: 10px; color: #999;">Y</label>
+                                        <input type="number" value="${Math.round(slice.y)}" 
+                                               onchange="app.updateSliceProperty('${slice.id}', 'y', this.value)" 
+                                               onclick="event.stopPropagation()">
+                                    </div>
+                                    <div>
+                                        <label style="font-size: 10px; color: #999;">Width</label>
+                                        <input type="number" value="${Math.round(slice.width)}" 
+                                               onchange="app.updateSliceProperty('${slice.id}', 'width', this.value)" 
+                                               onclick="event.stopPropagation()">
+                                    </div>
+                                    <div>
+                                        <label style="font-size: 10px; color: #999;">Height</label>
+                                        <input type="number" value="${Math.round(slice.height)}" 
+                                               onchange="app.updateSliceProperty('${slice.id}', 'height', this.value)" 
+                                               onclick="event.stopPropagation()">
+                                    </div>
+                                    <div style="grid-column: 1 / -1;">
+                                        <label style="font-size: 10px; color: #999;">Rotation (°)</label>
+                                        <input type="number" value="${Math.round(slice.rotation || 0)}" 
+                                               onchange="app.updateSliceProperty('${slice.id}', 'rotation', this.value)" 
+                                               onclick="event.stopPropagation()">
+                                    </div>
+                                </div>
+                            </div>
+                            ` : ''}
+                                </div>
+                            `;
+                        });
+                    }
+
+                    listHtml += `
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                document.getElementById('slicesList').innerHTML = listHtml || '<p style="color: #666; text-align: center; padding: 20px;">No slices</p>';
+            },
+
+            selectSlice(id) {
+                this.selectedSlice = this.slices.find(s => s.id === id) || null;
+                this.updateUI();
+                this.render();
+            },
+
+            deleteSliceById(id) {
+                this.slices = this.slices.filter(s => s.id !== id);
+                if (this.selectedSlice && this.selectedSlice.id === id) {
+                    this.selectedSlice = null;
+                }
+                this.updateUI();
+                this.render();
+                this.saveToLocalStorage();
+            },
+
+            exportJSON() {
+                const data = {
+                    version: '1.0',
+                    canvas: {
+                        width: this.canvasWidth,
+                        height: this.canvasHeight
+                    },
+                    customScreens: this.customScreens,
+                    slices: this.slices.map(s => ({
+                        id: s.id,
+                        label: s.label,
+                        screens: s.screens || [s.screen] || ['HDMI1'],
+                        x: Math.round(s.x),
+                        y: Math.round(s.y),
+                        width: Math.round(s.width),
+                        height: Math.round(s.height),
+                        rotation: Math.round(s.rotation || 0),
+                        color: s.color
+                    })),
+                    definitions: {},
+                    timestamp: new Date().toISOString()
+                };
+
+                // Create definitions for config.json format
+                this.slices.forEach(s => {
+                    data.definitions[s.id] = {
+                        x: Math.round(s.x),
+                        y: Math.round(s.y),
+                        width: Math.round(s.width),
+                        height: Math.round(s.height),
+                        description: s.label
+                    };
+                });
+
+                const json = JSON.stringify(data, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `slice-config-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                this.showToast('JSON exported');
+            },
+
+            importJSON(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        
+                        if (data.canvas) {
+                            document.getElementById('canvasWidth').value = data.canvas.width;
+                            document.getElementById('canvasHeight').value = data.canvas.height;
+                            this.updateCanvasSize();
+                        }
+
+                        if (data.customScreens) {
+                            this.customScreens = data.customScreens;
+                            this.updateScreenButtons();
+                        }
+
+                        this.slices = [];
+                        if (data.slices) {
+                            data.slices.forEach(s => {
+                                // Backward compatibility: convert old 'screen' string to 'screens' array
+                                let screens = s.screens || (s.screen ? [s.screen] : ['HDMI1']);
+                                this.slices.push({
+                                    id: s.id,
+                                    label: s.label,
+                                    screens: screens,
+                                    x: s.x,
+                                    y: s.y,
+                                    width: s.width,
+                                    height: s.height,
+                                    rotation: s.rotation || 0,
+                                    color: s.color || this.colors[this.slices.length % this.colors.length]
+                                });
+                            });
+                        }
+
+                        this.selectedSlice = null;
+                        this.updateUI();
+                        this.render();
+                        this.saveToLocalStorage();
+                        this.showToast('JSON imported');
+
+                    } catch (err) {
+                        this.showToast('Invalid JSON file', 'error');
+                        console.error(err);
+                    }
+                };
+                reader.readAsText(file);
+
+                // Reset input
+                event.target.value = '';
+            },
+
+            saveToLocalStorage() {
+                try {
+                    const data = {
+                        canvas: { width: this.canvasWidth, height: this.canvasHeight },
+                        slices: this.slices,
+                        customScreens: this.customScreens
+                    };
+                    localStorage.setItem('slice_editor_state', JSON.stringify(data));
+                } catch (err) {
+                    console.error('Failed to save to localStorage', err);
+                }
+            },
+
+            loadFromLocalStorage() {
+                try {
+                    const saved = localStorage.getItem('slice_editor_state');
+                    if (saved) {
+                        const data = JSON.parse(saved);
+                        if (data.canvas) {
+                            document.getElementById('canvasWidth').value = data.canvas.width;
+                            document.getElementById('canvasHeight').value = data.canvas.height;
+                        }
+                        if (data.slices) {
+                            this.slices = data.slices;
+                        }
+                        if (data.customScreens) {
+                            this.customScreens = data.customScreens;
+                            this.updateScreenButtons();
+                        }
+                        this.updateCanvasSize();
+                        this.updateUI();
+                        this.render();
+                    }
+                } catch (err) {
+                    console.error('Failed to load from localStorage', err);
+                }
+            },
+
+            showToast(message, type = 'success') {
+                const toast = document.createElement('div');
+                toast.className = `toast ${type}`;
+                toast.textContent = message;
+                document.body.appendChild(toast);
+
+                setTimeout(() => {
+                    toast.remove();
+                }, 2000);
+            }
+        };
+
+        // Initialize on load
+        window.addEventListener('load', () => app.init());
+        window.addEventListener('resize', () => app.updateCanvasSize());
+    </script>
+</body>
+</html>

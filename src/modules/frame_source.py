@@ -81,6 +81,9 @@ class VideoSource(FrameSource):
         self.gif_transparency_bg = tuple(config.get('video', {}).get('gif_transparency_bg', [0, 0, 0]) if config else [0, 0, 0])
         self.gif_respect_timing = config.get('video', {}).get('gif_respect_frame_timing', True) if config else True
         
+        # Autosize mode (stretch, fill, fit, off)
+        self.autosize_mode = config.get('video', {}).get('player_resolution', {}).get('autosize', 'off') if config else 'off'
+        
         # OPTIMIZATION: Loop frame caching (keep decoded frames for short loops)
         self.enable_loop_cache = config.get('performance', {}).get('enable_loop_cache', True) if config else True
         self.loop_cache_max_duration = config.get('performance', {}).get('loop_cache_max_duration', 10.0) if config else 10.0  # seconds
@@ -116,6 +119,90 @@ class VideoSource(FrameSource):
         except Exception as e:
             logger.warning(f"Fehler beim Laden der GIF Frame-Delays: {e}")
             return None
+    
+    def _apply_autosize_scaling(self, frame):
+        """Apply autosize scaling based on mode (off/stretch/fill/fit)
+        
+        Args:
+            frame: Input frame (numpy array)
+            
+        Returns:
+            Scaled frame matching canvas dimensions
+        """
+        frame_h, frame_w = frame.shape[:2]
+        canvas_w, canvas_h = self.canvas_width, self.canvas_height
+        
+        # If frame already matches canvas, no scaling needed
+        if frame_w == canvas_w and frame_h == canvas_h:
+            return frame
+        
+        if self.autosize_mode == 'stretch':
+            # Stretch - distort to fit canvas (ignores aspect ratio)
+            return cv2.resize(frame, (canvas_w, canvas_h), interpolation=cv2.INTER_AREA)
+        
+        elif self.autosize_mode == 'fill':
+            # Fill - crop to fill canvas (preserves aspect ratio)
+            frame_aspect = frame_w / frame_h
+            canvas_aspect = canvas_w / canvas_h
+            
+            if frame_aspect > canvas_aspect:
+                # Frame is wider - scale by height and crop width
+                new_h = canvas_h
+                new_w = int(frame_w * (canvas_h / frame_h))
+            else:
+                # Frame is taller - scale by width and crop height
+                new_w = canvas_w
+                new_h = int(frame_h * (canvas_w / frame_w))
+            
+            # Resize to larger dimension
+            scaled = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            
+            # Crop to canvas size (center crop)
+            x_offset = (new_w - canvas_w) // 2
+            y_offset = (new_h - canvas_h) // 2
+            return scaled[y_offset:y_offset + canvas_h, x_offset:x_offset + canvas_w]
+        
+        elif self.autosize_mode == 'fit':
+            # Fit - letterbox to fit canvas (preserves aspect ratio)
+            frame_aspect = frame_w / frame_h
+            canvas_aspect = canvas_w / canvas_h
+            
+            if frame_aspect > canvas_aspect:
+                # Frame is wider - fit to width with letterbox top/bottom
+                new_w = canvas_w
+                new_h = int(frame_h * (canvas_w / frame_w))
+            else:
+                # Frame is taller - fit to height with letterbox left/right
+                new_h = canvas_h
+                new_w = int(frame_w * (canvas_h / frame_h))
+            
+            # Resize to fit
+            scaled = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            
+            # Create black canvas and paste scaled frame
+            result = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+            x_offset = (canvas_w - new_w) // 2
+            y_offset = (canvas_h - new_h) // 2
+            result[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = scaled
+            return result
+        
+        else:  # 'off' or unknown mode - letterbox (same as fit)
+            frame_aspect = frame_w / frame_h
+            canvas_aspect = canvas_w / canvas_h
+            
+            if frame_aspect > canvas_aspect:
+                new_w = canvas_w
+                new_h = int(frame_h * (canvas_w / frame_w))
+            else:
+                new_h = canvas_h
+                new_w = int(frame_w * (canvas_h / frame_h))
+            
+            scaled = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            result = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+            x_offset = (canvas_w - new_w) // 2
+            y_offset = (canvas_h - new_h) // 2
+            result[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = scaled
+            return result
     
     def _process_frame_transparency(self, frame):
         """Verarbeitet Transparenz in Frames (für GIFs mit Alpha-Channel)."""
@@ -244,9 +331,9 @@ class VideoSource(FrameSource):
         if self.is_gif:
             frame = self._process_frame_transparency(frame)
         
-        # Auf Canvas-Größe skalieren
+        # Auf Canvas-Größe skalieren mit Autosize-Modus
         if frame.shape[1] != self.canvas_width or frame.shape[0] != self.canvas_height:
-            frame = cv2.resize(frame, (self.canvas_width, self.canvas_height), interpolation=cv2.INTER_AREA)
+            frame = self._apply_autosize_scaling(frame)
         
         # Frame-Delay berechnen
         delay = self.gif_frame_delays[self.current_frame] if (self.is_gif and self.gif_frame_delays and self.current_frame < len(self.gif_frame_delays)) else (1.0 / self.fps)

@@ -22,7 +22,7 @@ from modules.frame_source import VideoSource
 from modules.cli_handler import CLIHandler
 from modules.logger import FluxLogger, get_logger
 from modules.default_effects import get_default_effects_manager
-from modules.api_bpm import bpm_bp, set_audio_analyzer
+from modules.api_bpm import bpm_bp, set_audio_analyzer, set_sequence_manager
 
 logger = get_logger(__name__)
 
@@ -102,7 +102,7 @@ def load_config():
         config = validator.get_default_config()
         print(f"⚠️  Verwende Standard-Konfiguration")
     else:
-        logger.info("Konfiguration erfolgreich geladen und validiert")
+        logger.debug("Konfiguration erfolgreich geladen und validiert")
     
     return config
 
@@ -178,8 +178,58 @@ def main():
     # Lade Points-Daten um Canvas-Dimensionen zu erhalten
     from modules.points_loader import PointsLoader
     points_data = PointsLoader.load_points(points_json_path, validate_bounds=True)
-    canvas_width = points_data['canvas_width']
-    canvas_height = points_data['canvas_height']
+    
+    # Art-Net player uses resolution from points file (LED matrix dimensions)
+    artnet_canvas_width = points_data['canvas_width']
+    artnet_canvas_height = points_data['canvas_height']
+    
+    # Initialize session state early (needed for video player settings)
+    from modules.session_state import init_session_state, get_session_state
+    session_state_path = os.path.join(base_path, 'session_state.json')
+    
+    # Lösche alte Session-Daten beim Neustart
+    if os.path.exists(session_state_path):
+        try:
+            os.remove(session_state_path)
+            logger.debug("Alte Session-Daten gelöscht (Neustart)")
+        except Exception as e:
+            logger.warning(f"Konnte Session-Daten nicht löschen: {e}")
+    
+    session_state = init_session_state(session_state_path)
+    logger.debug("SessionStateManager initialisiert")
+    
+    # Get video player resolution from session state or config (preview only)
+    session_state_instance = get_session_state()
+    video_settings = {}
+    if session_state_instance:
+        video_settings = session_state_instance._state.get('video_player_settings', {})
+    
+    if not video_settings:
+        # Use config defaults if no session settings
+        video_config = config.get('video', {}).get('player_resolution', {})
+        video_settings = {
+            'preset': video_config.get('preset', '1080p'),
+            'custom_width': video_config.get('custom_width', 1920),
+            'custom_height': video_config.get('custom_height', 1080),
+            'autosize': video_config.get('autosize', 'off')
+        }
+    
+    # Calculate video player canvas dimensions based on preset or custom
+    if video_settings.get('preset') == 'custom':
+        video_canvas_width = video_settings.get('custom_width', 1920)
+        video_canvas_height = video_settings.get('custom_height', 1080)
+    else:
+        # Map preset to resolution
+        preset_resolutions = {
+            '720p': (1280, 720),
+            '1080p': (1920, 1080),
+            '1440p': (2560, 1440),
+            '2160p': (3840, 2160)
+        }
+        video_canvas_width, video_canvas_height = preset_resolutions.get(video_settings.get('preset', '1080p'), (1920, 1080))
+    
+    logger.info(f"Video player resolution: {video_canvas_width}x{video_canvas_height} (preset: {video_settings.get('preset', '1080p')}, autosize: {video_settings.get('autosize', 'off')})")
+    logger.info(f"Art-Net player resolution: {artnet_canvas_width}x{artnet_canvas_height} (from points file)")
     
     # Art-Net Manager global initialisieren (unabhängig vom Player)
     from modules.artnet_manager import ArtNetManager
@@ -191,40 +241,25 @@ def main():
     )
     artnet_config = config.get('artnet', {})
     artnet_manager.start(artnet_config)
-    logger.info(f"Art-Net gestartet: {target_ip}, Universen: {points_data['required_universes']}")
+    logger.debug(f"Art-Net gestartet: {target_ip}, Universen: {points_data['required_universes']}")
     
     # ClipRegistry initialisieren (ERST, bevor Player erstellt werden)
     from modules.clip_registry import get_clip_registry
     clip_registry = get_clip_registry()
-    logger.info("ClipRegistry initialisiert")
-    
-    # SessionStateManager initialisieren
-    from modules.session_state import init_session_state
-    session_state_path = os.path.join(base_path, 'session_state.json')
-    
-    # Lösche alte Session-Daten beim Neustart
-    if os.path.exists(session_state_path):
-        try:
-            os.remove(session_state_path)
-            logger.info("Alte Session-Daten gelöscht (Neustart)")
-        except Exception as e:
-            logger.warning(f"Konnte Session-Daten nicht löschen: {e}")
-    
-    session_state = init_session_state(session_state_path)
-    logger.info("SessionStateManager initialisiert")
+    logger.debug("ClipRegistry initialisiert")
     
     # Video Player initialisieren (nur für Preview, KEIN Art-Net Output!)
     # Starte mit leerer DummySource - User muss Video explizit laden
     from modules.frame_source import DummySource
-    video_source = DummySource(canvas_width, canvas_height)
+    video_source = DummySource(video_canvas_width, video_canvas_height)
     player = Player(video_source, points_json_path, target_ip, start_universe, fps_limit, config, 
                    enable_artnet=False, player_name="Video Player (Preview)", clip_registry=clip_registry)
-    logger.info(f"Video Player initialisiert (Preview only, kein Video geladen)")
+    logger.debug(f"Video Player initialisiert (Preview only, kein Video geladen)")
     
     # Replay Manager global initialisieren (mit Player-Referenz)
     from modules.replay_manager import ReplayManager
     replay_manager = ReplayManager(artnet_manager, config, player)
-    logger.info("Replay Manager initialisiert")
+    logger.debug("Replay Manager initialisiert")
     
     # Speichere data_dir für spätere Verwendung
     player.data_dir = data_dir
@@ -235,15 +270,15 @@ def main():
     
     # Art-Net Player initialisieren (separat vom Video Player)
     # Starte mit leerer DummySource - User muss Video explizit laden
-    artnet_video_source = DummySource(canvas_width, canvas_height)
+    artnet_video_source = DummySource(artnet_canvas_width, artnet_canvas_height)
     artnet_player = Player(artnet_video_source, points_json_path, target_ip, start_universe, fps_limit, config,
                           enable_artnet=True, player_name="Art-Net Player", clip_registry=clip_registry)
     artnet_player.set_artnet_manager(artnet_manager)
-    logger.info(f"Art-Net Player initialisiert (kein Video geladen)")
+    logger.debug(f"Art-Net Player initialisiert (kein Video geladen)")
     
     # PlayerManager initialisieren (Single Source of Truth)
     player_manager = PlayerManager(player, artnet_player)
-    logger.info("PlayerManager initialisiert mit Video Player und Art-Net Player")
+    logger.debug("PlayerManager initialisiert mit Video Player und Art-Net Player")
     
     # Set PlayerManager reference in players (for Master/Slave sync)
     player.player_manager = player_manager
@@ -251,19 +286,19 @@ def main():
     
     # Initialize Audio Sequencer
     player_manager.init_sequencer()
-    logger.info("Audio Sequencer initialisiert")
+    logger.debug("Audio Sequencer initialisiert")
     
     # Initialize Dynamic Parameter Sequences
     from modules.sequences import SequenceManager, AudioAnalyzer
-    sequence_manager = SequenceManager()
+    sequence_manager = SequenceManager(clip_registry=clip_registry)
     audio_analyzer = AudioAnalyzer(config=config)
     player_manager.sequence_manager = sequence_manager
     player_manager.audio_analyzer = audio_analyzer
-    logger.info("Parameter Sequence System initialisiert")
+    logger.debug("Parameter Sequence System initialisiert")
     
     # Connect sequence_manager to session_state for persistence
     session_state.set_sequence_manager(sequence_manager)
-    logger.info("SequenceManager connected to SessionState")
+    logger.debug("SequenceManager connected to SessionState")
     
     # Auto-start audio analyzer if it was running in previous session
     try:
@@ -276,14 +311,14 @@ def main():
                     if device is not None:
                         audio_analyzer.set_device(device)
                     audio_analyzer.start()
-                    logger.info(f"🎤 Audio analyzer auto-started (device={device})")
+                    logger.debug(f"🎤 Audio analyzer auto-started (device={device})")
     except Exception as e:
         logger.warning(f"⚠️ Failed to auto-start audio analyzer: {e}")
     
     # Start both players to generate frames (even with DummySource for preview)
     player.start()
     artnet_player.start()
-    logger.info("Players started for preview generation")
+    logger.debug("Players started for preview generation")
     
     # Default Effects Manager initialisieren und anwenden
     # WICHTIG: Nach Player-Initialisierung, damit PluginManager bereits geladen ist
@@ -302,13 +337,13 @@ def main():
         artnet_applied = default_effects_manager.apply_to_player(player_manager, 'artnet')
         
         if video_applied > 0 or artnet_applied > 0:
-            logger.info(f"✨ Default effects applied: {video_applied} video, {artnet_applied} artnet")
+            logger.debug(f"✨ Default effects applied: {video_applied} video, {artnet_applied} artnet")
     except Exception as e:
         logger.warning(f"⚠️ Failed to apply default effects: {e}")
     
     # Session State wird NICHT geladen beim Start (frischer Start)
     # User kann über Snapshots wiederherstellen wenn gewünscht
-    logger.info("Start mit leeren Playlists (Session State gelöscht)")
+    logger.debug("Start mit leeren Playlists (Session State gelöscht)")
     
     # Kommentiert: Alte Session State Loading Logik - nicht mehr beim Start geladen
     # try:
@@ -337,7 +372,9 @@ def main():
     # Register BPM API blueprint
     rest_api.app.register_blueprint(bpm_bp)
     set_audio_analyzer(audio_analyzer)
-    logger.info("BPM API registered")
+    if hasattr(player_manager, 'sequence_manager'):
+        set_sequence_manager(player_manager.sequence_manager)
+    logger.debug("BPM API registered")
     
     # Set socketio reference in player_manager for WebSocket events
     player_manager.socketio = rest_api.socketio
@@ -345,7 +382,7 @@ def main():
     # Update SequenceManager with socketio reference for real-time parameter updates
     if hasattr(player_manager, 'sequence_manager'):
         player_manager.sequence_manager.socketio = rest_api.socketio
-        logger.info("SequenceManager connected to SocketIO for real-time updates")
+        logger.debug("SequenceManager connected to SocketIO for real-time updates")
     
     rest_api.start(host=config['api']['host'], port=config['api']['port'])
     

@@ -169,6 +169,18 @@
     color: #64c8ff;
 }
 
+#bpm-tap-btn.manual-tap-active {
+    background: #ff6b35;
+    border-color: #ff6b35;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(255, 107, 53, 0.5);
+}
+
+#bpm-tap-btn.manual-tap-active:hover {
+    background: #ff8555;
+    border-color: #ff8555;
+}
+
 #bpm-resync-btn {
     color: #ff9800;
 }

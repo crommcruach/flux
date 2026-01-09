@@ -163,6 +163,34 @@ class UIDRegistry:
         if to_remove:
             logger.info(f"🗑️ Invalidated {len(to_remove)} UIDs for player [{player_id}]")
     
+    def clear_for_clip(self, clip_id: str) -> int:
+        """
+        Remove all UIDs for a specific clip (when clip is reloaded with new effect instances)
+        
+        Args:
+            clip_id: Clip UUID whose UIDs should be removed
+            
+        Returns:
+            Number of UIDs cleared
+        """
+        if not clip_id:
+            return 0
+        
+        # Find all UIDs containing this clip_id
+        to_remove = [
+            uid for uid in self._registry.keys() 
+            if clip_id in uid
+        ]
+        
+        # Remove each UID
+        for uid in to_remove:
+            self.invalidate(uid)
+        
+        if to_remove:
+            logger.info(f"🗑️ Cleared {len(to_remove)} UIDs for clip {clip_id[:8]}...")
+        
+        return len(to_remove)
+    
     def clear(self):
         """Clear all registered UIDs"""
         count = len(self._registry)

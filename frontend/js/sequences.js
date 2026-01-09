@@ -342,35 +342,59 @@ class SequenceManager {
                 }
             }
             
-            // If not running, check session state to see if we should start it
-            // (This is a fallback - normally backend auto-starts if it was running)
-            if (!window.sessionStateLoader) {
-                console.warn('⚠️ Session state loader not available');
-                return;
-            }
-
-            // Wait for state to be loaded if not already
-            if (!window.sessionStateLoader.isLoaded()) {
-                console.log('⏳ Waiting for session state to load...');
-                await window.sessionStateLoader.load();
-            }
-
-            const audioState = window.sessionStateLoader.get('audio_analyzer');
+            // AUTO-START LOGIC: Get default device and start analyzer automatically
+            console.log('🎤 Auto-starting audio analyzer with default device...');
             
-            if (audioState) {
-                // Convert backend state to frontend format
-                const state = {
-                    device: audioState.device,
-                    deviceName: null,  // Backend doesn't store device name
-                    gain: audioState.config?.gain || 1.0,
-                    running: audioState.running
-                };
-                
-                await this.restoreAudioAnalyzerState(state);
+            // Try to get available devices
+            try {
+                const devicesResponse = await fetch('/api/audio/devices');
+                if (devicesResponse.ok) {
+                    const devicesData = await devicesResponse.json();
+                    const devices = devicesData.devices || [];
+                    
+                    if (devices.length > 0) {
+                        // Find default device (usually the first one or one marked as default)
+                        let defaultDevice = devices.find(d => d.is_default) || devices[0];
+                        this.audioDevice = defaultDevice.index;
+                        this.audioDeviceName = defaultDevice.name;
+                        console.log(`🎤 Auto-selected default device: ${this.audioDeviceName} (${this.audioDevice})`);
+                    }
+                }
+            } catch (deviceError) {
+                console.warn('Could not fetch devices, will use system default:', deviceError);
+                // Continue anyway - backend will use default if no device specified
             }
+            
+            // Restore gain settings from session if available
+            if (window.sessionStateLoader) {
+                if (!window.sessionStateLoader.isLoaded()) {
+                    await window.sessionStateLoader.load();
+                }
+                
+                const audioState = window.sessionStateLoader.get('audio_analyzer');
+                if (audioState) {
+                    if (audioState.config?.gain !== undefined && this.audioGainKnob) {
+                        this.audioGainKnob.setValue(audioState.config.gain);
+                    }
+                    if (audioState.config?.beat_sensitivity !== undefined && this.beatSensitivityKnob) {
+                        this.beatSensitivityKnob.setValue(audioState.config.beat_sensitivity);
+                    }
+                    
+                    // If user had a specific device saved, use that instead
+                    if (audioState.device !== null && audioState.device !== undefined) {
+                        this.audioDevice = audioState.device;
+                        console.log('📝 Using saved device:', this.audioDevice);
+                    }
+                }
+            }
+            
+            // Auto-start the analyzer
+            await this.startAudioAnalyzer();
+            
         } catch (error) {
-            console.error('Error loading session state:', error);
-            // Don't auto-start on error - let user start manually
+            console.error('Error auto-starting audio analyzer:', error);
+            // Don't show error to user - audio analyzer is optional
+            // User can manually start it if needed
         }
     }
     
@@ -1870,7 +1894,8 @@ class SequenceManager {
         console.log(`🧹 Cleaning up sequences for removed clip: ${clipId}`);
         
         // Find all sequences whose target_parameter contains this clip_id
-        // Format: param_clip_{clip_id}_...
+        // Format (NEW): param_clip_{clip_id}_effect_{idx}_{param}
+        // Format (OLD): param_clip_{clip_id}_{param}_{uuid}
         const clipSequences = this.sequences.filter(seq => 
             seq.target_parameter && seq.target_parameter.includes(`_${clipId}_`)
         );
@@ -1902,7 +1927,8 @@ class SequenceManager {
         console.log(`🧹 Cleaning up sequences for effect ${pluginId} on clip: ${clipId}`);
         
         // Find all sequences whose target_parameter matches this clip and plugin
-        // Format: param_clip_{clip_id}_{param_name}_... where path includes plugin_id
+        // Format (NEW): param_clip_{clip_id}_effect_{idx}_{param}
+        // Format (OLD): param_clip_{clip_id}_{param}_... (matches by path)
         const effectSequences = this.sequences.filter(seq => {
             if (!seq.target_parameter || !seq.target_parameter.includes(`_${clipId}_`)) {
                 return false;
@@ -1941,8 +1967,8 @@ class SequenceManager {
         console.log(`🧹 Cleaning up sequences for layer ${layerId} on clip: ${clipId}`);
         
         // Find all sequences whose target_parameter contains this clip_id and layer_id
-        // Format: param_clip_{clip_id}_{param_name}_{timestamp}_{random}
-        // We need to check if the sequence belongs to this specific layer
+        // Format (NEW): param_clip_{clip_id}_layer_{layer_idx}_effect_{idx}_{param}
+        // Format (OLD): param_clip_{clip_id}_{param}_{uuid} (requires metadata check)
         const layerSequences = this.sequences.filter(seq => {
             if (!seq.target_parameter || !seq.target_parameter.includes(`_${clipId}_`)) {
                 return false;

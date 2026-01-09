@@ -64,6 +64,7 @@ class ClipRegistry:
             'created_at': datetime.now().isoformat(),
             'effects': [],  # Clip-spezifische Effekte
             'layers': [],   # Clip-spezifische Layer-Definitionen
+            'sequences': {},  # Clip-spezifische Sequences: {uid: [sequence_ids]}
             # Trimming & Playback Control
             'in_point': None,   # Start-Frame (None = Video-Start)
             'out_point': None,  # End-Frame (None = Video-Ende)
@@ -456,6 +457,231 @@ class ClipRegistry:
         self.clips[clip_id]['layers'] = new_layers
         logger.debug(f"Layers von Clip {clip_id} neu sortiert: {registry_order}")
         return True
+    def add_sequence_to_effect(self, clip_id: str, effect_index: int, param_name: str, sequence_config: Dict, layer_index: Optional[int] = None) -> bool:
+        """
+        Add a sequence to an effect parameter (NEW ARCHITECTURE)
+        
+        Args:
+            clip_id: Clip UUID
+            effect_index: Index of effect in clip's effects list
+            param_name: Parameter name (e.g., 'scale_xy')
+            sequence_config: Full sequence configuration dict
+            layer_index: Optional layer index (None = clip-level effect)
+        
+        Returns:
+            True if successful
+        """
+        if clip_id not in self.clips:
+            logger.warning(f"Cannot add sequence to non-existent clip: {clip_id}")
+            return False
+        
+        clip = self.clips[clip_id]
+        
+        # Get target effect list (clip-level or layer-level)
+        if layer_index is not None:
+            if layer_index >= len(clip.get('layers', [])):
+                logger.warning(f"Layer {layer_index} not found in clip {clip_id}")
+                return False
+            effects = clip['layers'][layer_index].get('effects', [])
+        else:
+            effects = clip.get('effects', [])
+        
+        if effect_index >= len(effects):
+            logger.warning(f"Effect index {effect_index} out of range for clip {clip_id}")
+            return False
+        
+        effect = effects[effect_index]
+        
+        # Initialize sequences dict if needed
+        if 'sequences' not in effect:
+            effect['sequences'] = {}
+        
+        # Store sequence config
+        effect['sequences'][param_name] = sequence_config
+        
+        location = f"layer {layer_index}, " if layer_index is not None else ""
+        logger.debug(f"Added sequence to clip {clip_id[:8]}..., {location}effect {effect_index}, param {param_name}")
+        
+        return True
+    
+    def remove_sequence_from_effect(self, clip_id: str, effect_index: int, param_name: str, layer_index: Optional[int] = None) -> bool:
+        """
+        Remove a sequence from an effect parameter (NEW ARCHITECTURE)
+        
+        Args:
+            clip_id: Clip UUID
+            effect_index: Index of effect in clip's effects list
+            param_name: Parameter name
+            layer_index: Optional layer index
+        
+        Returns:
+            True if removed
+        """
+        if clip_id not in self.clips:
+            return False
+        
+        clip = self.clips[clip_id]
+        
+        # Get target effect list
+        if layer_index is not None:
+            if layer_index >= len(clip.get('layers', [])):
+                return False
+            effects = clip['layers'][layer_index].get('effects', [])
+        else:
+            effects = clip.get('effects', [])
+        
+        if effect_index >= len(effects):
+            return False
+        
+        effect = effects[effect_index]
+        
+        if 'sequences' in effect and param_name in effect['sequences']:
+            del effect['sequences'][param_name]
+            logger.debug(f"Removed sequence from clip {clip_id[:8]}..., effect {effect_index}, param {param_name}")
+            return True
+        
+        return False
+    
+    def get_effect_sequences(self, clip_id: str, effect_index: int, layer_index: Optional[int] = None) -> Dict[str, Dict]:
+        """
+        Get all sequences for an effect (NEW ARCHITECTURE)
+        
+        Args:
+            clip_id: Clip UUID
+            effect_index: Index of effect
+            layer_index: Optional layer index
+        
+        Returns:
+            Dict mapping param_name to sequence_config
+        """
+        if clip_id not in self.clips:
+            return {}
+        
+        clip = self.clips[clip_id]
+        
+        # Get target effect list
+        if layer_index is not None:
+            if layer_index >= len(clip.get('layers', [])):
+                return {}
+            effects = clip['layers'][layer_index].get('effects', [])
+        else:
+            effects = clip.get('effects', [])
+        
+        if effect_index >= len(effects):
+            return {}
+        
+        return effects[effect_index].get('sequences', {})
+    
+    def get_all_clip_sequences(self, clip_id: str) -> List[Dict]:
+        """
+        Get ALL sequences from a clip (all effects, all layers) (NEW ARCHITECTURE)
+        
+        Returns list of dicts with:
+        - sequence_config: The sequence configuration
+        - effect_index: Index of effect
+        - layer_index: Index of layer (None for clip-level)
+        - param_name: Parameter name
+        - plugin_id: Plugin ID for context
+        """
+        if clip_id not in self.clips:
+            return []
+        
+        clip = self.clips[clip_id]
+        all_sequences = []
+        
+        # Clip-level effects
+        for effect_idx, effect in enumerate(clip.get('effects', [])):
+            for param_name, seq_config in effect.get('sequences', {}).items():
+                all_sequences.append({
+                    'sequence_config': seq_config,
+                    'effect_index': effect_idx,
+                    'layer_index': None,
+                    'param_name': param_name,
+                    'plugin_id': effect.get('plugin_id', 'unknown')
+                })
+        
+        # Layer-level effects
+        for layer_idx, layer in enumerate(clip.get('layers', [])):
+            for effect_idx, effect in enumerate(layer.get('effects', [])):
+                for param_name, seq_config in effect.get('sequences', {}).items():
+                    all_sequences.append({
+                        'sequence_config': seq_config,
+                        'effect_index': effect_idx,
+                        'layer_index': layer_idx,
+                        'param_name': param_name,
+                        'plugin_id': effect.get('plugin_id', 'unknown')
+                    })
+        
+        return all_sequences
+    
+    def add_sequence_to_clip(self, clip_id: str, sequence_id: str, target_uid: str) -> bool:
+        """
+        Add a sequence to a clip
+        
+        Args:
+            clip_id: Clip UUID
+            sequence_id: Sequence ID
+            target_uid: Parameter UID this sequence targets
+        
+        Returns:
+            True if successful
+        """
+        if clip_id not in self.clips:
+            logger.warning(f"Cannot add sequence to non-existent clip: {clip_id}")
+            return False
+        
+        if 'sequences' not in self.clips[clip_id]:
+            self.clips[clip_id]['sequences'] = {}
+        
+        if target_uid not in self.clips[clip_id]['sequences']:
+            self.clips[clip_id]['sequences'][target_uid] = []
+        
+        if sequence_id not in self.clips[clip_id]['sequences'][target_uid]:
+            self.clips[clip_id]['sequences'][target_uid].append(sequence_id)
+            logger.debug(f"Added sequence {sequence_id} to clip {clip_id[:8]}... (UID: {target_uid[:50]}...)")
+            return True
+        
+        return False
+    
+    def remove_sequence_from_clip(self, clip_id: str, sequence_id: str) -> bool:
+        """
+        Remove a sequence from a clip
+        
+        Args:
+            clip_id: Clip UUID
+            sequence_id: Sequence ID to remove
+        
+        Returns:
+            True if removed
+        """
+        if clip_id not in self.clips or 'sequences' not in self.clips[clip_id]:
+            return False
+        
+        removed = False
+        for uid, seq_list in list(self.clips[clip_id]['sequences'].items()):
+            if sequence_id in seq_list:
+                seq_list.remove(sequence_id)
+                removed = True
+                if not seq_list:  # Remove empty list
+                    del self.clips[clip_id]['sequences'][uid]
+                logger.debug(f"Removed sequence {sequence_id} from clip {clip_id[:8]}...")
+        
+        return removed
+    
+    def get_clip_sequences(self, clip_id: str) -> Dict[str, List[str]]:
+        """
+        Get all sequences for a clip
+        
+        Args:
+            clip_id: Clip UUID
+        
+        Returns:
+            Dict mapping UIDs to sequence IDs
+        """
+        if clip_id not in self.clips:
+            return {}
+        
+        return self.clips[clip_id].get('sequences', {})
 
 
 # Globale Singleton-Instanz

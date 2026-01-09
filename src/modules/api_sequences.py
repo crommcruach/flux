@@ -205,13 +205,121 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                 return jsonify({'error': f'Unknown sequence type: {seq_type}'}), 400
             
             # Remove any existing sequences for this parameter (only one sequence per parameter allowed)
-            existing_sequences = [s for s in sequence_manager.get_all() if s.target_parameter == target]
+            # IMPORTANT: Also check for sequences with similar UIDs in case of format changes or typos
+            # Parse the target UID to extract key components
+            existing_sequences = []
+            target_clip_id = None
+            target_effect_idx = None
+            target_param_name = None
+            
+            # Try to parse the target UID to get components
+            if target.startswith('param_clip_'):
+                parts = target.split('_')
+                try:
+                    if 'effect' in parts:
+                        clip_idx = parts.index('clip') + 1
+                        effect_idx_pos = parts.index('effect') + 1
+                        # Reconstruct clip UUID (might contain hyphens)
+                        clip_end = effect_idx_pos - 1
+                        target_clip_id = '_'.join(parts[clip_idx:clip_end])
+                        target_effect_idx = int(parts[effect_idx_pos])
+                        target_param_name = '_'.join(parts[effect_idx_pos + 1:])
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Could not parse target UID {target}: {e}")
+            
+            # Find existing sequences by exact match OR by matching clip_id + effect_idx + param_name
+            for s in sequence_manager.get_all():
+                if s.target_parameter == target:
+                    # Exact match
+                    existing_sequences.append(s)
+                elif target_clip_id and target_effect_idx is not None and target_param_name:
+                    # Check if this sequence targets the same parameter even with different UID format
+                    s_uid = s.target_parameter
+                    if s_uid.startswith('param_clip_'):
+                        s_parts = s_uid.split('_')
+                        try:
+                            if 'effect' in s_parts:
+                                s_clip_idx = s_parts.index('clip') + 1
+                                s_effect_idx_pos = s_parts.index('effect') + 1
+                                s_clip_end = s_effect_idx_pos - 1
+                                s_clip_id = '_'.join(s_parts[s_clip_idx:s_clip_end])
+                                s_effect_idx = int(s_parts[s_effect_idx_pos])
+                                s_param_name = '_'.join(s_parts[s_effect_idx_pos + 1:])
+                                
+                                # Match if all components are identical
+                                if (s_clip_id == target_clip_id and 
+                                    s_effect_idx == target_effect_idx and 
+                                    s_param_name == target_param_name):
+                                    existing_sequences.append(s)
+                                    logger.info(f"🔍 Found sequence with different UID format: {s_uid} -> matches {target}")
+                        except (ValueError, IndexError):
+                            pass
+            
             if existing_sequences:
                 logger.info(f"🗑️ Removing {len(existing_sequences)} existing sequence(s) for {target}")
                 for existing_seq in existing_sequences:
+                    logger.debug(f"   Deleting: {existing_seq.id} (UID: {existing_seq.target_parameter})")
                     sequence_manager.delete(existing_seq.id)
             
-            # Add to manager
+            # Parse UID to extract clip_id, effect_index, layer_index
+            # Expected formats:
+            # - param_clip_{clip_id}_effect_{effect_index}_{param_name}
+            # - param_clip_{clip_id}_layer_{layer_idx}_effect_{effect_idx}_{param_name}
+            clip_id = None
+            effect_index = None
+            layer_index = None
+            param_name = None
+            
+            if target.startswith('param_clip_'):
+                parts = target.split('_')
+                try:
+                    if 'layer' in parts:
+                        # Layer-level effect: param_clip_{clip}_layer_{layer}_effect_{effect}_{param}
+                        clip_idx = parts.index('clip') + 1
+                        layer_idx_pos = parts.index('layer') + 1
+                        effect_idx_pos = parts.index('effect') + 1
+                        
+                        clip_id = '_'.join(parts[clip_idx:layer_idx_pos-1])  # Reconstruct UUID
+                        layer_index = int(parts[layer_idx_pos])
+                        effect_index = int(parts[effect_idx_pos])
+                        param_name = '_'.join(parts[effect_idx_pos+1:])
+                    elif 'effect' in parts:
+                        # Clip-level effect: param_clip_{clip}_effect_{effect}_{param}
+                        clip_idx = parts.index('clip') + 1
+                        effect_idx_pos = parts.index('effect') + 1
+                        
+                        clip_id = '_'.join(parts[clip_idx:effect_idx_pos-1])  # Reconstruct UUID
+                        effect_index = int(parts[effect_idx_pos])
+                        param_name = '_'.join(parts[effect_idx_pos+1:])
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Could not parse new UID format: {target}, error: {e}")
+            
+            # Store sequence config in clip_registry (NEW ARCHITECTURE)
+            if clip_id and effect_index is not None and param_name:
+                clip_registry = get_clip_registry()
+                sequence_config = {
+                    'sequence_id': sequence.id,
+                    'type': seq_type,
+                    'enabled': True,
+                    **config  # Include all config parameters
+                }
+                
+                success = clip_registry.add_sequence_to_effect(
+                    clip_id, 
+                    effect_index, 
+                    param_name, 
+                    sequence_config,
+                    layer_index
+                )
+                
+                if success:
+                    logger.info(f"📦 Stored sequence in clip_registry: clip {clip_id[:8]}..., effect {effect_index}, param {param_name}")
+                else:
+                    logger.warning(f"⚠️ Could not store sequence in clip_registry (clip or effect not found)")
+            else:
+                logger.warning(f"⚠️ Could not parse UID to store in clip_registry: {target}")
+            
+            # Add to manager (for immediate activation)
             sequence_id = sequence_manager.create(sequence)
             logger.info(f"✅ Created sequence: {sequence_id} ({seq_type}) -> {target}")
             
@@ -294,7 +402,41 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
             
             target_parameter = sequence.target_parameter
             
-            # Delete the sequence
+            # Parse UID to remove from clip_registry
+            clip_id = None
+            effect_index = None
+            layer_index = None
+            param_name = None
+            
+            if target_parameter.startswith('param_clip_'):
+                parts = target_parameter.split('_')
+                try:
+                    if 'layer' in parts:
+                        clip_idx = parts.index('clip') + 1
+                        layer_idx_pos = parts.index('layer') + 1
+                        effect_idx_pos = parts.index('effect') + 1
+                        
+                        clip_id = '_'.join(parts[clip_idx:layer_idx_pos-1])
+                        layer_index = int(parts[layer_idx_pos])
+                        effect_index = int(parts[effect_idx_pos])
+                        param_name = '_'.join(parts[effect_idx_pos+1:])
+                    elif 'effect' in parts:
+                        clip_idx = parts.index('clip') + 1
+                        effect_idx_pos = parts.index('effect') + 1
+                        
+                        clip_id = '_'.join(parts[clip_idx:effect_idx_pos-1])
+                        effect_index = int(parts[effect_idx_pos])
+                        param_name = '_'.join(parts[effect_idx_pos+1:])
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Could not parse UID for deletion: {target_parameter}, error: {e}")
+            
+            # Remove from clip_registry (NEW ARCHITECTURE)
+            if clip_id and effect_index is not None and param_name:
+                clip_registry = get_clip_registry()
+                clip_registry.remove_sequence_from_effect(clip_id, effect_index, param_name, layer_index)
+                logger.debug(f"Removed sequence from clip_registry: clip {clip_id[:8]}..., effect {effect_index}, param {param_name}")
+            
+            # Delete the sequence from active pool
             success = sequence_manager.delete(sequence_id)
             
             if not success:

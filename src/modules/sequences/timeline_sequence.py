@@ -51,7 +51,7 @@ class TimelineSequence(BaseSequence):
         self._time_since_last_jump = 0.0
         self._current_random_value = min_value  # Current random value for random mode
         
-        logger.info(f"Created Timeline sequence: {duration}s, {playback_state}, {loop_mode}, {speed}x, range: {min_value}-{max_value}")
+        logger.debug(f"Created Timeline sequence: {duration}s, {playback_state}, {loop_mode}, {speed}x, range: {min_value}-{max_value}")
     
     def update(self, dt: float):
         """

@@ -38,6 +38,8 @@ class LayerManager:
         
     def _set_websocket_context_on_transport(self, clip_id, player_name=""):
         """Set WebSocket context on all transport effects in layers."""
+        logger.info(f"🎯 [{player_name}] _set_websocket_context_on_transport called with clip_id={clip_id}")
+        
         if not self.player or not hasattr(self.player, 'player_manager'):
             logger.warning(f"⚠️ [{player_name}] Cannot set WebSocket context: player or player_manager not available")
             return
@@ -49,17 +51,24 @@ class LayerManager:
         socketio = self.player.player_manager.socketio
         player_id = self.player_id
         
-        for layer in self.layers:
-            for effect in layer.effects:
+        transport_found = False
+        for layer_idx, layer in enumerate(self.layers):
+            logger.debug(f"🔍 [{player_name}] Checking layer {layer_idx}, has {len(layer.effects) if layer.effects else 0} effects")
+            for effect_idx, effect in enumerate(layer.effects):
+                effect_id = effect.get('id', effect.get('plugin_id', 'unknown'))
+                logger.debug(f"🔍 [{player_name}]   Effect {effect_idx}: id={effect_id}, has_instance={effect.get('instance') is not None}")
                 if effect.get('id') == 'transport' and effect.get('instance'):
                     transport = effect['instance']
-                    if hasattr(transport, '_needs_websocket_context'):
-                        transport.socketio = socketio
-                        transport.player_id = player_id
-                        transport.clip_id = clip_id
-                        logger.info(f"📡 [{player_name}] Set WebSocket context on transport: player_id={player_id}, clip_id={clip_id}, socketio={socketio is not None}")
+                    transport.socketio = socketio
+                    transport.player_id = player_id
+                    transport.clip_id = clip_id
+                    transport_found = True
+                    logger.info(f"📡 [{player_name}] Set WebSocket context on transport: layer={layer_idx}, player_id={player_id}, clip_id={clip_id}, socketio={socketio is not None}")
         
-    def load_clip_layers(self, clip_id, video_dir=None, player_name=""):
+        if not transport_found:
+            logger.warning(f"⚠️ [{player_name}] No transport effect found in {len(self.layers)} layers to set WebSocket context")
+        
+    def load_clip_layers(self, clip_id, video_dir=None, player_name="", sequence_manager=None):
         """
         Load all layers from clip definition and create FrameSources.
         Replaces current layer stack.
@@ -68,10 +77,15 @@ class LayerManager:
             clip_id: Clip UUID from ClipRegistry
             video_dir: Base directory for resolving relative video paths
             player_name: Name for logging
+            sequence_manager: SequenceManager for loading sequences (NEW ARCHITECTURE)
         
         Returns:
             bool: True on success
         """
+        # Unload sequences for old clip if we had one
+        if sequence_manager and hasattr(self, '_current_clip_id') and self._current_clip_id:
+            sequence_manager.unload_sequences_for_clip(self._current_clip_id)
+        
         # Get clip data
         clip_data = self.clip_registry.get_clip(clip_id)
         if not clip_data:
@@ -108,7 +122,7 @@ class LayerManager:
             base_layer = Layer(layer_counter, base_source, 'normal', 100.0, clip_id)
             new_layers.append(base_layer)
             layer_counter += 1
-            logger.info(f"✅ [{player_name}] Created clip {clip_id} as Layer 0 (base)")
+            logger.debug(f"✅ [{player_name}] Created clip {clip_id} as Layer 0 (base)")
             
             # Load effects for base layer from registry
             self.load_layer_effects_from_registry(base_layer, player_name)
@@ -189,7 +203,15 @@ class LayerManager:
         # Set WebSocket context on transport effects (needs player reference)
         self._set_websocket_context_on_transport(clip_id, player_name)
         
-        logger.info(f"✅ [{player_name}] Loaded {len(self.layers)} layers from clip {clip_id}")
+        # Store current clip_id for unloading sequences later
+        self._current_clip_id = clip_id
+        
+        # Load sequences from clip (NEW ARCHITECTURE)
+        if sequence_manager:
+            loaded_seq_count = sequence_manager.load_sequences_from_clip(clip_id)
+            logger.debug(f"📊 [{player_name}] Loaded {loaded_seq_count} sequences for clip {clip_id[:8]}...")
+        
+        logger.debug(f"✅ [{player_name}] Loaded {len(self.layers)} layers from clip {clip_id}")
         return True
     
     def add_layer(self, source, clip_id=None, blend_mode='normal', opacity=100.0, player_name=""):
@@ -422,13 +444,14 @@ class LayerManager:
         
         # Create plugin instances
         layer.effects = []
-        logger.info(f"📦 [{player_name}] Loading {len(effects)} effects for Layer {layer.layer_id} from registry")
+        logger.debug(f"📦 [{player_name}] Loading {len(effects)} effects for Layer {layer.layer_id} from registry")
         for effect_config in effects:
             plugin_id = effect_config.get('plugin_id')
-            params = effect_config.get('params', {})
+            # IMPORTANT: Use 'parameters' key (not 'params') to match API and registry format
+            params = effect_config.get('parameters', effect_config.get('params', {}))
             enabled = effect_config.get('enabled', True)
             
-            logger.info(f"   Loading plugin '{plugin_id}' with params: {params}")
+            logger.debug(f"   Loading plugin '{plugin_id}' with params: {params}")
             
             # Load plugin instance
             plugin_instance = self.plugin_manager.load_plugin(plugin_id, params)
@@ -449,17 +472,18 @@ class LayerManager:
             # Add to layer effects
             try:
                 effect_dict = {
-                    'plugin_id': plugin_id,  # Use 'plugin_id' to match registry format
+                    'id': plugin_id,  # Use 'id' key for runtime checks (e.g., transport detection)
+                    'plugin_id': plugin_id,  # Also keep 'plugin_id' for registry compatibility
                     'instance': plugin_instance,
                     'parameters': effect_config.get('parameters', params),  # Use 'parameters' key, prefer from effect_config
                     'enabled': enabled
                 }
                 layer.effects.append(effect_dict)
-                logger.info(f"   ✅ Added {plugin_id} instance [{id(plugin_instance)}] to layer effects (index {len(layer.effects)-1})")
+                logger.debug(f"   ✅ Added {plugin_id} instance [{id(plugin_instance)}] to layer effects (index {len(layer.effects)-1})")
             except Exception as e:
                 logger.error(f"❌ [{player_name}] Error loading effect '{plugin_id}' for Layer {layer.layer_id}: {e}")
         
-        logger.info(f"✅ [{player_name}] Loaded {len(layer.effects)} effects for Layer {layer.layer_id}")
+        logger.debug(f"✅ [{player_name}] Loaded {len(layer.effects)} effects for Layer {layer.layer_id}")
     
     def reload_all_layer_effects(self, player_name=""):
         """

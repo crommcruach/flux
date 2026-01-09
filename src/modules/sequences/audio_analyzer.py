@@ -446,7 +446,21 @@ class AudioAnalyzer:
         try:
             devices = sd.query_devices()
             hostapis = sd.query_hostapis()
+            default_output_idx = sd.default.device[1]  # Default output device
             input_devices = []
+            
+            # Get the default output device's hostapi to find matching input device
+            default_output_hostapi = None
+            if default_output_idx is not None and default_output_idx < len(devices):
+                default_output_hostapi = devices[default_output_idx].get('hostapi')
+            
+            # Find first input device on same hostapi as default output (usually loopback/stereo mix)
+            preferred_input_idx = None
+            for idx, device in enumerate(devices):
+                if device['max_input_channels'] > 0:
+                    if default_output_hostapi is not None and device.get('hostapi') == default_output_hostapi:
+                        preferred_input_idx = idx
+                        break
             
             for idx, device in enumerate(devices):
                 if device['max_input_channels'] > 0:
@@ -454,13 +468,17 @@ class AudioAnalyzer:
                     hostapi_idx = device.get('hostapi', 0)
                     hostapi_name = hostapis[hostapi_idx]['name'] if hostapi_idx < len(hostapis) else 'Unknown'
                     
+                    # Mark input device on same hardware as default output as default
+                    is_default = idx == preferred_input_idx if preferred_input_idx is not None else (idx == sd.default.device[0])
+                    
                     input_devices.append({
                         'index': idx,
                         'name': device['name'],
                         'channels': device['max_input_channels'],
                         'sample_rate': device['default_samplerate'],
                         'hostapi': hostapi_name,
-                        'hostapi_index': hostapi_idx
+                        'hostapi_index': hostapi_idx,
+                        'is_default': is_default
                     })
             
             return input_devices
@@ -509,27 +527,64 @@ class AudioAnalyzer:
             # Convert buffer to numpy array
             audio_data = np.array(list(self._audio_buffer))
             
-            # Onset detection
-            onset_env = librosa.onset.onset_strength(
-                y=audio_data,
-                sr=self.sample_rate,
-                aggregate=np.median
-            )
+            if len(audio_data) == 0:
+                logger.debug("BPM detection: Empty audio buffer")
+                return
             
-            # Tempo estimation
-            tempo = librosa.beat.beat_track(
-                onset_envelope=onset_env,
-                sr=self.sample_rate
-            )[0]
+            logger.debug(f"BPM detection: Processing {len(audio_data)} samples, dtype={audio_data.dtype}, min={audio_data.min():.3f}, max={audio_data.max():.3f}")
+            
+            # Normalize audio to prevent overflow in librosa
+            # Clip to prevent extreme values
+            audio_data = np.clip(audio_data, -1.0, 1.0)
+            
+            # Scale down if RMS is too high
+            rms = np.sqrt(np.mean(audio_data**2))
+            if rms > 0.5:
+                audio_data = audio_data * (0.5 / rms)
+                logger.debug(f"BPM detection: Scaled audio (RMS was {rms:.3f})")
+            
+            # Suppress numpy warnings for this operation
+            with np.errstate(over='ignore', invalid='ignore'):
+                logger.debug("BPM detection: Computing onset envelope...")
+                # Onset detection
+                onset_env = librosa.onset.onset_strength(
+                    y=audio_data,
+                    sr=self.sample_rate,
+                    aggregate=np.median
+                )
+                
+                logger.debug(f"BPM detection: Onset envelope computed, shape={onset_env.shape}, min={onset_env.min():.3f}, max={onset_env.max():.3f}")
+                
+                logger.debug("BPM detection: Running beat tracking...")
+                # Tempo estimation
+                tempo_result = librosa.beat.beat_track(
+                    onset_envelope=onset_env,
+                    sr=self.sample_rate
+                )[0]
+                
+                # Convert to scalar if it's an array
+                if isinstance(tempo_result, np.ndarray):
+                    tempo = float(tempo_result.item()) if tempo_result.size == 1 else float(tempo_result[0])
+                else:
+                    tempo = float(tempo_result)
+                
+                logger.debug(f"BPM detection: Beat tracking complete, tempo={tempo}")
+            
+            # Validate tempo
+            if np.isnan(tempo) or np.isinf(tempo):
+                logger.warning(f"BPM detection returned invalid value: {tempo}")
+                return
             
             # Calculate confidence (simple heuristic)
             confidence = 0.7 if tempo > 0 else 0.0
+            
+            logger.debug(f"BPM detection: Final tempo={tempo:.1f}, confidence={confidence:.2f}")
             
             # Update BPM with smoothing
             self._update_bpm(float(tempo), confidence)
             
         except Exception as e:
-            logger.debug(f"BPM detection error: {e}")
+            logger.error(f"BPM detection error: {e}", exc_info=True)
     
     def _update_bpm(self, bpm: float, confidence: float):
         """Update BPM with smoothing

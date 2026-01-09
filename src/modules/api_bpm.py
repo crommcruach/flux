@@ -14,12 +14,19 @@ bpm_bp = Blueprint('bpm', __name__)
 
 # Global reference to audio analyzer (will be set by main.py)
 _audio_analyzer = None
+_sequence_manager = None
 
 
 def set_audio_analyzer(analyzer):
     """Set the audio analyzer instance"""
     global _audio_analyzer
     _audio_analyzer = analyzer
+
+
+def set_sequence_manager(manager):
+    """Set the sequence manager instance"""
+    global _sequence_manager
+    _sequence_manager = manager
 
 
 @bpm_bp.route('/api/bpm/start', methods=['POST'])
@@ -141,21 +148,32 @@ def tap_tempo():
 
 @bpm_bp.route('/api/bpm/resync', methods=['POST'])
 def resync_bpm():
-    """Resync to auto BPM detection (overwrite manual/tap)"""
+    """Resync all BPM sequences to current beat"""
     try:
         if _audio_analyzer is None:
             return jsonify({'success': False, 'error': 'Audio analyzer not initialized'}), 500
         
-        _audio_analyzer.resync_bpm()
-        _audio_analyzer.enable_bpm_detection(True)
+        if _sequence_manager is None:
+            return jsonify({'success': False, 'error': 'Sequence manager not initialized'}), 500
+        
+        # Reset all BPM sequences to sync to current beat
+        synced_count = 0
+        for sequence in _sequence_manager.get_all():
+            if sequence.type == 'bpm':
+                sequence.reset()  # Reset to start from current beat
+                synced_count += 1
+                logger.info(f"Resynced BPM sequence: {sequence.id}")
+        
+        logger.info(f"🔄 Resynced {synced_count} BPM sequences to current beat")
         
         return jsonify({
             'success': True,
+            'synced_count': synced_count,
             'status': _audio_analyzer.get_bpm_status()
         })
     
     except Exception as e:
-        logger.error(f"Error resyncing BPM: {e}", exc_info=True)
+        logger.error(f"Error resyncing BPM sequences: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

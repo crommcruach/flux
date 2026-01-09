@@ -377,6 +377,63 @@
     <script src="libs/ion-rangeslider/js/ion.rangeSlider.min.js"></script>
     <script src="libs/socket.io.min.js"></script>
     <script src="js/triple-slider.js"></script>
+    
+    <!-- Video Player Settings Modal -->
+    <div class="modal fade" id="videoPlayerSettingsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Video Player Settings</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Resolution Setting -->
+                    <div class="mb-3">
+                        <label class="form-label">Resolution</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="videoResolutionPreset">
+                            <option value="720p">1280x720 (720p)</option>
+                            <option value="1080p" selected>1920x1080 (1080p)</option>
+                            <option value="1440p">2560x1440 (1440p)</option>
+                            <option value="2160p">3840x2160 (4K)</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Custom Resolution (hidden by default) -->
+                    <div class="mb-3" id="videoCustomResolutionGroup" style="display: none;">
+                        <label class="form-label">Custom Resolution</label>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <input type="number" class="form-control bg-dark text-light border-secondary" 
+                                       id="videoCustomWidth" placeholder="Width" min="640" max="7680">
+                            </div>
+                            <div class="col-6">
+                                <input type="number" class="form-control bg-dark text-light border-secondary" 
+                                       id="videoCustomHeight" placeholder="Height" min="480" max="4320">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Autosize Setting -->
+                    <div class="mb-3">
+                        <label class="form-label">Autosize Mode</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="videoAutosizeMode">
+                            <option value="off" selected>Off (Letterbox)</option>
+                            <option value="stretch">Stretch (Distort to fit)</option>
+                            <option value="fill">Fill (Crop to fit)</option>
+                            <option value="fit">Fit (Scale to fit)</option>
+                        </select>
+                        <small class="text-muted">How to handle videos that don't match the resolution</small>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveVideoPlayerSettings()">Apply</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <!-- Audio File Browser Modal -->
     <div class="modal fade" id="sequencerFileBrowserModal" tabindex="-1">
         <div class="modal-dialog modal-lg">

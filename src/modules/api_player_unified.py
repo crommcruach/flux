@@ -681,12 +681,12 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                         if index < len(layer.effects):
                             live_effect = layer.effects[index]
                             if 'instance' in live_effect and live_effect['instance']:
-                                # CRITICAL: Log the caller to trace where 121.0 is coming from
+                                # CRITICAL: Log the caller to trace parameter updates (DEBUG level)
                                 import traceback
                                 caller_stack = traceback.extract_stack()
                                 # Get the API request origin (usually 5-6 frames up)
                                 callers = [f"{frame.filename.split('/')[-1]}:{frame.lineno}" for frame in caller_stack[-6:-1]]
-                                logger.warning(f"🔍 API CALL: update_parameter('{param_name}', {value_to_update}) from {' → '.join(callers)}")
+                                logger.debug(f"🔍 API CALL: update_parameter('{param_name}', {value_to_update}) from {' → '.join(callers)}")
                                 
                                 live_effect['instance'].update_parameter(param_name, value_to_update)
                                 updated_live = True
@@ -1273,7 +1273,13 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                         relative_path=os.path.relpath(next_video_path, video_dir),
                         metadata={}
                     )
-                player.playlist_ids[next_video_path] = clip_id
+                # Store clip_id in playlist_ids list at correct index
+                if not isinstance(player.playlist_ids, list):
+                    player.playlist_ids = []
+                # Extend list if needed
+                while len(player.playlist_ids) <= next_index:
+                    player.playlist_ids.append(None)
+                player.playlist_ids[next_index] = clip_id
             
             player.current_clip_id = clip_id
             
@@ -1383,7 +1389,13 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                         relative_path=os.path.relpath(prev_video_path, video_dir),
                         metadata={}
                     )
-                player.playlist_ids[prev_video_path] = clip_id
+                # Store clip_id in playlist_ids list at correct index
+                if not isinstance(player.playlist_ids, list):
+                    player.playlist_ids = []
+                # Extend list if needed
+                while len(player.playlist_ids) <= prev_index:
+                    player.playlist_ids.append(None)
+                player.playlist_ids[prev_index] = clip_id
         
             player.current_clip_id = clip_id
             
@@ -2024,4 +2036,88 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 'error': str(e)
             }), 500
     
-    logger.info("✅ Unified Player API routes registered")
+    # ========================================
+    # VIDEO PLAYER SETTINGS
+    # ========================================
+    
+    @app.route('/api/player/video/settings', methods=['GET'])
+    def get_video_player_settings():
+        """Get video player resolution and autosize settings"""
+        try:
+            session_state = get_session_state()
+            settings = session_state._state.get('video_player_settings', {}) if session_state else {}
+            
+            # Apply defaults if not set
+            if not settings:
+                settings = {
+                    'preset': '1080p',
+                    'custom_width': 1920,
+                    'custom_height': 1080,
+                    'autosize': 'off'
+                }
+            
+            return jsonify({
+                'success': True,
+                'settings': settings
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting video player settings: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/player/video/settings', methods=['POST'])
+    def save_video_player_settings():
+        """Save video player resolution and autosize settings"""
+        try:
+            data = request.get_json()
+            
+            settings = {
+                'preset': data.get('preset', '1080p'),
+                'autosize': data.get('autosize', 'off')
+            }
+            
+            if data.get('preset') == 'custom':
+                settings['custom_width'] = data.get('custom_width', 1920)
+                settings['custom_height'] = data.get('custom_height', 1080)
+            
+            # Save to session state
+            session_state = get_session_state()
+            if session_state:
+                session_state._state['video_player_settings'] = settings
+            
+            # Apply resolution change immediately to video player
+            video_player = player_manager.get_player('video')
+            if video_player:
+                # Calculate new resolution
+                if settings.get('preset') == 'custom':
+                    new_width = settings.get('custom_width', 1920)
+                    new_height = settings.get('custom_height', 1080)
+                else:
+                    preset_resolutions = {
+                        '720p': (1280, 720),
+                        '1080p': (1920, 1080),
+                        '1440p': (2560, 1440),
+                        '2160p': (3840, 2160)
+                    }
+                    new_width, new_height = preset_resolutions.get(settings.get('preset', '1080p'), (1920, 1080))
+                
+                # Update player resolution with autosize mode
+                video_player.update_resolution(new_width, new_height, settings.get('autosize', 'off'))
+            
+            logger.info(f"Video player settings saved and applied: {settings}")
+            
+            return jsonify({
+                'success': True,
+                'settings': settings
+            })
+            
+        except Exception as e:
+            logger.error(f"Error saving video player settings: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    

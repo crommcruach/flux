@@ -93,7 +93,7 @@ class BPMSequence(BaseSequence):
         
         # Log BPM status every 60 frames
         if self._debug_counter % 60 == 1:
-            logger.info(f"🥁 BPM sequence {self.id}: beat_count={current_beat_count}, last={self._last_beat_count}, active={self._animation_active}, progress={self._progress:.3f}")
+            logger.debug(f"🥁 BPM sequence {self.id}: beat_count={current_beat_count}, last={self._last_beat_count}, active={self._animation_active}, progress={self._progress:.3f}")
         
         # Start animation on first beat or when beat count changes
         if current_beat_count != self._last_beat_count:
@@ -118,7 +118,7 @@ class BPMSequence(BaseSequence):
         
         # Log progress every 60 frames
         if self._debug_counter % 60 == 1:
-            logger.info(f"📊 BPM progress: beats_elapsed={beats_elapsed:.2f}, raw_progress={raw_progress:.3f}, beat_division={self.beat_division}")
+            logger.debug(f"📊 BPM progress: beats_elapsed={beats_elapsed:.2f}, raw_progress={raw_progress:.3f}, beat_division={self.beat_division}")
         
         # Apply loop mode
         if self.loop_mode == 'once':
@@ -159,7 +159,7 @@ class BPMSequence(BaseSequence):
         self._get_value_counter += 1
         
         if self._get_value_counter % 60 == 1:
-            logger.info(f"📈 BPM get_value(): progress={self._progress:.3f}, min={self.min_value}, max={self.max_value}, value={value:.2f}")
+            logger.debug(f"📈 BPM get_value(): progress={self._progress:.3f}, min={self.min_value}, max={self.max_value}, value={value:.2f}")
         
         return value
     

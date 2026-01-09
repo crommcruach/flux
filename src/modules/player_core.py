@@ -155,6 +155,70 @@ class Player:
         # Art-Net Manager wird extern gesetzt
         self.artnet_manager = None
     
+    def update_resolution(self, new_width: int, new_height: int, autosize_mode: str = None):
+        """Update player canvas resolution dynamically
+        
+        Args:
+            new_width: New canvas width
+            new_height: New canvas height
+            autosize_mode: Optional autosize mode (off/stretch/fill/fit)
+        """
+        old_width, old_height = self.canvas_width, self.canvas_height
+        
+        # Update canvas dimensions
+        self.canvas_width = new_width
+        self.canvas_height = new_height
+        
+        # Update autosize mode in config if provided
+        if autosize_mode is not None:
+            if 'video' not in self.config:
+                self.config['video'] = {}
+            if 'player_resolution' not in self.config['video']:
+                self.config['video']['player_resolution'] = {}
+            self.config['video']['player_resolution']['autosize'] = autosize_mode
+        
+        # Update layer manager resolution
+        if hasattr(self, 'layer_manager') and self.layer_manager:
+            self.layer_manager.canvas_width = new_width
+            self.layer_manager.canvas_height = new_height
+        
+        # If a video source is currently loaded, recreate it with new dimensions
+        if hasattr(self, 'source') and self.source:
+            from .frame_source import VideoSource, GeneratorSource, DummySource
+            
+            if isinstance(self.source, VideoSource):
+                # Recreate video source with new dimensions and updated config
+                old_source = self.source
+                video_path = old_source.source_path if hasattr(old_source, 'source_path') else None
+                clip_id = old_source.clip_id if hasattr(old_source, 'clip_id') else None
+                
+                if video_path:
+                    self.source = VideoSource(
+                        video_path,
+                        canvas_width=new_width,
+                        canvas_height=new_height,
+                        config=self.config,
+                        clip_id=clip_id
+                    )
+            elif isinstance(self.source, GeneratorSource):
+                # Recreate generator source with new dimensions
+                old_source = self.source
+                generator_id = old_source.generator_id if hasattr(old_source, 'generator_id') else None
+                params = old_source.parameters if hasattr(old_source, 'parameters') else {}
+                
+                if generator_id:
+                    self.source = GeneratorSource(
+                        generator_id,
+                        params,
+                        canvas_width=new_width,
+                        canvas_height=new_height
+                    )
+            elif isinstance(self.source, DummySource):
+                # Recreate dummy source with new dimensions
+                self.source = DummySource(new_width, new_height)
+        
+        logger.info(f"[{self.player_name}] Resolution updated: {old_width}x{old_height} → {new_width}x{new_height}")
+    
     # Properties that delegate to source
     @property
     def current_frame(self):
@@ -810,11 +874,11 @@ class Player:
                 
                 if transport_loop_completed:
                     self.current_loop += 1
-                    logger.info(f"🔁 [{self.player_name}] Transport loop completed: current_loop={self.current_loop}, max_loops={self.max_loops}")
+                    logger.debug(f"🔁 [{self.player_name}] Transport loop completed: current_loop={self.current_loop}, max_loops={self.max_loops}")
                     
                     # Check if we should advance to next clip in playlist
                     if self.max_loops > 0 and self.current_loop >= self.max_loops:
-                        logger.info(f"📋 [{self.player_name}] max_loops reached ({self.current_loop}/{self.max_loops})")
+                        logger.debug(f"📋 [{self.player_name}] max_loops reached ({self.current_loop}/{self.max_loops})")
                         
                         # Prüfe Playlist-Autoplay
                         if self.autoplay and len(self.playlist) > 0:
@@ -1559,7 +1623,11 @@ class Player:
     
     def load_clip_layers(self, clip_id, clip_registry, video_dir=None):
         """Delegates to layer_manager.load_clip_layers()."""
-        return self.layer_manager.load_clip_layers(clip_id, video_dir, self.player_name)
+        # Get sequence_manager from player_manager if available
+        sequence_manager = None
+        if hasattr(self, 'player_manager') and self.player_manager and hasattr(self.player_manager, 'sequence_manager'):
+            sequence_manager = self.player_manager.sequence_manager
+        return self.layer_manager.load_clip_layers(clip_id, video_dir, self.player_name, sequence_manager)
     
     def add_layer(self, source, clip_id=None, blend_mode='normal', opacity=100.0):
         """Delegates to layer_manager.add_layer()."""

@@ -11,6 +11,8 @@ class BPMWidget {
         this.beatDot = null;
         this.bpmInput = null;
         this.lastBeatPhase = 0;
+        this.manualTapMode = false; // Manual tap mode prevents audio from overwriting BPM
+        this.tapBtn = null;
     }
     
     init() {
@@ -21,7 +23,7 @@ class BPMWidget {
         this.playBtn = document.getElementById('bpm-play-btn');
         this.pauseBtn = document.getElementById('bpm-pause-btn');
         this.stopBtn = document.getElementById('bpm-stop-btn');
-        const tapBtn = document.getElementById('bpm-tap-btn');
+        this.tapBtn = document.getElementById('bpm-tap-btn');
         const resyncBtn = document.getElementById('bpm-resync-btn');
         
         // Transport controls
@@ -30,7 +32,11 @@ class BPMWidget {
         this.stopBtn.addEventListener('click', () => this.stop());
         
         // Action buttons
-        tapBtn.addEventListener('click', () => this.tap());
+        this.tapBtn.addEventListener('click', () => this.tap());
+        this.tapBtn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this.toggleManualTapMode();
+        });
         resyncBtn.addEventListener('click', () => this.resync());
         
         // Manual BPM input
@@ -99,8 +105,8 @@ class BPMWidget {
     }
     
     handleBPMUpdate(data) {
-        // Update BPM display (if not manually editing)
-        if (document.activeElement !== this.bpmInput && data.bpm > 0) {
+        // Update BPM display (if not manually editing and not in manual tap mode)
+        if (document.activeElement !== this.bpmInput && data.bpm > 0 && !this.manualTapMode) {
             this.currentBPM = data.bpm;
             this.bpmInput.value = data.bpm.toFixed(1);
         }
@@ -264,12 +270,27 @@ class BPMWidget {
             .catch(e => console.error('Failed to tap:', e));
     }
     
-    // Resync (re-enable auto detection, overwrite manual)
+    // Toggle manual tap mode
+    toggleManualTapMode() {
+        this.manualTapMode = !this.manualTapMode;
+        
+        if (this.manualTapMode) {
+            // Enable manual tap mode - prevent audio from overwriting BPM
+            this.tapBtn.classList.add('manual-tap-active');
+            console.log('🔒 Manual tap mode enabled');
+        } else {
+            // Disable manual tap mode - allow audio to update BPM
+            this.tapBtn.classList.remove('manual-tap-active');
+            console.log('🔓 Manual tap mode disabled');
+        }
+    }
+    
+    // Resync all BPM sequences to current beat
     resync() {
         fetch('/api/bpm/resync', {method: 'POST'})
             .then(r => r.json())
             .then(data => {
-                console.log('🔄 BPM auto-detection resynced');
+                console.log(`🔄 BPM sequences resynced: ${data.synced_count} sequences`);
                 this.beatCount = 0;
             })
             .catch(e => console.error('Failed to resync:', e));

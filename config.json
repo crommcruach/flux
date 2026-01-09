@@ -141,6 +141,14 @@
     "default_brightness": 100,
     "default_fps": null,
     "default_speed": 1,
+    "player_resolution": {
+      "preset": "1080p",
+      "custom_width": 1920,
+      "custom_height": 1080,
+      "autosize": "off",
+      "_preset_comment": "Options: 720p, 1080p, 1440p, 2160p (4K), custom",
+      "_autosize_comment": "Options: off, stretch, fill, fit. How to handle videos that don't match resolution"
+    },
     "preview_stream": {
       "video": {
         "fps": 25,

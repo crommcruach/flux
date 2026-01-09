@@ -68,6 +68,24 @@
     border-radius: 4px;
 }
 
+/* Audio Sequence - Green */
+.param-dynamic-settings.audio-sequence {
+    background: rgba(40, 167, 69, 0.15);
+    border-left: 3px solid #28a745;
+}
+
+/* Timeline Sequence - Blue */
+.param-dynamic-settings.timeline-sequence {
+    background: rgba(0, 123, 255, 0.15);
+    border-left: 3px solid #007bff;
+}
+
+/* BPM Sequence - Purple */
+.param-dynamic-settings.bpm-sequence {
+    background: rgba(111, 66, 193, 0.15);
+    border-left: 3px solid #6f42c1;
+}
+
 .dynamic-settings-content {
     display: flex;
     align-items: center;

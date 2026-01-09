@@ -68,9 +68,10 @@ class TransportEffect(PluginBase):
         {
             'name': 'loop_count',
             'type': ParameterType.INT,
-            'default': 0,
+            'default': 1,
             'min': 0,
-            'max': 100,
+            'max': 999,
+            'control_type': 'input',
             'description': 'Loop Count (0 = infinite, 1+ = play N times then advance)'
         }
     ]
@@ -299,13 +300,17 @@ class TransportEffect(PluginBase):
                 
                 logger.debug(f"🎲 Random loop completed: {self._current_loop_iteration}/{self.loop_count if self.loop_count > 0 else '∞'} ({random_loop_duration} frames shown)")
                 
-                # Check if we've completed all desired loops
+                # Check if we've completed all desired loops (for autoplay advancement)
                 if self.loop_count > 0 and self._current_loop_iteration >= self.loop_count:
                     self.loop_completed = True
                     info_log_conditional(logger, DebugCategories.TRANSPORT, f"✅ Random mode loop_count reached: {self._current_loop_iteration}/{self.loop_count} - signaling completion")
                 elif self.loop_count == 0:
                     # Infinite mode - signal completion after each "loop" of random frames
                     self.loop_completed = True
+            
+            # IMPORTANT: Always emit position updates in random mode, even after loop completion
+            # This keeps the frontend slider moving while autoplay decides when to advance
+            self._emit_position_update()
             
             return frame_num
         
@@ -541,20 +546,21 @@ class TransportEffect(PluginBase):
         """Emit WebSocket update for transport position (rate-limited by config)."""
         # DEBUG: Check if WebSocket context is available
         if not self.socketio or not self.player_id or not self.clip_id:
-            if self._position_update_counter == 0:  # Log only once to avoid spam
-                logger.info(f"⚠️ Transport WebSocket context not set: socketio={self.socketio is not None}, player_id={self.player_id}, clip_id={self.clip_id}")
+            if self._position_update_counter % 100 == 0:  # Log every 100 frames to avoid spam
+                logger.warning(f"⚠️ Transport WebSocket context not set: socketio={self.socketio is not None}, player_id={self.player_id}, clip_id={self.clip_id}")
+            self._position_update_counter += 1
             return
         
         # Increment counter
         self._position_update_counter += 1
         
-        # Get update interval from config (default 10 frames)
+        # Get update interval from config (default 2 frames for smooth updates)
         try:
             from modules.app_config import get_config
             config = get_config()
-            update_interval = config.get('effects', {}).get('transport_position_update_interval', 10)
+            update_interval = config.get('effects', {}).get('transport_position_update_interval', 2)
         except:
-            update_interval = 10
+            update_interval = 2
         
         # Only emit every N frames or if position changed significantly
         should_emit = (
@@ -562,6 +568,10 @@ class TransportEffect(PluginBase):
             self._last_emitted_position is None or
             abs(self.current_position - self._last_emitted_position) > 30  # Force update if jumped
         )
+        
+        # Debug every 30 frames
+        if self._position_update_counter % 30 == 0:
+            logger.debug(f"🔍 Transport emit check: counter={self._position_update_counter}, interval={update_interval}, should_emit={should_emit}, pos={self.current_position}, last={self._last_emitted_position}")
         
         if should_emit:
             try:
@@ -578,7 +588,7 @@ class TransportEffect(PluginBase):
                 self._position_update_counter = 0
                 self._last_emitted_position = self.current_position
             except Exception as e:
-                logger.error(f"❌ Failed to emit transport position: {e}")
+                logger.error(f"❌ Failed to emit transport position: {e}", exc_info=True)
     
     def get_parameters(self):
         """Gibt aktuelle Parameter-Werte zurück mit Range Metadata für Transport."""

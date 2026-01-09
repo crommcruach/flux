@@ -143,7 +143,8 @@ class TransformEffect(PluginBase):
         """Initialisiert Plugin mit Transform-Parametern."""
         import traceback
         caller = traceback.extract_stack()[-2]
-        print(f"🏗️ [Transform {id(self)}] Instance initialized for rendering (called from {caller.filename}:{caller.lineno})")
+        logger.debug(f"🏗️ [Transform {id(self)}] Instance initialized for rendering (called from {caller.filename}:{caller.lineno})")
+        
         # Use _get_param_value() from PluginBase to handle range metadata
         self.position_x = self._get_param_value('position_x', 0.0)
         self.position_y = self._get_param_value('position_y', 0.0)
