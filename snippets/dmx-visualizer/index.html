@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D DMX Visualizer Prototype</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Control Panel -->
+        <div id="control-panel">
+            <h2>3D DMX Visualizer</h2>
+            
+            <div class="section">
+                <h3>Camera Views</h3>
+                <button onclick="visualizer.setCameraView('perspective')">3D Perspective</button>
+                <button onclick="visualizer.setCameraView('top')">Top View</button>
+                <button onclick="visualizer.setCameraView('front')">Front View</button>
+                <button onclick="visualizer.setCameraView('side')">Side View</button>
+            </div>
+
+            <div class="section">
+                <h3>Stage Settings</h3>
+                <label>
+                    Width (m): <input type="number" id="stageWidth" value="10" min="1" max="50" step="1">
+                </label>
+                <label>
+                    Depth (m): <input type="number" id="stageDepth" value="10" min="1" max="50" step="1">
+                </label>
+                <label>
+                    Height (m): <input type="number" id="stageHeight" value="4" min="1" max="20" step="0.5">
+                </label>
+                <button onclick="visualizer.updateStage()">Update Stage</button>
+            </div>
+
+            <div class="section">
+                <h3>Add Fixtures</h3>
+                <select id="fixtureType">
+                    <option value="moving_head">Moving Head</option>
+                    <option value="par">LED PAR</option>
+                    <option value="strobe">Strobe</option>
+                    <option value="led_strip">LED Strip</option>
+                    <option value="display">Display/Screen</option>
+                </select>
+                <button onclick="visualizer.addFixture()">Add Fixture</button>
+            </div>
+
+            <div class="section">
+                <h3>Visualization Options</h3>
+                <label>
+                    <input type="checkbox" id="showGrid" checked onchange="visualizer.toggleGrid()">
+                    Show Grid
+                </label>
+                <label>
+                    <input type="checkbox" id="showBeams" checked onchange="visualizer.toggleBeams()">
+                    Show Beams
+                </label>
+                <label>
+                    <input type="checkbox" id="showLabels" checked onchange="visualizer.toggleLabels()">
+                    Show Labels
+                </label>
+            </div>
+
+            <div class="section">
+                <h3>Transform Controls</h3>
+                <p style="font-size: 11px; color: #888; margin-bottom: 10px;">
+                    Click a fixture to select, then use arrows to move/rotate/scale
+                </p>
+                <button onclick="visualizer.setTransformMode('translate')" class="active" id="btnTranslate">
+                    Move (W)
+                </button>
+                <button onclick="visualizer.setTransformMode('rotate')" id="btnRotate">
+                    Rotate (E)
+                </button>
+                <button onclick="visualizer.setTransformMode('scale')" id="btnScale">
+                    Scale (R)
+                </button>
+                <button onclick="visualizer.deselectFixture()" style="background: #ff4444; margin-top: 10px;">
+                    Deselect (Esc)
+                </button>
+            </div>
+
+            <div class="section">
+                <h3>Test Controls</h3>
+                <label>
+                    Pan: <input type="range" id="testPan" min="0" max="255" value="127" 
+                                oninput="visualizer.updateTestFixture('pan', this.value)">
+                    <span id="panValue">127</span>
+                </label>
+                <label>
+                    Tilt: <input type="range" id="testTilt" min="0" max="255" value="127"
+                                 oninput="visualizer.updateTestFixture('tilt', this.value)">
+                    <span id="tiltValue">127</span>
+                </label>
+                <label>
+                    Dimmer: <input type="range" id="testDimmer" min="0" max="255" value="255"
+                                   oninput="visualizer.updateTestFixture('dimmer', this.value)">
+                    <span id="dimmerValue">255</span>
+                </label>
+                <label>
+                    Color: <input type="color" id="testColor" value="#ffffff"
+                                  onchange="visualizer.updateTestFixture('color', this.value)">
+                </label>
+            </div>
+
+            <div class="section">
+                <h3>Performance Stats</h3>
+                <div id="stats">
+                    <div>FPS: <span id="fps">60</span></div>
+                    <div>Fixtures: <span id="fixtureCount">0</span></div>
+                    <div>Draw Calls: <span id="drawCalls">0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3D Viewport -->
+        <div id="viewport">
+            <canvas id="canvas"></canvas>
+            <div id="selected-info" style="display: none;">
+                <h4>Selected Fixture</h4>
+                <div id="fixture-details"></div>
+            </div>
+        </div>
+        
+        <!-- Fixture List Panel -->
+        <div id="fixture-list-panel">
+            <h3>Fixtures</h3>
+            <div id="fixture-list">
+                <div class="no-fixtures">No fixtures added yet</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js from CDN (ES Modules) -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    
+    <!-- Visualizer Scripts as ES Module -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        
+        // Make THREE and controls available globally
+        window.THREE = THREE;
+        window.OrbitControls = OrbitControls;
+        window.TransformControls = TransformControls;
+        
+        // Load other scripts dynamically
+        const loadScript = (src) => {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = resolve;
+                script.onerror = reject;
+                document.body.appendChild(script);
+            });
+        };
+        
+        // Load scripts in sequence
+        try {
+            await loadScript('visualizer.js');
+            await loadScript('fixtures.js');
+            await loadScript('demo.js');
+            
+            // Initialize visualizer
+            window.visualizer = new DMXVisualizer('canvas');
+            startDemo();
+        } catch (error) {
+            console.error('Failed to load scripts:', error);
+        }
+    </script>
+</body>
+</html>
