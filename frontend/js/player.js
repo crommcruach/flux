@@ -94,11 +94,32 @@ let effectsTab = null;
 let sourcesTab = null;
 let filesTab = null;
 
-document.addEventListener('DOMContentLoaded', () => {
+// Early preview stream initialization (before DOMContentLoaded for faster LCP)
+function initEarlyPreviewStream() {
+    const previewImg = document.getElementById('videoPreviewImg');
+    if (previewImg && !previewImg.src) {
+        // Start MJPEG stream immediately without waiting for full init
+        const apiBase = window.API_BASE || '';
+        previewImg.src = `${apiBase}/api/preview/stream`;
+        console.log('🚀 Early preview stream initialized');
+    }
+}
+
+// Try to start preview as soon as the image element is available
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        initEarlyPreviewStream();
+        init().catch(error => {
+            console.error('❌ Initialization error:', error);
+        });
+    });
+} else {
+    // DOM already loaded
+    initEarlyPreviewStream();
     init().catch(error => {
         console.error('❌ Initialization error:', error);
     });
-});
+}
 
 /**
  * Initialize tab components
@@ -1452,12 +1473,20 @@ function startPreviewStream() {
     const previewImg = document.getElementById('videoPreviewImg');
     if (!previewImg) return;
     
+    // Check if stream already started (by early init)
+    const currentSrc = previewImg.src;
+    const expectedSrc = `${API_BASE}/api/preview/stream`;
+    if (currentSrc && currentSrc.includes('/api/preview/stream')) {
+        debug.log(`MJPEG preview stream already running`);
+        return;
+    }
+    
     // Stop existing preview
     stopPreviewStream();
     
     // Start MJPEG stream (browser handles it natively - no JavaScript interference)
     previewImg.style.display = 'block';
-    previewImg.src = `${API_BASE}/api/preview/stream`;
+    previewImg.src = expectedSrc;
     
     debug.log(`MJPEG preview stream started`);
 }
@@ -1875,8 +1904,11 @@ function renderPlaylistGeneric(playlistId) {
             ? `background-image: url('${thumbnailUrl}'); background-size: cover; background-position: center;` 
             : '';
         
+        // Generate layer previews HTML
+        const layerPreviewsHtml = generateLayerPreviewsHtml(item.id, playlistId);
+        
         itemsHtml += `
-            <div class="playlist-item-wrapper ${isActive ? 'active' : ''}">
+            <div class="playlist-item-wrapper ${isActive ? 'active' : ''}" data-clip-id="${item.id}">
                 <div class="playlist-item" 
                      ${cfg.dataAttr}="${index}"
                      data-playlist="${playlistId}"
@@ -1887,6 +1919,7 @@ function renderPlaylistGeneric(playlistId) {
                     ${getLayerBadgeHtml(item.id)}
                     <button class="playlist-item-remove" onclick="${cfg.removeFunc(index)}; event.stopPropagation();" title="Remove from playlist">×</button>
                 </div>
+                ${layerPreviewsHtml}
                 <div class="playlist-item-fx-tab ${isFxSelected ? 'selected' : ''}" 
                      data-playlist="${playlistId}"
                      data-clip-id="${item.id}"
@@ -1908,6 +1941,9 @@ function renderPlaylistGeneric(playlistId) {
     
     attachPlaylistItemHandlers(container, playlistId, files, cfg);
     attachPlaylistDropZoneHandlers(container, playlistId, files, cfg);
+    
+    // Setup hover handlers for layer previews
+    setupLayerPreviewHover(playlistId);
 }
 
 // Helper function for item event handlers using Event Delegation
@@ -2716,6 +2752,136 @@ window.updateMasterUI = function() {
 
 // REMOVED: Master/slave sync polling - no external master changes expected
 // If needed in future, implement via WebSocket events instead of polling
+
+// Generate layer previews HTML for a clip
+function generateLayerPreviewsHtml(clipId, playerId) {
+    // Check if clipLayers exists and has layers for this clip
+    if (typeof clipLayers === 'undefined' || !clipLayers[clipId] || clipLayers[clipId].length === 0) {
+        return ''; // No layers, no preview
+    }
+    
+    const layers = clipLayers[clipId];
+    let layersHtml = '<div class="layer-previews">';
+    
+    layers.forEach((layer, idx) => {
+        const layerName = layer.name || `Layer ${idx + 1}`;
+        const layerPath = layer.source || layer.path;
+        
+        // Generate thumbnail URL if layer has a source
+        let layerStyle = '';
+        let hasThumb = false;
+        if (layerPath && !layerPath.startsWith('generator:')) {
+            const thumbnailUrl = `${API_BASE}/api/files/thumbnail/${encodeURIComponent(layerPath)}`;
+            layerStyle = `background-image: url('${thumbnailUrl}');`;
+            hasThumb = true;
+        }
+        
+        // Get blend mode if available
+        const blendMode = layer.blend_mode || 'normal';
+        const opacity = layer.opacity !== undefined ? Math.round(layer.opacity * 100) + '%' : '100%';
+        
+        layersHtml += `
+            <div class="layer-preview ${hasThumb ? 'has-thumbnail' : ''}" style="${layerStyle}">
+                <span class="layer-preview-label">
+                    ${layerName}<br>
+                    <small>${blendMode} · ${opacity}</small>
+                </span>
+            </div>
+        `;
+    });
+    
+    layersHtml += '</div>';
+    return layersHtml;
+}
+
+// Setup hover handlers for layer preview popups
+function setupLayerPreviewHover(playlistId) {
+    const container = document.getElementById(
+        playlistId === 'video' ? 'videoPlaylist' : 'artnetPlaylist'
+    );
+    
+    if (!container) return;
+    
+    const wrappers = container.querySelectorAll('.playlist-item-wrapper');
+    
+    wrappers.forEach(wrapper => {
+        let hoverTimer = null;
+        let isHovering = false;
+        
+        const layerPreviews = wrapper.querySelector('.layer-previews');
+        const hasLayers = layerPreviews && layerPreviews.children.length > 0;
+        
+        if (!hasLayers) return; // Skip if no layers
+        
+        // Get the playlist-item inside wrapper (the actual thumbnail)
+        const playlistItem = wrapper.querySelector('.playlist-item');
+        if (!playlistItem) return;
+        
+        // Remove title attribute to prevent tooltip conflict
+        const originalTitle = playlistItem.getAttribute('title');
+        
+        const updatePosition = () => {
+            // Calculate position relative to viewport
+            const rect = playlistItem.getBoundingClientRect();
+            layerPreviews.style.left = `${rect.left}px`;
+            layerPreviews.style.top = `${rect.bottom + 8}px`;
+        };
+        
+        const startHover = () => {
+            isHovering = true;
+            
+            // Remove tooltip while hovering
+            playlistItem.removeAttribute('title');
+            
+            // Wait 2 seconds before showing layers
+            hoverTimer = setTimeout(() => {
+                if (isHovering) {
+                    updatePosition();
+                    wrapper.classList.add('show-layers');
+                }
+            }, 2000);
+        };
+        
+        const endHover = () => {
+            isHovering = false;
+            
+            // Restore tooltip
+            if (originalTitle) {
+                playlistItem.setAttribute('title', originalTitle);
+            }
+            
+            // Clear timer if leaving before 2 seconds
+            if (hoverTimer) {
+                clearTimeout(hoverTimer);
+                hoverTimer = null;
+            }
+            
+            // Hide layers immediately
+            wrapper.classList.remove('show-layers');
+        };
+        
+        // Listen on both wrapper and playlist-item for better detection
+        wrapper.addEventListener('mouseenter', startHover);
+        wrapper.addEventListener('mouseleave', endHover);
+        playlistItem.addEventListener('mouseenter', startHover);
+        playlistItem.addEventListener('mouseleave', (e) => {
+            // Only end hover if leaving the wrapper entirely
+            if (!wrapper.contains(e.relatedTarget)) {
+                endHover();
+            }
+        });
+        
+        // Update position on scroll (in case playlist scrolls while preview is open)
+        const scrollContainer = container.closest('.playlist-scroll');
+        if (scrollContainer) {
+            scrollContainer.addEventListener('scroll', () => {
+                if (wrapper.classList.contains('show-layers')) {
+                    updatePosition();
+                }
+            });
+        }
+    });
+}
 
 async function updatePlaylist(playerId) {
     const config = playerConfigs[playerId];
@@ -6123,8 +6289,11 @@ async function showVideoPlayerSettingsModal() {
 
 async function loadVideoPlayerSettings() {
     try {
+        console.log('📂 Loading video player settings...');
         const response = await fetch('/api/player/video/settings');
+        console.log('📥 Load response status:', response.status);
         const data = await response.json();
+        console.log('📥 Load response data:', data);
         
         if (data.success && data.settings) {
             const settings = data.settings;
@@ -6133,12 +6302,14 @@ async function loadVideoPlayerSettings() {
             const presetSelect = document.getElementById('videoResolutionPreset');
             if (presetSelect) {
                 presetSelect.value = settings.preset || '1080p';
+                console.log('✅ Set preset to:', presetSelect.value);
                 
                 // Trigger change event to show/hide custom fields
                 if (settings.preset === 'custom') {
                     document.getElementById('videoCustomResolutionGroup').style.display = 'block';
                     document.getElementById('videoCustomWidth').value = settings.custom_width || 1920;
                     document.getElementById('videoCustomHeight').value = settings.custom_height || 1080;
+                    console.log('✅ Set custom resolution:', settings.custom_width, 'x', settings.custom_height);
                 }
             }
             
@@ -6146,12 +6317,13 @@ async function loadVideoPlayerSettings() {
             const autosizeSelect = document.getElementById('videoAutosizeMode');
             if (autosizeSelect) {
                 autosizeSelect.value = settings.autosize || 'off';
+                console.log('✅ Set autosize to:', autosizeSelect.value);
             }
             
             debug.log('✅ Video player settings loaded:', settings);
         }
     } catch (error) {
-        console.error('Failed to load video player settings:', error);
+        console.error('❌ Failed to load video player settings:', error);
     }
 }
 
@@ -6162,6 +6334,10 @@ async function saveVideoPlayerSettings() {
         const customWidth = document.getElementById('videoCustomWidth');
         const customHeight = document.getElementById('videoCustomHeight');
         
+        console.log('🔧 Saving video player settings...');
+        console.log('  Preset:', presetSelect?.value);
+        console.log('  Autosize:', autosizeSelect?.value);
+        
         const settings = {
             preset: presetSelect.value,
             autosize: autosizeSelect.value
@@ -6171,7 +6347,10 @@ async function saveVideoPlayerSettings() {
         if (presetSelect.value === 'custom') {
             settings.custom_width = parseInt(customWidth.value) || 1920;
             settings.custom_height = parseInt(customHeight.value) || 1080;
+            console.log('  Custom resolution:', settings.custom_width, 'x', settings.custom_height);
         }
+        
+        console.log('📤 Sending settings to API:', settings);
         
         const response = await fetch('/api/player/video/settings', {
             method: 'POST',
@@ -6179,7 +6358,9 @@ async function saveVideoPlayerSettings() {
             body: JSON.stringify(settings)
         });
         
+        console.log('📥 API response status:', response.status);
         const data = await response.json();
+        console.log('📥 API response data:', data);
         
         if (data.success) {
             showToast('✅ Video player resolution updated', 'success');
@@ -6195,7 +6376,7 @@ async function saveVideoPlayerSettings() {
             showToast('❌ Failed to save settings: ' + (data.error || 'Unknown error'), 'error');
         }
     } catch (error) {
-        console.error('Failed to save video player settings:', error);
+        console.error('❌ Failed to save video player settings:', error);
         showToast('❌ Failed to save settings', 'error');
     }
 }

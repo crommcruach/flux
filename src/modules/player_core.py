@@ -154,6 +154,58 @@ class Player:
         
         # Art-Net Manager wird extern gesetzt
         self.artnet_manager = None
+        
+        # Output Manager (NEW - video player only, optional feature)
+        self.output_manager = None
+        try:
+            from .outputs import OutputManager
+            from .outputs.plugins import DisplayOutput, VirtualOutput
+            OUTPUTS_AVAILABLE = True
+        except ImportError as e:
+            OUTPUTS_AVAILABLE = False
+            logger.warning(f"{self.player_name}: Output routing system not available - Import failed: {e}")
+        
+        if OUTPUTS_AVAILABLE and not enable_artnet:
+            # Only initialize for video player - all configuration comes from session state
+            try:
+                self.output_manager = OutputManager(
+                    player_name=self.player_name,
+                    canvas_width=self.canvas_width,
+                    canvas_height=self.canvas_height,
+                    config={}  # Empty config - all settings from session state
+                )
+                
+                # Restore output state from session (all outputs and slices)
+                from .session_state import get_session_state
+                session_state = get_session_state()
+                if not session_state:
+                    logger.error("Session state not available")
+                    self.output_manager = None
+                    return
+                
+                saved_state = session_state.get_output_state(self.player_name)
+                if saved_state:
+                    try:
+                        self.output_manager.set_state(saved_state)
+                        logger.info(f"Output state restored for {self.player_name}: {len(saved_state.get('outputs', {}))} outputs, {len(saved_state.get('slices', {}))} slices")
+                    except Exception as e:
+                        logger.warning(f"Failed to restore output state: {e}")
+                else:
+                    logger.info(f"No saved output state found for {self.player_name}")
+                
+                # Register auto-save callback
+                self.output_manager.set_state_save_callback(
+                    lambda player_name, state: session_state.save_output_state(player_name, state)
+                )
+                
+                logger.info(f"✅ Output Manager initialized for {self.player_name}")
+            except Exception as e:
+                logger.error(f"Output Manager initialization failed: {e}", exc_info=True)
+                self.output_manager = None
+        elif enable_artnet:
+            logger.debug(f"{self.player_name}: Output routing disabled (Art-Net player)")
+        else:
+            logger.debug(f"{self.player_name}: Output routing unavailable (imports failed)")
     
     def update_resolution(self, new_width: int, new_height: int, autosize_mode: str = None):
         """Update player canvas resolution dynamically
@@ -181,6 +233,40 @@ class Player:
         if hasattr(self, 'layer_manager') and self.layer_manager:
             self.layer_manager.canvas_width = new_width
             self.layer_manager.canvas_height = new_height
+            
+            # Update all layer sources with new resolution
+            from .frame_source import VideoSource, GeneratorSource
+            for layer_idx, layer in enumerate(self.layer_manager.layers):
+                if hasattr(layer, 'source') and layer.source:
+                    old_source = layer.source
+                    
+                    if isinstance(old_source, VideoSource):
+                        # Recreate video source with new dimensions
+                        video_path = old_source.source_path if hasattr(old_source, 'source_path') else None
+                        clip_id = old_source.clip_id if hasattr(old_source, 'clip_id') else layer.clip_id
+                        
+                        if video_path:
+                            layer.source = VideoSource(
+                                video_path,
+                                canvas_width=new_width,
+                                canvas_height=new_height,
+                                config=self.config,
+                                clip_id=clip_id
+                            )
+                            logger.info(f"[{self.player_name}] Layer {layer_idx} video source updated to {new_width}x{new_height}")
+                    elif isinstance(old_source, GeneratorSource):
+                        # Recreate generator source with new dimensions
+                        generator_id = old_source.generator_id if hasattr(old_source, 'generator_id') else None
+                        params = old_source.parameters if hasattr(old_source, 'parameters') else {}
+                        
+                        if generator_id:
+                            layer.source = GeneratorSource(
+                                generator_id,
+                                params,
+                                canvas_width=new_width,
+                                canvas_height=new_height
+                            )
+                            logger.info(f"[{self.player_name}] Layer {layer_idx} generator source updated to {new_width}x{new_height}")
         
         # If a video source is currently loaded, recreate it with new dimensions
         if hasattr(self, 'source') and self.source:
@@ -1289,6 +1375,18 @@ class Player:
                 self._bgr_buffer = np.empty((frame_for_video_preview.shape[0], frame_for_video_preview.shape[1], 3), dtype=np.uint8)
             cv2.cvtColor(frame_for_video_preview, cv2.COLOR_RGB2BGR, dst=self._bgr_buffer)
             self.last_video_frame = self._bgr_buffer
+            
+            # Distribute frame to output routing system (if enabled)
+            if self.output_manager:
+                try:
+                    # Pass BGR frame (cv2 windows expect BGR)
+                    self.output_manager.update_frame(
+                        composite_frame=self._bgr_buffer,  # BGR format for cv2
+                        layer_manager=self.layer_manager,
+                        current_clip_id=self.current_clip_id
+                    )
+                except Exception as e:
+                    logger.error(f"[OUTPUT] Frame update error: {e}", exc_info=True)
             
             # DMX extraction - only if needed (Art-Net enabled OR recording active)
             # This saves ~2-3ms per frame when Art-Net is disabled

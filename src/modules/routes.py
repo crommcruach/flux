@@ -87,6 +87,11 @@ def register_web_routes(app, config=None, player_manager=None):
         """Serve the video converter page."""
         return send_from_directory(app.static_folder, 'converter.html')
     
+    @app.route('/output-settings')
+    def output_settings():
+        """Serve the output settings page."""
+        return send_from_directory(app.static_folder, 'output-settings.html')
+    
     # ========================================
     # STATISCHE DATEIEN
     # ========================================

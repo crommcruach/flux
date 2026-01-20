@@ -13,14 +13,13 @@ import time
 from collections import deque
 from typing import Dict, Optional, Any
 
-try:
-    import librosa
-    LIBROSA_AVAILABLE = True
-except ImportError:
-    LIBROSA_AVAILABLE = False
-    logging.warning("librosa not available - BPM detection disabled")
-
+# Initialize logger first
 logger = logging.getLogger(__name__)
+
+# BPM detection will use numpy-only implementation (no external dependencies)
+# Simple but effective onset-based tempo detection
+AUBIO_AVAILABLE = True  # Always available (using numpy-only implementation)
+logger.info("✓ BPM detection ready (using numpy-only implementation)")
 
 
 class AudioAnalyzer:
@@ -58,7 +57,7 @@ class AudioAnalyzer:
         self._lock = threading.Lock()
         
         # BPM Detection
-        self._bpm_enabled = False
+        self._bpm_enabled = True
         self._current_bpm = 0.0
         self._bpm_confidence = 0.0
         self._bpm_history = deque(maxlen=10)
@@ -76,6 +75,11 @@ class AudioAnalyzer:
         
         # Audio buffer for BPM detection (4 seconds)
         self._audio_buffer = deque(maxlen=sample_rate * 4)
+        
+        # BPM detection thread (separate thread to avoid blocking audio callback)
+        self._bpm_thread = None
+        self._bpm_thread_running = False
+        self._bpm_request_event = threading.Event()
         
         # FFT setup
         self._window = np.hanning(block_size)
@@ -213,10 +217,16 @@ class AudioAnalyzer:
                 self._running = True
                 self.device = device_id
                 
-                # Enable BPM detection by default on startup
-                if LIBROSA_AVAILABLE and not self._bpm_enabled:
-                    self._bpm_enabled = True
-                    logger.info("🎵 BPM detection enabled by default")
+                # Start BPM detection thread (only if enabled)
+                if AUBIO_AVAILABLE and self._bpm_enabled and not self._bpm_thread_running:
+                    try:
+                        self._bpm_thread_running = True
+                        self._bpm_thread = threading.Thread(target=self._bpm_detection_loop, daemon=True, name="BPM-Detection")
+                        self._bpm_thread.start()
+                        logger.info("🎵 BPM detection thread started")
+                    except Exception as e:
+                        logger.error(f"Failed to start BPM detection thread: {e}", exc_info=True)
+                        self._bpm_thread_running = False
                 
                 logger.info(f"✓ AudioAnalyzer started successfully")
                 logger.info(f"  Strategy: {strategy_name}")
@@ -259,6 +269,14 @@ class AudioAnalyzer:
             return
         
         try:
+            # Stop BPM detection thread first
+            if self._bpm_thread_running:
+                self._bpm_thread_running = False
+                self._bpm_request_event.set()  # Wake thread to exit
+                if self._bpm_thread and self._bpm_thread.is_alive():
+                    self._bpm_thread.join(timeout=2.0)
+                logger.debug("🎵 BPM detection thread stopped")
+            
             if self._stream:
                 self._stream.stop()
                 self._stream.close()
@@ -340,7 +358,7 @@ class AudioAnalyzer:
             self._bass_history.append(bass_norm)
             
             # Get beat sensitivity from config (0.1 = very sensitive, 3.0 = very insensitive)
-            beat_sensitivity = self.config.get('beat_sensitivity', 1.0)
+            beat_sensitivity = max(0.1, self.config.get('beat_sensitivity', 1.0))  # Ensure minimum 0.1 to avoid division by zero
             
             # Calculate averages
             avg_peak = np.mean(self._peak_history) if len(self._peak_history) > 5 else 0.0
@@ -348,7 +366,6 @@ class AudioAnalyzer:
             
             # Adaptive threshold based on signal level
             # For loud signals (avg > 0.5), use relative change
-            # For quiet signals (avg < 0.5), use absolute threshold
             if avg_peak > 0.5:
                 # Loud signal: detect relative spikes
                 threshold_multiplier = 1.2 + (beat_sensitivity * 0.15)  # 1.2 to 1.65
@@ -387,15 +404,15 @@ class AudioAnalyzer:
                     logger.debug(f"🥁 BEAT detected! peak={peak:.3f} (avg={avg_peak:.3f}), bass={bass_norm:.3f} (avg={avg_bass:.3f}), sens={beat_sensitivity:.2f}, beat_count={self._beat_count}")
             
             # BPM Detection (if enabled)
-            if self._bpm_enabled and LIBROSA_AVAILABLE and len(self._audio_buffer) >= self.sample_rate * 2:
-                # Run BPM detection every ~1 second to avoid overhead
+            if self._bpm_enabled and AUBIO_AVAILABLE and len(self._audio_buffer) >= self.sample_rate * 2:
+                # Request BPM analysis in separate thread (non-blocking)
                 if not hasattr(self, '_bpm_last_analysis'):
                     self._bpm_last_analysis = time.time()
                 
                 if time.time() - self._bpm_last_analysis >= 1.0:
                     self._bpm_last_analysis = time.time()
-                    # Run in callback is okay since it's infrequent
-                    self._detect_bpm_from_buffer()
+                    # Signal BPM thread to run analysis (non-blocking)
+                    self._bpm_request_event.set()
             
             # Update features (thread-safe) - convert numpy types to Python native types
             with self._lock:
@@ -419,7 +436,8 @@ class AudioAnalyzer:
                     logger.debug(f"🎵 Audio features: rms={rms:.3f}, peak={peak:.3f}, bass={bass_norm:.3f}, mid={mid_norm:.3f}, treble={treble_norm:.3f}")
         
         except Exception as e:
-            logger.error(f"Error in audio callback: {e}", exc_info=True)
+            logger.error(f"❌ Error in audio callback: {e}", exc_info=True)
+            # Don't crash the audio thread - just log and continue
     
     def get_features(self) -> Dict[str, float]:
         """
@@ -505,14 +523,59 @@ class AudioAnalyzer:
         
         logger.info(f"Audio device changed to: {device}")
     
+    def _bpm_detection_loop(self):
+        """Background thread for BPM detection (prevents blocking audio callback)"""
+        logger.info("🎵 BPM detection loop started")
+        
+        # Wait for audio buffer to fill before starting (prevents startup race condition)
+        minimum_buffer_samples = self.sample_rate * 2  # 2 seconds of audio
+        logger.info(f"🎵 Waiting for audio buffer to fill ({minimum_buffer_samples} samples needed)...")
+        
+        while self._bpm_thread_running and len(self._audio_buffer) < minimum_buffer_samples:
+            time.sleep(0.5)
+        
+        if not self._bpm_thread_running:
+            logger.info("🎵 BPM detection loop stopped before buffer filled")
+            return
+        
+        logger.info(f"🎵 Audio buffer ready ({len(self._audio_buffer)} samples), starting BPM detection")
+        
+        try:
+            while self._bpm_thread_running:
+                try:
+                    # Wait for request signal (with timeout to check running flag)
+                    if self._bpm_request_event.wait(timeout=0.5):
+                        self._bpm_request_event.clear()
+                        
+                        # Verify buffer still has enough data
+                        if len(self._audio_buffer) < minimum_buffer_samples:
+                            logger.debug("BPM detection: Buffer too small, skipping")
+                            continue
+                        
+                        # Only process if still enabled and running
+                        if self._bpm_enabled and self._bpm_thread_running and AUBIO_AVAILABLE:
+                            try:
+                                self._detect_bpm_from_buffer()
+                            except Exception as bpm_error:
+                                logger.error(f"BPM detection failed: {bpm_error}", exc_info=True)
+                                # Continue loop even if detection fails
+                            
+                except Exception as loop_error:
+                    logger.error(f"BPM loop iteration error: {loop_error}", exc_info=True)
+                    # Don't break, keep trying
+        except Exception as fatal_error:
+            logger.error(f"BPM detection loop fatal error: {fatal_error}", exc_info=True)
+        finally:
+            logger.info("🎵 BPM detection loop exited")
+    
     def enable_bpm_detection(self, enabled: bool = True):
         """Enable or disable BPM detection
         
         Args:
             enabled: True to enable, False to disable
         """
-        if not LIBROSA_AVAILABLE and enabled:
-            logger.error("Cannot enable BPM detection: librosa not installed")
+        if not AUBIO_AVAILABLE and enabled:
+            logger.error("Cannot enable BPM detection: numpy-only detector not available")
             return
         
         self._bpm_enabled = enabled
@@ -522,66 +585,84 @@ class AudioAnalyzer:
             logger.info("🎵 BPM detection disabled")
     
     def _detect_bpm_from_buffer(self):
-        """Detect BPM from audio buffer using librosa"""
+        """Detect BPM from audio buffer using numpy-only onset detection"""
         try:
             # Convert buffer to numpy array
-            audio_data = np.array(list(self._audio_buffer))
+            audio_data = np.array(list(self._audio_buffer), dtype=np.float32)
             
             if len(audio_data) == 0:
                 logger.debug("BPM detection: Empty audio buffer")
                 return
             
-            logger.debug(f"BPM detection: Processing {len(audio_data)} samples, dtype={audio_data.dtype}, min={audio_data.min():.3f}, max={audio_data.max():.3f}")
+            logger.debug(f"BPM detection: Processing {len(audio_data)} samples")
             
-            # Normalize audio to prevent overflow in librosa
-            # Clip to prevent extreme values
-            audio_data = np.clip(audio_data, -1.0, 1.0)
+            # Simple but effective BPM detection using onset detection
+            # 1. Compute energy envelope (onset strength)
+            frame_length = 2048
+            hop_length = 512
             
-            # Scale down if RMS is too high
-            rms = np.sqrt(np.mean(audio_data**2))
-            if rms > 0.5:
-                audio_data = audio_data * (0.5 / rms)
-                logger.debug(f"BPM detection: Scaled audio (RMS was {rms:.3f})")
+            # Calculate energy in overlapping frames
+            n_frames = (len(audio_data) - frame_length) // hop_length + 1
+            energy = np.zeros(n_frames)
             
-            # Suppress numpy warnings for this operation
-            with np.errstate(over='ignore', invalid='ignore'):
-                logger.debug("BPM detection: Computing onset envelope...")
-                # Onset detection
-                onset_env = librosa.onset.onset_strength(
-                    y=audio_data,
-                    sr=self.sample_rate,
-                    aggregate=np.median
-                )
+            for i in range(n_frames):
+                start = i * hop_length
+                end = start + frame_length
+                frame = audio_data[start:end]
                 
-                logger.debug(f"BPM detection: Onset envelope computed, shape={onset_env.shape}, min={onset_env.min():.3f}, max={onset_env.max():.3f}")
-                
-                logger.debug("BPM detection: Running beat tracking...")
-                # Tempo estimation
-                tempo_result = librosa.beat.beat_track(
-                    onset_envelope=onset_env,
-                    sr=self.sample_rate
-                )[0]
-                
-                # Convert to scalar if it's an array
-                if isinstance(tempo_result, np.ndarray):
-                    tempo = float(tempo_result.item()) if tempo_result.size == 1 else float(tempo_result[0])
-                else:
-                    tempo = float(tempo_result)
-                
-                logger.debug(f"BPM detection: Beat tracking complete, tempo={tempo}")
+                # Compute RMS energy
+                energy[i] = np.sqrt(np.mean(frame**2))
             
-            # Validate tempo
-            if np.isnan(tempo) or np.isinf(tempo):
-                logger.warning(f"BPM detection returned invalid value: {tempo}")
+            # 2. Find peaks in energy (onsets)
+            # Derivative of energy to find increases
+            energy_diff = np.diff(energy)
+            energy_diff = np.maximum(energy_diff, 0)  # Only keep increases
+            
+            # Adaptive threshold
+            threshold = np.mean(energy_diff) + 1.5 * np.std(energy_diff)
+            
+            # Find peak indices
+            peaks = []
+            for i in range(1, len(energy_diff) - 1):
+                if energy_diff[i] > threshold and energy_diff[i] > energy_diff[i-1] and energy_diff[i] > energy_diff[i+1]:
+                    peaks.append(i)
+            
+            if len(peaks) < 2:
+                logger.debug("BPM detection: Not enough onsets detected")
                 return
             
-            # Calculate confidence (simple heuristic)
-            confidence = 0.7 if tempo > 0 else 0.0
+            # 3. Calculate inter-onset intervals (IOI)
+            peak_times = np.array(peaks) * hop_length / self.sample_rate  # Convert to seconds
+            intervals = np.diff(peak_times)
             
-            logger.debug(f"BPM detection: Final tempo={tempo:.1f}, confidence={confidence:.2f}")
+            # Filter out very short intervals (noise)
+            intervals = intervals[intervals > 0.2]  # Min 300 BPM
             
-            # Update BPM with smoothing
-            self._update_bpm(float(tempo), confidence)
+            if len(intervals) == 0:
+                logger.debug("BPM detection: No valid intervals")
+                return
+            
+            # 4. Estimate BPM from median interval
+            median_interval = np.median(intervals)
+            tempo = 60.0 / median_interval  # Convert interval to BPM
+            
+            # Validate tempo (reasonable BPM range: 60-180)
+            if tempo > 180:
+                tempo = tempo / 2  # Likely detecting every half-beat
+            elif tempo < 60:
+                tempo = tempo * 2  # Likely detecting every other beat
+            
+            # Confidence based on consistency of intervals
+            interval_std = np.std(intervals)
+            confidence = max(0.0, min(1.0, 1.0 - (interval_std / median_interval)))
+            
+            logger.debug(f"BPM detection: tempo={tempo:.1f}, confidence={confidence:.2f}, onsets={len(peaks)}, intervals={len(intervals)}")
+            
+            # Validate final tempo
+            if 40 <= tempo <= 240:
+                self._update_bpm(float(tempo), confidence)
+            else:
+                logger.debug(f"BPM detection: tempo {tempo:.1f} out of range (40-240)")
             
         except Exception as e:
             logger.error(f"BPM detection error: {e}", exc_info=True)
@@ -619,6 +700,11 @@ class AudioAnalyzer:
             return 0.0
         
         bpm = self._manual_bpm if self._manual_bpm is not None else self._current_bpm
+        
+        # Safety check to prevent division by zero
+        if bpm <= 0:
+            return 0.0
+            
         beat_duration = 60.0 / bpm
         current_time = time.time()
         

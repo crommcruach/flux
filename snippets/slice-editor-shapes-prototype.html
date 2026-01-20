@@ -530,6 +530,41 @@
         .toast.error {
             background: #d32f2f;
         }
+
+        /* Context Menu */
+        .context-menu {
+            position: fixed;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            padding: 4px 0;
+            z-index: 10000;
+            display: none;
+            min-width: 180px;
+        }
+
+        .context-menu.active {
+            display: block;
+        }
+
+        .context-menu-item {
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #e0e0e0;
+            transition: background 0.2s;
+        }
+
+        .context-menu-item:hover {
+            background: #3a3a3a;
+        }
+
+        .context-menu-separator {
+            height: 1px;
+            background: #444;
+            margin: 4px 0;
+        }
     </style>
 </head>
 <body>
@@ -587,6 +622,7 @@
                     <button onclick="app.showPreview()" id="previewBtn">🔍 Preview Slice</button>
                     <button onclick="app.toggleSnap()" id="snapBtn">📐 Snap: OFF</button>
                     <button onclick="app.toggleTransformMode()" id="transformBtn">🔧 Transform</button>
+                    <button onclick="app.deleteTransform()" id="deleteTransformBtn">🔄 Delete Transform</button>
                 </div>
                 </div>
             </div>
@@ -640,6 +676,7 @@
                 <h2>💾 Export / Import</h2>
                 <div class="panel-section-content">
                     <div style="display: flex; gap: 8px; flex-direction: column;">
+                        <button class="primary" onclick="app.saveAndApply()" style="background: #4CAF50; font-weight: bold;">✅ Save & Apply</button>
                         <button class="primary" onclick="app.exportJSON()">📥 Export JSON</button>
                         <button onclick="document.getElementById('importFile').click()">📤 Import JSON</button>
                         <input type="file" id="importFile" accept=".json" onchange="app.importJSON(event)" style="display: none;">
@@ -662,6 +699,20 @@
             </div>
             <div class="preview-info" id="previewInfo"></div>
         </div>
+    </div>
+
+    <div id="contextMenu" class="context-menu">
+        <div class="context-menu-item" onclick="app.contextMenuAction('centerX')">📍 Center X</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('centerY')">📍 Center Y</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('leftHalf')">◧ Left Half</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('rightHalf')">◨ Right Half</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('topHalf')">⬒ Top Half</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('bottomHalf')">⬓ Bottom Half</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('wholeArea')">⬜ Whole Area</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('duplicate')">📋 Duplicate</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('delete')">🗑️ Delete</div>
     </div>
 
     <script>
@@ -697,6 +748,7 @@
             drawingMode: false,
             drawingPoints: [],
             tempShape: null,
+            contextMenuTarget: null,
 
             init() {
                 this.canvas = document.getElementById('sliceCanvas');
@@ -707,6 +759,14 @@
                 this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
                 this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
                 this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
+                this.canvas.addEventListener('contextmenu', (e) => this.onContextMenu(e));
+                
+                // Close context menu on click outside
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('#contextMenu')) {
+                        this.closeContextMenu();
+                    }
+                });
                 
                 // Mouse wheel zoom
                 const wrapper = document.getElementById('canvasWrapper');
@@ -844,7 +904,17 @@
                     shape.red = 0;
                     shape.green = 0;
                     shape.blue = 0;
-                    shape.softEdge = false;
+                    shape.softEdge = {
+                        enabled: false,
+                        autoDetect: true,
+                        width: { top: 50, bottom: 50, left: 50, right: 50 },
+                        curve: 'smooth', // linear, smooth, exponential
+                        strength: 1.0,
+                        gamma: 1.0,
+                        gammaR: 1.0,
+                        gammaG: 1.0,
+                        gammaB: 1.0
+                    };
                     shape.mirror = 'none'; // none, horizontal, vertical, both
                 }
 
@@ -927,15 +997,15 @@
                     }
                 }
 
-                // Check rotation handle (rectangles only)
-                if (this.selectedSlice && this.selectedSlice.shape === 'rectangle' && this.isOnRotationHandle(pos, this.selectedSlice)) {
+                // Check rotation handle (rectangles only) - but not if transformed
+                if (this.selectedSlice && this.selectedSlice.shape === 'rectangle' && !this.isTransformed(this.selectedSlice) && this.isOnRotationHandle(pos, this.selectedSlice)) {
                     this.isRotating = true;
                     this.dragStart = pos;
                     return;
                 }
 
-                // Check resize handle (rectangles only)
-                if (this.selectedSlice && this.selectedSlice.shape === 'rectangle') {
+                // Check resize handle (rectangles only) - but not if transformed
+                if (this.selectedSlice && this.selectedSlice.shape === 'rectangle' && !this.isTransformed(this.selectedSlice)) {
                     const handle = this.getResizeHandle(pos, this.selectedSlice);
                     if (handle) {
                         this.isResizing = true;
@@ -1101,8 +1171,20 @@
             isOnRotationHandle(pos, slice) {
                 if (slice.shape !== 'rectangle') return false;
                 const centerX = slice.x + slice.width / 2;
-                const rotHandleY = slice.y - 30;
-                const distance = Math.sqrt(Math.pow(pos.x - centerX, 2) + Math.pow(pos.y - rotHandleY, 2));
+                const centerY = slice.y + slice.height / 2;
+                const rotation = (slice.rotation || 0) * Math.PI / 180;
+                
+                // Rotation handle position (unrotated)
+                const handleX = centerX;
+                const handleY = slice.y - 30;
+                
+                // Rotate the handle position around center
+                const dx = handleX - centerX;
+                const dy = handleY - centerY;
+                const rotHandleX = centerX + dx * Math.cos(rotation) - dy * Math.sin(rotation);
+                const rotHandleY = centerY + dx * Math.sin(rotation) + dy * Math.cos(rotation);
+                
+                const distance = Math.sqrt(Math.pow(pos.x - rotHandleX, 2) + Math.pow(pos.y - rotHandleY, 2));
                 return distance <= 15;
             },
 
@@ -1134,10 +1216,68 @@
                 const slice = this.selectedSlice;
                 if (!slice || !slice.transformCorners) return;
 
-                // Update corner position relative to slice origin
+                // Update corner position relative to slice origin (no constraints)
                 const corner = slice.transformCorners[this.draggingCorner];
-                corner.x = Math.max(0, Math.min(slice.width, pos.x - slice.x));
-                corner.y = Math.max(0, Math.min(slice.height, pos.y - slice.y));
+                corner.x = pos.x - slice.x;
+                corner.y = pos.y - slice.y;
+                
+                // Recalculate slice dimensions based on bounding box of transform corners
+                this.updateSliceDimensionsFromTransform(slice);
+            },
+
+            updateSliceDimensionsFromTransform(slice) {
+                if (!slice.transformCorners) return;
+                
+                // Find bounding box of all corners
+                let minX = Infinity, minY = Infinity;
+                let maxX = -Infinity, maxY = -Infinity;
+                
+                slice.transformCorners.forEach(corner => {
+                    const absX = slice.x + corner.x;
+                    const absY = slice.y + corner.y;
+                    minX = Math.min(minX, absX);
+                    minY = Math.min(minY, absY);
+                    maxX = Math.max(maxX, absX);
+                    maxY = Math.max(maxY, absY);
+                });
+                
+                // Update slice position and size to match bounding box
+                const oldX = slice.x;
+                const oldY = slice.y;
+                
+                slice.x = minX;
+                slice.y = minY;
+                slice.width = maxX - minX;
+                slice.height = maxY - minY;
+                
+                // Adjust corner positions relative to new origin
+                const deltaX = oldX - slice.x;
+                const deltaY = oldY - slice.y;
+                slice.transformCorners.forEach(corner => {
+                    corner.x += deltaX;
+                    corner.y += deltaY;
+                });
+            },
+
+            isTransformed(slice) {
+                if (!slice.transformCorners) return false;
+                
+                // Check if corners differ from default rectangle corners
+                const defaultCorners = [
+                    {x: 0, y: 0},
+                    {x: slice.width, y: 0},
+                    {x: slice.width, y: slice.height},
+                    {x: 0, y: slice.height}
+                ];
+                
+                for (let i = 0; i < 4; i++) {
+                    const c = slice.transformCorners[i];
+                    const d = defaultCorners[i];
+                    if (Math.abs(c.x - d.x) > 1 || Math.abs(c.y - d.y) > 1) {
+                        return true;
+                    }
+                }
+                return false;
             },
 
             drawTransformHandles(slice) {
@@ -1202,8 +1342,36 @@
                     }
                 }
                 
-                // Round to 1 decimal place to avoid floating point errors
-                slice.rotation = Math.round(angle * 10) / 10;
+                // Calculate rotation delta
+                const oldRotation = slice.rotation || 0;
+                const newRotation = Math.round(angle * 10) / 10;
+                const deltaRotation = (newRotation - oldRotation) * Math.PI / 180;
+                
+                slice.rotation = newRotation;
+                
+                // Rotate transform corners if they exist
+                if (slice.transformCorners && Math.abs(deltaRotation) > 0.001) {
+                    const cx = slice.width / 2;
+                    const cy = slice.height / 2;
+                    
+                    slice.transformCorners = slice.transformCorners.map(corner => {
+                        // Translate to center
+                        const x = corner.x - cx;
+                        const y = corner.y - cy;
+                        
+                        // Rotate
+                        const cos = Math.cos(deltaRotation);
+                        const sin = Math.sin(deltaRotation);
+                        const newX = x * cos - y * sin;
+                        const newY = x * sin + y * cos;
+                        
+                        // Translate back
+                        return {
+                            x: newX + cx,
+                            y: newY + cy
+                        };
+                    });
+                }
             },
 
             resizeSlice(pos) {
@@ -1267,8 +1435,21 @@
             getResizeHandle(pos, slice) {
                 if (slice.shape !== 'rectangle') return null;
                 const handleSize = 10;
+                const centerX = slice.x + slice.width / 2;
+                const centerY = slice.y + slice.height / 2;
+                const rotation = (slice.rotation || 0) * Math.PI / 180;
                 
-                // Corner handles
+                // Helper function to rotate a point around center
+                const rotatePoint = (x, y) => {
+                    const dx = x - centerX;
+                    const dy = y - centerY;
+                    return {
+                        x: centerX + dx * Math.cos(rotation) - dy * Math.sin(rotation),
+                        y: centerY + dx * Math.sin(rotation) + dy * Math.cos(rotation)
+                    };
+                };
+                
+                // Corner handles (unrotated positions)
                 const corners = {
                     'nw': { x: slice.x, y: slice.y },
                     'ne': { x: slice.x + slice.width, y: slice.y },
@@ -1278,7 +1459,8 @@
 
                 // Check corners first (priority)
                 for (let [handle, hPos] of Object.entries(corners)) {
-                    if (Math.abs(pos.x - hPos.x) < handleSize && Math.abs(pos.y - hPos.y) < handleSize) {
+                    const rotPos = rotatePoint(hPos.x, hPos.y);
+                    if (Math.abs(pos.x - rotPos.x) < handleSize && Math.abs(pos.y - rotPos.y) < handleSize) {
                         return handle;
                     }
                 }
@@ -1292,7 +1474,8 @@
                 };
                 
                 for (let [handle, hPos] of Object.entries(edges)) {
-                    if (Math.abs(pos.x - hPos.x) < handleSize && Math.abs(pos.y - hPos.y) < handleSize) {
+                    const rotPos = rotatePoint(hPos.x, hPos.y);
+                    if (Math.abs(pos.x - rotPos.x) < handleSize && Math.abs(pos.y - rotPos.y) < handleSize) {
                         return handle;
                     }
                 }
@@ -1551,12 +1734,18 @@
 
                     // Draw handles for selected slice
                     if (isSelected && slice.shape === 'rectangle') {
-                        if (this.transformMode) {
+                        if (this.transformMode || this.isTransformed(slice)) {
+                            // Show transform handles if in transform mode OR if slice has been transformed
                             this.drawTransformHandles(slice);
                         } else {
                             this.drawResizeHandles(slice);
                             this.drawRotationHandle(slice);
                         }
+                    }
+                    
+                    // Draw transform indicator for non-selected transformed slices
+                    if (!isSelected && slice.shape === 'rectangle' && this.isTransformed(slice)) {
+                        this.drawTransformIndicator(slice);
                     }
                 });
             },
@@ -1632,7 +1821,21 @@
             },
 
             drawResizeHandles(slice) {
-                // Corner handles
+                const centerX = slice.x + slice.width / 2;
+                const centerY = slice.y + slice.height / 2;
+                const rotation = (slice.rotation || 0) * Math.PI / 180;
+                
+                // Helper function to rotate a point around center
+                const rotatePoint = (x, y) => {
+                    const dx = x - centerX;
+                    const dy = y - centerY;
+                    return [
+                        centerX + dx * Math.cos(rotation) - dy * Math.sin(rotation),
+                        centerY + dx * Math.sin(rotation) + dy * Math.cos(rotation)
+                    ];
+                };
+                
+                // Corner handles (unrotated positions)
                 const corners = [
                     [slice.x, slice.y],
                     [slice.x + slice.width, slice.y],
@@ -1651,31 +1854,52 @@
                 // Draw corner handles (larger, white)
                 this.ctx.fillStyle = '#ffffff';
                 corners.forEach(([x, y]) => {
-                    this.ctx.fillRect(x - 6, y - 6, 12, 12);
+                    const [rx, ry] = rotatePoint(x, y);
+                    this.ctx.fillRect(rx - 6, ry - 6, 12, 12);
                 });
                 
                 // Draw edge handles (smaller, blue)
                 this.ctx.fillStyle = '#2196F3';
                 edges.forEach(([x, y]) => {
-                    this.ctx.fillRect(x - 5, y - 5, 10, 10);
+                    const [rx, ry] = rotatePoint(x, y);
+                    this.ctx.fillRect(rx - 5, ry - 5, 10, 10);
                 });
             },
 
             drawRotationHandle(slice) {
                 const centerX = slice.x + slice.width / 2;
-                const rotHandleY = slice.y - 30;
+                const centerY = slice.y + slice.height / 2;
+                const rotation = (slice.rotation || 0) * Math.PI / 180;
+                
+                // Rotation handle position (unrotated)
+                const handleX = centerX;
+                const handleY = slice.y - 30;
+                
+                // Rotate the handle position around center
+                const dx = handleX - centerX;
+                const dy = handleY - centerY;
+                const rotHandleX = centerX + dx * Math.cos(rotation) - dy * Math.sin(rotation);
+                const rotHandleY = centerY + dx * Math.sin(rotation) + dy * Math.cos(rotation);
+                
+                // Top edge center (rotated)
+                const topX = centerX;
+                const topY = slice.y;
+                const topDx = topX - centerX;
+                const topDy = topY - centerY;
+                const rotTopX = centerX + topDx * Math.cos(rotation) - topDy * Math.sin(rotation);
+                const rotTopY = centerY + topDx * Math.sin(rotation) + topDy * Math.cos(rotation);
                 
                 // Draw line from top center to rotation handle
                 this.ctx.beginPath();
                 this.ctx.strokeStyle = '#4CAF50';
                 this.ctx.lineWidth = 2;
-                this.ctx.moveTo(centerX, slice.y);
-                this.ctx.lineTo(centerX, rotHandleY);
+                this.ctx.moveTo(rotTopX, rotTopY);
+                this.ctx.lineTo(rotHandleX, rotHandleY);
                 this.ctx.stroke();
                 
                 // Draw rotation handle circle
                 this.ctx.beginPath();
-                this.ctx.arc(centerX, rotHandleY, 12, 0, Math.PI * 2);
+                this.ctx.arc(rotHandleX, rotHandleY, 12, 0, Math.PI * 2);
                 this.ctx.fillStyle = '#4CAF50';
                 this.ctx.fill();
                 this.ctx.strokeStyle = '#ffffff';
@@ -1686,8 +1910,41 @@
                 this.ctx.strokeStyle = '#ffffff';
                 this.ctx.lineWidth = 1.5;
                 this.ctx.beginPath();
-                this.ctx.arc(centerX, rotHandleY, 4, 0.5, Math.PI * 1.5);
+                this.ctx.arc(rotHandleX, rotHandleY, 4, 0.5, Math.PI * 1.5);
                 this.ctx.stroke();
+            },
+
+            drawTransformIndicator(slice) {
+                if (!slice.transformCorners) return;
+                
+                // Draw dashed lines connecting corners
+                this.ctx.strokeStyle = '#FFA500';
+                this.ctx.lineWidth = 2;
+                this.ctx.setLineDash([5, 5]); // Dashed line pattern
+                this.ctx.beginPath();
+                for (let i = 0; i < slice.transformCorners.length; i++) {
+                    const corner = slice.transformCorners[i];
+                    const x = slice.x + corner.x;
+                    const y = slice.y + corner.y;
+                    if (i === 0) {
+                        this.ctx.moveTo(x, y);
+                    } else {
+                        this.ctx.lineTo(x, y);
+                    }
+                }
+                this.ctx.closePath();
+                this.ctx.stroke();
+                this.ctx.setLineDash([]); // Reset to solid line
+                
+                // Draw corner dots
+                this.ctx.fillStyle = '#FFA500';
+                slice.transformCorners.forEach(corner => {
+                    const x = slice.x + corner.x;
+                    const y = slice.y + corner.y;
+                    this.ctx.beginPath();
+                    this.ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    this.ctx.fill();
+                });
             },
 
             getMousePos(e) {
@@ -1865,17 +2122,183 @@
                 document.getElementById('snapBtn').textContent = `📐 Snap: ${this.snapToGrid ? 'ON' : 'OFF'}`;
             },
 
+            detectSliceOverlaps(slice) {
+                if (!slice || slice.type !== 'slice') return null;
+                
+                const overlaps = { top: 0, bottom: 0, left: 0, right: 0 };
+                
+                // Check against all other slices with soft edge enabled
+                for (const other of this.slices) {
+                    if (other === slice || other.type !== 'slice') continue;
+                    if (!other.softEdge || !other.softEdge.enabled) continue;
+                    if (!slice.softEdge || !slice.softEdge.enabled) continue;
+                    
+                    // Check for left/right overlap (vertical alignment must be 100%)
+                    const verticalOverlap = Math.min(slice.y + slice.height, other.y + other.height) - Math.max(slice.y, other.y);
+                    const minHeight = Math.min(slice.height, other.height);
+                    
+                    if (verticalOverlap >= minHeight * 0.99) { // 99% to account for rounding
+                        // Check right edge overlap (slice on left, other on right)
+                        if (slice.x + slice.width > other.x && slice.x + slice.width < other.x + other.width) {
+                            const overlapWidth = slice.x + slice.width - other.x;
+                            overlaps.right = Math.max(overlaps.right, overlapWidth);
+                        }
+                        // Check left edge overlap (slice on right, other on left)
+                        if (slice.x < other.x + other.width && slice.x > other.x) {
+                            const overlapWidth = other.x + other.width - slice.x;
+                            overlaps.left = Math.max(overlaps.left, overlapWidth);
+                        }
+                    }
+                    
+                    // Check for top/bottom overlap (horizontal alignment must be 100%)
+                    const horizontalOverlap = Math.min(slice.x + slice.width, other.x + other.width) - Math.max(slice.x, other.x);
+                    const minWidth = Math.min(slice.width, other.width);
+                    
+                    if (horizontalOverlap >= minWidth * 0.99) { // 99% to account for rounding
+                        // Check bottom edge overlap (slice on top, other on bottom)
+                        if (slice.y + slice.height > other.y && slice.y + slice.height < other.y + other.height) {
+                            const overlapHeight = slice.y + slice.height - other.y;
+                            overlaps.bottom = Math.max(overlaps.bottom, overlapHeight);
+                        }
+                        // Check top edge overlap (slice on bottom, other on top)
+                        if (slice.y < other.y + other.height && slice.y > other.y) {
+                            const overlapHeight = other.y + other.height - slice.y;
+                            overlaps.top = Math.max(overlaps.top, overlapHeight);
+                        }
+                    }
+                }
+                
+                return overlaps;
+            },
+
+            updateSoftEdgeFromOverlap(slice) {
+                if (!slice || !slice.softEdge || !slice.softEdge.autoDetect || !slice.softEdge.enabled) return;
+                
+                const overlaps = this.detectSliceOverlaps(slice);
+                if (overlaps) {
+                    if (overlaps.top > 0) slice.softEdge.width.top = Math.round(overlaps.top);
+                    if (overlaps.bottom > 0) slice.softEdge.width.bottom = Math.round(overlaps.bottom);
+                    if (overlaps.left > 0) slice.softEdge.width.left = Math.round(overlaps.left);
+                    if (overlaps.right > 0) slice.softEdge.width.right = Math.round(overlaps.right);
+                }
+            },
+
+            toggleSoftEdge(sliceId, enabled) {
+                const slice = this.slices.find(s => s.id === sliceId);
+                if (!slice) return;
+                
+                if (!slice.softEdge || typeof slice.softEdge !== 'object') {
+                    slice.softEdge = {
+                        enabled: false,
+                        autoDetect: true,
+                        width: { top: 50, bottom: 50, left: 50, right: 50 },
+                        curve: 'smooth',
+                        strength: 1.0,
+                        gamma: 1.0,
+                        gammaR: 1.0,
+                        gammaG: 1.0,
+                        gammaB: 1.0
+                    };
+                }
+                
+                slice.softEdge.enabled = enabled;
+                
+                // Auto-detect overlaps if enabled
+                if (enabled && slice.softEdge.autoDetect) {
+                    this.updateSoftEdgeFromOverlap(slice);
+                    // Update all other slices with soft edge enabled
+                    for (const other of this.slices) {
+                        if (other !== slice && other.type === 'slice' && other.softEdge?.enabled && other.softEdge?.autoDetect) {
+                            this.updateSoftEdgeFromOverlap(other);
+                        }
+                    }
+                }
+                
+                this.saveState();
+                this.updateSliceList();
+                this.render();
+            },
+
+            updateSoftEdgeProperty(sliceId, property, value) {
+                const slice = this.slices.find(s => s.id === sliceId);
+                if (!slice || !slice.softEdge) return;
+                
+                slice.softEdge[property] = value;
+                
+                // If auto-detect was toggled, recalculate
+                if (property === 'autoDetect' && value === true) {
+                    this.updateSoftEdgeFromOverlap(slice);
+                }
+                
+                this.saveState();
+                this.updateSliceList();
+                this.render();
+            },
+
+            updateSoftEdgeWidth(sliceId, edge, value) {
+                const slice = this.slices.find(s => s.id === sliceId);
+                if (!slice || !slice.softEdge || !slice.softEdge.width) return;
+                
+                slice.softEdge.width[edge] = value;
+                
+                // Disable auto-detect when manually changing values
+                if (slice.softEdge.autoDetect) {
+                    slice.softEdge.autoDetect = false;
+                }
+                
+                this.saveState();
+                this.updateSliceList();
+                this.render();
+            },
+
             toggleTransformMode() {
                 this.transformMode = !this.transformMode;
                 const btn = document.getElementById('transformBtn');
                 if (this.transformMode) {
+                    // Reset rotation to 0° when entering transform mode
+                    if (this.selectedSlice && this.selectedSlice.rotation) {
+                        this.selectedSlice.rotation = 0;
+                        this.saveState();
+                    }
                     btn.style.background = '#2a4a2a';
                     btn.style.borderColor = '#4CAF50';
-                    this.showToast('Transform mode: Drag corners to move them independently');
+                    this.showToast('Transform mode active (rotation disabled). Drag corners to move them independently.');
                 } else {
                     btn.style.background = '';
                     btn.style.borderColor = '';
                 }
+                this.render();
+            },
+
+            deleteTransform() {
+                if (!this.selectedSlice) {
+                    this.showToast('Select a slice first', 'error');
+                    return;
+                }
+                
+                if (this.selectedSlice.type !== 'slice') {
+                    this.showToast('Transform only available for slices', 'error');
+                    return;
+                }
+                
+                // Reset transform corners to default rectangle
+                this.selectedSlice.transformCorners = [
+                    {x: 0, y: 0}, // top-left
+                    {x: this.selectedSlice.width, y: 0}, // top-right
+                    {x: this.selectedSlice.width, y: this.selectedSlice.height}, // bottom-right
+                    {x: 0, y: this.selectedSlice.height} // bottom-left
+                ];
+                
+                // Update dimensions
+                this.updateSliceDimensionsFromTransform(this.selectedSlice);
+                
+                // Turn off transform mode
+                if (this.transformMode) {
+                    this.toggleTransformMode();
+                }
+                
+                this.showToast('Transform reset to default rectangle');
+                this.saveState();
                 this.render();
             },
 
@@ -2255,11 +2678,65 @@
                                                     <option value="both" ${slice.mirror === 'both' ? 'selected' : ''}>Both</option>
                                                 </select>
                                             </div>
-                                            <div style="grid-column: 1 / -1;">
-                                                <label style="font-size: 10px; color: #666; display: flex; align-items: center; gap: 8px;">
-                                                    <input type="checkbox" ${slice.softEdge ? 'checked' : ''} onchange="app.updateProperty('${slice.id}', 'softEdge', this.checked)" style="width: auto;">
-                                                    Soft Edge
+                                            <div style="grid-column: 1 / -1; border-top: 1px solid #333; padding-top: 8px; margin-top: 8px;">
+                                                <label style="font-size: 10px; color: #666; display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                                    <input type="checkbox" ${slice.softEdge?.enabled ? 'checked' : ''} onchange="app.toggleSoftEdge('${slice.id}', this.checked)" style="width: auto;">
+                                                    <strong>Soft Edge (Blending)</strong>
                                                 </label>
+                                                ${slice.softEdge?.enabled ? `
+                                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-left: 20px;">
+                                                        <div style="grid-column: 1 / -1;">
+                                                            <label style="font-size: 9px; color: #666; display: flex; align-items: center; gap: 8px;">
+                                                                <input type="checkbox" ${slice.softEdge.autoDetect ? 'checked' : ''} onchange="app.updateSoftEdgeProperty('${slice.id}', 'autoDetect', this.checked)" style="width: auto;">
+                                                                Auto-detect overlaps
+                                                            </label>
+                                                        </div>
+                                                        <div>
+                                                            <label style="font-size: 9px; color: #888;">Top (px)</label>
+                                                            <input type="number" min="0" max="500" value="${slice.softEdge.width?.top || 50}" onchange="app.updateSoftEdgeWidth('${slice.id}', 'top', parseInt(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                        <div>
+                                                            <label style="font-size: 9px; color: #888;">Bottom (px)</label>
+                                                            <input type="number" min="0" max="500" value="${slice.softEdge.width?.bottom || 50}" onchange="app.updateSoftEdgeWidth('${slice.id}', 'bottom', parseInt(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                        <div>
+                                                            <label style="font-size: 9px; color: #888;">Left (px)</label>
+                                                            <input type="number" min="0" max="500" value="${slice.softEdge.width?.left || 50}" onchange="app.updateSoftEdgeWidth('${slice.id}', 'left', parseInt(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                        <div>
+                                                            <label style="font-size: 9px; color: #888;">Right (px)</label>
+                                                            <input type="number" min="0" max="500" value="${slice.softEdge.width?.right || 50}" onchange="app.updateSoftEdgeWidth('${slice.id}', 'right', parseInt(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                        <div style="grid-column: 1 / -1;">
+                                                            <label style="font-size: 9px; color: #888;">Fade Curve</label>
+                                                            <select value="${slice.softEdge.curve || 'smooth'}" onchange="app.updateSoftEdgeProperty('${slice.id}', 'curve', this.value)" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                                <option value="linear" ${slice.softEdge.curve === 'linear' ? 'selected' : ''}>Linear</option>
+                                                                <option value="smooth" ${(slice.softEdge.curve || 'smooth') === 'smooth' ? 'selected' : ''}>Smooth (S-curve)</option>
+                                                                <option value="exponential" ${slice.softEdge.curve === 'exponential' ? 'selected' : ''}>Exponential</option>
+                                                            </select>
+                                                        </div>
+                                                        <div style="grid-column: 1 / -1;">
+                                                            <label style="font-size: 9px; color: #888;">Strength (0.0-1.0)</label>
+                                                            <input type="number" min="0" max="1" step="0.1" value="${slice.softEdge.strength || 1.0}" onchange="app.updateSoftEdgeProperty('${slice.id}', 'strength', parseFloat(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                        <div style="grid-column: 1 / -1;">
+                                                            <label style="font-size: 9px; color: #888;">Gamma (Overall)</label>
+                                                            <input type="number" min="0.1" max="5" step="0.1" value="${slice.softEdge.gamma || 1.0}" onchange="app.updateSoftEdgeProperty('${slice.id}', 'gamma', parseFloat(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                        <div>
+                                                            <label style="font-size: 9px; color: #888;">Gamma R</label>
+                                                            <input type="number" min="0.1" max="5" step="0.1" value="${slice.softEdge.gammaR || 1.0}" onchange="app.updateSoftEdgeProperty('${slice.id}', 'gammaR', parseFloat(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                        <div>
+                                                            <label style="font-size: 9px; color: #888;">Gamma G</label>
+                                                            <input type="number" min="0.1" max="5" step="0.1" value="${slice.softEdge.gammaG || 1.0}" onchange="app.updateSoftEdgeProperty('${slice.id}', 'gammaG', parseFloat(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                        <div>
+                                                            <label style="font-size: 9px; color: #888;">Gamma B</label>
+                                                            <input type="number" min="0.1" max="5" step="0.1" value="${slice.softEdge.gammaB || 1.0}" onchange="app.updateSoftEdgeProperty('${slice.id}', 'gammaB', parseFloat(this.value))" style="width: 100%; padding: 2px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 3px; font-size: 10px;">
+                                                        </div>
+                                                    </div>
+                                                ` : ''}
                                             </div>
                                         </div>
                                     </div>
@@ -2406,7 +2883,17 @@
                             shape: s.shape,
                             screens: s.screens || [],
                             color: s.color,
-                            ...this.getShapeData(s)
+                            visible: s.visible !== false,
+                            rotation: s.rotation || 0,
+                            brightness: s.brightness || 0,
+                            contrast: s.contrast || 0,
+                            red: s.red || 0,
+                            green: s.green || 0,
+                            blue: s.blue || 0,
+                            softEdge: s.softEdge && typeof s.softEdge === 'object' ? s.softEdge : { enabled: false, autoDetect: true, width: { top: 50, bottom: 50, left: 50, right: 50 }, curve: 'smooth', strength: 1.0, gamma: 1.0, gammaR: 1.0, gammaG: 1.0, gammaB: 1.0 },
+                            mirror: s.mirror || 'none',
+                            ...this.getShapeData(s),
+                            transformCorners: s.transformCorners || null
                         };
                         
                         // Add masks if any
@@ -2417,8 +2904,13 @@
                                 type: m.type,
                                 shape: m.shape,
                                 color: m.color,
+                                visible: m.visible !== false,
+                                rotation: m.rotation || 0,
+                                geometry: m.geometry || null,
                                 ...this.getShapeData(m)
                             }));
+                        } else {
+                            sliceData.masks = [];
                         }
                         
                         return sliceData;
@@ -2434,6 +2926,12 @@
                 a.click();
                 URL.revokeObjectURL(url);
                 this.showToast('Exported!');
+            },
+
+            saveAndApply() {
+                // For now, use the export function
+                this.exportJSON();
+                this.showToast('Saved & Applied!', 'success');
             },
 
             getShapeData(shape) {
@@ -2534,6 +3032,109 @@
                 toast.textContent = message;
                 document.body.appendChild(toast);
                 setTimeout(() => toast.remove(), 3000);
+            },
+
+            onContextMenu(e) {
+                e.preventDefault();
+                
+                const pos = this.getMousePos(e);
+                const slice = this.getSliceAt(pos);
+                
+                // Only show context menu for slices (not masks)
+                if (!slice || slice.type !== 'slice') {
+                    this.closeContextMenu();
+                    return;
+                }
+                
+                this.contextMenuTarget = slice;
+                this.selectedSlice = slice;
+                
+                const menu = document.getElementById('contextMenu');
+                menu.style.left = e.clientX + 'px';
+                menu.style.top = e.clientY + 'px';
+                menu.classList.add('active');
+                
+                this.render();
+            },
+
+            closeContextMenu() {
+                const menu = document.getElementById('contextMenu');
+                menu.classList.remove('active');
+            },
+
+            contextMenuAction(action) {
+                this.closeContextMenu();
+                
+                if (!this.contextMenuTarget) return;
+                
+                const slice = this.contextMenuTarget;
+                
+                switch(action) {
+                    case 'centerX':
+                        slice.x = (this.canvasWidth - slice.width) / 2;
+                        this.showToast('Slice centered horizontally');
+                        break;
+                        
+                    case 'centerY':
+                        slice.y = (this.canvasHeight - slice.height) / 2;
+                        this.showToast('Slice centered vertically');
+                        break;
+                        
+                    case 'leftHalf':
+                        slice.x = 0;
+                        slice.y = 0;
+                        slice.width = this.canvasWidth / 2;
+                        slice.height = this.canvasHeight;
+                        this.showToast('Slice set to left half');
+                        break;
+                        
+                    case 'rightHalf':
+                        slice.x = this.canvasWidth / 2;
+                        slice.y = 0;
+                        slice.width = this.canvasWidth / 2;
+                        slice.height = this.canvasHeight;
+                        this.showToast('Slice set to right half');
+                        break;
+                        
+                    case 'topHalf':
+                        slice.x = 0;
+                        slice.y = 0;
+                        slice.width = this.canvasWidth;
+                        slice.height = this.canvasHeight / 2;
+                        this.showToast('Slice set to top half');
+                        break;
+                        
+                    case 'bottomHalf':
+                        slice.x = 0;
+                        slice.y = this.canvasHeight / 2;
+                        slice.width = this.canvasWidth;
+                        slice.height = this.canvasHeight / 2;
+                        this.showToast('Slice set to bottom half');
+                        break;
+                        
+                    case 'wholeArea':
+                        slice.x = 0;
+                        slice.y = 0;
+                        slice.width = this.canvasWidth;
+                        slice.height = this.canvasHeight;
+                        this.showToast('Slice set to whole area');
+                        break;
+                        
+                    case 'duplicate':
+                        this.selectedSlice = slice;
+                        this.duplicateSelected();
+                        break;
+                        
+                    case 'delete':
+                        this.deleteSliceById(slice.id);
+                        this.contextMenuTarget = null;
+                        this.selectedSlice = null;
+                        break;
+                }
+                
+                this.saveState();
+                this.updateSliceList();
+                this.render();
             }
         };
 

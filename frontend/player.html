@@ -5,27 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Player - Flux</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    
+    <!-- Resource Hints for faster loading -->
+    <link rel="dns-prefetch" href="/api">
+    <link rel="preconnect" href="/api">
+    
+    <!-- Critical CSS (inline or prioritized) -->
     <link href="libs/bootstrap/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="libs/ion-rangeslider/css/ion.rangeSlider.min.css"/>
     <link href="css/styles.css" rel="stylesheet">
-    <link href="css/triple-slider.css" rel="stylesheet">
-    <link href="css/parameter-grid.css" rel="stylesheet">
     <link href="css/player.css" rel="stylesheet">
-    <link href="css/tab-components.css" rel="stylesheet">
-    <link href="css/thumbnails.css" rel="stylesheet">
-    <link href="css/color-picker.css" rel="stylesheet">
-    <link href="css/sequences.css" rel="stylesheet">
-    <link href="css/bpm-widget.css" rel="stylesheet">
-    <link href="css/circular-slider.css" rel="stylesheet">
+    
+    <!-- Non-critical CSS (deferred) -->
+    <link rel="stylesheet" href="libs/ion-rangeslider/css/ion.rangeSlider.min.css" media="print" onload="this.media='all'">
+    <link href="css/triple-slider.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="css/parameter-grid.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="css/tab-components.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="css/thumbnails.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="css/color-picker.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="css/sequences.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="css/bpm-widget.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="css/circular-slider.css" rel="stylesheet" media="print" onload="this.media='all'">
+    
+    <style>
+        /* Inline critical CSS for preview placeholder */
+        #videoPreviewImg {
+            background: #000;
+        }
+        #videoPreviewImg[src=""] {
+            content: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%23000000" width="800" height="600"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="%23667eea"%3E🎬 Loading Preview...%3C/text%3E%3C/svg%3E');
+        }
+    </style>
 </head>
 <body>
     <!-- Centralized Session State Loader (load first!) -->
-    <script src="js/session-loader.js"></script>
+    <script src="js/session-loader.js" defer></script>
     
-    <script src="js/menu-loader.js"></script>
-    <script src="js/transition-menu-loader.js"></script>
-    <script src="js/modal-loader.js"></script>
-    <script src="js/search-filter-loader.js"></script>
+    <script src="js/menu-loader.js" defer></script>
+    <script src="js/transition-menu-loader.js" defer></script>
+    <script src="js/modal-loader.js" defer></script>
+    <script src="js/search-filter-loader.js" defer></script>
     
     <div class="app-layout">
         <!-- Global Playlist Controls -->
@@ -93,7 +111,12 @@
             <div class="preview-box">
                 <div class="preview-video" id="videoPreview" onclick="openVideoFullscreen()" title="Click to open fullscreen">
                     <canvas id="videoPreviewVideo" style="width: 100%; height: 100%; object-fit: contain; display: none;"></canvas>
-                    <img src="" alt="Video Preview" id="videoPreviewImg" style="width: 100%; height: 100%; object-fit: contain;" decoding="async" loading="eager">
+                    <img src="" alt="Video Preview" id="videoPreviewImg" 
+                         width="800" height="600"
+                         style="width: 100%; height: 100%; object-fit: contain;" 
+                         decoding="async" 
+                         loading="eager"
+                         fetchpriority="high">
                 </div>
                 <div class="player-controls">
                     <button class="btn btn-secondary btn-sm" onclick="previous('video')" title="Previous Video">⏮️</button>

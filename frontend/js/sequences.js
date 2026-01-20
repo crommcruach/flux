@@ -388,8 +388,9 @@ class SequenceManager {
                 }
             }
             
-            // Auto-start the analyzer
-            await this.startAudioAnalyzer();
+            // DON'T auto-start - let user start manually or backend will auto-start on first use
+            // Auto-starting causes crashes when page reloads while audio is already running
+            console.log('💡 Audio analyzer ready (start manually if needed)');
             
         } catch (error) {
             console.error('Error auto-starting audio analyzer:', error);

@@ -6,6 +6,81 @@ import json
 import sys
 import time
 import logging
+import threading
+import traceback
+from datetime import datetime
+
+# Setup crash log file BEFORE anything else
+crash_log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs', 'crash.log')
+os.makedirs(os.path.dirname(crash_log_path), exist_ok=True)
+
+def log_crash(message):
+    """Log crash to file"""
+    try:
+        with open(crash_log_path, 'a', encoding='utf-8') as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"CRASH at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"{'='*80}\n")
+            f.write(message)
+            f.write(f"\n{'='*80}\n\n")
+            f.flush()
+        print(f"🔥 CRASH logged to: {crash_log_path}")
+    except Exception as e:
+        print(f"Failed to write crash log: {e}")
+
+# Global exception handler for threads
+def global_exception_handler(args):
+    """Catch uncaught exceptions in threads"""
+    thread_name = args.thread.name if args.thread else "Unknown"
+    exc_type = args.exc_type.__name__ if args.exc_type else "Unknown"
+    exc_value = str(args.exc_value) if args.exc_value else "Unknown"
+    
+    error_msg = f"""
+Thread: {thread_name}
+Type: {exc_type}
+Message: {exc_value}
+"""
+    
+    if args.exc_traceback:
+        error_msg += "\nTraceback:\n"
+        error_msg += "".join(traceback.format_tb(args.exc_traceback))
+    
+    print(f"\n{'='*80}")
+    print(f"🔥 UNCAUGHT EXCEPTION IN THREAD: {thread_name}")
+    print(f"{'='*80}")
+    print(error_msg)
+    print(f"{'='*80}\n")
+    
+    log_crash(error_msg)
+    logging.critical(f"Thread '{thread_name}' crashed: {exc_type}: {exc_value}")
+
+# Set global thread exception handler
+threading.excepthook = global_exception_handler
+
+# Catch ALL unhandled exceptions (even in main thread)
+def unhandled_exception_handler(exc_type, exc_value, exc_traceback):
+    """Catch exceptions in main thread"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    
+    error_msg = f"""
+Type: {exc_type.__name__}
+Message: {str(exc_value)}
+
+Traceback:
+{"".join(traceback.format_tb(exc_traceback))}
+"""
+    
+    print(f"\n{'='*80}")
+    print(f"🔥 UNHANDLED EXCEPTION IN MAIN THREAD")
+    print(f"{'='*80}")
+    print(error_msg)
+    print(f"{'='*80}\n")
+    
+    log_crash(error_msg)
+
+sys.excepthook = unhandled_exception_handler
 
 # Add project root to Python path for plugins/ access
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -109,12 +184,18 @@ def load_config():
 
 def main():
     """Hauptfunktion der Anwendung mit erweiteter CLI."""
+    # Heartbeat Monitor disabled (not needed for now)
+    # from heartbeat_monitor import HeartbeatMonitor
+    # heartbeat = HeartbeatMonitor()
+    # heartbeat.start()
+    
     # Konfiguration laden (vor Logger, um console_log_level zu erhalten)
     config = load_config()
     
     # Log-Levels aus Config lesen
     console_level_str = config.get('app', {}).get('console_log_level', 'WARNING')
     file_level_str = config.get('app', {}).get('file_log_level', 'WARNING')
+    max_log_files = config.get('app', {}).get('max_log_files', 10)
     
     log_level_map = {
         'DEBUG': logging.DEBUG,
@@ -128,7 +209,7 @@ def main():
     
     # Logging initialisieren mit Levels aus Config
     flux_logger = FluxLogger()
-    flux_logger.setup_logging(log_level=file_level, console_level=console_level)
+    flux_logger.setup_logging(log_level=file_level, console_level=console_level, max_log_files=max_log_files)
     logger.debug("Flux startet...")
     logger.debug("Konfiguration geladen")
     
@@ -434,8 +515,29 @@ def main():
             traceback.print_exc()
     
     dmx_controller.stop()
+    
+    # Heartbeat Monitor disabled
+    # try:
+    #     heartbeat.stop()
+    # except:
+    #     pass
+    
     print("Auf Wiedersehen!")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("\n" + "=" * 80)
+        print("FATAL ERROR - Application crashed during startup")
+        print("=" * 80)
+        import traceback
+        traceback.print_exc()
+        print("=" * 80)
+        print("\nPress Enter to exit...")
+        try:
+            input()
+        except:
+            pass
+        sys.exit(1)

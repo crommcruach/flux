@@ -384,6 +384,11 @@ class SessionStateManager:
         if state["master_playlist"]:
             logger.debug(f"👑 Master playlist saved: {state['master_playlist']}")
         
+        # Video player settings speichern (resolution, autosize)
+        if 'video_player_settings' in self._state:
+            state["video_player_settings"] = self._state['video_player_settings'].copy()
+            logger.debug(f"🎬 Video player settings saved: {state['video_player_settings']}")
+        
         # Save flat sequences by UID
         state["sequences"] = self._save_sequences()
         
@@ -804,6 +809,58 @@ class SessionStateManager:
         except Exception as e:
             logger.error(f"❌ Fehler beim Löschen von session_state.json: {e}")
             return False
+    
+    def save_output_state(self, player_name: str, output_state: dict):
+        """
+        Save output routing state to session
+        
+        Args:
+            player_name: Name of the player ('video' or 'artnet')
+            output_state: Output state dictionary from OutputManager.get_state()
+        """
+        if 'outputs' not in self._state:
+            self._state['outputs'] = {}
+        
+        self._state['outputs'][player_name] = {
+            'outputs': output_state.get('outputs', {}),
+            'slices': output_state.get('slices', {}),
+            'enabled_outputs': output_state.get('enabled_outputs', []),
+            'timestamp': time.time()
+        }
+        
+        # Trigger async save
+        self._pending_save = True
+        self._pending_save_data = self._state.copy()
+        
+        logger.debug(f"Output state saved for {player_name}")
+    
+    def get_output_state(self, player_name: str) -> dict:
+        """
+        Load output routing state from session
+        
+        Args:
+            player_name: Name of the player ('video' or 'artnet')
+            
+        Returns:
+            dict: Output state or empty dict if not found
+        """
+        if 'outputs' not in self._state:
+            return {}
+        return self._state['outputs'].get(player_name, {})
+    
+    def clear_output_state(self, player_name: str):
+        """
+        Clear output state for specific player
+        
+        Args:
+            player_name: Name of the player ('video' or 'artnet')
+        """
+        if 'outputs' in self._state and player_name in self._state['outputs']:
+            del self._state['outputs'][player_name]
+            # Trigger async save
+            self._pending_save = True
+            self._pending_save_data = self._state.copy()
+            logger.debug(f"Output state cleared for {player_name}")
     
     def set_sequence_manager(self, sequence_manager):
         """

@@ -10,7 +10,9 @@
     "default_player": "video",
     "console_log_level": "INFO",
     "file_log_level": "INFO",
-    "_log_level_comment": "Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL"
+    "_log_level_comment": "Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL",
+    "max_log_files": 10,
+    "_max_log_files_comment": "Maximum number of log files to keep (0 = infinite, keep all logs)"
   },
   "artnet": {
     "broadcast": true,
@@ -189,5 +191,10 @@
     "max_per_channel": 255,
     "recording_stop_delay": 0.3,
     "shutdown_delay": 0.5
+  },
+  "output_routing": {
+    "_comment": "Output routing system - all configuration is stored per-session in session_state.json",
+    "_info": "Use the output-settings.html UI or /api/outputs endpoints to configure outputs",
+    "_session_based": "All outputs, slices, and settings are dynamically created and stored in session state, not here"
   }
 }

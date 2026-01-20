@@ -24,7 +24,38 @@ class FluxLogger:
             self.setup_logging()  # Wird mit Defaults initialisiert
             FluxLogger._initialized = True
     
-    def setup_logging(self, log_dir='logs', log_level=logging.INFO, console_level=logging.WARNING):
+    def _cleanup_old_logs(self, log_dir, max_files=10):
+        """
+        Clean up old log files, keeping only the most recent ones.
+        
+        Args:
+            log_dir: Path to log directory
+            max_files: Maximum number of log files to keep (0 = infinite, keep all)
+        """
+        # Skip cleanup if max_files is 0 (infinite)
+        if max_files == 0:
+            return
+        
+        try:
+            # Get all flux log files
+            log_files = sorted(
+                log_dir.glob('flux_*.log*'),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True
+            )
+            
+            # Remove old files beyond max_files limit
+            for old_file in log_files[max_files:]:
+                try:
+                    old_file.unlink()
+                    print(f"Deleted old log file: {old_file.name}")
+                except Exception as e:
+                    print(f"Failed to delete {old_file.name}: {e}")
+        
+        except Exception as e:
+            print(f"Log cleanup failed: {e}")
+    
+    def setup_logging(self, log_dir='logs', log_level=logging.INFO, console_level=logging.WARNING, max_log_files=10):
         """
         Richtet das Logging-System ein.
         
@@ -32,10 +63,14 @@ class FluxLogger:
             log_dir: Verzeichnis für Log-Dateien
             log_level: Logging-Level für Datei (DEBUG, INFO, WARNING, ERROR, CRITICAL)
             console_level: Logging-Level für Konsole (Standard: WARNING)
+            max_log_files: Maximum number of log files to keep (0 = infinite)
         """
         # Log-Verzeichnis erstellen
         log_path = Path(log_dir)
         log_path.mkdir(exist_ok=True)
+        
+        # Cleanup old log files (keep only last N files, or all if max_log_files=0)
+        self._cleanup_old_logs(log_path, max_files=max_log_files)
         
         # Timestamp für Log-Datei
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

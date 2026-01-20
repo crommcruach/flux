@@ -16,6 +16,10 @@
     background: #f8f9fa;
     border: 1px solid #dee2e6;
     transition: transform 0.2s;
+    /* Prevent layout shift */
+    aspect-ratio: 1 / 1;
+    /* Content visibility for better performance */
+    content-visibility: auto;
 }
 
 .file-thumbnail:hover {
@@ -23,8 +27,11 @@
 }
 
 .file-thumbnail.loading {
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-    background-size: 200% 100%;
+    background: 
+        linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%),
+        url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50"%3E%3Crect fill="%23f8f9fa" width="50" height="50"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-size="20" fill="%23adb5bd"%3E\ud83d\udcce%3C/text%3E%3C/svg%3E');
+    background-size: 200% 100%, 50px 50px;
+    background-position: 200% 0, center;
     animation: shimmer 1.5s infinite;
 }
 

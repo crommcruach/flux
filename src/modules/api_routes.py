@@ -373,13 +373,165 @@ def register_info_routes(app, player_manager, api=None, config=None):
             }
         })
     
+    def apply_mask_to_frame(frame, mask_config):
+        """
+        Apply a mask to frame (make masked region black)
+        
+        Args:
+            frame: Input frame
+            mask_config: Mask definition with shape, position, etc.
+        
+        Returns:
+            np.ndarray: Frame with mask applied
+        """
+        try:
+            import cv2
+            import numpy as np
+            
+            h, w = frame.shape[:2]
+            mask_shape = mask_config.get('shape', 'circle')
+            
+            # Create mask image (white = keep, black = remove)
+            mask = np.ones((h, w), dtype=np.uint8) * 255
+            
+            if mask_shape == 'rectangle':
+                x = int(mask_config.get('x', 0))
+                y = int(mask_config.get('y', 0))
+                mask_width = int(mask_config.get('width', w))
+                mask_height = int(mask_config.get('height', h))
+                cv2.rectangle(mask, (x, y), (x + mask_width, y + mask_height), 0, -1)
+                
+            elif mask_shape == 'circle':
+                centerX = int(mask_config.get('centerX', w // 2))
+                centerY = int(mask_config.get('centerY', h // 2))
+                radius = int(mask_config.get('radius', min(w, h) // 4))
+                cv2.circle(mask, (centerX, centerY), radius, 0, -1)
+                
+            elif mask_shape in ['polygon', 'triangle', 'freehand']:
+                points = mask_config.get('points', [])
+                if points and len(points) >= 3:
+                    pts = np.array([[int(p.get('x', 0)), int(p.get('y', 0))] for p in points], dtype=np.int32)
+                    cv2.fillPoly(mask, [pts], 0)
+            
+            # Apply mask
+            frame_masked = cv2.bitwise_and(frame, frame, mask=mask)
+            return frame_masked
+            
+        except Exception as e:
+            logger.error(f"Failed to apply mask: {e}")
+            return frame
+    
+    def apply_inline_slice(frame, slice_config):
+        """
+        Helper function to apply inline slice definition to frame
+        
+        Args:
+            frame: Source frame (numpy array, BGR)
+            slice_config: Dict with slice parameters
+            
+        Returns:
+            np.ndarray: Sliced frame
+        """
+        try:
+            import cv2
+            import numpy as np
+            
+            shape = slice_config.get('shape', 'rectangle')
+            x = int(slice_config.get('x', 0))
+            y = int(slice_config.get('y', 0))
+            width = int(slice_config.get('width', frame.shape[1]))
+            height = int(slice_config.get('height', frame.shape[0]))
+            rotation = slice_config.get('rotation', 0)
+            transform_corners = slice_config.get('transformCorners', None)
+            
+            h, w = frame.shape[:2]
+            
+            # Check if perspective transform is needed
+            if transform_corners and len(transform_corners) == 4:
+                logger.debug(f"Applying perspective transform with corners: {transform_corners}")
+                try:
+                    # Convert transform corners to numpy array
+                    src_points = np.float32([
+                        [transform_corners[0]['x'], transform_corners[0]['y']],  # top-left
+                        [transform_corners[1]['x'], transform_corners[1]['y']],  # top-right
+                        [transform_corners[2]['x'], transform_corners[2]['y']],  # bottom-right
+                        [transform_corners[3]['x'], transform_corners[3]['y']]   # bottom-left
+                    ])
+                    
+                    # Define destination rectangle (output size)
+                    dst_points = np.float32([
+                        [0, 0],              # top-left
+                        [width, 0],          # top-right
+                        [width, height],     # bottom-right
+                        [0, height]          # bottom-left
+                    ])
+                    
+                    # Calculate perspective transform matrix
+                    matrix = cv2.getPerspectiveTransform(src_points, dst_points)
+                    
+                    # Apply perspective warp
+                    sliced = cv2.warpPerspective(frame, matrix, (width, height))
+                    logger.debug(f"Perspective transform applied successfully")
+                    
+                    return sliced
+                except Exception as e:
+                    logger.error(f"Failed to apply perspective transform: {e}")
+                    # Fall through to normal slice extraction
+            
+            # Normal rectangular extraction
+            # Clamp coordinates to frame bounds
+            x1 = max(0, min(x, w))
+            y1 = max(0, min(y, h))
+            x2 = max(0, min(x + width, w))
+            y2 = max(0, min(y + height, h))
+            
+            # Extract region
+            sliced = frame[y1:y2, x1:x2].copy()
+            
+            # Resize to target dimensions if needed
+            if sliced.shape[1] != width or sliced.shape[0] != height:
+                sliced = cv2.resize(sliced, (width, height))
+            
+            # Apply rotation if specified
+            if rotation != 0:
+                center = (width // 2, height // 2)
+                matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+                sliced = cv2.warpAffine(sliced, matrix, (width, height))
+            
+            # Apply masks if present
+            masks = slice_config.get('masks', [])
+            if masks and len(masks) > 0:
+                logger.debug(f"Applying {len(masks)} mask(s) to slice")
+                for mask in masks:
+                    if mask.get('visible', True):
+                        sliced = apply_mask_to_frame(sliced, mask)
+            
+            return sliced
+            
+        except Exception as e:
+            # Return original frame on error
+            return frame
+    
     @app.route('/api/preview/stream')
     def preview_stream():
-        """MJPEG Video-Stream des aktuellen Frames."""
-        from flask import Response
+        """MJPEG Video-Stream des aktuellen Frames mit optionalem Slice-Parameter."""
+        from flask import Response, request
         import cv2
         import numpy as np
         import time
+        import json
+        
+        # Get optional slice parameter from query string
+        slice_param = request.args.get('slice', None)
+        slice_config = None
+        
+        if slice_param:
+            try:
+                # Try to parse as JSON (inline slice definition)
+                slice_config = json.loads(slice_param)
+            except:
+                # If not JSON, treat as slice ID (string)
+                slice_config = slice_param
         
         # Load config settings for video preview
         cfg = config if config else {}
@@ -400,10 +552,20 @@ def register_info_routes(app, player_manager, api=None, config=None):
                     frame_count += 1
                     # Hole aktuellen Player dynamisch
                     player = player_manager.player
+                    
+                    # Check if player exists and is initialized
+                    if player is None:
+                        frame = np.zeros((180, 320, 3), dtype=np.uint8)
                     # Hole aktuelles Video-Frame (komplettes Bild)
-                    if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
-                        # Verwende komplettes Video-Frame (bereits in BGR) - KEIN COPY!
-                        frame = player.last_video_frame
+                    elif hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
+                        # Verwende komplettes Video-Frame (bereits in BGR) - MAKE A COPY to avoid race conditions
+                        try:
+                            frame = player.last_video_frame.copy()
+                        except:
+                            # If copy fails, create black frame
+                            canvas_width = getattr(player, 'canvas_width', 320)
+                            canvas_height = getattr(player, 'canvas_height', 180)
+                            frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
                     elif not hasattr(player, 'last_frame') or player.last_frame is None:
                         # Schwarzes Bild wenn kein Frame vorhanden
                         canvas_width = getattr(player, 'canvas_width', 320)
@@ -431,6 +593,16 @@ def register_info_routes(app, player_manager, api=None, config=None):
                             
                             # Setze alle Pixel auf einmal (BGR Format für OpenCV)
                             frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
+                    
+                    # Apply slice if configured
+                    if slice_config is not None:
+                        if isinstance(slice_config, dict):
+                            # Inline slice definition - apply directly
+                            frame = apply_inline_slice(frame, slice_config)
+                        elif player and hasattr(player, 'output_manager') and player.output_manager:
+                            # Slice ID - use output manager's slice manager
+                            if hasattr(player.output_manager, 'slice_manager'):
+                                frame = player.output_manager.slice_manager.get_slice(slice_config, frame)
                     
                     # Skaliere auf Preview-Größe (wenn konfiguriert)
                     if max_width > 0 and frame.shape[1] > max_width:
@@ -633,8 +805,11 @@ def register_info_routes(app, player_manager, api=None, config=None):
                     time.sleep(frame_delay)
                 
                 except Exception as e:
-                    # Bei Fehler: Schwarzes Bild
-                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                    # Bei Fehler: Schwarzes Bild mit aktueller Player-Auflösung
+                    player = player_manager.player
+                    error_width = getattr(player, 'canvas_width', 320)
+                    error_height = getattr(player, 'canvas_height', 180)
+                    frame = np.zeros((error_height, error_width, 3), dtype=np.uint8)
                     ret, buffer = cv2.imencode('.jpg', frame)
                     if ret:
                         frame_bytes = buffer.tobytes()

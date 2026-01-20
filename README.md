@@ -66,6 +66,9 @@ venv\Scripts\activate  # Windows
 source venv/bin/activate  # Linux/Mac
 ```
 
+**Hinweis:** Ab Version 2.4 benötigt Flux **keine MSVC Build Tools** mehr für Windows!  
+Audio-Playback nutzt jetzt PyAV + sounddevice (bereits in dependencies enthalten).
+
 ## Schnellstart
 
 ```bash

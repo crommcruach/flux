@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Output Settings</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link href="libs/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/styles.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/output-settings.css">
+</head>
+<body>
+    <script src="js/menu-loader.js"></script>
+    <script src="js/modal-loader.js"></script>
+    <script src="js/toast-loader.js"></script>
+    
+    <div class="container">
+        <!-- Left Panel -->
+        <div class="left-panel" id="leftPanel">
+            <div class="panel-toggle" onclick="app.togglePanel('left')" title="Toggle Panel">◀</div>
+            <div class="panel-section" id="canvasSection">
+                <h2>⚙️ Canvas</h2>
+                <div class="panel-section-content">
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label>Width</label>
+                            <input type="number" id="canvasWidth" value="1920" readonly title="Set resolution via player context menu (right-click video preview)">
+                        </div>
+                        <div class="input-group">
+                            <label>Height</label>
+                            <input type="number" id="canvasHeight" value="1080" readonly title="Set resolution via player context menu (right-click video preview)">
+                        </div>
+                    </div>
+                    <small style="color: #888; font-size: 11px; padding: 4px 8px; display: block;">💡 Change resolution via player context menu</small>
+                </div>
+            </div>
+
+            <div class="panel-section" id="toolsSection">
+                <h2>🛠️ Tools</h2>
+                <div class="panel-section-content">
+                <div class="type-toggle">
+                    <div class="type-btn slice active" onclick="app.setType('slice')" id="typeSliceBtn">
+                        ▭ Slice
+                    </div>
+                    <div class="type-btn mask" onclick="app.setType('mask')" id="typeMaskBtn">
+                        ◐ Mask
+                    </div>
+                </div>
+                <div id="maskWarning" style="display: none; font-size: 11px; color: #ff9800; padding: 8px; background: #3a2a1a; border-radius: 4px; margin: 10px 0;">
+                    ⚠️ Select a slice first to add masks
+                </div>
+
+                <div id="shapeTypeSection" style="display: none;">
+                    <div style="font-size: 11px; color: #999; margin: 10px 0;">Shape Type:</div>
+                    <div class="shape-tools">
+                        <button class="shape-btn active" onclick="app.setShape('rectangle')" id="shapeRectangleBtn" title="Rectangle">▭</button>
+                        <button class="shape-btn" onclick="app.setShape('circle')" id="shapeCircleBtn" title="Circle">○</button>
+                        <button class="shape-btn" onclick="app.setShape('triangle')" id="shapeTriangleBtn" title="Triangle">△</button>
+                        <button class="shape-btn" onclick="app.setShape('polygon')" id="shapePolygonBtn" title="Polygon">⬡</button>
+                        <button class="shape-btn" onclick="app.setShape('freehand')" id="shapeFreehandBtn" title="Freehand">✏️</button>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 8px; flex-direction: column;">
+                    <button class="primary" onclick="app.startDrawing()" id="addShapeBtn">➕ Add Rectangle</button>
+                    <button onclick="app.finishDrawing()" id="finishDrawBtn" style="display: none; background: #4CAF50;">✓ Finish</button>
+                    <button onclick="app.cancelDrawing()" id="cancelDrawBtn" style="display: none;">✕ Cancel</button>
+                    <button onclick="app.deleteSelected()">🗑️ Delete</button>
+                    <button onclick="app.showPreview()" id="previewBtn">🔍 Preview Slice</button>
+                    <button onclick="app.toggleSnap()" id="snapBtn">📐 Snap: OFF</button>
+                    <button onclick="app.toggleTransformMode()" id="transformBtn">🔧 Transform</button>
+                    <button onclick="app.deleteTransform()" id="deleteTransformBtn">🔄 Delete Transform</button>
+                </div>
+                </div>
+            </div>
+
+            <div class="panel-section" id="outputsSection">
+                <h2>🖥️ Outputs</h2>
+                <div class="panel-section-content">
+                <div style="font-size: 11px; color: #999; margin-bottom: 10px;">Multi-select:</div>
+                <div id="screenButtonsContainer" style="display: flex; gap: 6px; flex-direction: column;">
+                    <!-- Checkboxes generated -->
+                </div>
+                <button class="primary" onclick="app.addOutput()" style="margin-top: 10px; width: 100%;">➕ Add Output</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Panel -->
+        <div class="canvas-panel">
+            <div class="canvas-header">
+                <div class="canvas-info">
+                    <span>Canvas: <strong id="canvasDimensions">1920x1080</strong></span>
+                    <span>Mouse: <strong id="mousePosition">--, --</strong></span>
+                    <span>Selected: <strong id="selectedSlice">None</strong></span>
+                </div>
+            </div>
+
+            <div class="canvas-wrapper" id="canvasWrapper">
+                <div id="canvasContainer">
+                    <img id="videoStream" style="position: absolute; width: 100%; height: 100%; object-fit: contain;" src="/api/preview/stream" alt="Video Stream">
+                    <canvas id="videoCanvas" style="display: none;"></canvas>
+                    <canvas id="sliceCanvas"></canvas>
+                </div>
+                <div class="zoom-controls">
+                    <button onclick="window.app.zoomOut()" title="Zoom Out">−</button>
+                    <div class="zoom-level" id="zoomLevel">100%</div>
+                    <button onclick="window.app.zoomIn()" title="Zoom In">+</button>
+                    <button onclick="window.app.resetZoom()" title="Reset Zoom" style="font-size: 12px;">1:1</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div class="right-panel" id="rightPanel">
+            <div class="panel-toggle" onclick="app.togglePanel('right')" title="Toggle Panel" style="left: 10px; right: auto;">▶</div>
+            <div class="slices-list">
+                <h2>📦 Shapes (<span id="sliceCount">0</span>)</h2>
+                <div id="slicesList"></div>
+            </div>
+
+            <div class="panel-section" id="backendSyncSection">
+                <h2>🔄 Backend Sync</h2>
+                <div class="panel-section-content">
+                    <div style="display: flex; gap: 8px; flex-direction: column;">
+                        <button class="primary" onclick="loadMonitors()" style="background: #2196F3;">🖥️ Load Monitors</button>
+                        <button class="primary" onclick="saveSlicesToBackend()" style="background: #4CAF50;">💾 Save to Backend</button>
+                        <button onclick="loadSlicesFromBackend()">📥 Load from Backend</button>
+                        <div id="backendStatus" style="font-size: 11px; color: #888; margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px;">
+                            <strong>Backend:</strong> <span id="backendStatusText">Not connected</span><br>
+                            <span id="monitorCount" style="display: none;">Monitors: <strong id="monitorCountNum">0</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section" id="exportSection">
+                <h2>💾 Export / Import</h2>
+                <div class="panel-section-content">
+                    <div style="display: flex; gap: 8px; flex-direction: column;">
+                        <button class="primary" onclick="app.saveAndApply()" style="background: #4CAF50; font-weight: bold;">✅ Save & Apply</button>
+                        <button class="primary" onclick="app.exportJSON()">📥 Export JSON</button>
+                        <button onclick="document.getElementById('importFile').click()">📤 Import JSON</button>
+                        <input type="file" id="importFile" accept=".json" onchange="app.importJSON(event)" style="display: none;">
+                        <button onclick="app.clearAll()" class="danger">🗑️ Clear All</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="previewModal" class="preview-modal">
+        <div class="preview-content">
+            <div class="preview-header">
+                <h3>Slice Preview</h3>
+                <button class="preview-close" onclick="app.closePreview()">✕ Close</button>
+            </div>
+            <div class="preview-canvas-wrapper">
+                <canvas id="previewCanvas"></canvas>
+            </div>
+            <div class="preview-info" id="previewInfo"></div>
+        </div>
+    </div>
+
+    <div id="contextMenu" class="context-menu">
+        <div class="context-menu-item" onclick="app.contextMenuAction('centerX', event)">📍 Center X</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('centerY', event)">📍 Center Y</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('alignCenter', event)">⊙ Align Center</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('alignLeft', event)">⇤ Align Left</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('alignRight', event)">⇥ Align Right</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('alignTop', event)">⇧ Align Top</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('alignBottom', event)">⇩ Align Bottom</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('leftHalf', event)">◧ Left Half</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('rightHalf', event)">◨ Right Half</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('topHalf', event)">⬒ Top Half</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('bottomHalf', event)">⬓ Bottom Half</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('wholeArea', event)">⬜ Whole Area</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('preview', event)">🔍 Preview Slice</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('duplicate', event)">📋 Duplicate</div>
+        <div class="context-menu-item" onclick="app.contextMenuAction('delete', event)">🗑️ Delete</div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="libs/bootstrap/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Main Script -->
+    <script src="js/output-settings.js"></script>
+</body>
+</html>

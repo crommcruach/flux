@@ -1,0 +1,1246 @@
+
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DMX Patch – Strict Drag, Multi-row Ghost, Gruppen & QR Export (Sidebar edit fix)</title>
+  <style>
+    :root{
+      --bg:#0f1216;
+      --panel:#161a22;
+      --panel-2:#1d2330;
+      --text:#e9eef7;
+      --muted:#8ea0b5;
+      --danger:#ff6b6b;
+      --accent:#4cc2ff;
+
+      --cellW:28px;
+      --cellH:28px;
+      --gap:2px;
+      --cols:32; /* dynamisch */
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; background:var(--bg); color:var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    }
+    header{
+      display:flex; align-items:center; gap:12px;
+      padding:12px 16px; background:var(--panel); border-bottom:1px solid #263047; position:sticky; top:0; z-index:10;
+    }
+    header h1{margin:0; font-size:16px; color:var(--muted)}
+    .spacer{flex:1}
+    select,button,input[type="text"]{
+      background:var(--panel-2); color:var(--text); border:1px solid #2b354a; border-radius:6px; padding:6px 10px; font-size:14px
+    }
+    button.toggle{border-color:var(--accent)}
+    button.danger{border-color:var(--danger); color:#ffdede}
+    button.small{padding:2px 6px; font-size:12px; line-height:1; border-radius:6px}
+
+    main{display:grid; grid-template-columns:320px 1fr; min-height:calc(100vh - 56px)}
+    aside{background:var(--panel); border-right:1px solid #263047; padding:12px; display:flex; flex-direction:column; gap:12px}
+    .palette h2{font-size:14px; color:var(--muted); margin:6px 0 10px}
+    .device{
+      display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px;
+      padding:10px; margin-bottom:10px; border:1px solid #2b354a; border-radius:8px; background:var(--panel-2); cursor:grab
+    }
+    .swatch{width:18px; height:18px; border-radius:4px; border:1px solid #0003}
+    .device .meta{font-size:12px; color:var(--muted)}
+    .multiplyBtn{cursor:pointer}
+    .work{padding:12px}
+    .ribbon{display:flex; align-items:center; gap:12px; margin-bottom:8px; color:var(--muted); font-size:12px}
+    .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:#25314a; color:#bcd2ef}
+    .hint{color:var(--muted); font-size:12px}
+
+    /* Matrix-Container */
+    .matrix-shell{border:1px solid #2b354a; border-radius:10px; overflow:hidden; background:#0b0e13}
+    .matrix-scroll{max-height:420px; overflow:auto; position:relative}
+
+    /* Zellen-Grid */
+    .grid{
+      position:relative;
+      display:grid;
+      grid-template-columns: repeat(var(--cols), var(--cellW));
+      grid-auto-rows: var(--cellH);
+      gap: var(--gap);
+      padding: var(--gap);
+      background:#0b0e13;
+    }
+    .cell{
+      width:var(--cellW); height:var(--cellH);
+      background:#12161e; border:1px solid #1d2330; border-radius:4px;
+      display:flex; align-items:center; justify-content:center;
+      color:#b6c6db; font-size:10px; user-select:none;
+    }
+    .cell.mark{background:#162135; color:#d7e3f2; font-weight:600}
+
+    /* Overlay-Ebene für Geräte */
+    .overlay{
+      position:absolute; inset:0; pointer-events:none;
+    }
+    .fixtureSegment{
+      position:absolute; height:var(--cellH);
+      background:#7ae58f; border:2px solid transparent; border-radius:6px; box-shadow:0 3px 8px #0008;
+      display:flex; align-items:center; gap:6px; padding:0 10px 0 16px; color:#0b0e13; font-weight:700;
+      pointer-events:all; cursor:grab;
+      overflow:hidden; white-space:nowrap;
+      transition: border-color 0.15s ease, border-style 0.15s ease;
+      user-select: none; -webkit-user-select: none; -ms-user-select: none; -webkit-user-drag: none;
+    }
+    .fixtureSegment.mh{background:#6b7bff}
+    .fixtureSegment.rgb{background:#ff6b6b}
+    .fixtureSegment.selected{box-shadow:0 0 0 2px #ffd166 inset, 0 3px 8px #000a}
+
+    /* Tiny start number (top-left) */
+    .startTiny{
+      position:absolute; top:2px; left:4px;
+      font-size:10px; font-weight:800; line-height:1;
+      color:#0b0e13; background:#ffffffb3; padding:0 4px; border-radius:4px;
+      pointer-events:none;
+    }
+
+    /* Drag preview ghost (multi-row) */
+    .dragGhost {
+      position: absolute;
+      height: var(--cellH);
+      background: repeating-linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.20),
+        rgba(255, 255, 255, 0.20) 8px,
+        rgba(255, 255, 255, 0.05) 8px,
+        rgba(255, 255, 255, 0.05) 16px
+      );
+      border: 2px dashed #fff8;
+      border-radius: 6px;
+      pointer-events: none;
+      box-shadow: 0 0 0 2px #0006 inset;
+      z-index: 3;
+    }
+    .dragGhost.conflict {
+      background: repeating-linear-gradient(
+        45deg,
+        rgba(255, 0, 0, 0.25),
+        rgba(255, 0, 0, 0.25) 8px,
+        rgba(255, 0, 0, 0.08) 8px,
+        rgba(255, 0, 0, 0.08) 16px
+      );
+      border-color: #ffaaaa;
+    }
+
+    /* Sidebar: Details (device options) */
+    .detailsPanel{
+      background:var(--panel-2);
+      border:1px solid #2b354a; border-radius:8px; padding:10px; color:var(--text);
+    }
+    .detailsPanel h3{margin:0 0 8px 0; font-size:14px; color:#cfe0fb}
+    .formRow{display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px}
+    .formRow label{display:flex; align-items:center; gap:6px; font-size:13px}
+    .formRow input[type="number"]{width:100%; background:#0f141e; color:#fff; border:1px solid #2b354a; border-radius:6px; padding:6px 8px}
+    .formRow input[type="checkbox"]{transform: translateY(1px)}
+    .groupRow{display:grid; grid-template-columns: 1fr auto; gap:8px; margin-bottom:8px}
+    .groupAddRow{display:grid; grid-template-columns: 1fr auto; gap:8px}
+    .detailsHint{font-size:12px; color:#9fb1c9}
+
+    /* Sidebar: Separate List Panel */
+    .listPanel{
+      background:var(--panel-2);
+      border:1px solid #2b354a; border-radius:8px; padding:10px; color:var(--text);
+    }
+    .listPanel h3{margin:0 0 8px 0; font-size:14px; color:#cfe0fb}
+    .collapsibleHeader{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:8px; margin-top:4px; margin-bottom:6px;
+    }
+    .collapsibleHeader button{
+      width:100%; text-align:left; display:flex; align-items:center; gap:8px;
+    }
+    .collapsibleBody{
+      border:1px solid #2b354a; border-radius:8px; background:#151b27;
+      padding:8px; margin-bottom:6px;
+    }
+    .miniHeader, .miniRow{
+      display:grid; grid-template-columns: 96px 1fr; gap:8px; align-items:center;
+      padding:6px 8px; border-radius:6px;
+    }
+    .miniHeader{
+      color:#9fb1c9; font-size:12px; background:#111724; border:1px solid #202a3a; margin-bottom:6px;
+    }
+    .miniRow{
+      background:#0f141e; border:1px solid #1f2a3c; font-size:14px;
+    }
+    .miniRow + .miniRow{ margin-top:6px; }
+    .miniStart{ font-variant-numeric: tabular-nums; color:#cfe0fb; font-weight:700; }
+    .miniName{ color:#e9eef7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .miniNote{ font-size:12px; color:#9fb1c9; margin-top:6px; }
+
+    /* Sidebar List: Name-Input */
+    .sideListNameInput {
+      width: 100%;
+      background: #0f141e;
+      color: #e9eef7;
+      border: 1px solid #2b354a;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 14px;
+    }
+
+    /* Smartphone enhancements */
+    @media (max-width: 480px){
+      .miniHeader, .miniRow{ grid-template-columns: 1fr; }
+      .miniStart{ font-size:16px; }
+      .miniName{ font-size:16px; white-space:normal; }
+      .collapsibleHeader button{ padding:10px; font-size:16px; }
+      .collapsibleBody{ padding:10px; }
+      .sideListNameInput{ font-size:16px; padding:10px; }
+    }
+
+    /* Tabelle (Listenansicht) */
+    table{width:100%; border-collapse:collapse; background:var(--panel-2); border:1px solid #2b354a; border-radius:10px; overflow:hidden; margin-top:10px}
+    thead th{text-align:left; font-size:12px; color:#9fb1c9; padding:10px; background:#12161e; border-bottom:1px solid #2b354a; position:sticky; top:0}
+    tbody td{padding:10px; border-top:1px solid #223049; font-size:14px; vertical-align:middle}
+    tbody tr:hover{background:#182033}
+    .listControls{display:flex; align-items:center; gap:8px; margin-bottom:8px}
+    .empty{color:#9fb1c9; font-size:14px; padding:18px}
+
+    /* QR Modal */
+    #qrModal{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:#0008; z-index:9999}
+  </style>
+  <!-- QR library via CDN (online). For offline, include local file instead. -->
+  https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js</script>
+  <!-- Offline alternative:
+  ./lib/qrcode.min.js</script>
+  -->
+</head>
+<body>
+  <header>
+    <h1>DMX Patch</h1>
+    <div class="spacer"></div>
+    <label for="universe">Universum:</label>
+    <select id="universe"></select>
+    <button id="toggleView" class="toggle">Matrix ↔︎ Liste</button>
+    <button id="exportQR">Export → QR</button>
+    <button id="resetUniverse" class="danger">Universum leeren</button>
+  </header>
+
+  <main>
+    <aside>
+      <div class="palette">
+        <h2>Geräte-Palette (Drag & Drop)</h2>
+
+        <!-- RGB item -->
+        <div class="device" draggable="true" data-type="rgb3" aria-label="RGB (3ch)">
+          <div class="swatch" style="background:#ff6b6b"></div>
+          <div>
+            <div><strong>RGB (3ch)</strong></div>
+            <div class="meta">Typ: rgb3 • 3 Kanäle</div>
+          </div>
+          <button class="multiplyBtn small" data-type="rgb3" title="Am Ende hinzufügen (Duplizieren)">×</button>
+        </div>
+
+        <!-- Moving Head item -->
+        <div class="device" draggable="true" data-type="mh8" aria-label="Moving Head (8ch)">
+          <div class="swatch" style="background:#6b7bff"></div>
+          <div>
+            <div><strong>Moving Head (8ch)</strong></div>
+            <div class="meta">Typ: mh8 • 8 Kanäle</div>
+          </div>
+          <button class="multiplyBtn small" data-type="mh8" title="Am Ende hinzufügen (Duplizieren)">×</button>
+        </div>
+
+        <p class="hint">Drag & Drop in die Matrix. Klick auf „×“ dupliziert am letzten freien Platz.</p>
+      </div>
+
+      <!-- Device Options (Parameters, Group, Delete) -->
+      <div class="detailsPanel" id="detailsPanel">
+        <h3>Geräte-Optionen</h3>
+        <div id="detailsContent">
+          <p class="detailsHint">Wähle in der Matrix ein Gerät aus, um dessen Optionen zu bearbeiten.</p>
+        </div>
+      </div>
+
+      <!-- Separate collapsible list section under device options -->
+      <div class="listPanel" id="listPanel">
+        <h3>Patch-Liste</h3>
+        <div id="sideListContainer"><!-- populated dynamically --></div>
+      </div>
+    </aside>
+
+    <section class="work">
+      <div class="ribbon">
+        <span class="badge" id="uMeta">Universum #1 • 0 Geräte</span>
+        <span class="hint">Strict Drag (kein Auto-Snap) · Multi-row Ghost · Gruppen & QR Export</span>
+      </div>
+
+      <!-- MATRIX VIEW -->
+      <div id="matrixView" class="matrix-shell">
+        <div class="matrix-scroll" id="matrixScroll">
+          <div class="grid" id="grid"></div>
+          <div class="overlay" id="overlay"></div>
+        </div>
+      </div>
+
+      <!-- LIST VIEW -->
+      <div id="listView" style="display:none">
+        <!-- Gruppenverwaltung oberhalb der Tabelle -->
+        <div class="listControls">
+          <label>Neue Gruppe:
+            <input type="text" id="lv_group_new" placeholder="z. B. Front MH" />
+          </label>
+          <button id="lv_group_add">Hinzufügen</button>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Typ</th>
+              <th>Kanäle</th>
+              <th>Start</th>
+              <th>Ende</th>
+              <th>Pan inv</th>
+              <th>Tilt inv</th>
+              <th>Pan/Tilt inv</th>
+              <th>Pan min</th>
+              <th>Pan max</th>
+              <th>Tilt min</th>
+              <th>Tilt max</th>
+              <th>Dimmer max</th>
+              <th>Gruppe</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody id="listBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- QR Modal -->
+    <div id="qrModal">
+      <div style="background:#161a22;border:1px solid #2b354a;border-radius:12px;padding:16px;max-width:92vw;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <strong style="color:#e9eef7">Patch QR</strong>
+          <span style="color:#9fb1c9;font-size:12px">Mit Smartphone-Kamera scannen</span>
+          <div style="flex:1"></div>
+          <button id="qrClose" style="background:#0f141e;color:#e9eef7;border:1px solid #2b354a;border-radius:8px;padding:6px 10px;">Schließen</button>
+        </div>
+        <canvas id="qrCanvas" width="512" height="512" style="width: min(80vw, 320px); height: auto; display:block; margin:auto"></canvas>
+        <div id="qrInfo" style="color:#9fb1c9;font-size:12px;margin-top:8px;text-align:center"></div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:8px;">
+          <button id="qrModeViewer" style="background:#0f141e;color:#e9eef7;border:1px solid #2b354a;border-radius:8px;padding:6px 10px;">Rich viewer</button>
+          <button id="qrModePlain" style="background:#0f141e;color:#e9eef7;border:1px solid #2b354a;border-radius:8px;padding:6px 10px;">Plain CSV</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    /************* Datenmodell *************/
+    const DMX_MAX = 512;
+    const catalog = {
+      rgb3: { label: 'RGB (3ch)', channels: 3, colorClass: 'rgb' },
+      mh8:  { label: 'Moving Head (8ch)', channels: 8, colorClass: 'mh' }
+    };
+    const universes = {};
+    const groups = {}; // pro Universum: Array<String>
+    const MAX_UNIVERSE = 8;
+    let currentUniverse = 1;
+    let viewmode = 'matrix';
+    let uidCounter = 1;
+    let selectedUid = null;
+
+    // Sidebar collapsible state
+    let sideListOpen = true;
+
+    /************* DOM *************/
+    const selUniverse = document.getElementById('universe');
+    const toggleViewBtn = document.getElementById('toggleView');
+    const resetUniverseBtn = document.getElementById('resetUniverse');
+    const exportQRBtn = document.getElementById('exportQR');
+    const qrModalEl = document.getElementById('qrModal');
+    const qrCanvasEl = document.getElementById('qrCanvas');
+    const qrCloseBtn = document.getElementById('qrClose');
+    const qrInfoEl = document.getElementById('qrInfo');
+    const qrModeViewerBtn = document.getElementById('qrModeViewer');
+    const qrModePlainBtn = document.getElementById('qrModePlain');
+
+    const gridEl = document.getElementById('grid');
+    const overlayEl = document.getElementById('overlay');
+    const scrollEl = document.getElementById('matrixScroll');
+    const listViewEl = document.getElementById('listView');
+    const matrixViewEl = document.getElementById('matrixView');
+    const listBodyEl = document.getElementById('listBody');
+    const uMetaEl = document.getElementById('uMeta');
+    const detailsPanelEl = document.getElementById('detailsPanel');
+    const detailsContentEl = document.getElementById('detailsContent');
+    const lvGroupNewEl = document.getElementById('lv_group_new');
+    const lvGroupAddBtn = document.getElementById('lv_group_add');
+    const sideListContainerEl = document.getElementById('sideListContainer');
+    const listPanelEl = document.getElementById('listPanel');
+
+    /************* DnD Ghost (multi-row) *************/
+    let dropLock = false;
+    let dragGhostEls = [];
+
+    function clearGhost() {
+      for (const el of dragGhostEls) if (el && el.parentNode) el.parentNode.removeChild(el);
+      dragGhostEls = [];
+    }
+    function addGhostSegment(x, y, width, conflict) {
+      const g = document.createElement('div');
+      g.className = 'dragGhost' + (conflict ? ' conflict' : '');
+      g.style.left = `${x}px`;
+      g.style.top = `${y}px`;
+      g.style.width = `${width}px`;
+      g.style.height = `var(--cellH)`;
+      overlayEl.appendChild(g);
+      dragGhostEls.push(g);
+    }
+    function isRangeFreePreview(start, len, ignoreUid = null) {
+      if (start < 1 || start + len - 1 > DMX_MAX) return false;
+      for (const f of fixtures()) {
+        if (ignoreUid && f.uid === ignoreUid) continue;
+        if (rangesOverlap(start, len, f.start, f.channels)) return false;
+      }
+      return true;
+    }
+    function preventTextSelectionDuringDrag(el) {
+      el.addEventListener('selectstart', (e) => e.preventDefault());
+      el.addEventListener('dragstart', (e) => e.preventDefault());
+    }
+
+    /************* Helpers *************/
+    function fixtures(){ return universes[currentUniverse] || []; }
+    function initUniverses(){ for(let i=1;i<=MAX_UNIVERSE;i++) universes[i] ??= []; }
+    function initGroups(){ for(let i=1;i<=MAX_UNIVERSE;i++) groups[i] ??= ['Ungrouped']; }
+    function getGroups(){ return groups[currentUniverse]; }
+    function addGroup(name){
+      const n = (name || '').trim();
+      if(!n) return;
+      const arr = getGroups();
+      const exists = arr.some(g => g.toLowerCase() === n.toLowerCase());
+      if(!exists){ arr.push(n); renderAll(); }
+    }
+    function populateUniverseSelect(){
+      selUniverse.innerHTML = '';
+      for(let i=1;i<=MAX_UNIVERSE;i++){
+        const o=document.createElement('option');
+        o.value=i; o.textContent = `#${i}`;
+        selUniverse.appendChild(o);
+      }
+      selUniverse.value = String(currentUniverse);
+    }
+    function updateUniverseMeta(){
+      const count = fixtures().length;
+      uMetaEl.textContent = `Universum #${currentUniverse} • ${count} Gerät${count===1?'':'e'}`;
+    }
+
+    function cssNum(varName, fallback){
+      const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(varName));
+      return Number.isFinite(v) ? v : fallback;
+    }
+    function computeCols(){
+      const cw = cssNum('--cellW', 28);
+      const gap = cssNum('--gap', 2);
+      const pad = gap * 2;
+      const w = gridEl.clientWidth || scrollEl.clientWidth || 800;
+      const per = cw + gap;
+      let cols = Math.max(8, Math.floor((w - pad + gap) / per));
+      cols = Math.min(cols, DMX_MAX);
+      document.documentElement.style.setProperty('--cols', cols);
+      return cols;
+    }
+
+    // Überlappungen (linear 1..512)
+    function rangesOverlap(aStart,aLen,bStart,bLen){
+      const aEnd = aStart+aLen-1, bEnd = bStart+bLen-1;
+      return !(aEnd < bStart || bEnd < aStart);
+    }
+    function isFree(start,len, ignoreUid=null){
+      if(start < 1 || (start+len-1) > DMX_MAX) return false;
+      for(const f of fixtures()){
+        if(ignoreUid && f.uid===ignoreUid) continue;
+        if(rangesOverlap(start,len, f.start, f.channels)) return false;
+      }
+      return true;
+    }
+
+    function defaultParams(){
+      return {
+        panInvert:false, tiltInvert:false, panTiltInvert:false,
+        panMin:0, panMax:255, tiltMin:0, tiltMax:255, dimmerMax:255,
+        group:'Ungrouped'
+      };
+    }
+
+    // Add via palette DnD (forward scan + wrap)
+    function addFixture(type, desiredStart=1){
+      const cfg = catalog[type]; if(!cfg) return;
+      const start = snapForwardOrWrap(desiredStart, cfg.channels);
+      if(start==null){ alert('Kein freier Platz im Universum.'); return; }
+      const fx = {
+        uid: `fx_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        name: `${cfg.label} #${uidCounter++}`,
+        type, channels: cfg.channels, start,
+        ...defaultParams()
+      };
+      universes[currentUniverse].push(fx);
+      selectedUid = fx.uid;
+      renderAll();
+    }
+
+    // Multiply: add one at the last highest DMX address (search forward, then wrap)
+    function addFixtureAtEnd(type){
+      const cfg = catalog[type]; if(!cfg) return;
+      const maxEnd = fixtures().reduce((m,f)=>Math.max(m, f.start + f.channels - 1), 0);
+      const desired = Math.min(DMX_MAX - cfg.channels + 1, Math.max(1, maxEnd + 1));
+      const start = snapForwardOrWrap(desired, cfg.channels);
+      if(start==null){ alert('Kein Platz gefunden, Universum ist voll.'); return; }
+      const fx = {
+        uid: `fx_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        name: `${cfg.label} #${uidCounter++}`,
+        type, channels: cfg.channels, start,
+        ...defaultParams()
+      };
+      universes[currentUniverse].push(fx);
+      selectedUid = fx.uid;
+      renderAll();
+    }
+
+    function removeFixture(uid){
+      universes[currentUniverse] = fixtures().filter(f => f.uid !== uid);
+      if(selectedUid === uid) selectedUid = null;
+      renderAll();
+    }
+
+    // STRICT move (nur wenn komplette Range frei)
+    function moveFixtureStrict(uid, desiredStart){
+      const f = fixtures().find(x=>x.uid===uid); if(!f) return;
+      const maxStart = DMX_MAX - f.channels + 1;
+      if (desiredStart < 1) desiredStart = 1;
+      if (desiredStart > maxStart) desiredStart = maxStart;
+      const ok = isRangeFreePreview(desiredStart, f.channels, uid);
+      if (ok) { f.start = desiredStart; renderAll(); }
+    }
+
+    // Forward-only scan (then wrap to 1)
+    function snapForwardOrWrap(desiredStart, len, ignoreUid=null){
+      for(let s=desiredStart; s<=DMX_MAX-len+1; s++) if(isFree(s,len,ignoreUid)) return s;
+      for(let s=1; s<=DMX_MAX-len+1; s++) if(isFree(s,len,ignoreUid)) return s;
+      return null;
+    }
+
+    /************* Group color mapping (dashed outline) *************/
+    const GROUP_COLORS = ['#ff7aa2','#ffd166','#7bdff2','#b28dff','#9be564','#ff9e6d','#4dd4ac','#c8d26a','#f6a6ff','#5eead4'];
+    function groupColor(name){
+      if(!name || name==='Ungrouped') return null;
+      const arr = getGroups();
+      const idx = arr.findIndex(g=>g===name);
+      if (idx < 0) return '#b0b9c8';
+      return GROUP_COLORS[idx % GROUP_COLORS.length];
+    }
+
+    /************* Rendering: Grid + Overlay *************/
+    function renderGridCells(){
+      gridEl.innerHTML = '';
+      for(let a=1; a<=DMX_MAX; a++){
+        const d = document.createElement('div');
+        d.className = 'cell' + (a%16===0 ? ' mark' : '');
+        d.textContent = a;
+        d.dataset.addr = a;
+        gridEl.appendChild(d);
+      }
+    }
+
+    function selectFixture(uid){
+      selectedUid = uid;
+      renderAll();
+    }
+
+    function updateGhostForPointerMultiRow(fixture, point) {
+      const cols = computeCols();
+      const cw = cssNum('--cellW', 28);
+      const ch = cssNum('--cellH', 28);
+      const gap = cssNum('--gap', 2);
+
+      let desiredStart = point.addr;
+      const maxStart = DMX_MAX - fixture.channels + 1;
+      if (desiredStart < 1) desiredStart = 1;
+      if (desiredStart > maxStart) desiredStart = maxStart;
+
+      const conflict = !isRangeFreePreview(desiredStart, fixture.channels, fixture.uid);
+
+      clearGhost();
+
+      const endAddr = desiredStart + fixture.channels - 1;
+      let segStart = desiredStart;
+      while (segStart <= endAddr) {
+        const rowIdx = Math.floor((segStart - 1) / cols);
+        const rowEndAddr = Math.min((rowIdx + 1) * cols, DMX_MAX);
+        const segEnd = Math.min(endAddr, rowEndAddr);
+        const span = segEnd - segStart + 1;
+        const colIdx = (segStart - 1) % cols;
+
+        const x = gap + colIdx * (cw + gap);
+        const y = gap + rowIdx * (ch + gap);
+        const width = span * cw + (span - 1) * gap;
+
+        addGhostSegment(x, y, width, conflict);
+        segStart = segEnd + 1;
+      }
+    }
+
+    function renderOverlay(){
+      overlayEl.innerHTML = '';
+      const cols = computeCols();
+      const cw = cssNum('--cellW', 28);
+      const ch = cssNum('--cellH', 28);
+      const gap = cssNum('--gap', 2);
+
+      for(const f of fixtures()){
+        const cfg = catalog[f.type];
+        const start = f.start;
+        const end = f.start + f.channels - 1;
+
+        let segStart = start;
+        while(segStart <= end){
+          const rowIdx = Math.floor((segStart-1) / cols);
+          const rowEndAddr = Math.min((rowIdx+1)*cols, DMX_MAX);
+          const segEnd = Math.min(end, rowEndAddr);
+          const span = (segEnd - segStart + 1);
+
+          const colIdx = (segStart-1) % cols;
+
+          const x = gap + colIdx * (cw + gap);
+          const y = gap + rowIdx * (ch + gap);
+          const width = span * cw + (span-1) * gap;
+
+          const seg = document.createElement('div');
+          seg.className = 'fixtureSegment ' + cfg.colorClass + (f.uid===selectedUid ? ' selected' : '');
+          seg.style.left = x + 'px';
+          seg.style.top = y + 'px';
+          seg.style.width = width + 'px';
+          seg.style.height = ch + 'px';
+          seg.dataset.uid = f.uid;
+          seg.title = `${f.name} • ${cfg.label} • Start ${start} – Ende ${end}${f.group ? ' • Gruppe: '+f.group : ''}`;
+
+          // Tiny start number (first segment only)
+          if(segStart === start){
+            const badge = document.createElement('span');
+            badge.className = 'startTiny';
+            badge.textContent = start;
+            seg.appendChild(badge);
+
+            const label = document.createElement('span');
+            label.textContent = f.name;
+            seg.appendChild(label);
+          } else {
+            const label = document.createElement('span');
+            label.textContent = '';
+            seg.appendChild(label);
+          }
+
+          // Group dashed outline (colored)
+          const gColor = groupColor(f.group);
+          if (gColor){
+            seg.style.borderStyle = 'dashed';
+            seg.style.borderColor = gColor;
+          }
+
+          preventTextSelectionDuringDrag(seg);
+
+          // Auswahl per Klick
+          seg.addEventListener('click', (ev)=>{
+            ev.stopPropagation();
+            selectFixture(f.uid);
+          });
+
+          // STRICT Drag
+          let dragging=false;
+          seg.addEventListener('pointerdown', (ev)=>{
+            dragging=true;
+            seg.setPointerCapture(ev.pointerId);
+            seg.style.cursor='grabbing';
+            overlayEl.classList.add('dragMode');
+            updateGhostForPointerMultiRow(f, pointToAddr(ev.clientX, ev.clientY));
+          });
+          seg.addEventListener('pointermove', (ev)=>{
+            if(!dragging) return;
+            updateGhostForPointerMultiRow(f, pointToAddr(ev.clientX, ev.clientY));
+          });
+          seg.addEventListener('pointerup', (ev)=>{
+            if(!dragging) return;
+            dragging=false;
+            seg.style.cursor='grab';
+            overlayEl.classList.remove('dragMode');
+            const {addr} = pointToAddr(ev.clientX, ev.clientY);
+            moveFixtureStrict(f.uid, addr);
+            clearGhost();
+          });
+          seg.addEventListener('lostpointercapture', ()=>{
+            dragging=false;
+            overlayEl.classList.remove('dragMode');
+            clearGhost();
+          });
+
+          overlayEl.appendChild(seg);
+
+          segStart = segEnd + 1;
+        }
+      }
+    }
+
+    // Punkt -> Adresse
+    function pointToAddr(clientX, clientY){
+      const rect = gridEl.getBoundingClientRect();
+      const cols = computeCols();
+      const cw = cssNum('--cellW', 28);
+      const ch = cssNum('--cellH', 28);
+      const gap = cssNum('--gap', 2);
+
+      const x = clientX - rect.left + scrollEl.scrollLeft - gap;
+      const y = clientY - rect.top  + scrollEl.scrollTop  - gap;
+
+      const stepX = cw + gap;
+      const stepY = ch + gap;
+
+      let col = Math.floor(x / stepX); if(col < 0) col = 0; if(col >= cols) col = cols-1;
+      let row = Math.floor(y / stepY); if(row < 0) row = 0;
+
+      let addr = row*cols + col + 1;
+      if(addr < 1) addr = 1;
+      if(addr > DMX_MAX) addr = DMX_MAX;
+      return {row, col, addr};
+    }
+
+    /************* Sidebar: Device Options *************/
+    function renderDetailsPanel(){
+      detailsPanelEl.style.display = (viewmode === 'matrix') ? '' : 'none';
+      const f = fixtures().find(x => x.uid === selectedUid);
+      detailsContentEl.innerHTML = ''; // rebuild
+
+      if(!f){
+        const hintP = document.createElement('p');
+        hintP.className = 'detailsHint';
+        hintP.textContent = 'Wähle in der Matrix ein Gerät aus, um dessen Optionen zu bearbeiten.';
+        detailsContentEl.appendChild(hintP);
+        return;
+      }
+
+      const groupOptions = getGroups().map(g => `<option value="${escapeHTML(g)}"${g===f.group?' selected':''}>${escapeHTML(g)}</option>`).join('');
+
+      detailsContentEl.innerHTML = `
+        <div class="groupRow">
+          <label>Gruppe
+            <select id="det_group">${groupOptions}</select>
+          </label>
+          <button id="det_delete" class="danger">Gerät löschen</button>
+        </div>
+        <div class="groupAddRow">
+          <input type="text" id="det_group_new" placeholder="Neue Gruppe hinzufügen" />
+          <button id="det_group_add">Hinzufügen</button>
+        </div>
+
+        <div class="formRow">
+          <label><input type="checkbox" id="det_panInv" ${f.panInvert?'checked':''}> Pan invert</label>
+          <label><input type="checkbox" id="det_tiltInv" ${f.tiltInvert?'checked':''}> Tilt invert</label>
+        </div>
+        <div class="formRow">
+          <label><input type="checkbox" id="det_panTiltInv" ${f.panTiltInvert?'checked':''}> Pan/Tilt invert</label>
+          <span></span>
+        </div>
+        <div class="formRow">
+          <label>Pan min <input type="number" id="det_panMin" min="0" max="255" value="${f.panMin}"></label>
+          <label>Pan max <input type="number" id="det_panMax" min="0" max="255" value="${f.panMax}"></label>
+        </div>
+        <div class="formRow">
+          <label>Tilt min <input type="number" id="det_tiltMin" min="0" max="255" value="${f.tiltMin}"></label>
+          <label>Tilt max <input type="number" id="det_tiltMax" min="0" max="255" value="${f.tiltMax}"></label>
+        </div>
+        <div class="formRow">
+          <label>Dimmer max <input type="number" id="det_dimmerMax" min="0" max="255" value="${f.dimmerMax}"></label>
+          <span></span>
+        </div>
+      `;
+
+      const byId = id => detailsContentEl.querySelector('#'+id);
+      byId('det_group').addEventListener('change', (e)=>{ f.group = e.target.value; renderAll(); });
+      byId('det_group_add').addEventListener('click', ()=>{
+        const val = (byId('det_group_new').value || '').trim();
+        const before = getGroups().length;
+        addGroup(val);
+        if (getGroups().length > before) { f.group = val.trim(); renderAll(); }
+      });
+      byId('det_delete').addEventListener('click', ()=> removeFixture(f.uid));
+
+      byId('det_panInv').addEventListener('change', (e)=>{ f.panInvert = e.target.checked; renderAll(); });
+      byId('det_tiltInv').addEventListener('change', (e)=>{ f.tiltInvert = e.target.checked; renderAll(); });
+      byId('det_panTiltInv').addEventListener('change', (e)=>{ f.panTiltInvert = e.target.checked; renderAll(); });
+      byId('det_panMin').addEventListener('change', (e)=>{ f.panMin = clampNum(e.target.value,0,255,f.panMin); renderAll(); });
+      byId('det_panMax').addEventListener('change', (e)=>{ f.panMax = clampNum(e.target.value,0,255,f.panMax); renderAll(); });
+      byId('det_tiltMin').addEventListener('change', (e)=>{ f.tiltMin = clampNum(e.target.value,0,255,f.tiltMin); renderAll(); });
+      byId('det_tiltMax').addEventListener('change', (e)=>{ f.tiltMax = clampNum(e.target.value,0,255,f.tiltMax); renderAll(); });
+      byId('det_dimmerMax').addEventListener('change', (e)=>{ f.dimmerMax = clampNum(e.target.value,0,255,f.dimmerMax); renderAll(); });
+    }
+
+    function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function clampNum(v,min,max,fallback){
+      let n = parseInt(v); if(Number.isNaN(n)) n = fallback;
+      n = Math.max(min, Math.min(max, n));
+      return n;
+    }
+
+    /************* Sidebar: Separate Collapsible List (editable names, fixed) *************/
+    function pad3(n){ return String(n).padStart(3,'0'); }
+
+    function renderSideList(){
+      listPanelEl.style.display = (viewmode === 'matrix') ? '' : 'none';
+      sideListContainerEl.innerHTML = '';
+
+      const header = document.createElement('div');
+      header.className = 'collapsibleHeader';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'side_list_toggle';
+      btn.setAttribute('aria-controls','side_list_body');
+      btn.setAttribute('aria-expanded', String(sideListOpen));
+      btn.innerHTML = (sideListOpen ? '▼' : '►') + '  Gepatchte Geräte (Start → Name)';
+      header.appendChild(btn);
+
+      const body = document.createElement('div');
+      body.className = 'collapsibleBody';
+      body.id = 'side_list_body';
+      body.hidden = !sideListOpen;
+      body.setAttribute('role','region');
+      body.setAttribute('aria-label','Liste gepatchter Geräte');
+
+      const hdrRow = document.createElement('div');
+      hdrRow.className = 'miniHeader';
+      hdrRow.innerHTML = '<span>Startadresse</span><span>Gerätename</span>';
+      body.appendChild(hdrRow);
+
+      const sorted = [...fixtures()].sort((a,b)=>a.start-b.start);
+      if (sorted.length === 0){
+        const empty = document.createElement('div');
+        empty.className = 'miniRow';
+        empty.innerHTML = '<span class="miniStart">—</span><span class="miniName">Keine Geräte gepatcht</span>';
+        body.appendChild(empty);
+      } else {
+        sorted.forEach(f=>{
+          const row = document.createElement('div');
+          row.className = 'miniRow';
+
+          // Spalte 1: Start (nicht editierbar)
+          const startSpan = document.createElement('span');
+          startSpan.className = 'miniStart';
+          startSpan.textContent = pad3(f.start);
+
+          // Spalte 2: Name (editierbar, fixed behavior)
+          const nameWrap = document.createElement('span');
+          nameWrap.className = 'miniName';
+
+          const nameInput = document.createElement('input');
+          nameInput.type = 'text';
+          nameInput.value = f.name || '';
+          nameInput.className = 'sideListNameInput';
+          nameInput.title = 'Gerätename bearbeiten';
+
+          // Prevent row click/select while editing
+          ['click','mousedown','mouseup','touchstart','touchend'].forEach(evt => {
+            nameInput.addEventListener(evt, e => e.stopPropagation());
+            nameWrap.addEventListener(evt, e => e.stopPropagation());
+          });
+
+          // Live update model while typing; no re-render yet
+          nameInput.addEventListener('input', () => {
+            f.name = nameInput.value;
+          });
+
+          // Commit & re-render on blur
+          nameInput.addEventListener('blur', () => {
+            renderAll();
+          });
+
+          // Enter = commit; Escape = revert current model value + exit
+          nameInput.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') {
+              ev.preventDefault();
+              nameInput.blur();
+            } else if (ev.key === 'Escape') {
+              ev.preventDefault();
+              nameInput.value = f.name || '';
+              nameInput.blur();
+            }
+          });
+
+          // Row click still selects device (outside input)
+          row.addEventListener('click', () => {
+            selectedUid = f.uid;
+            renderAll();
+          });
+
+          nameWrap.appendChild(nameInput);
+          row.appendChild(startSpan);
+          row.appendChild(nameWrap);
+          body.appendChild(row);
+        });
+      }
+
+      const note = document.createElement('div');
+      note.className = 'miniNote';
+      note.textContent = 'Hinweis: Ausgabe ist für Smartphones optimiert (größere Touch-Ziele, responsive Layout).';
+      body.appendChild(note);
+
+      btn.addEventListener('click', ()=>{
+        sideListOpen = !sideListOpen;
+        btn.setAttribute('aria-expanded', String(sideListOpen));
+        btn.innerHTML = (sideListOpen ? '▼' : '►') + '  Gepatchte Geräte (Start → Name)';
+        body.hidden = !sideListOpen;
+      });
+
+      sideListContainerEl.appendChild(header);
+      sideListContainerEl.appendChild(body);
+    }
+
+    /************* Listenansicht (mit Gruppe) *************/
+    function renderList(){
+      listBodyEl.innerHTML = '';
+
+      if (lvGroupAddBtn) {
+        lvGroupAddBtn.onclick = () => {
+          const val = (lvGroupNewEl.value || '').trim();
+          addGroup(val);
+          lvGroupNewEl.value = '';
+        };
+      }
+
+      const sorted = [...fixtures()].sort((a,b)=>a.start-b.start);
+      if(sorted.length===0){
+        const tr=document.createElement('tr'); const td=document.createElement('td');
+        td.colSpan=16; td.className='empty'; td.textContent='Keine Geräte gepatcht.';
+        tr.appendChild(td); listBodyEl.appendChild(tr); return;
+      }
+
+      sorted.forEach((f,i)=>{
+        const cfg = catalog[f.type];
+        const tr=document.createElement('tr');
+
+        const tdIdx=document.createElement('td'); tdIdx.textContent=String(i+1); tr.appendChild(tdIdx);
+
+        const tdName=document.createElement('td'); const nameInput=document.createElement('input');
+        nameInput.type='text'; nameInput.value=f.name; nameInput.addEventListener('change',()=>{f.name=nameInput.value; renderAll();});
+        tdName.appendChild(nameInput); tr.appendChild(tdName);
+
+        const tdType=document.createElement('td'); tdType.textContent=cfg.label; tr.appendChild(tdType);
+
+        const tdCh=document.createElement('td'); tdCh.textContent=f.channels; tr.appendChild(tdCh);
+
+        const tdStart=document.createElement('td'); const num=document.createElement('input');
+        num.type='number'; num.min=1; num.max=DMX_MAX - f.channels + 1; num.value=f.start;
+        num.addEventListener('change',()=>{ // strict: if overlap, revert
+          const desired = parseInt(num.value)||1;
+          const ok = isRangeFreePreview(desired, f.channels, f.uid);
+          if (ok) { f.start = desired; renderAll(); }
+          else { num.value = f.start; }
+        });
+        tdStart.appendChild(num); tr.appendChild(tdStart);
+
+        const tdEnd=document.createElement('td'); tdEnd.textContent= f.start + f.channels - 1; tr.appendChild(tdEnd);
+
+        const mkCheck = (checked, onchg) => {
+          const i = document.createElement('input'); i.type='checkbox'; i.checked = !!checked;
+          i.addEventListener('change', e => { onchg(e.target.checked); });
+          return i;
+        };
+        const mkNum = (value, onchg) => {
+          const i = document.createElement('input'); i.type='number'; i.min=0; i.max=255; i.value = value;
+          i.addEventListener('change', e => { onchg(clampNum(e.target.value,0,255,value)); });
+          return i;
+        };
+
+        const tdPanInv=document.createElement('td'); tdPanInv.appendChild(mkCheck(f.panInvert, v=>{f.panInvert=v; renderAll();})); tr.appendChild(tdPanInv);
+        const tdTiltInv=document.createElement('td'); tdTiltInv.appendChild(mkCheck(f.tiltInvert, v=>{f.tiltInvert=v; renderAll();})); tr.appendChild(tdTiltInv);
+        const tdPTInv=document.createElement('td'); tdPTInv.appendChild(mkCheck(f.panTiltInvert, v=>{f.panTiltInvert=v; renderAll();})); tr.appendChild(tdPTInv);
+
+        const tdPanMin=document.createElement('td'); tdPanMin.appendChild(mkNum(f.panMin, v=>{f.panMin=v; renderAll();})); tr.appendChild(tdPanMin);
+        const tdPanMax=document.createElement('td'); tdPanMax.appendChild(mkNum(f.panMax, v=>{f.panMax=v; renderAll();})); tr.appendChild(tdPanMax);
+        const tdTiltMin=document.createElement('td'); tdTiltMin.appendChild(mkNum(f.tiltMin, v=>{f.tiltMin=v; renderAll();})); tr.appendChild(tdTiltMin);
+        const tdTiltMax=document.createElement('td'); tdTiltMax.appendChild(mkNum(f.tiltMax, v=>{f.tiltMax=v; renderAll();})); tr.appendChild(tdTiltMax);
+        const tdDimMax=document.createElement('td'); tdDimMax.appendChild(mkNum(f.dimmerMax, v=>{f.dimmerMax=v; renderAll();})); tr.appendChild(tdDimMax);
+
+        const tdGroup=document.createElement('td');
+        const sel=document.createElement('select');
+        getGroups().forEach(g=>{
+          const opt=document.createElement('option');
+          opt.value=g; opt.textContent=g; if(g===f.group) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        sel.addEventListener('change', e=>{ f.group = e.target.value; renderAll(); });
+        tdGroup.appendChild(sel);
+        tr.appendChild(tdGroup);
+
+        const tdAct=document.createElement('td'); tdAct.className='actions';
+        const btnSel=document.createElement('button'); btnSel.textContent='Auswählen';
+        btnSel.addEventListener('click', ()=>{ selectedUid=f.uid; setView('matrix'); });
+        const btnDel=document.createElement('button'); btnDel.className='danger'; btnDel.textContent='Entfernen';
+        btnDel.addEventListener('click',()=> removeFixture(f.uid));
+        tdAct.appendChild(btnSel); tdAct.appendChild(btnDel);
+        tr.appendChild(tdAct);
+
+        listBodyEl.appendChild(tr);
+      });
+    }
+
+    /************* Gemeinsames Rendering *************/
+    function renderAll(){
+      updateUniverseMeta();
+      computeCols();
+      if(viewmode==='matrix'){
+        matrixViewEl.style.display='';
+        listViewEl.style.display='none';
+        renderGridCells();
+        renderOverlay();
+        renderDetailsPanel();
+        renderSideList();
+      }else{
+        matrixViewEl.style.display='none';
+        listViewEl.style.display='';
+        renderList();
+        // Keep panels; state is preserved
+        renderDetailsPanel();
+        renderSideList();
+      }
+    }
+    function setView(mode){
+      viewmode = mode;
+      renderAll();
+    }
+
+    /************* DnD-Handler (Palette) *************/
+    function handleGridDragOver(ev){
+      ev.preventDefault();
+      if(ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+    }
+    function handleGridDrop(ev){
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (dropLock) return;
+      dropLock = true;
+      try{
+        const type = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
+        if(!catalog[type]) return;
+        const { addr } = pointToAddr(ev.clientX, ev.clientY);
+        addFixture(type, addr); // Palette-Drop: forward scan/wrap
+      } finally {
+        setTimeout(()=>{ dropLock = false; }, 0);
+      }
+    }
+
+    /************* QR Export – Viewer & Fallback *************/
+    function buildPatchCSV() {
+      const rows = fixtures()
+        .slice()
+        .sort((a,b) => a.start - b.start)
+        .map(f => `${f.start},${(f.name || '').replace(/[\r\n,]/g,' ')}`);
+      return rows.join('\n');
+    }
+
+    function buildViewerHTML() {
+      // Tiny, phone-friendly viewer reading CSV from hash
+      return `
+<!doctype html><meta charset=utf-8><title>DMX Patch</title>
+<style>
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#0f1216;color:#e9eef7}
+.wrap{padding:12px}
+h1{font-size:16px;margin:0 0 8px;color:#cfe0fb}
+.note{color:#9fb1c9;font-size:12px;margin-bottom:8px}
+table{width:100%;border-collapse:collapse;background:#1d2330;border:1px solid #2b354a;border-radius:8px;overflow:hidden}
+th,td{padding:8px;border-top:1px solid #2b354a;font-size:14px}
+th{color:#9fb1c9;background:#12161e;text-align:left}
+@media(max-width:480px){th,td{font-size:16px}}
+</style>
+<div class=wrap>
+<h1>DMX Patch</h1>
+<div class=note>Offline view · Start → Name · Phone friendly</div>
+<table><thead><tr><th>Start</th><th>Name</th></tr></thead><tbody id=t></tbody></table>
+</div>
+<script>
+const h=location.hash?decodeURIComponent(location.hash.slice(1)):"";
+const rows=h.split("\\n").filter(Boolean).map(l=>{const i=l.indexOf(",");return i>-1?[l.slice(0,i),l.slice(i+1)]:[l,""]});
+const tb=document.getElementById("t");
+for(const [s,n] of rows){const tr=document.createElement("tr");const td1=document.createElement("td");td1.textContent=s;const td2=document.createElement("td");td2.textContent=n;tr.append(td1,td2);tb.append(tr);}
+<\/script>`;
+    }
+
+    function buildViewerDataURL(csv) {
+      const html = buildViewerHTML();
+      return 'data:text/html;charset=utf-8,' + encodeURIComponent(html) + '#' + encodeURIComponent(csv);
+    }
+
+    function buildPlainDataURL(csv) {
+      return 'data:text/plain;charset=utf-8,' + encodeURIComponent(csv);
+    }
+
+    async function renderQRToCanvas(canvas, text, opts = {}) {
+      const defaultOpts = { errorCorrectionLevel: 'M', margin: 1, scale: 8 };
+      const qrOpts = Object.assign({}, defaultOpts, opts);
+      return new Promise((resolve, reject) => {
+        if (typeof QRCode === 'undefined' || !QRCode.toCanvas) {
+          reject(new Error('QR library not loaded'));
+          return;
+        }
+        QRCode.toCanvas(canvas, text, qrOpts, err => err ? reject(err) : resolve());
+      });
+    }
+
+    /** Versucht, QR-Bibliothek zu laden (lokal oder CDN) und liefert Promise */
+    function ensureQrLibraryLoaded() {
+      return new Promise((resolve, reject) => {
+        if (typeof QRCode !== 'undefined' && QRCode.toCanvas) { resolve(); return; }
+        const hasLocal = Array.from(document.scripts).some(s => /qrcode\.min\.js/i.test(s.src));
+        if (hasLocal) {
+          setTimeout(() => {
+            if (typeof QRCode !== 'undefined' && QRCode.toCanvas) resolve();
+            else reject(new Error('Lokale QR-Bibliothek gefunden, aber nicht funktionsfähig.'));
+          }, 50);
+          return;
+        }
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+        s.async = true;
+        s.onload = () => {
+          if (typeof QRCode !== 'undefined' && QRCode.toCanvas) resolve();
+          else reject(new Error('CDN geladen, aber QRCode nicht verfügbar.'));
+        };
+        s.onerror = () => reject(new Error('CDN konnte nicht geladen werden (offline/blocked).'));
+        document.head.appendChild(s);
+      });
+    }
+
+    /** QR zeichnen oder Fallback-UI zeigen */
+    async function renderQRWithFallback(canvas, dataUrl, infoEl) {
+      try {
+        await ensureQrLibraryLoaded();
+        await renderQRToCanvas(canvas, dataUrl, { errorCorrectionLevel: 'M', margin: 1, scale: 8 });
+        infoEl.textContent = `QR geladen • ${dataUrl.length} bytes (Tippen zum Kopieren)`;
+        infoEl.onclick = async () => {
+          try { await navigator.clipboard.writeText(dataUrl); infoEl.textContent += ' • URL kopiert'; } catch {}
+        };
+      } catch (err) {
+        // Fallback UI ohne QR-Bibliothek
+        infoEl.innerHTML = `
+          <div style="text-align:left">
+            <div style="color:#ff9e6d; margin-bottom:8px;">QR-Bibliothek nicht geladen (${err.message}).</div>
+            <div style="margin-bottom:8px;">Hier ist die <strong>Data-URL</strong> deiner Patchliste:</div>
+            <textarea id="qrFallbackText" style="width:100%; height:120px; background:#0f141e; color:#fff; border:1px solid #2b354a; border-radius:8px; padding:8px;"></textarea>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button id="qrFallbackCopy" style="background:#0f141e;color:#e9eef7;border:1px solid #2b354a;border-radius:8px;padding:6px 10px;">Kopieren</button>
+              #Öffnen</a>
+            </div>
+            <p style="color:#9fb1c9; font-size:12px; margin-top:8px;">
+              Tipp: Du kannst diesen <strong>Data-URL</strong> Text direkt in einen QR-Generator deiner Wahl einfügen (offline Tools, Druck, etc.).
+            </p>
+          </div>
+        `;
+        const ta = document.getElementById('qrFallbackText');
+        const copyBtn = document.getElementById('qrFallbackCopy');
+        const openLink = document.getElementById('qrFallbackOpen');
+        ta.value = dataUrl;
+        copyBtn.onclick = async () => { try { await navigator.clipboard.writeText(dataUrl); copyBtn.textContent = 'Kopiert!'; } catch {} };
+        openLink.href = dataUrl;
+      }
+    }
+
+    async function showQRModal(mode = 'viewer') {
+      const csv = buildPatchCSV();
+      let data, label;
+
+      if (mode === 'viewer') {
+        data = buildViewerDataURL(csv);
+        label = 'Rich viewer (data:text/html)';
+      } else {
+        data = buildPlainDataURL(csv);
+        label = 'Plain CSV (data:text/plain)';
+      }
+
+      // auto-fallback wenn die Data-URL zu groß wird
+      if (mode === 'viewer' && data.length > 2500) {
+        data = buildPlainDataURL(csv);
+        label = 'Plain CSV (auto fallback: content too large for single QR)';
+      }
+
+      qrInfoEl.textContent = `${label} • ${data.length} bytes`;
+      qrModalEl.style.display = 'flex';
+      await renderQRWithFallback(qrCanvasEl, data, qrInfoEl);
+    }
+
+    function initQRExportUI(){
+      exportQRBtn?.addEventListener('click', () => showQRModal('viewer'));
+      qrCloseBtn?.addEventListener('click', () => qrModalEl.style.display = 'none');
+      qrModalEl?.addEventListener('click', (e) => { if (e.target === qrModalEl) qrModalEl.style.display='none'; });
+      qrModeViewerBtn?.addEventListener('click', () => showQRModal('viewer'));
+      qrModePlainBtn?.addEventListener('click', () => showQRModal('plain'));
+    }
+
+    /************* Events *************/
+    selUniverse.addEventListener('change', ()=>{
+      currentUniverse = parseInt(selUniverse.value);
+      selectedUid=null;
+      renderAll();
+    });
+    toggleViewBtn.addEventListener('click', ()=>{ setView(viewmode==='matrix'?'list':'matrix'); });
+    resetUniverseBtn.addEventListener('click', ()=>{
+      if(confirm(`Universum #${currentUniverse} wirklich leeren?`)){
+        universes[currentUniverse]=[];
+        selectedUid=null;
+        renderAll();
+      }
+    });
+    // Palette: DnD data + Multiply
+    document.querySelectorAll('.device[draggable="true"]').forEach(el=>{
+      el.addEventListener('dragstart', (ev)=> ev.dataTransfer.setData('text/plain', el.dataset.type));
+    });
+    document.querySelectorAll('.multiplyBtn').forEach(btn=>{
+      btn.addEventListener('click', ()=> addFixtureAtEnd(btn.dataset.type));
+    });
+
+    // Responsive neu zeichnen
+    const ro = new ResizeObserver(()=> renderAll());
+    ro.observe(gridEl); ro.observe(scrollEl); window.addEventListener('resize', ()=> renderAll());
+
+    overlayEl.addEventListener('click', ()=>{ selectedUid=null; renderAll(); });
+    gridEl.addEventListener('click', ()=>{ selectedUid=null; renderAll(); });
+
+    /************* Bootstrap *************/
+    function defaultFixture(type, start){
+      return {
+        uid:`fx_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        name: catalog[type].label + ' #' + uidCounter++,
+        type, channels: catalog[type].channels, start,
+        ...defaultParams()
+      };
+    }
+    function bootstrap(){
+      initUniverses();
+      initGroups();
+      populateUniverseSelect();
+
+      renderGridCells();
+
+      gridEl.addEventListener('dragover', handleGridDragOver, { passive:false });
+      gridEl.addEventListener('drop', handleGridDrop, { passive:false });
+
+      // zwei Startgeräte
+      universes[currentUniverse].push(
+        defaultFixture('rgb3', 1),
+        defaultFixture('mh8', 16)
+      );
+
+      initQRExportUI();
+      renderAll();
+    }
+    bootstrap();
+  </script>
+</body>
+</html>

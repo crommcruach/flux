@@ -144,6 +144,7 @@ class RestAPI:
         from .api_benchmark import register_benchmark_routes
         from .api_layers import register_layer_routes
         from .api_clip_layers import register_clip_layer_routes
+        from .api_outputs import register_output_routes
         from .api_converter import converter_bp
         from .clip_registry import get_clip_registry
         
@@ -164,6 +165,7 @@ class RestAPI:
         register_benchmark_routes(self.app, self.player_manager)
         register_layer_routes(self.app, self.player_manager, self.config)
         register_clip_layer_routes(self.app, get_clip_registry(), self.player_manager, self.video_dir)
+        register_output_routes(self.app, self.player_manager)
         
         # Register Converter Blueprint
         self.app.register_blueprint(converter_bp)
@@ -1078,8 +1080,17 @@ class RestAPI:
         self.bpm_broadcast_thread.start()
         
         # Server Thread starten
+        def run_server():
+            try:
+                self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
+            except Exception as e:
+                logger.critical(f"🔥 FATAL: Flask/SocketIO server crashed: {e}", exc_info=True)
+                import traceback
+                traceback.print_exc()
+                self.is_running = False
+                
         self.server_thread = threading.Thread(
-            target=lambda: self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True),
+            target=run_server,
             daemon=True
         )
         self.server_thread.start()

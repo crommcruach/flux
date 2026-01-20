@@ -7,6 +7,50 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ---
 
+## [Unreleased] - 2026-01-20
+
+### 🎵 Audio Engine Migration: miniaudio → PyAV + sounddevice
+
+#### Geändert
+- **Audio Engine** - Ersetzt `miniaudio` durch `PyAV + sounddevice`
+  - ✅ **Universal Compatibility** - Keine MSVC Build Tools mehr erforderlich (Windows)
+  - ✅ **Zero New Dependencies** - Nutzt bereits vorhandene Packages (`av` + `sounddevice`)
+  - ✅ **Better Format Support** - Alle FFmpeg-unterstützten Formate (MP3, WAV, OGG, FLAC, M4A, AAC)
+  - ✅ **Einfachere Installation** - `pip install -r requirements.txt` funktioniert überall
+  - ✅ **Graceful Degradation** - Deaktiviert sich automatisch wenn Dependencies fehlen
+
+#### Implementation Details
+- `src/modules/audio_engine.py` komplett neu geschrieben
+  - PyAV (`av`) für Audio-Decoding (FFmpeg bindings)
+  - sounddevice für Audio-Output (PortAudio backend)
+  - Queue-basiertes Streaming mit Callback-Pattern
+  - Threadsafe Position-Tracking
+  - Frame-level Seeking mit PyAV container.seek()
+  
+- `requirements.txt` aktualisiert
+  - `miniaudio>=1.61` entfernt
+  - Kommentar für `sounddevice` aktualisiert (jetzt Input + Output)
+  - Kommentar für `av` aktualisiert (Video + Audio decoding)
+
+#### API Compatibility
+- ✅ **Keine Breaking Changes** - Public API bleibt identisch
+  - `load(file_path)` - Identisches Metadata-Format
+  - `play()`, `pause()`, `stop()`, `seek()` - Gleiches Verhalten
+  - `get_position()`, `get_duration()` - Unverändert
+  - `cleanup()` - Unverändert
+
+#### Tested Features
+- ✅ MP3/WAV/OGG/FLAC Playback
+- ✅ Play/Pause/Stop/Seek Controls
+- ✅ Position Tracking
+- ✅ Thread Safety
+- ✅ Graceful Error Handling
+
+#### Known Issues
+- WaveSurfer.js Frontend **nicht betroffen** - Nutzt Browser Web Audio API unabhängig vom Backend
+
+---
+
 ## [Unreleased] - 2025-12-08
 
 ### 🔧 Console Logging Optimierung

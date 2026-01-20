@@ -10,7 +10,11 @@ python-socketio>=5.11.0
 msgpack>=1.0.0
 Pillow>=10.0.0
 aiortc>=1.6.0
-av>=10.0.0
-sounddevice>=0.4.0  # Audio input for parameter sequences
-miniaudio>=1.61  # Audio playback for sequencer (Windows: requires MSVC Build Tools + Windows 10/11 SDK)
-librosa>=0.10.0  # BPM detection and beat tracking
+av>=10.0.0  # Video processing & audio decoding (FFmpeg bindings)
+sounddevice>=0.4.0  # Audio input/output for parameter sequences & sequencer
+# BPM detection: using numpy-only implementation (no external library needed)
+
+# Output routing system
+screeninfo>=0.8.0  # Multi-monitor detection
+# NDIlib-python>=1.0.0  # NDI network video output (optional - install separately if needed)
+# SpoutGL>=0.2.0  # Spout GPU texture sharing (optional, Windows only)

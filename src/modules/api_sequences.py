@@ -39,7 +39,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
         
         while _streaming_active:
             try:
-                if audio_analyzer.is_running() and socketio:
+                if audio_analyzer and audio_analyzer.is_running() and socketio:
                     features = audio_analyzer.get_features()
                     # Emit to all connected clients
                     socketio.emit('audio_features', {

@@ -4,7 +4,7 @@
 
 ## 🚀 Roadmap Overview
 
-**Current Status (v2.4.0 - December 2025):**
+**Current Status (v2.4.0 - January 2026):**
 - ✅ Unified API & Plugin System
 - ✅ Multi-layer compositing with blend modes  
 - ✅ Master/Slave playlist synchronization
@@ -14,6 +14,8 @@
 - ✅ HAP codec support & universal video converter
 - ✅ Transition system with fade effects
 - ✅ 18 effect plugins (color, time, motion, blur, blending)
+- ✅ Audio engine migration (PyAV + sounddevice)
+- ✅ Player.html LCP optimization (5.96s → ~1.3s, 78% improvement)
 
 **Priority Levels:**
 - 🔥 **P1 - Critical** (28-40h): Core features for professional VJ workflow
