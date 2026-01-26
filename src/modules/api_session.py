@@ -43,9 +43,7 @@ def register_session_routes(app, session_state_manager):
                 )
             
             # Copy current session_state.json to snapshots directory
-            session_state_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)), '..', 'session_state.json'
-            )
+            session_state_path = session_state_manager.get_state_file_path()
             
             if not os.path.exists(session_state_path):
                 return jsonify({
@@ -141,9 +139,7 @@ def register_session_routes(app, session_state_manager):
                 return jsonify({"success": False, "error": f"Snapshot '{filename}' not found"}), 404
             
             # Copy snapshot to session_state.json
-            session_state_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)), '..', 'session_state.json'
-            )
+            session_state_path = session_state_manager.get_state_file_path()
             
             shutil.copy2(snapshot_path, session_state_path)
             
@@ -165,9 +161,7 @@ def register_session_routes(app, session_state_manager):
     def get_session_state():
         """Get current session state including audio analyzer settings."""
         try:
-            session_state_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)), '..', 'session_state.json'
-            )
+            session_state_path = session_state_manager.get_state_file_path()
             
             if not os.path.exists(session_state_path):
                 return jsonify({

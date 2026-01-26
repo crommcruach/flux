@@ -19,6 +19,25 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 
+def _save_timeline_to_playlist(player_manager):
+    """
+    Helper: Save timeline to viewed playlist after any change.
+    Called after timeline modifications (upload, load, split add/remove, clip mapping).
+    """
+    try:
+        from .api_playlists import get_playlist_system
+        playlist_system = get_playlist_system()
+        if playlist_system:
+            viewed = playlist_system.get_viewed_playlist()
+            if viewed:
+                # Save timeline to viewed playlist
+                viewed.sequencer['timeline'] = player_manager.sequencer.timeline.to_dict()
+                playlist_system._auto_save()
+                logger.debug(f"💾 Saved timeline to viewed playlist '{viewed.name}'")
+    except Exception as e:
+        logger.warning(f"Failed to save timeline to playlist: {e}")
+
+
 def register_sequencer_routes(app, player_manager, config, session_state=None):
     """Register sequencer API routes.
     
@@ -57,7 +76,39 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
                     'error': 'Sequencer not initialized'
                 }), 500
             
-            player_manager.set_sequencer_mode(enabled)
+            # Save sequencer mode to VIEWED playlist
+            try:
+                from .api_playlists import get_playlist_system
+                playlist_system = get_playlist_system()
+                if playlist_system:
+                    viewed = playlist_system.get_viewed_playlist()
+                    if viewed:
+                        # Always save to viewed playlist
+                        viewed.sequencer['mode_active'] = enabled
+                        
+                        # Check if viewed playlist is active
+                        is_active = viewed.id == playlist_system.active_playlist_id
+                        
+                        if is_active:
+                            # Apply to physical players only if this is the active playlist
+                            logger.info(f"✅ Applying sequencer mode={enabled} to ACTIVE playlist")
+                            player_manager.set_sequencer_mode(enabled)
+                        else:
+                            # Just save, don't apply to players
+                            logger.info(f"💾 Saved sequencer mode={enabled} to INACTIVE playlist")
+                        
+                        # Trigger auto-save
+                        playlist_system._auto_save()
+                    else:
+                        # Fallback if no viewed playlist
+                        player_manager.set_sequencer_mode(enabled)
+                else:
+                    # Fallback if playlist system not available
+                    player_manager.set_sequencer_mode(enabled)
+            except Exception as e:
+                logger.error(f"Could not save sequencer mode to playlist: {e}", exc_info=True)
+                # Fallback: apply to players directly
+                player_manager.set_sequencer_mode(enabled)
             
             return jsonify({
                 'success': True,
@@ -98,8 +149,20 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
             if engine.is_loaded and timeline.clip_mapping:
                 clip_mapping_json = {str(k): v for k, v in timeline.clip_mapping.items()}
             
+            # Get sequencer mode from VIEWED playlist (not physical player!)
+            mode_active = player_manager.sequencer_mode_active  # Default
+            try:
+                from .api_playlists import get_playlist_system
+                playlist_system = get_playlist_system()
+                if playlist_system:
+                    viewed = playlist_system.get_viewed_playlist()
+                    if viewed:
+                        mode_active = viewed.sequencer.get('mode_active', False)  # From viewed playlist!
+            except Exception as e:
+                logger.warning(f"Could not get sequencer mode from viewed playlist: {e}")
+            
             status = {
-                'mode_active': player_manager.sequencer_mode_active,
+                'mode_active': mode_active,  # From viewed playlist!
                 'has_audio': engine.is_loaded,
                 'audio_file': audio_file,
                 'audio_duration': engine.duration if engine.is_loaded else 0,
@@ -153,6 +216,9 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
             
             # Load into sequencer immediately (with absolute path)
             metadata = player_manager.sequencer.load_audio(str(file_path))
+            
+            # Save timeline to viewed playlist
+            _save_timeline_to_playlist(player_manager)
             
             # Return relative path for frontend (from workspace root)
             relative_path = file_path.relative_to(workspace_root)
@@ -238,6 +304,9 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
                 return jsonify({'error': f'File not found: {file_path}'}), 404
             
             metadata = player_manager.sequencer.load_audio(str(absolute_path))
+            
+            # Save timeline to viewed playlist
+            _save_timeline_to_playlist(player_manager)
             
             logger.info(f"📂 Audio loaded: {os.path.basename(file_path)}")
             
@@ -349,6 +418,9 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
             success = player_manager.sequencer.add_split(time)
             
             if success:
+                # Save timeline to viewed playlist
+                _save_timeline_to_playlist(player_manager)
+                
                 # Save session state to persist splits
                 if session_state:
                     from .clip_registry import get_clip_registry
@@ -383,6 +455,9 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
             success = player_manager.sequencer.remove_split(time)
             
             if success:
+                # Save timeline to viewed playlist
+                _save_timeline_to_playlist(player_manager)
+                
                 # Save session state to persist splits
                 if session_state:
                     from .clip_registry import get_clip_registry
@@ -426,6 +501,9 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
                 return jsonify({'error': 'Missing slot_index or clip_name'}), 400
             
             player_manager.sequencer.set_clip_mapping(slot_index, clip_name)
+            
+            # Save timeline to viewed playlist
+            _save_timeline_to_playlist(player_manager)
             
             # Save session state to persist clip mappings
             if session_state:

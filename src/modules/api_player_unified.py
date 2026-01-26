@@ -8,6 +8,7 @@ Ersetzt separate Video- und Art-Net-APIs durch ein einheitliches Interface:
 """
 
 import os
+import time
 from flask import request, jsonify
 from .logger import get_logger, debug_api, debug_playback, DebugCategories
 from .clip_registry import get_clip_registry
@@ -161,6 +162,24 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 if session_state:
                     session_state.save_async(player_manager, clip_registry, force=True)
                 
+                # Save clip to viewed playlist
+                try:
+                    from .api_playlists import get_playlist_system
+                    playlist_system = get_playlist_system()
+                    if playlist_system:
+                        viewed = playlist_system.get_viewed_playlist()
+                        if viewed:
+                            player_state = viewed.players[player_id]
+                            # Save complete player state to viewed playlist
+                            player_state.clips = list(player.playlist) if hasattr(player, 'playlist') and player.playlist else []
+                            player_state.clip_ids = list(player.playlist_ids) if hasattr(player, 'playlist_ids') and player.playlist_ids else []
+                            player_state.clip_params = dict(player.playlist_params) if hasattr(player, 'playlist_params') else {}
+                            player_state.index = player.playlist_index
+                            playlist_system._auto_save()
+                            logger.debug(f"💾 Saved generator clip to viewed playlist '{viewed.name}'")
+                except Exception as e:
+                    logger.warning(f"Failed to save clip to playlist: {e}")
+                
                 return jsonify({
                     "success": True,
                     "message": f"Generator loaded: {generator_id}",
@@ -278,6 +297,23 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 session_state = get_session_state()
                 if session_state:
                     session_state.save_async(player_manager, clip_registry, force=True)
+                
+                # Save clip to viewed playlist
+                try:
+                    from .api_playlists import get_playlist_system
+                    playlist_system = get_playlist_system()
+                    if playlist_system:
+                        viewed = playlist_system.get_viewed_playlist()
+                        if viewed:
+                            player_state = viewed.players[player_id]
+                            # Save complete player state to viewed playlist
+                            player_state.clips = list(player.playlist) if hasattr(player, 'playlist') and player.playlist else []
+                            player_state.clip_ids = list(player.playlist_ids) if hasattr(player, 'playlist_ids') and player.playlist_ids else []
+                            player_state.index = player.playlist_index
+                            playlist_system._auto_save()
+                            logger.debug(f"💾 Saved video clip to viewed playlist '{viewed.name}'")
+                except Exception as e:
+                    logger.warning(f"Failed to save clip to playlist: {e}")
                 
                 return jsonify({
                     "success": True,
@@ -1489,7 +1525,14 @@ def register_unified_routes(app, player_manager, config, socketio=None):
     
     @app.route('/api/player/<player_id>/playlist/set', methods=['POST'])
     def set_playlist(player_id):
-        """Setzt die Playlist für einen Player."""
+        """
+        DEPRECATED: Direct player playlist manipulation.
+        Use /api/playlists/update_player instead for multi-playlist-aware updates.
+        
+        This endpoint modifies the active player directly without playlist awareness.
+        """
+        logger.warning(f"⚠️ DEPRECATED: /api/player/{player_id}/playlist/set called. Use /api/playlists/update_player instead.")
+        
         try:
             data = request.get_json()
             playlist = data.get('playlist', [])
@@ -1919,8 +1962,9 @@ def register_unified_routes(app, player_manager, config, socketio=None):
     @app.route('/api/player/<player_id>/set_master', methods=['POST'])
     def set_master_playlist(player_id):
         """
-        Activates/deactivates Master mode for a playlist.
-        When enabled, all other playlists become Slaves and follow this Master.
+        Activates/deactivates Master mode for the VIEWED playlist.
+        When enabled, all players in this playlist become master/slave synchronized.
+        This setting is per-playlist and saved with the playlist.
         
         Request Body:
             {
@@ -1930,20 +1974,14 @@ def register_unified_routes(app, player_manager, config, socketio=None):
         Response:
             {
                 "success": true,
-                "master_playlist": "video",  // or "artnet" or null
-                "synced_slaves": ["artnet"],
-                "message": "Master playlist set to video"
+                "master_player": "video",  // or "artnet" or null
+                "playlist_id": "...",
+                "message": "Master player set to video for playlist 'Default'"
             }
         """
         try:
             data = request.get_json()
             enabled = data.get('enabled', True)
-            
-            # DEBUG: Log all API calls to set_master
-            import traceback
-            logger.info(f"🔥 API set_master called: player_id={player_id}, enabled={enabled}")
-            logger.info(f"🔥 Request data: {data}")
-            logger.info(f"🔥 Caller stack:\n{''.join(traceback.format_stack()[:-1])}")
             
             # Validate player_id
             if player_id not in player_manager.get_all_player_ids():
@@ -1952,29 +1990,64 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                     'error': f'Invalid player_id: {player_id}'
                 }), 400
             
-            # Set or clear master
-            if enabled:
-                success = player_manager.set_master_playlist(player_id)
-            else:
-                success = player_manager.set_master_playlist(None)
-            
-            if not success:
+            # Get the VIEWED playlist (master/slave is per-playlist, set on viewed playlist)
+            playlist_system = player_manager.playlist_system
+            if not playlist_system:
                 return jsonify({
                     'success': False,
-                    'error': f'Failed to set master playlist'
+                    'error': 'Playlist system not initialized'
                 }), 500
             
-            # Build response
-            master_playlist = player_manager.get_master_playlist()
-            slaves = [pid for pid in player_manager.get_all_player_ids() 
-                     if pid != master_playlist]
+            viewed_playlist = playlist_system.get_viewed_playlist()
+            if not viewed_playlist:
+                return jsonify({
+                    'success': False,
+                    'error': 'No viewed playlist'
+                }), 400
             
-            message = f"Master playlist set to {master_playlist}" if master_playlist else "Master mode disabled"
+            # Set or clear master_player on the VIEWED playlist
+            old_master = viewed_playlist.master_player
+            if enabled:
+                viewed_playlist.master_player = player_id
+            else:
+                viewed_playlist.master_player = None
+            
+            # If the viewed playlist is also the active one, update global master for immediate effect
+            # Otherwise, the setting will be applied when this playlist is activated
+            active_playlist = playlist_system.get_active_playlist()
+            if viewed_playlist.id == active_playlist.id:
+                player_manager.master_playlist = viewed_playlist.master_player
+                player_manager._update_all_slave_caches()
+            
+            # Emit WebSocket event
+            if player_manager.socketio and old_master != viewed_playlist.master_player:
+                try:
+                    player_manager.socketio.emit('master_slave_changed', {
+                        'master_player': viewed_playlist.master_player,
+                        'playlist_id': viewed_playlist.id,
+                        'playlist_name': viewed_playlist.name,
+                        'timestamp': time.time()
+                    }, namespace='/player')
+                    logger.info(f"📡 WebSocket: master_slave_changed emitted (master={viewed_playlist.master_player}, playlist={viewed_playlist.name})")
+                except Exception as e:
+                    logger.error(f"❌ Error emitting master_slave_changed WebSocket event: {e}")
+            
+            # Save to session state
+            from .session_state import get_session_state
+            from .clip_registry import get_clip_registry
+            session_state = get_session_state()
+            clip_registry = get_clip_registry()
+            session_state.save_without_capture(player_manager, clip_registry)
+            
+            logger.info(f"👑 Set master_player={viewed_playlist.master_player} for playlist '{viewed_playlist.name}' (id={viewed_playlist.id})")
+            
+            message = f"Master player set to {viewed_playlist.master_player} for playlist '{viewed_playlist.name}'" if viewed_playlist.master_player else f"Master mode disabled for playlist '{viewed_playlist.name}'"
             
             return jsonify({
                 'success': True,
-                'master_playlist': master_playlist,
-                'synced_slaves': slaves,
+                'master_player': viewed_playlist.master_player,
+                'playlist_id': viewed_playlist.id,
+                'playlist_name': viewed_playlist.name,
                 'message': message
             })
             
@@ -2083,10 +2156,10 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 settings['custom_width'] = data.get('custom_width', 1920)
                 settings['custom_height'] = data.get('custom_height', 1080)
             
-            # Save to session state
+            # Save to session state using proper API
             session_state = get_session_state()
             if session_state:
-                session_state._state['video_player_settings'] = settings
+                session_state.set_video_player_settings(settings)
             
             # Apply resolution change immediately to video player
             video_player = player_manager.get_player('video')

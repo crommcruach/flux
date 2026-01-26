@@ -381,6 +381,22 @@ def main():
     session_state.set_sequence_manager(sequence_manager)
     logger.debug("SequenceManager connected to SessionState")
     
+    # Initialize Multi-Playlist System
+    from modules.playlist_manager import MultiPlaylistSystem
+    from modules.api_playlists import register_playlist_routes, set_playlist_system
+    
+    playlist_system = MultiPlaylistSystem(player_manager, session_state, None)
+    set_playlist_system(playlist_system)
+    player_manager.playlist_system = playlist_system
+    
+    # Create default playlist if none exist
+    if len(playlist_system.playlists) == 0:
+        default_playlist = playlist_system.create_playlist("Default", "standard")
+        playlist_system.activate_playlist(default_playlist.id)
+        logger.debug("Created and activated Default playlist")
+    
+    logger.debug("Multi-Playlist System initialisiert")
+    
     # Auto-start audio analyzer if it was running in previous session
     try:
         if os.path.exists(session_state_path):
@@ -456,6 +472,14 @@ def main():
     if hasattr(player_manager, 'sequence_manager'):
         set_sequence_manager(player_manager.sequence_manager)
     logger.debug("BPM API registered")
+    
+    # Register Multi-Playlist API routes
+    register_playlist_routes(rest_api.app, player_manager, config, rest_api.socketio)
+    logger.debug("Multi-Playlist API routes registered")
+    
+    # Connect websocket to playlist system
+    player_manager.playlist_system.websocket_manager = rest_api.socketio
+    logger.debug("Playlist system connected to WebSocket")
     
     # Set socketio reference in player_manager for WebSocket events
     player_manager.socketio = rest_api.socketio

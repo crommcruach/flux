@@ -1,0 +1,186 @@
+/* Playlist Tabs Component - Compact for 50px Middle Bar */
+
+.playlist-tabs-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.playlist-tabs {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    background: rgba(20, 20, 30, 0.6);
+    padding: 3px 6px;
+    border-radius: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    max-height: 40px;
+    flex-wrap: nowrap;
+}
+
+.playlist-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: rgba(40, 40, 50, 0.9);
+    border: 2px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 11px;
+    color: #bbb;
+    position: relative;
+    user-select: none;
+    max-height: 30px;
+}
+
+.playlist-tab:hover {
+    background: rgba(60, 60, 70, 0.9);
+    color: #fff;
+}
+
+/* Viewed playlist (highlighted) */
+.playlist-tab.viewed {
+    background: rgba(70, 70, 100, 0.9);
+    color: #fff;
+}
+
+/* Active playlist (green border - controls playback) */
+.playlist-tab.active {
+    border-color: #00ff00;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+}
+
+.playlist-tab i {
+    font-size: 11px;
+}
+
+.playlist-name {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sequencer-badge {
+    font-size: 9px;
+    background: rgba(255, 170, 0, 0.3);
+    padding: 1px 3px;
+    border-radius: 2px;
+}
+
+.active-indicator {
+    color: #00ff00;
+    font-size: 9px;
+    margin-left: 2px;
+}
+
+.add-playlist-btn {
+    background: rgba(0, 150, 255, 0.8);
+    border: none;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 12px;
+    max-height: 30px;
+}
+
+.add-playlist-btn:hover {
+    background: rgba(0, 180, 255, 1);
+    transform: scale(1.05);
+}
+
+.playlist-status {
+    margin-top: 0;
+    padding: 2px 6px;
+    background: rgba(30, 30, 40, 0.8);
+    border-radius: 2px;
+    font-size: 9px;
+    color: #888;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Context Menu */
+.playlist-context-menu {
+    position: absolute;
+    display: none;
+    background: rgba(30, 30, 40, 0.98);
+    border: 1px solid rgba(100, 100, 120, 0.5);
+    border-radius: 5px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    min-width: 180px;
+    padding: 5px 0;
+}
+
+.playlist-context-menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 15px;
+    background: transparent;
+    border: none;
+    color: #ccc;
+    cursor: pointer;
+    text-align: left;
+    font-size: 13px;
+    transition: all 0.15s;
+}
+
+.playlist-context-menu button:hover:not(:disabled) {
+    background: rgba(70, 70, 90, 0.8);
+    color: #fff;
+}
+
+.playlist-context-menu button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.playlist-context-menu button.danger:hover:not(:disabled) {
+    background: rgba(200, 50, 50, 0.8);
+    color: #fff;
+}
+
+.playlist-context-menu button i {
+    width: 16px;
+    text-align: center;
+}
+
+.playlist-context-menu hr {
+    border: none;
+    border-top: 1px solid rgba(100, 100, 120, 0.3);
+    margin: 3px 0;
+}
+
+/* Scrollbar styling for tabs */
+.playlist-tabs::-webkit-scrollbar {
+    height: 6px;
+}
+
+.playlist-tabs::-webkit-scrollbar-track {
+    background: rgba(10, 10, 20, 0.5);
+    border-radius: 3px;
+}
+
+.playlist-tabs::-webkit-scrollbar-thumb {
+    background: rgba(100, 100, 120, 0.5);
+    border-radius: 3px;
+}
+
+.playlist-tabs::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 120, 140, 0.7);
+}

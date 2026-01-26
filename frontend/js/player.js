@@ -147,6 +147,65 @@ async function init() {
         // Load debug configuration first
         await loadDebugConfig(API_BASE);
         
+        // Initialize Playlist Tabs Component
+        if (typeof PlaylistTabsManager !== 'undefined') {
+            window.playlistTabsManager = new PlaylistTabsManager('playlistTabsContainer');
+            
+            // Wire up callbacks
+            window.playlistTabsManager.onView = async (playlistId, playlistData) => {
+                console.log('📋 Viewing playlist:', playlistData.name);
+                
+                // Load the viewed playlist data using same method as initial load
+                await loadPlaylistFromResponse('video', playlistData.video);
+                await loadPlaylistFromResponse('artnet', playlistData.artnet);
+                
+                // Update master/slave UI based on this playlist's master_player setting
+                if (playlistData.master_player !== undefined) {
+                    masterPlaylist = playlistData.master_player;
+                    updateMasterUI();
+                    debug.log(`👑 Updated master/slave UI for playlist: ${playlistData.name}, master=${masterPlaylist}`);
+                }
+                
+                // Update sequencer mode UI based on THIS playlist's sequencer_mode setting
+                if (playlistData.sequencer_mode !== undefined) {
+                    const isSequencerModeActive = playlistData.sequencer_mode;
+                    const btn = document.getElementById('sequencerModeBtn');
+                    const waveformSection = document.querySelector('.waveform-analyzer-section');
+                    
+                    if (btn && waveformSection) {
+                        window.sequencerModeActive = isSequencerModeActive;
+                        
+                        if (isSequencerModeActive) {
+                            waveformSection.style.display = 'grid';
+                            btn.classList.remove('btn-outline-secondary');
+                            btn.classList.add('btn-success');
+                            btn.textContent = '🎵 Sequencer: MASTER';
+                        } else {
+                            waveformSection.style.display = 'none';
+                            btn.classList.remove('btn-success');
+                            btn.classList.add('btn-outline-secondary');
+                            btn.textContent = '🎵 Sequencer Mode';
+                        }
+                        debug.log(`🎵 Updated sequencer UI for playlist: ${playlistData.name}, mode=${isSequencerModeActive}`);
+                    }
+                }
+            };
+            
+            window.playlistTabsManager.onActivate = async (playlistId, playlistData) => {
+                console.log('▶️ Activated playlist:', playlistData.name);
+                
+                // When activating, the backend applies playlist to players AND sets viewed = active
+                // So we need to refresh from backend to get the live player state
+                await refreshPlaylistsFromBackend();
+                await refreshSequencerToggle();
+            };
+            
+            await window.playlistTabsManager.init();
+            console.log('✅ Playlist Tabs initialized');
+        } else {
+            console.warn('⚠️ PlaylistTabsManager not available');
+        }
+        
         // Initialize tab components (includes search functionality)
         await initializeTabComponents();
         
@@ -245,8 +304,8 @@ async function init() {
         await refreshVideoEffects();
         await refreshArtnetEffects();
         
-        // Restore master/slave state from backend
-        await restoreMasterSlaveState();
+        // Master/slave state is now per-playlist and loaded when viewing playlists
+        // No need for global restore - removed restoreMasterSlaveState()
         
         // Layers are now loaded per-clip when clips are loaded
         
@@ -330,9 +389,13 @@ async function init() {
         // Listen for master/slave mode changes
         playerSocket.on('master_slave_changed', (data) => {
             debug.log(`👑 Master/Slave mode changed via WebSocket:`, data);
-            // Update master playlist state
-            if (data.master_playlist !== undefined) {
-                masterPlaylist = data.master_playlist;
+            // Update master player state (per-playlist now)
+            if (data.master_player !== undefined) {
+                masterPlaylist = data.master_player;
+            }
+            // Log which playlist was affected
+            if (data.playlist_name) {
+                debug.log(`📋 Master/slave updated for playlist: ${data.playlist_name}`);
             }
             updateMasterUI();
         });
@@ -577,14 +640,8 @@ async function updateCurrentFromPlayer(playerId) {
                 renderPlaylist(playerId);
             }
             
-            // Update master state from backend (for Master/Slave sync)
-            if (data.master_playlist !== undefined) {
-                const oldMaster = masterPlaylist;
-                masterPlaylist = data.master_playlist;
-                if (oldMaster !== masterPlaylist) {
-                    updateMasterUI();
-                }
-            }
+            // Master/slave state is now per-playlist and updated when viewing playlists
+            // Removed global master_playlist sync from status polling to avoid overwriting playlist settings
         }
     } catch (error) {
         // Silent fail - don't spam console
@@ -973,8 +1030,11 @@ function setupPlaylistContainerDropHandlers() {
                 renderPlaylist('video');
                 await updatePlaylist('video');
                 
-                // Auto-load and auto-play first item
-                if (playerConfigs.video.files.length === 1) {
+                // Auto-load and auto-play first item ONLY if this is the active playlist
+                const isActivePlaylist = !window.playlistTabsManager || 
+                    window.playlistTabsManager.activePlaylistId === window.playlistTabsManager.viewedPlaylistId;
+                
+                if (playerConfigs.video.files.length === 1 && isActivePlaylist) {
                     if (fileType === 'image') {
                         await loadGeneratorClip('static_picture', 'video', newItem.id, newItem.parameters);
                     } else {
@@ -1119,8 +1179,11 @@ function setupPlaylistContainerDropHandlers() {
                 renderPlaylist('artnet');
                 await updatePlaylist('artnet');
                 
-                // Auto-load and auto-play first item
-                if (playerConfigs.artnet.files.length === 1) {
+                // Auto-load and auto-play first item ONLY if this is the active playlist
+                const isActivePlaylist = !window.playlistTabsManager || 
+                    window.playlistTabsManager.activePlaylistId === window.playlistTabsManager.viewedPlaylistId;
+                
+                if (playerConfigs.artnet.files.length === 1 && isActivePlaylist) {
                     if (fileType === 'image') {
                         await loadGeneratorClip('static_picture', 'artnet', newItem.id, newItem.parameters);
                     } else {
@@ -1143,6 +1206,13 @@ function setupPlaylistContainerDropHandlers() {
 // Load generator as clip into player
 window.loadGeneratorClip = async function(generatorId, playerType = 'video', clipId = null, savedParameters = null) {
     try {
+        // GUARD: Prevent loading clips when viewing non-active playlist
+        if (window.playlistTabsManager && 
+            window.playlistTabsManager.viewedPlaylistId !== window.playlistTabsManager.activePlaylistId) {
+            console.warn(`⚠️ Cannot load generator: Viewing non-active playlist. Activate playlist first or wait for preview player feature.`);
+            return;
+        }
+        
         // Performance: Use Map.get() instead of Array.find()
         const generator = generatorsMap.get(generatorId);
         if (!generator) {
@@ -1601,9 +1671,11 @@ async function loadPlaylist(playerId) {
                     };
                 } else {
                     // Regular video item
+                    // Normalize path separators to forward slashes for consistency
+                    const normalizedPath = actualPath.replace(/\\/g, '/');
                     return {
                         name: actualPath.split('/').pop().split('\\').pop(),
-                        path: actualPath,
+                        path: normalizedPath,
                         id: savedId || crypto.randomUUID() // Use saved UUID or generate new
                     };
                 }
@@ -1692,6 +1764,102 @@ async function loadPlaylist(playerId) {
     loadAllClipLayerCounts(config.files);
 }
 
+/**
+ * Load playlist from formatted response data (matches /api/player/status format)
+ * Used when viewing playlists - processes data already formatted by backend
+ */
+async function loadPlaylistFromResponse(playerId, playerData) {
+    const config = playerConfigs[playerId];
+    if (!config) {
+        console.error(`Unknown player: ${playerId}`);
+        return;
+    }
+    
+    try {
+        // Process playlist data (already formatted like /api/player/status returns)
+        if (playerData.playlist) {
+            config.files = playerData.playlist.map((item, idx) => {
+                const path = item.path;
+                const savedId = item.id;
+                
+                if (!path) {
+                    debug.warn(`Empty path in ${playerId} playlist at index`, idx);
+                    return null;
+                }
+                
+                if (path.startsWith('generator:')) {
+                    // Generator item
+                    const generatorId = item.generator_id || path.replace('generator:', '');
+                    const generator = generatorsMap.get(generatorId);
+                    const generatorName = generator ? generator.name : generatorId;
+                    const params = item.parameters || {};
+                    
+                    return {
+                        path: path,
+                        name: `🌟 ${generatorName}`,
+                        id: savedId || crypto.randomUUID(),
+                        type: 'generator',
+                        generator_id: generatorId,
+                        parameters: params
+                    };
+                } else {
+                    // Regular video item - path already relativized by backend
+                    return {
+                        name: path.split('/').pop().split('\\').pop(),
+                        path: path,
+                        id: savedId || crypto.randomUUID()
+                    };
+                }
+            }).filter(item => item !== null);
+        } else {
+            config.files = [];
+        }
+        
+        // Restore autoplay/loop state
+        config.autoplay = playerData.autoplay !== undefined ? playerData.autoplay : config.autoplay;
+        config.loop = playerData.loop !== undefined ? playerData.loop : config.loop;
+        
+        // Restore current file (index)
+        if (playerData.index !== undefined && playerData.index >= 0 && playerData.index < config.files.length) {
+            config.currentFile = config.files[playerData.index].path;
+        }
+        
+        // Update UI buttons
+        const autoplayBtn = document.getElementById(config.autoplayBtnId);
+        const loopBtn = document.getElementById(config.loopBtnId);
+        if (autoplayBtn) {
+            if (config.autoplay) {
+                autoplayBtn.classList.remove('btn-outline-primary');
+                autoplayBtn.classList.add('btn-primary');
+            } else {
+                autoplayBtn.classList.remove('btn-primary');
+                autoplayBtn.classList.add('btn-outline-primary');
+            }
+        }
+        if (loopBtn) {
+            if (config.loop) {
+                loopBtn.classList.remove('btn-outline-primary');
+                loopBtn.classList.add('btn-primary');
+            } else {
+                loopBtn.classList.remove('btn-primary');
+                loopBtn.classList.add('btn-outline-primary');
+            }
+        }
+        
+        console.log(`✅ Loaded ${playerId} playlist from response:`, config.files.length, 'clips');
+        
+    } catch (error) {
+        console.error(`❌ Failed to load ${playerId} playlist from response:`, error);
+        config.files = [];
+    }
+    
+    renderPlaylist(playerId);
+    
+    // Load layer counts for all clips in background (for badge display)
+    loadAllClipLayerCounts(config.files);
+}
+
+
 // Generic render function - USES GENERIC IMPLEMENTATION
 function renderPlaylist(playlistId) {
     renderPlaylistGeneric(playlistId);
@@ -1709,6 +1877,13 @@ function renderPlaylistGeneric(playlistId) {
             updateFunc: () => updatePlaylist('video'),
             removeFunc: (index) => `removeFromVideoPlaylist(${index})`,
             loadFunc: async (item) => {
+                // Check if viewed playlist is active - only allow loading in active playlist
+                if (window.playlistTabsManager && 
+                    window.playlistTabsManager.viewedPlaylistId !== window.playlistTabsManager.activePlaylistId) {
+                    console.warn('⚠️ Cannot load clip from non-active playlist. Preview player feature coming soon.');
+                    return;
+                }
+                
                 // Load clip and play (called on double-click)
                 playerConfigs.video.currentItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
@@ -1729,6 +1904,13 @@ function renderPlaylistGeneric(playlistId) {
             updateFunc: () => updatePlaylist('artnet'),
             removeFunc: (index) => `removeFromArtnetPlaylist(${index})`,
             loadFunc: async (item) => {
+                // Check if viewed playlist is active - only allow loading in active playlist
+                if (window.playlistTabsManager && 
+                    window.playlistTabsManager.viewedPlaylistId !== window.playlistTabsManager.activePlaylistId) {
+                    console.warn('⚠️ Cannot load clip from non-active playlist. Preview player feature coming soon.');
+                    return;
+                }
+                
                 // Load clip and play (called on double-click)
                 playerConfigs.artnet.currentItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
@@ -1869,14 +2051,19 @@ function renderPlaylistGeneric(playlistId) {
     // Build HTML with playlist items in horizontal row (layers now managed per-clip)
     let itemsHtml = '';
     files.forEach((item, index) => {
+        // Check if viewing the active playlist
+        const isActivePlaylist = window.playlistTabsManager && 
+            window.playlistTabsManager.viewedPlaylistId === window.playlistTabsManager.activePlaylistId;
+        
+        // Only show "currently playing" indicator if viewing the ACTIVE playlist
         // Use clip index ONLY for active state (most reliable for Master/Slave sync)
         // Fallback to clip_id only if index is not available
-        const isActive = cfg.currentClipIndex >= 0 
+        const isActive = isActivePlaylist && (cfg.currentClipIndex >= 0 
             ? (index === cfg.currentClipIndex)
-            : (cfg.currentItemId && item.id === cfg.currentItemId);
+            : (cfg.currentItemId && item.id === cfg.currentItemId));
         
         // Debug: Show comparison values for ALL items when index changes
-        if (cfg.currentClipIndex >= 0) {
+        if (cfg.currentClipIndex >= 0 && isActivePlaylist) {
             debug.log(`🔍 [${playlistId}] item[${index}]: ${item.name.substring(0,20)} | index=${index} vs currentClipIndex=${cfg.currentClipIndex} | isActive=${isActive}`);
         }
         
@@ -2333,6 +2520,13 @@ window.loadFile = async function(playerId, filePath, clipId = null, addToPlaylis
         return;
     }
     
+    // GUARD: Prevent loading clips when viewing non-active playlist
+    if (window.playlistTabsManager && 
+        window.playlistTabsManager.viewedPlaylistId !== window.playlistTabsManager.activePlaylistId) {
+        console.warn(`⚠️ Cannot load clip: Viewing non-active playlist. Activate playlist first or wait for preview player feature.`);
+        return;
+    }
+    
     try {
         debug.log(`📂 Loading file for ${config.name}: ${filePath} (addToPlaylist: ${addToPlaylist})`);
         
@@ -2694,15 +2888,16 @@ window.toggleMasterPlaylist = async function(playerId) {
         const data = await response.json();
         
         if (data.success) {
-            masterPlaylist = data.master_playlist;
+            // API now returns 'master_player' (per-playlist setting)
+            masterPlaylist = data.master_player;
             updateMasterUI();
             
             const message = enabled ? 
-                `👑 ${playerId} is now Master` : 
-                '🔓 Master mode disabled';
+                `👑 ${playerId} is now Master for playlist '${data.playlist_name}'` : 
+                `🔓 Master mode disabled for playlist '${data.playlist_name}'`;
             showToast(message, 'success');
             
-            debug.log(`Master/Slave status: master=${masterPlaylist}, slaves=${data.synced_slaves}`);
+            debug.log(`Master/Slave status updated: master=${masterPlaylist}, playlist=${data.playlist_name}`);
         } else {
             // Revert checkbox on error
             checkbox.checked = !enabled;
@@ -2891,10 +3086,21 @@ async function updatePlaylist(playerId) {
     const files = config.files;
     
     try {
-        const response = await fetch(`${API_BASE}${config.apiBase}/playlist/set`, {
+        // Get the viewed playlist ID - MANDATORY for playlist updates
+        const viewedPlaylistId = window.playlistTabsManager?.viewedPlaylistId;
+        
+        if (!viewedPlaylistId) {
+            console.error('❌ Cannot update playlist: No viewed playlist ID available');
+            return;
+        }
+        
+        // Use playlist-specific endpoint that updates the EXPLICIT playlist by ID
+        const response = await fetch(`/api/playlists/update_player`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                playlist_id: viewedPlaylistId,  // MANDATORY: explicit playlist ID
+                player_id: playerId,
                 playlist: files.map(v => ({
                     path: v.path,
                     id: v.id,  // Save UUID
@@ -2907,9 +3113,62 @@ async function updatePlaylist(playerId) {
             })
         });
         const data = await response.json();
-        // Playlist updated successfully
+        if (!data.success) {
+            console.error(`❌ Failed to update ${config.name} playlist:`, data.error);
+        }
     } catch (error) {
         console.error(`❌ Error updating ${config.name} playlist:`, error);
+    }
+}
+
+// ========================================
+// MULTI-PLAYLIST HELPER FUNCTIONS
+// ========================================
+
+/**
+ * Refresh both playlists from backend after playlist activation/view change
+ */
+async function refreshPlaylistsFromBackend() {
+    try {
+        await loadPlaylist('video');
+        await loadPlaylist('artnet');
+        console.log('✅ Refreshed playlists from backend');
+    } catch (error) {
+        console.error('❌ Failed to refresh playlists:', error);
+    }
+}
+
+/**
+ * Refresh sequencer mode toggle button based on VIEWED playlist
+ */
+async function refreshSequencerToggle() {
+    try {
+        const response = await fetch('/api/sequencer/status');
+        const data = await response.json();
+        
+        if (data.success) {
+            const isSequencerModeActive = data.mode_active;
+            const btn = document.getElementById('sequencerModeBtn');
+            const waveformSection = document.querySelector('.waveform-analyzer-section');
+            
+            if (btn && waveformSection) {
+                window.sequencerModeActive = isSequencerModeActive;
+                
+                if (isSequencerModeActive) {
+                    waveformSection.style.display = 'grid';
+                    btn.classList.remove('btn-outline-secondary');
+                    btn.classList.add('btn-success');
+                    btn.textContent = '🎵 Sequencer: MASTER';
+                } else {
+                    waveformSection.style.display = 'none';
+                    btn.classList.remove('btn-success');
+                    btn.classList.add('btn-outline-secondary');
+                    btn.textContent = '🎵 Sequencer Mode';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('❌ Failed to refresh sequencer toggle:', error);
     }
 }
 
@@ -5230,6 +5489,15 @@ function getLayerBadgeHtml(clipId) {
 async function loadClipLayers(clipId) {
     try {
         const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers`);
+        
+        // If clip not found (404), it means the clip is in a non-active playlist
+        // and hasn't been loaded into the player yet - this is expected
+        if (response.status === 404) {
+            clipLayers[clipId] = [];
+            debug.log(`ℹ️ Clip ${clipId} not loaded yet (in non-active playlist)`);
+            return;
+        }
+        
         const data = await response.json();
         
         if (data.success) {
