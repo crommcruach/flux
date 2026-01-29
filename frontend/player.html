@@ -10,6 +10,13 @@
     <link rel="dns-prefetch" href="/api">
     <link rel="preconnect" href="/api">
     
+    <!-- Preload critical resources -->
+    <link rel="preload" href="libs/bootstrap/css/bootstrap.min.css" as="style">
+    <link rel="preload" href="css/styles.css" as="style">
+    <link rel="preload" href="css/player.css" as="style">
+    <link rel="preload" href="libs/bootstrap/js/bootstrap.bundle.min.js" as="script">
+    <link rel="preload" href="libs/jquery-3.6.0.min.js" as="script">
+    
     <!-- Critical CSS (inline or prioritized) -->
     <link href="libs/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link href="css/styles.css" rel="stylesheet">
@@ -35,9 +42,91 @@
         #videoPreviewImg[src=""] {
             content: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%23000000" width="800" height="600"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="%23667eea"%3E🎬 Loading Preview...%3C/text%3E%3C/svg%3E');
         }
+        
+        /* Preload Overlay */
+        #preloadOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 99999;
+            transition: opacity 0.5s ease-out;
+        }
+        #preloadOverlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .preload-content {
+            text-align: center;
+            color: #fff;
+        }
+        .preload-logo {
+            font-size: 64px;
+            margin-bottom: 20px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        .preload-title {
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .preload-subtitle {
+            font-size: 14px;
+            color: #aaa;
+            margin-bottom: 40px;
+        }
+        .progress-container {
+            width: 400px;
+            max-width: 80vw;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+        }
+        .progress-text {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #667eea;
+            font-weight: 500;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.8; }
+        }
     </style>
 </head>
 <body>
+    <!-- Preload Overlay -->
+    <div id="preloadOverlay">
+        <div class="preload-content">
+            <div class="preload-logo">🎬</div>
+            <div class="preload-title">Flux</div>
+            <div class="preload-subtitle">Loading Player...</div>
+            <div class="progress-container">
+                <div class="progress-bar" id="preloadProgress" style="width: 0%"></div>
+            </div>
+            <div class="progress-text" id="preloadText">Initializing...</div>
+        </div>
+    </div>
+    
     <!-- Centralized Session State Loader (load first!) -->
     <script src="js/session-loader.js" defer></script>
     
@@ -53,11 +142,11 @@
                 <span>📋 Playlist Management</span>
             </div>
             <div class="playlist-management-bar-actions">
+                <button class="btn btn-info btn-sm" onclick="showVideoPlayerSettingsModal()" title="Configure Input Settings">⚙️ Input Settings</button>
                 <button class="btn btn-success btn-sm" onclick="savePlaylists()" title="Save Both Playlists">💾 Save Playlists</button>
                 <button class="btn btn-primary btn-sm" onclick="saveSnapshot()" title="Create Snapshot">📸 Snapshot</button>
                 <button class="btn btn-info btn-sm" onclick="loadPlaylists()" title="Load Both Playlists">📂 Load Playlists</button>
                 <button class="btn btn-warning btn-sm" onclick="loadSnapshotModal()" title="Load Snapshot">🔄 Restore</button>
-                <button class="btn btn-outline-secondary btn-sm" id="sequencerModeBtn" onclick="toggleSequencerMode()" title="Toggle Sequencer Mode">🎵 Sequencer Mode</button>
             </div>
         </div>
         
@@ -116,8 +205,8 @@
                          width="800" height="600"
                          style="width: 100%; height: 100%; object-fit: contain;" 
                          decoding="async" 
-                         loading="eager"
-                         fetchpriority="high">
+                         loading="lazy"
+                         fetchpriority="low">
                 </div>
                 <div class="player-controls">
                     <button class="btn btn-secondary btn-sm" onclick="previous('video')" title="Previous Video">⏮️</button>
@@ -160,7 +249,7 @@
             <div class="preview-box">
                 <div class="preview-video" id="artnetPreview">
                     <canvas id="artnetPreviewVideo" style="width: 100%; height: 100%; object-fit: contain; display: none;"></canvas>
-                    <img src="" alt="Art-Net Preview" id="artnetPreviewImg" style="width: 100%; height: 100%; object-fit: contain;" decoding="async" loading="eager">
+                    <img src="" alt="Art-Net Preview" id="artnetPreviewImg" style="width: 100%; height: 100%; object-fit: contain;" decoding="async" loading="lazy" fetchpriority="low">
                 </div>
                 <div class="player-controls">
                     <button class="btn btn-secondary btn-sm" onclick="previous('artnet')" title="Previous Video">⏮️</button>
@@ -371,14 +460,7 @@
 
 
 
-    <!-- Toast Component -->
-    <script src="js/toast-loader.js"></script>
-
-    <script src="libs/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="libs/ion-rangeslider/js/ion.rangeSlider.min.js"></script>
-    <script src="libs/socket.io.min.js"></script>
-    <script src="js/triple-slider.js"></script>
+    <!-- Modals (before scripts to avoid DOM manipulation delays) -->
     
     <!-- Video Player Settings Modal -->
     <div class="modal fade" id="videoPlayerSettingsModal" tabindex="-1">
@@ -471,24 +553,111 @@
         </div>
     </div>
 
-    <script src="js/components/color-picker.js"></script>
-    <script src="js/circular-slider.js"></script>
-    <script src="js/sequences.js"></script>
-    <script src="js/bpm-widget.js"></script>
-    <script src="js/components/playlist-tabs.js"></script>
+    <!-- Load Scripts After DOM Structure (optimized order) -->
+    <!-- Toast Component -->
+    <script src="js/toast-loader.js" defer></script>
+
+    <!-- Critical Libraries (load early but don't block parsing) -->
+    <script src="libs/jquery-3.6.0.min.js" defer></script>
+    <script src="libs/bootstrap/js/bootstrap.bundle.min.js" defer></script>
+    
+    <!-- Non-critical libraries (fully async) -->
+    <script src="libs/ion-rangeslider/js/ion.rangeSlider.min.js" defer></script>
+    <script src="libs/socket.io.min.js" defer></script>
+    <script src="js/triple-slider.js" defer></script>
+
+    <!-- Component Scripts (deferred for faster initial load) -->
+    <script src="js/components/color-picker.js" defer></script>
+    <script src="js/circular-slider.js" defer></script>
+    <script src="js/sequences.js" defer></script>
+    <script src="js/bpm-widget.js" defer></script>
+    <script src="js/components/playlist-tabs.js" defer></script>
     <script src="js/player.js" type="module"></script>
     <script type="module" src="js/waveform-analyzer.js"></script>
+
     <script>
-        // Sequencer Mode Toggle (exposed on window for state restoration)
+        // Preload Progress Tracker (Optimized)
+        (function() {
+            const progressBar = document.getElementById('preloadProgress');
+            const progressText = document.getElementById('preloadText');
+            const overlay = document.getElementById('preloadOverlay');
+            
+            let loadedResources = 0;
+            const scripts = document.querySelectorAll('script[src]');
+            const stylesheets = document.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]');
+            const totalResources = scripts.length + stylesheets.length + 2; // +2 for DOM and final load
+            
+            const startTime = performance.now();
+            
+            function updateProgress(message) {
+                loadedResources++;
+                const percent = Math.min((loadedResources / totalResources) * 100, 100);
+                progressBar.style.width = percent + '%';
+                
+                if (message) {
+                    progressText.textContent = message;
+                } else {
+                    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+                    progressText.textContent = `Loading... ${Math.round(percent)}% (${elapsed}s)`;
+                }
+                
+                if (loadedResources >= totalResources) {
+                    const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+                    progressText.textContent = `Ready! (${totalTime}s)`;
+                    console.log(`⚡ Page loaded in ${totalTime}s`);
+                    
+                    setTimeout(() => {
+                        overlay.classList.add('hidden');
+                        setTimeout(() => overlay.remove(), 500);
+                    }, 300);
+                }
+            }
+            
+            // Track resource loading with performance API
+            scripts.forEach(script => {
+                script.addEventListener('load', () => updateProgress());
+                script.addEventListener('error', (e) => {
+                    console.warn('Failed to load:', script.src);
+                    updateProgress('Error loading resource');
+                });
+            });
+            
+            stylesheets.forEach(style => {
+                style.addEventListener('load', () => updateProgress());
+                style.addEventListener('error', () => updateProgress('Error loading style'));
+            });
+            
+            // Track DOM ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => updateProgress('DOM Ready'));
+            } else {
+                updateProgress('DOM Ready');
+            }
+            
+            // Track final window load
+            window.addEventListener('load', () => updateProgress('Complete'));
+            
+            // Fallback: hide after 10 seconds if something goes wrong
+            setTimeout(() => {
+                if (!overlay.classList.contains('hidden')) {
+                    console.warn('Preload timeout - forcing hide');
+                    overlay.classList.add('hidden');
+                    setTimeout(() => overlay.remove(), 500);
+                }
+            }, 10000);
+        })();
+    </script>
+    
+    <script>
+        // Sequencer Mode Toggle (exposed on window for playlist context menu)
         window.sequencerModeActive = false;
         
         async function toggleSequencerMode() {
             window.sequencerModeActive = !window.sequencerModeActive;
             const waveformSection = document.querySelector('.waveform-analyzer-section');
-            const btn = document.getElementById('sequencerModeBtn');
             
             try {
-                // Call backend API to enable/disable master mode
+                // Call backend API to enable/disable master mode (playlist-aware)
                 const response = await fetch('/api/sequencer/mode', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -500,16 +669,15 @@
                 if (result.success) {
                     if (window.sequencerModeActive) {
                         waveformSection.style.display = 'grid';
-                        btn.classList.remove('btn-outline-secondary');
-                        btn.classList.add('btn-success');
-                        btn.textContent = '🎵 Sequencer: MASTER';
                         console.log('✅ Sequencer mode ENABLED (MASTER)');
                     } else {
                         waveformSection.style.display = 'none';
-                        btn.classList.remove('btn-success');
-                        btn.classList.add('btn-outline-secondary');
-                        btn.textContent = '🎵 Sequencer Mode';
                         console.log('✅ Sequencer mode DISABLED');
+                    }
+                    
+                    // Update master/slave UI to reflect sequencer mode change
+                    if (typeof window.updateMasterUI === 'function') {
+                        window.updateMasterUI();
                     }
                 } else {
                     console.error('Failed to toggle sequencer mode');

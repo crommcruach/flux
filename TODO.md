@@ -16,12 +16,31 @@
 - ✅ 18 effect plugins (color, time, motion, blur, blending)
 - ✅ Audio engine migration (PyAV + sounddevice)
 - ✅ Player.html LCP optimization (5.96s → ~1.3s, 78% improvement)
+- ✅ Rudimentary output routing (foundation for multi-output system)
 
 **Priority Levels:**
 - 🔥 **P1 - Critical** (28-40h): Core features for professional VJ workflow
 - ⚡ **P2 - High Value** (32-46h): Features that unlock major use cases
 - 🎯 **P3 - Enhancement** (30-42h): Quality of life & polish
 - 🔬 **P4 - Advanced** (60-90h): Complex features for specialized setups
+- 🏗️ **P5 - Architecture** (80-120h): Major system redesigns and refactoring
+
+---
+
+## 🏗️ P5 - ARCHITECTURE REDESIGN (~80-120h)
+
+### 5.1 🖥️ Multi-Output Player Architecture (~80-120h) 🏗️
+
+**Status:** ✅ Foundation implemented (rudimentary output routing)  
+**Documentation:** 📄 [MULTI_OUTPUT_ARCHITECTURE.md](docs/MULTI_OUTPUT_ARCHITECTURE.md)
+
+Complete redesign for N-output parameter-based system enabling:
+- Multiple simultaneous outputs (preview, main, Art-Net, NDI, SDI)
+- Flexible playlist-to-output routing
+- Independent resolution/fps per output
+- Dynamic output management
+
+See [MULTI_OUTPUT_ARCHITECTURE.md](docs/MULTI_OUTPUT_ARCHITECTURE.md) for detailed implementation plan.
 
 ---
 

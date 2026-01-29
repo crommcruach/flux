@@ -159,35 +159,53 @@ async function init() {
                 await loadPlaylistFromResponse('video', playlistData.video);
                 await loadPlaylistFromResponse('artnet', playlistData.artnet);
                 
-                // Update master/slave UI based on this playlist's master_player setting
+                // Update sequencer mode state FIRST (before updating master UI)
+                if (playlistData.sequencer_mode !== undefined) {
+                    const isSequencerModeActive = playlistData.sequencer_mode;
+                    const waveformSection = document.querySelector('.waveform-analyzer-section');
+                    
+                    window.sequencerModeActive = isSequencerModeActive;
+                    
+                    if (waveformSection) {
+                        // Show/hide waveform section based on sequencer mode
+                        waveformSection.style.display = isSequencerModeActive ? 'grid' : 'none';
+                    }
+                    
+                    debug.log(`🎵 Updated sequencer state for playlist: ${playlistData.name}, mode=${isSequencerModeActive}`);
+                }
+                
+                // Update master/slave UI based on this playlist's master_player setting AND sequencer mode
                 if (playlistData.master_player !== undefined) {
                     masterPlaylist = playlistData.master_player;
                     updateMasterUI();
-                    debug.log(`👑 Updated master/slave UI for playlist: ${playlistData.name}, master=${masterPlaylist}`);
+                    debug.log(`👑 Updated master/slave UI for playlist: ${playlistData.name}, master=${masterPlaylist}, sequencer=${window.sequencerModeActive}`);
                 }
                 
-                // Update sequencer mode UI based on THIS playlist's sequencer_mode setting
-                if (playlistData.sequencer_mode !== undefined) {
-                    const isSequencerModeActive = playlistData.sequencer_mode;
-                    const btn = document.getElementById('sequencerModeBtn');
-                    const waveformSection = document.querySelector('.waveform-analyzer-section');
-                    
-                    if (btn && waveformSection) {
-                        window.sequencerModeActive = isSequencerModeActive;
-                        
-                        if (isSequencerModeActive) {
-                            waveformSection.style.display = 'grid';
-                            btn.classList.remove('btn-outline-secondary');
-                            btn.classList.add('btn-success');
-                            btn.textContent = '🎵 Sequencer: MASTER';
-                        } else {
-                            waveformSection.style.display = 'none';
-                            btn.classList.remove('btn-success');
-                            btn.classList.add('btn-outline-secondary');
-                            btn.textContent = '🎵 Sequencer Mode';
-                        }
-                        debug.log(`🎵 Updated sequencer UI for playlist: ${playlistData.name}, mode=${isSequencerModeActive}`);
-                    }
+                // Refresh effects panels to show this playlist's effects
+                // When viewing non-active playlist, render from playlist data instead of fetching from player
+                if (playlistData.video.global_effects !== undefined) {
+                    videoEffects = playlistData.video.global_effects;
+                    renderVideoEffects();
+                } else {
+                    await refreshVideoEffects();
+                }
+                
+                if (playlistData.artnet.global_effects !== undefined) {
+                    artnetEffects = playlistData.artnet.global_effects;
+                    renderArtnetEffects();
+                } else {
+                    await refreshArtnetEffects();
+                }
+                
+                // Refresh transition config to show this playlist's transition settings
+                if (playlistData.video.transition_config !== undefined && transitionMenus.video) {
+                    transitionMenus.video.setConfig(playlistData.video.transition_config);
+                    debug.log(`🎬 Updated video transition UI from playlist data:`, playlistData.video.transition_config);
+                }
+                
+                if (playlistData.artnet.transition_config !== undefined && transitionMenus.artnet) {
+                    transitionMenus.artnet.setConfig(playlistData.artnet.transition_config);
+                    debug.log(`🎬 Updated artnet transition UI from playlist data:`, playlistData.artnet.transition_config);
                 }
             };
             
@@ -1818,6 +1836,11 @@ async function loadPlaylistFromResponse(playerId, playerData) {
         // Restore autoplay/loop state
         config.autoplay = playerData.autoplay !== undefined ? playerData.autoplay : config.autoplay;
         config.loop = playerData.loop !== undefined ? playerData.loop : config.loop;
+        
+        // Restore transition config
+        if (playerData.transition_config) {
+            config.transitionConfig = playerData.transition_config;
+        }
         
         // Restore current file (index)
         if (playerData.index !== undefined && playerData.index >= 0 && playerData.index < config.files.length) {
