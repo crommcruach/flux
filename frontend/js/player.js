@@ -100,8 +100,9 @@ function initEarlyPreviewStream() {
     if (previewImg && !previewImg.src) {
         // Start MJPEG stream immediately without waiting for full init
         const apiBase = window.API_BASE || '';
-        previewImg.src = `${apiBase}/api/preview/stream`;
-        console.log('🚀 Early preview stream initialized');
+        // NEW: Use generalized output streaming endpoint
+        previewImg.src = `${apiBase}/api/outputs/video/stream/preview_virtual?fps=25&quality=85`;
+        console.log('🚀 Early preview stream initialized (new output-based endpoint)');
     }
 }
 
@@ -158,6 +159,63 @@ async function init() {
                 // Load the viewed playlist data using same method as initial load
                 await loadPlaylistFromResponse('video', playlistData.video);
                 await loadPlaylistFromResponse('artnet', playlistData.artnet);
+                
+                // Check if this is a non-active playlist
+                const isActive = playlistId === window.playlistTabsManager.activePlaylistId;
+                
+                // If viewing non-active playlist with clips, load into preview player
+                if (!isActive && playlistData.video.playlist && playlistData.video.playlist.length > 0) {
+                    console.log('🎭 Non-active playlist - switching to live preview mode');
+                    const firstClip = playlistData.video.playlist[0];
+                    
+                    try {
+                        const response = await fetch(`${API_BASE}/api/playlists/${playlistId}/preview-clip`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                player_id: 'video',
+                                clip_index: 0,
+                                clip_id: firstClip.id
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        if (result.success && result.mode === 'preview_live') {
+                            console.log('✅ Live preview mode activated');
+                            
+                            // Switch to live preview streams
+                            const videoPreviewImg = document.getElementById('videoPreviewImg');
+                            const artnetPreviewImg = document.getElementById('artnetPreviewImg');
+                            
+                            if (videoPreviewImg) {
+                                videoPreviewImg.src = `${API_BASE}/api/outputs/video/stream/preview_live?t=${Date.now()}`;
+                                videoPreviewImg.title = 'Live Preview (Active playlist continues outputting)';
+                            }
+                            
+                            if (artnetPreviewImg) {
+                                artnetPreviewImg.src = `${API_BASE}/api/outputs/artnet/stream/preview_live?t=${Date.now()}`;
+                                artnetPreviewImg.title = 'Live Preview (Active playlist continues outputting)';
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('⚠️ Failed to load live preview:', error);
+                    }
+                } else if (isActive) {
+                    // Active playlist - use main output streams
+                    console.log('✅ Active playlist - using main output streams');
+                    const videoPreviewImg = document.getElementById('videoPreviewImg');
+                    const artnetPreviewImg = document.getElementById('artnetPreviewImg');
+                    
+                    if (videoPreviewImg) {
+                        videoPreviewImg.src = `${API_BASE}/api/outputs/video/stream/preview_virtual?t=${Date.now()}`;
+                        videoPreviewImg.title = 'Active Output';
+                    }
+                    
+                    if (artnetPreviewImg) {
+                        artnetPreviewImg.src = `${API_BASE}/api/outputs/artnet/stream/preview_virtual?t=${Date.now()}`;
+                        artnetPreviewImg.title = 'Active Output';
+                    }
+                }
                 
                 // Update sequencer mode state FIRST (before updating master UI)
                 if (playlistData.sequencer_mode !== undefined) {
@@ -655,7 +713,17 @@ async function updateCurrentFromPlayer(playerId) {
                 if (clipIndexChanged) {
                     debug.log(`✅ [${playerId}] Re-rendering playlist - index changed to ${newClipIndex}`);
                 }
-                renderPlaylist(playerId);
+                
+                // Only re-render if we're viewing the active playlist
+                // Don't re-render if viewing a non-active playlist (preview mode)
+                const isViewingActivePlaylist = !window.playlistTabsManager || 
+                    window.playlistTabsManager.viewedPlaylistId === window.playlistTabsManager.activePlaylistId;
+                
+                if (isViewingActivePlaylist) {
+                    renderPlaylist(playerId);
+                } else {
+                    debug.log(`⏭️ [${playerId}] Skipping render - viewing non-active playlist`);
+                }
             }
             
             // Master/slave state is now per-playlist and updated when viewing playlists
@@ -1563,9 +1631,9 @@ function startPreviewStream() {
     
     // Check if stream already started (by early init)
     const currentSrc = previewImg.src;
-    const expectedSrc = `${API_BASE}/api/preview/stream`;
-    if (currentSrc && currentSrc.includes('/api/preview/stream')) {
-        debug.log(`MJPEG preview stream already running`);
+    const expectedSrc = `${API_BASE}/api/outputs/video/stream/preview_virtual?fps=25&quality=85`;
+    if (currentSrc && currentSrc.includes('/api/outputs/video/stream/preview_virtual')) {
+        debug.log(`MJPEG preview stream already running (new output endpoint)`);
         return;
     }
     
@@ -1576,7 +1644,7 @@ function startPreviewStream() {
     previewImg.style.display = 'block';
     previewImg.src = expectedSrc;
     
-    debug.log(`MJPEG preview stream started`);
+    debug.log(`MJPEG preview stream started (new output-based endpoint)`);
 }
 
 function stopPreviewStream() {
@@ -1900,14 +1968,49 @@ function renderPlaylistGeneric(playlistId) {
             updateFunc: () => updatePlaylist('video'),
             removeFunc: (index) => `removeFromVideoPlaylist(${index})`,
             loadFunc: async (item) => {
-                // Check if viewed playlist is active - only allow loading in active playlist
-                if (window.playlistTabsManager && 
-                    window.playlistTabsManager.viewedPlaylistId !== window.playlistTabsManager.activePlaylistId) {
-                    console.warn('⚠️ Cannot load clip from non-active playlist. Preview player feature coming soon.');
+                // Check if viewed playlist is active
+                const isActive = window.playlistTabsManager && 
+                    window.playlistTabsManager.viewedPlaylistId === window.playlistTabsManager.activePlaylistId;
+                
+                if (!isActive) {
+                    // Live preview mode - load clip into preview player
+                    console.log('🎭 Live preview mode: Loading clip into preview player');
+                    const playlistId = window.playlistTabsManager.viewedPlaylistId;
+                    const clipIndex = playerConfigs.video.files.indexOf(item);
+                    
+                    try {
+                        const response = await fetch(`${API_BASE}/api/playlists/${playlistId}/preview-clip`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                player_id: 'video',
+                                clip_index: clipIndex,
+                                clip_id: item.id
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        if (result.success && result.mode === 'preview_live') {
+                            console.log('✅ Live preview loaded:', result.message);
+                            showToast(`Preview: ${item.path || item.generator_id}`, 'info');
+                            
+                            // Ensure preview stream is connected
+                            const previewImg = document.getElementById('videoPreviewImg');
+                            if (previewImg && !previewImg.src.includes('preview_live')) {
+                                previewImg.src = `${API_BASE}/api/outputs/video/stream/preview_live?t=${Date.now()}`;
+                            }
+                        } else {
+                            console.error('❌ Live preview failed:', result.error);
+                            showToast(`Preview failed: ${result.error || 'Unknown error'}`, 'error');
+                        }
+                    } catch (error) {
+                        console.error('❌ Preview error:', error);
+                        showToast('Preview failed', 'error');
+                    }
                     return;
                 }
                 
-                // Load clip and play (called on double-click)
+                // Active playlist - load normally
                 playerConfigs.video.currentItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'video', item.id, item.parameters);
@@ -1927,14 +2030,49 @@ function renderPlaylistGeneric(playlistId) {
             updateFunc: () => updatePlaylist('artnet'),
             removeFunc: (index) => `removeFromArtnetPlaylist(${index})`,
             loadFunc: async (item) => {
-                // Check if viewed playlist is active - only allow loading in active playlist
-                if (window.playlistTabsManager && 
-                    window.playlistTabsManager.viewedPlaylistId !== window.playlistTabsManager.activePlaylistId) {
-                    console.warn('⚠️ Cannot load clip from non-active playlist. Preview player feature coming soon.');
+                // Check if viewed playlist is active
+                const isActive = window.playlistTabsManager && 
+                    window.playlistTabsManager.viewedPlaylistId === window.playlistTabsManager.activePlaylistId;
+                
+                if (!isActive) {
+                    // Live preview mode - load clip into preview player
+                    console.log('🎭 Live preview mode: Loading clip into preview player');
+                    const playlistId = window.playlistTabsManager.viewedPlaylistId;
+                    const clipIndex = playerConfigs.artnet.files.indexOf(item);
+                    
+                    try {
+                        const response = await fetch(`${API_BASE}/api/playlists/${playlistId}/preview-clip`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                player_id: 'artnet',
+                                clip_index: clipIndex,
+                                clip_id: item.id
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        if (result.success && result.mode === 'preview_live') {
+                            console.log('✅ Live preview loaded:', result.message);
+                            showToast(`Preview: ${item.path || item.generator_id}`, 'info');
+                            
+                            // Ensure preview stream is connected
+                            const artnetPreviewImg = document.getElementById('artnetPreviewImg');
+                            if (artnetPreviewImg && !artnetPreviewImg.src.includes('preview_live')) {
+                                artnetPreviewImg.src = `${API_BASE}/api/outputs/artnet/stream/preview_live?t=${Date.now()}`;
+                            }
+                        } else {
+                            console.error('❌ Live preview failed:', result.error);
+                            showToast(`Preview failed: ${result.error || 'Unknown error'}`, 'error');
+                        }
+                    } catch (error) {
+                        console.error('❌ Preview error:', error);
+                        showToast('Preview failed', 'error');
+                    }
                     return;
                 }
                 
-                // Load clip and play (called on double-click)
+                // Active playlist - load normally
                 playerConfigs.artnet.currentItemId = item.id;
                 if (item.type === 'generator' && item.generator_id) {
                     await loadGeneratorClip(item.generator_id, 'artnet', item.id, item.parameters);
@@ -3117,6 +3255,10 @@ async function updatePlaylist(playerId) {
             return;
         }
         
+        // Check if this is a non-active playlist
+        const isActive = viewedPlaylistId === window.playlistTabsManager?.activePlaylistId;
+        const shouldLoadPreview = !isActive && files.length > 0 && playerId === 'video';
+        
         // Use playlist-specific endpoint that updates the EXPLICIT playlist by ID
         const response = await fetch(`/api/playlists/update_player`, {
             method: 'POST',
@@ -3138,6 +3280,37 @@ async function updatePlaylist(playerId) {
         const data = await response.json();
         if (!data.success) {
             console.error(`❌ Failed to update ${config.name} playlist:`, data.error);
+        } else if (shouldLoadPreview) {
+            // For non-active playlists, load the first clip for preview
+            console.log('🔍 Loading preview for non-active playlist');
+            const firstClip = files[0];
+            try {
+                const previewResponse = await fetch(`${API_BASE}/api/playlists/${viewedPlaylistId}/preview-clip`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        player_id: playerId,
+                        clip_index: 0,
+                        clip_id: firstClip.id
+                    })
+                });
+                
+                const previewResult = await previewResponse.json();
+                if (previewResult.success && previewResult.mode === 'preview_live') {
+                    console.log('✅ Live preview updated after playlist change');
+                    
+                    // Switch to live preview streams
+                    const previewImg = playerId === 'video' ? 
+                        document.getElementById('videoPreviewImg') : 
+                        document.getElementById('artnetPreviewImg');
+                    if (previewImg) {
+                        previewImg.src = `${API_BASE}/api/outputs/${playerId}/stream/preview_live?t=${Date.now()}`;
+                        previewImg.title = 'Live Preview (Active playlist continues outputting)';
+                    }
+                }
+            } catch (error) {
+                console.warn('⚠️ Failed to load preview clip:', error);
+            }
         }
     } catch (error) {
         console.error(`❌ Error updating ${config.name} playlist:`, error);
@@ -6353,7 +6526,19 @@ function showPlaylistContextMenu(x, y, playlistId, index, fileItem) {
     
     const hasCopiedClip = clipboardClip !== null;
     
+    // Check if we're viewing a non-active playlist
+    const viewedPlaylistId = window.playlistTabsManager?.viewedPlaylistId;
+    const activePlaylistId = window.playlistTabsManager?.activePlaylistId;
+    const isNonActive = viewedPlaylistId && activePlaylistId && viewedPlaylistId !== activePlaylistId;
+    
     menu.innerHTML = `
+        ${isNonActive ? `
+        <div class="context-menu-item" data-action="takeover-preview">
+            <span>🎬 Live Preview This Clip</span>
+            <small>Pause active, play on output</small>
+        </div>
+        <div class="context-menu-separator"></div>
+        ` : ''}
         <div class="context-menu-item" data-action="clone">
             <span>🔄 Clone</span>
             <small>Full copy with effects & layers</small>
@@ -6407,6 +6592,10 @@ function showPlaylistContextMenu(x, y, playlistId, index, fileItem) {
         
         try {
             switch (action) {
+                case 'takeover-preview':
+                    // Start takeover preview with this specific clip (no separate window)
+                    await window.startTakeoverPreview(viewedPlaylistId, null, index);
+                    break;
                 case 'clone':
                     await clonePlaylistItem(playlistId, index, fileItem);
                     break;
@@ -6675,6 +6864,186 @@ async function saveVideoPlayerSettings() {
 // Make functions globally accessible
 window.showVideoPlayerSettingsModal = showVideoPlayerSettingsModal;
 window.saveVideoPlayerSettings = saveVideoPlayerSettings;
+
+// ========================================
+// TAKEOVER PREVIEW MODE
+// ========================================
+
+/**
+ * Start takeover preview mode: Pause active playlist and play preview playlist on output
+ */
+async function startTakeoverPreview(playlistId, playerType = null, clipIndex = 0) {
+    try {
+        console.log(`🎬 Starting takeover preview for playlist ${playlistId}${playerType ? ` (${playerType} only)` : ''} at clip ${clipIndex}`);
+        
+        const response = await fetch(`${API_BASE}/api/playlists/${playlistId}/takeover-preview/start`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                player_id: playerType,  // null = both players
+                clip_index: clipIndex   // Start at this clip
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log('✅ Takeover preview started:', result);
+            showToast(`🎬 Live Preview: ${result.preview_playlist} (Output taken over)`, 'success');
+            
+            // Switch preview images to show main output (takeover uses main players)
+            const videoPreviewImg = document.getElementById('videoPreviewImg');
+            const artnetPreviewImg = document.getElementById('artnetPreviewImg');
+            
+            if (videoPreviewImg) {
+                videoPreviewImg.src = `${API_BASE}/api/outputs/video/stream/preview_virtual?t=${Date.now()}`;
+                videoPreviewImg.title = 'Output (Takeover Preview Active)';
+            }
+            
+            if (artnetPreviewImg) {
+                artnetPreviewImg.src = `${API_BASE}/api/outputs/artnet/stream/preview_virtual?t=${Date.now()}`;
+                artnetPreviewImg.title = 'Output (Takeover Preview Active)';
+            }
+            
+            // Update UI to show takeover mode
+            updateTakeoverPreviewUI(true, playlistId);
+            
+            return true;
+        } else {
+            console.error('❌ Failed to start takeover preview:', result.error);
+            showToast(`Failed to start live preview: ${result.error}`, 'error');
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Takeover preview error:', error);
+        showToast('Failed to start live preview', 'error');
+        return false;
+    }
+}
+
+/**
+ * Stop takeover preview mode and restore active playlist
+ */
+async function stopTakeoverPreview() {
+    try {
+        console.log('🛑 Stopping takeover preview...');
+        
+        const response = await fetch(`${API_BASE}/api/playlists/takeover-preview/stop`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log('✅ Takeover preview stopped:', result);
+            showToast(`▶️ Restored: ${result.active_playlist}`, 'success');
+            
+            // Update UI to remove takeover mode indicator
+            updateTakeoverPreviewUI(false);
+            
+            return true;
+        } else {
+            console.error('❌ Failed to stop takeover preview:', result.error);
+            showToast(`Failed to stop live preview: ${result.error}`, 'error');
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Stop takeover preview error:', error);
+        showToast('Failed to stop live preview', 'error');
+        return false;
+    }
+}
+
+/**
+ * Check takeover preview status
+ */
+async function checkTakeoverPreviewStatus() {
+    try {
+        const response = await fetch(`${API_BASE}/api/playlists/takeover-preview/status`);
+        const result = await response.json();
+        
+        if (result.success && result.takeover_active) {
+            return result.state;
+        }
+        return null;
+    } catch (error) {
+        console.error('❌ Check takeover status error:', error);
+        return null;
+    }
+}
+
+/**
+ * Update UI to show takeover preview mode
+ */
+function updateTakeoverPreviewUI(active, playlistId = null) {
+    // Add visual indicator to show takeover mode is active
+    const container = document.getElementById('playlistTabsContainer');
+    if (!container) return;
+    
+    if (active) {
+        // Add takeover indicator
+        let indicator = document.getElementById('takeoverPreviewIndicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'takeoverPreviewIndicator';
+            indicator.className = 'takeover-preview-indicator';
+            indicator.innerHTML = `
+                <span class="takeover-text">🎬 LIVE PREVIEW MODE</span>
+                <button class="btn btn-sm btn-danger" onclick="stopTakeoverPreview()">Stop & Restore</button>
+            `;
+            container.parentElement.insertBefore(indicator, container);
+        }
+    } else {
+        // Remove takeover indicator
+        const indicator = document.getElementById('takeoverPreviewIndicator');
+        if (indicator) {
+            indicator.remove();
+        }
+    }
+}
+
+/**
+ * Toggle takeover preview for viewed playlist
+ */
+async function toggleTakeoverPreview() {
+    const status = await checkTakeoverPreviewStatus();
+    
+    if (status) {
+        // Already active - stop it
+        await stopTakeoverPreview();
+    } else {
+        // Start takeover preview for viewed playlist
+        const viewedPlaylistId = window.playlistTabsManager?.viewedPlaylistId;
+        const activePlaylistId = window.playlistTabsManager?.activePlaylistId;
+        
+        if (!viewedPlaylistId) {
+            showToast('No playlist selected', 'warning');
+            return;
+        }
+        
+        if (viewedPlaylistId === activePlaylistId) {
+            showToast('Cannot preview active playlist', 'info');
+            return;
+        }
+        
+        await startTakeoverPreview(viewedPlaylistId);
+    }
+}
+
+// Export functions
+window.startTakeoverPreview = startTakeoverPreview;
+window.stopTakeoverPreview = stopTakeoverPreview;
+window.checkTakeoverPreviewStatus = checkTakeoverPreviewStatus;
+window.toggleTakeoverPreview = toggleTakeoverPreview;
+
+// Check takeover status on load
+document.addEventListener('DOMContentLoaded', async () => {
+    const status = await checkTakeoverPreviewStatus();
+    if (status) {
+        updateTakeoverPreviewUI(true, status.preview_playlist_id);
+    }
+});
 
 // Cleanup
 window.addEventListener('beforeunload', () => {

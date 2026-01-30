@@ -7,6 +7,7 @@ Separates ACTIVE playlist (controls playback) from VIEWED playlist (shown in GUI
 
 import os
 import uuid
+import time
 from flask import request, jsonify
 from .logger import get_logger
 
@@ -316,13 +317,17 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                             "playlist": format_playlist_for_gui(viewed.players['video'].to_dict(), video_dir),
                             "autoplay": viewed.players['video'].autoplay,
                             "loop": viewed.players['video'].loop,
-                            "index": viewed.players['video'].index
+                            "index": viewed.players['video'].index,
+                            "transition_config": viewed.players['video'].transition_config,
+                            "global_effects": viewed.players['video'].global_effects
                         },
                         "artnet": {
                             "playlist": format_playlist_for_gui(viewed.players['artnet'].to_dict(), video_dir),
                             "autoplay": viewed.players['artnet'].autoplay,
                             "loop": viewed.players['artnet'].loop,
-                            "index": viewed.players['artnet'].index
+                            "index": viewed.players['artnet'].index,
+                            "transition_config": viewed.players['artnet'].transition_config,
+                            "global_effects": viewed.players['artnet'].global_effects
                         },
                         "sequencer": viewed.sequencer
                     },
@@ -343,6 +348,9 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
         If the specified playlist is also active, changes are applied to live player.
         """
         try:
+            from .clip_registry import get_clip_registry
+            clip_registry = get_clip_registry()
+            
             data = request.get_json()
             playlist_id = data.get('playlist_id')
             player_id = data.get('player_id')
@@ -375,6 +383,9 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
             for item in playlist_data:
                 path = item.get('path', '')
                 clip_id = item.get('id')
+                item_type = item.get('type', 'video')
+                generator_id = item.get('generator_id')
+                parameters = item.get('parameters', {})
                 
                 if not path:
                     continue
@@ -390,7 +401,32 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                     try:
                         abs_path = os.path.join(video_dir, path)
                         clips.append(abs_path)
-                        clip_ids.append(clip_id or str(uuid.uuid4()))
+                        
+                        # Generate or use provided clip_id
+                        final_clip_id = clip_id or str(uuid.uuid4())
+                        clip_ids.append(final_clip_id)
+                        
+                        # Register clip in clip_registry if not already registered
+                        # This ensures default effects (transport, transform) are applied
+                        if final_clip_id not in clip_registry.clips:
+                            relative_path = os.path.relpath(abs_path, video_dir) if not abs_path.startswith('generator:') else abs_path
+                            metadata = {'type': item_type, 'generator_id': generator_id, 'parameters': parameters} if item_type == 'generator' else {}
+                            
+                            # Register the clip (this applies default effects automatically)
+                            registered_id = clip_registry.register_clip(
+                                player_id,
+                                abs_path,
+                                relative_path,
+                                metadata
+                            )
+                            
+                            # If registered_id differs from final_clip_id, update the registry
+                            if registered_id != final_clip_id:
+                                clip_registry.clips[final_clip_id] = clip_registry.clips[registered_id]
+                                clip_registry.clips[final_clip_id]['clip_id'] = final_clip_id
+                                del clip_registry.clips[registered_id]
+                                logger.debug(f"📌 Registered clip {final_clip_id} with default effects")
+                        
                     except:
                         logger.warning(f"Failed to convert path: {path}")
                         continue
@@ -428,9 +464,7 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
             # Save to session state WITHOUT capturing active playlist
             # (we just explicitly updated the playlist state above)
             from .session_state import get_session_state
-            from .clip_registry import get_clip_registry
             session_state = get_session_state()
-            clip_registry = get_clip_registry()
             session_state.save_without_capture(player_manager, clip_registry)
             
             logger.info(f"Updated {player_id} playlist in '{target_playlist.name}' (id={playlist_id}, active={is_active})")
@@ -504,4 +538,235 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
             logger.error(f"Failed to save state: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
     
-    logger.info("Multi-Playlist API routes registered")
+    # ========================================
+    # CLIP PREVIEW (for non-active playlists)
+    # ========================================
+    
+    @app.route('/api/playlists/<playlist_id>/preview-clip', methods=['POST'], endpoint='multi_preview_clip')
+    def preview_clip(playlist_id):
+        """
+        Load and preview a clip from any playlist (active or inactive).
+        Creates a temporary preview stream for non-active playlist clips.
+        
+        Request body:
+            {
+                "player_id": "video" or "artnet",
+                "clip_index": 0,  // Index in playlist
+                "clip_id": "optional-clip-id"  // Alternative to index
+            }
+        """
+        try:
+            data = request.get_json()
+            player_id = data.get('player_id', 'video')
+            clip_index = data.get('clip_index')
+            clip_id = data.get('clip_id')
+            
+            if clip_index is None and not clip_id:
+                return jsonify({
+                    "success": False,
+                    "error": "Either clip_index or clip_id is required"
+                }), 400
+            
+            playlist_system = get_playlist_system()
+            if not playlist_system:
+                return jsonify({"success": False, "error": "Playlist system not initialized"}), 500
+            
+            # Get the playlist
+            playlist = playlist_system.get_playlist(playlist_id)
+            if not playlist:
+                return jsonify({"success": False, "error": f"Playlist {playlist_id} not found"}), 404
+            
+            # Get player state
+            if player_id not in playlist.players:
+                return jsonify({"success": False, "error": f"Player {player_id} not found"}), 404
+            
+            player_state = playlist.players[player_id]
+            
+            # Find clip by index or ID
+            if clip_id:
+                try:
+                    clip_index = player_state.clip_ids.index(clip_id)
+                except ValueError:
+                    return jsonify({"success": False, "error": f"Clip ID {clip_id} not found"}), 404
+            
+            if clip_index < 0 or clip_index >= len(player_state.clips):
+                return jsonify({"success": False, "error": "Invalid clip index"}), 404
+            
+            clip_path = player_state.clips[clip_index]
+            actual_clip_id = player_state.clip_ids[clip_index] if clip_index < len(player_state.clip_ids) else None
+            
+            is_active = playlist.id == playlist_system.active_playlist_id
+            
+            if is_active:
+                # For active playlist, load directly into the player
+                player = player_manager.get_player(player_id)
+                if not player:
+                    return jsonify({"success": False, "error": f"Player {player_id} not available"}), 500
+                
+                # Load the clip by index
+                success = player.load_clip_by_index(clip_index, notify_manager=True)
+                
+                return jsonify({
+                    "success": success,
+                    "mode": "active_player",
+                    "message": "Clip loaded into active player" if success else "Failed to load clip"
+                })
+            else:
+                # For non-active playlist: LIVE PREVIEW MODE
+                # Use preview players to show actual playback without affecting output
+                
+                # Create preview players if not exists
+                if not player_manager.create_preview_players():
+                    return jsonify({
+                        "success": False,
+                        "error": "Failed to create preview players"
+                    }), 500
+                
+                # Get the preview player
+                preview_player_id = f"{player_id}_preview"
+                preview_player = player_manager.get_player(preview_player_id)
+                
+                if not preview_player:
+                    return jsonify({
+                        "success": False,
+                        "error": f"Preview player {preview_player_id} not available"
+                    }), 500
+                
+                # Load the viewed playlist into preview player
+                preview_player.playlist = player_state.clips.copy()
+                preview_player.playlist_ids = player_state.clip_ids.copy()
+                preview_player.autoplay = player_state.autoplay
+                preview_player.loop_playlist = player_state.loop
+                
+                # Load the specific clip
+                success = preview_player.load_clip_by_index(clip_index, notify_manager=False)
+                
+                if not success:
+                    return jsonify({
+                        "success": False,
+                        "error": "Failed to load clip into preview player"
+                    }), 500
+                
+                # Start preview player if not running
+                if not preview_player.is_running:
+                    preview_player.play()
+                
+                return jsonify({
+                    "success": True,
+                    "mode": "preview_live",
+                    "message": f"Live preview: {clip_path}",
+                    "clip": {
+                        "path": clip_path,
+                        "id": actual_clip_id,
+                        "index": clip_index,
+                        "type": "generator" if clip_path.startswith('generator:') else "video"
+                    },
+                    "preview_settings": {
+                        "autoplay": player_state.autoplay,
+                        "loop": player_state.loop
+                    },
+                    "note": "Live preview mode: Preview players running independently, active playlist continues outputting"
+                })
+        
+        except Exception as e:
+            logger.error(f"Failed to preview clip: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/playlists/<playlist_id>/takeover-preview/start', methods=['POST'])
+    def start_takeover_preview(playlist_id):
+        """
+        Start takeover preview mode: Pause active playlist and play preview playlist on output.
+        
+        Request body (optional):
+            {
+                "player_id": "video" or "artnet" or null (both players),
+                "clip_index": 0  // Optional: Start at specific clip index
+            }
+        """
+        try:
+            data = request.get_json() or {}
+            player_id = data.get('player_id')  # None = takeover both players
+            clip_index = data.get('clip_index', 0)  # Default to first clip
+            
+            result = player_manager.start_takeover_preview(playlist_id, player_id)
+            
+            if result['success']:
+                # Load the preview playlist into the output players
+                playlist_system = get_playlist_system()
+                preview_playlist = playlist_system.get_playlist(playlist_id)
+                
+                if preview_playlist:
+                    players_to_load = [player_id] if player_id else ['video', 'artnet']
+                    
+                    for pid in players_to_load:
+                        player = player_manager.get_player(pid)
+                        if not player:
+                            continue
+                        
+                        player_state = preview_playlist.get_player_state(pid)
+                        if not player_state:
+                            continue
+                        
+                        # Load preview playlist
+                        player.playlist = player_state.clips.copy()
+                        player.playlist_ids = player_state.clip_ids.copy()
+                        player.autoplay = player_state.autoplay
+                        player.loop_playlist = player_state.loop
+                        
+                        # Load clip at specified index
+                        if len(player.playlist) > 0:
+                            # Clamp clip_index to valid range
+                            safe_index = max(0, min(clip_index, len(player.playlist) - 1))
+                            player.load_clip_by_index(safe_index, notify_manager=False)
+                            player.play()
+                            logger.info(f"🎬 Loaded preview playlist into {pid} player at clip {safe_index}")
+                
+                return jsonify(result)
+            else:
+                return jsonify(result), 400
+        
+        except Exception as e:
+            logger.error(f"Failed to start takeover preview: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/playlists/takeover-preview/stop', methods=['POST'])
+    def stop_takeover_preview():
+        """
+        Stop takeover preview mode and restore active playlist.
+        """
+        try:
+            result = player_manager.stop_takeover_preview()
+            
+            if result['success']:
+                return jsonify(result)
+            else:
+                return jsonify(result), 400
+        
+        except Exception as e:
+            logger.error(f"Failed to stop takeover preview: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/playlists/takeover-preview/status', methods=['GET'])
+    def get_takeover_preview_status():
+        """
+        Get current takeover preview status.
+        """
+        try:
+            state = player_manager.get_takeover_preview_state()
+            
+            if state:
+                return jsonify({
+                    "success": True,
+                    "takeover_active": True,
+                    "state": state
+                })
+            else:
+                return jsonify({
+                    "success": True,
+                    "takeover_active": False,
+                    "state": None
+                })
+        
+        except Exception as e:
+            logger.error(f"Failed to get takeover preview status: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500

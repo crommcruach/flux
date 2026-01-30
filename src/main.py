@@ -8,6 +8,8 @@ import time
 import logging
 import threading
 import traceback
+import signal
+import atexit
 from datetime import datetime
 
 # Setup crash log file BEFORE anything else
@@ -100,6 +102,137 @@ from modules.default_effects import get_default_effects_manager
 from modules.api_bpm import bpm_bp, set_audio_analyzer, set_sequence_manager
 
 logger = get_logger(__name__)
+
+# Global shutdown flag and cleanup resources
+_shutdown_requested = False
+_cleanup_resources = {}
+
+def register_cleanup_resource(name, cleanup_func):
+    """Register a resource for cleanup on shutdown"""
+    _cleanup_resources[name] = cleanup_func
+
+def graceful_shutdown(signum=None, frame=None):
+    """Gracefully shutdown all components"""
+    global _shutdown_requested
+    
+    if _shutdown_requested:
+        print("\n⚠️  Shutdown already in progress...")
+        return
+    
+    _shutdown_requested = True
+    print("\n\n" + "="*80)
+    print("🛑 Shutting down gracefully...")
+    print("="*80)
+    
+    # Cleanup in reverse order of initialization (most important first)
+    cleanup_order = [
+        'outputs',      # Close display windows first
+        'players',      # Stop playback
+        'rest_api',     # Stop web server
+        'dmx',          # Stop DMX controller
+        'session',      # Save session state
+    ]
+    
+    import concurrent.futures
+    
+    for resource_name in cleanup_order:
+        if resource_name in _cleanup_resources:
+            try:
+                print(f"  ├─ Cleaning up: {resource_name}...")
+                
+                # Execute cleanup with 5 second timeout
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_cleanup_resources[resource_name])
+                    try:
+                        future.result(timeout=5.0)
+                        print(f"  ✅ {resource_name} cleaned up")
+                    except concurrent.futures.TimeoutError:
+                        print(f"  ⚠️  Timeout cleaning up {resource_name} (forced)")
+            except Exception as e:
+                print(f"  ⚠️  Error cleaning up {resource_name}: {e}")
+    
+    # Cleanup remaining resources
+    for resource_name, cleanup_func in _cleanup_resources.items():
+        if resource_name not in cleanup_order:
+            try:
+                print(f"  ├─ Cleaning up: {resource_name}...")
+                
+                # Execute cleanup with 3 second timeout
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(cleanup_func)
+                    try:
+                        future.result(timeout=3.0)
+                        print(f"  ✅ {resource_name} cleaned up")
+                    except concurrent.futures.TimeoutError:
+                        print(f"  ⚠️  Timeout cleaning up {resource_name} (forced)")
+            except Exception as e:
+                print(f"  ⚠️  Error cleaning up {resource_name}: {e}")
+    
+    print("="*80)
+    print("✅ Shutdown complete. Auf Wiedersehen!")
+    print("="*80)
+    
+    # Force exit after 1 second to ensure we don't hang
+    def force_exit():
+        time.sleep(1.0)
+        os._exit(0)
+    
+    exit_thread = threading.Thread(target=force_exit, daemon=True)
+    exit_thread.start()
+    
+    # Exit cleanly
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, graceful_shutdown)   # Ctrl+C
+signal.signal(signal.SIGTERM, graceful_shutdown)  # Termination request
+atexit.register(lambda: graceful_shutdown() if not _shutdown_requested else None)
+
+
+# Cleanup helper functions
+def _cleanup_outputs(player_manager):
+    """Close all output windows (display outputs)"""
+    try:
+        for player_id in ['video', 'artnet']:
+            player = player_manager.get_player(player_id)
+            if player and hasattr(player, 'output_manager') and player.output_manager:
+                for output_id, output in player.output_manager.outputs.items():
+                    try:
+                        if hasattr(output, 'cleanup'):
+                            output.cleanup()
+                            logger.info(f"  └─ Output {output_id} cleaned up")
+                    except Exception as e:
+                        logger.warning(f"  └─ Failed to cleanup output {output_id}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to cleanup outputs: {e}")
+
+def _cleanup_players(player, artnet_player):
+    """Stop both players"""
+    try:
+        player.stop()
+        artnet_player.stop()
+        logger.info("  └─ Players stopped")
+    except Exception as e:
+        logger.error(f"Failed to stop players: {e}")
+
+def _cleanup_rest_api(rest_api):
+    """Stop REST API server"""
+    try:
+        if hasattr(rest_api, 'stop'):
+            rest_api.stop()
+        logger.info("  └─ REST API stopped")
+    except Exception as e:
+        logger.error(f"Failed to stop REST API: {e}")
+
+def _cleanup_session(playlist_system):
+    """Save session state"""
+    try:
+        if playlist_system and playlist_system.active_playlist_id:
+            playlist_system.capture_active_playlist_state()
+            playlist_system._auto_save()
+        logger.info("  └─ Session state saved")
+    except Exception as e:
+        logger.error(f"Failed to save session: {e}")
 
 
 class ConsoleCapture:
@@ -385,7 +518,7 @@ def main():
     from modules.playlist_manager import MultiPlaylistSystem
     from modules.api_playlists import register_playlist_routes, set_playlist_system
     
-    playlist_system = MultiPlaylistSystem(player_manager, session_state, None)
+    playlist_system = MultiPlaylistSystem(player_manager, session_state, None, config)
     set_playlist_system(playlist_system)
     player_manager.playlist_system = playlist_system
     
@@ -417,26 +550,30 @@ def main():
     artnet_player.start()
     logger.debug("Players started for preview generation")
     
-    # Default Effects Manager initialisieren und anwenden
-    # WICHTIG: Nach Player-Initialisierung, damit PluginManager bereits geladen ist
+    # Register cleanup for outputs (first to close display windows)
+    register_cleanup_resource('outputs', lambda: _cleanup_outputs(player_manager))
+    
+    # Register cleanup for players
+    register_cleanup_resource('players', lambda: _cleanup_players(player, artnet_player))
+    
+    # Default Effects Manager - Used by ClipRegistry for clip-level effects
+    # IMPORTANT: Default PLAYER effects are now applied per-playlist (see playlist_manager.py)
     try:
         # Hole PluginManager vom Player (bereits initialisiert)
         plugin_manager = player.plugin_manager
         default_effects_manager = get_default_effects_manager(config, plugin_manager)
         
-        # Configure ClipRegistry to auto-apply default effects
+        # Configure ClipRegistry to auto-apply default clip effects
         clip_registry.set_default_effects_manager(default_effects_manager)
         
-        # Apply default effects to video player
-        video_applied = default_effects_manager.apply_to_player(player_manager, 'video')
+        # REMOVED: Default player effects now applied per-playlist when playlist is created/activated
+        # This prevents duplicate effects when switching playlists
+        # video_applied = default_effects_manager.apply_to_player(player_manager, 'video')
+        # artnet_applied = default_effects_manager.apply_to_player(player_manager, 'artnet')
         
-        # Apply default effects to artnet player
-        artnet_applied = default_effects_manager.apply_to_player(player_manager, 'artnet')
-        
-        if video_applied > 0 or artnet_applied > 0:
-            logger.debug(f"✨ Default effects applied: {video_applied} video, {artnet_applied} artnet")
+        logger.debug(f"✨ Default effects manager configured for clip-level effects")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to apply default effects: {e}")
+        logger.warning(f"⚠️ Failed to configure default effects manager: {e}")
     
     # Session State wird NICHT geladen beim Start (frischer Start)
     # User kann über Snapshots wiederherstellen wenn gewünscht
@@ -463,8 +600,17 @@ def main():
     )
     dmx_controller.start()
     
+    # Register cleanup for DMX
+    register_cleanup_resource('dmx', lambda: dmx_controller.stop())
+    
     # REST API initialisieren und automatisch starten
     rest_api = RestAPI(player_manager, dmx_controller, data_dir, video_dir, config, replay_manager=replay_manager)
+    
+    # Register unified player routes now that both rest_api and playlist_system exist
+    rest_api.register_unified_player_routes(playlist_system)
+    
+    # Register transition routes with playlist_system
+    rest_api.register_transition_routes(playlist_system)
     
     # Register BPM API blueprint
     rest_api.app.register_blueprint(bpm_bp)
@@ -490,6 +636,12 @@ def main():
         logger.debug("SequenceManager connected to SocketIO for real-time updates")
     
     rest_api.start(host=config['api']['host'], port=config['api']['port'])
+    
+    # Register cleanup for REST API
+    register_cleanup_resource('rest_api', lambda: _cleanup_rest_api(rest_api))
+    
+    # Register cleanup for session state
+    register_cleanup_resource('session', lambda: _cleanup_session(playlist_system))
     
     # Console Capture NICHT aktivieren - verursacht "write() before start_response" Fehler
     # Die REST API Console Log funktioniert über direkte add_log() Aufrufe
@@ -526,32 +678,22 @@ def main():
             
             # Exit wenn gewünscht
             if not continue_loop:
+                graceful_shutdown()
                 break
         
         except KeyboardInterrupt:
-            print("\n\nBeende Anwendung...")
-            player.stop()
-            dmx_controller.stop()
-            break
+            graceful_shutdown()
         except Exception as e:
             print(f"Fehler: {e}")
             import traceback
             traceback.print_exc()
-    
-    dmx_controller.stop()
-    
-    # Heartbeat Monitor disabled
-    # try:
-    #     heartbeat.stop()
-    # except:
-    #     pass
-    
-    print("Auf Wiedersehen!")
 
 
 if __name__ == "__main__":
     try:
         main()
+    except KeyboardInterrupt:
+        graceful_shutdown()
     except Exception as e:
         print("\n" + "=" * 80)
         print("FATAL ERROR - Application crashed during startup")

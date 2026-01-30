@@ -91,23 +91,30 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
                         
                         if is_active:
                             # Apply to physical players only if this is the active playlist
-                            logger.info(f"✅ Applying sequencer mode={enabled} to ACTIVE playlist")
+                            logger.info(f"✅ Applying sequencer mode={enabled} to ACTIVE playlist '{viewed.name}'")
                             player_manager.set_sequencer_mode(enabled)
                         else:
                             # Just save, don't apply to players
-                            logger.info(f"💾 Saved sequencer mode={enabled} to INACTIVE playlist")
+                            logger.info(f"💾 Saved sequencer mode={enabled} to INACTIVE playlist '{viewed.name}' (not applying to physical players)")
                         
                         # Trigger auto-save
                         playlist_system._auto_save()
                     else:
-                        # Fallback if no viewed playlist
-                        player_manager.set_sequencer_mode(enabled)
+                        # Fallback if no viewed playlist - only apply if we have an active playlist
+                        active = playlist_system.get_active_playlist()
+                        if active:
+                            active.sequencer['mode_active'] = enabled
+                            player_manager.set_sequencer_mode(enabled)
+                            playlist_system._auto_save()
+                            logger.info(f"✅ Applied sequencer mode={enabled} to active playlist (no viewed playlist)")
                 else:
-                    # Fallback if playlist system not available
+                    # Fallback if playlist system not available - legacy behavior
                     player_manager.set_sequencer_mode(enabled)
+                    logger.warning(f"⚠️ Playlist system not available, applying sequencer mode={enabled} directly to player manager")
             except Exception as e:
                 logger.error(f"Could not save sequencer mode to playlist: {e}", exc_info=True)
-                # Fallback: apply to players directly
+                # Only apply to players if playlist system is not working at all
+                logger.warning(f"⚠️ Fallback: applying sequencer mode={enabled} directly due to error")
                 player_manager.set_sequencer_mode(enabled)
             
             return jsonify({

@@ -237,8 +237,15 @@ class PlaylistTabsManager {
             <button data-action="activate">
                 <i class="fas fa-play"></i> Activate (Start Playing)
             </button>
+            <button data-action="takeover-preview">
+                🎬 Live Preview (Takeover Output)
+            </button>
+            <hr>
             <button data-action="rename">
                 <i class="fas fa-edit"></i> Rename
+            </button>
+            <button data-action="sequencer">
+                <i class="fas fa-music"></i> Toggle Sequencer Mode
             </button>
             <hr>
             <button data-action="delete" class="danger">
@@ -256,9 +263,35 @@ class PlaylistTabsManager {
             this.hideContextMenu();
         });
         
+        menu.querySelector('[data-action="takeover-preview"]').addEventListener('click', async () => {
+            if (this.contextMenuPlaylistId) {
+                // Check if already in takeover mode
+                const status = await window.checkTakeoverPreviewStatus();
+                if (status) {
+                    // Stop current takeover
+                    await window.stopTakeoverPreview();
+                } else {
+                    // Start takeover for this playlist
+                    if (this.contextMenuPlaylistId === this.activePlaylistId) {
+                        alert('Cannot preview the active playlist. This playlist is already playing.');
+                    } else {
+                        await window.startTakeoverPreview(this.contextMenuPlaylistId);
+                    }
+                }
+            }
+            this.hideContextMenu();
+        });
+        
         menu.querySelector('[data-action="rename"]').addEventListener('click', () => {
             if (this.contextMenuPlaylistId) {
                 this.renamePlaylist(this.contextMenuPlaylistId);
+            }
+            this.hideContextMenu();
+        });
+        
+        menu.querySelector('[data-action="sequencer"]').addEventListener('click', () => {
+            if (this.contextMenuPlaylistId) {
+                this.toggleSequencerMode(this.contextMenuPlaylistId);
             }
             this.hideContextMenu();
         });
@@ -387,6 +420,21 @@ class PlaylistTabsManager {
         } catch (error) {
             console.error('Failed to delete playlist:', error);
             alert('Failed to delete playlist');
+        }
+    }
+    
+    async toggleSequencerMode(playlistId) {
+        const playlist = this.playlists.find(p => p.id === playlistId);
+        if (!playlist) return;
+        
+        // Call the global toggleSequencerMode if it exists
+        if (typeof window.toggleSequencerMode === 'function') {
+            await window.toggleSequencerMode();
+            // Reload playlists to reflect sequencer badge
+            await this.loadPlaylists();
+            this.render();
+        } else {
+            console.error('toggleSequencerMode function not found');
         }
     }
 }

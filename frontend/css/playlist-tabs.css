@@ -184,3 +184,51 @@
 .playlist-tabs::-webkit-scrollbar-thumb:hover {
     background: rgba(120, 120, 140, 0.7);
 }
+/* Takeover Preview Mode Indicator */
+.takeover-preview-indicator {
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    background: linear-gradient(135deg, rgba(220, 53, 69, 0.95), rgba(255, 87, 34, 0.95));
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 4px 20px rgba(220, 53, 69, 0.5);
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.takeover-text {
+    color: white;
+    font-weight: bold;
+    font-size: 13px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.5px;
+}
+
+.takeover-preview-indicator button {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: white;
+    font-size: 11px;
+    padding: 4px 12px;
+    transition: all 0.2s;
+}
+
+.takeover-preview-indicator button:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.05);
+}
+
+@keyframes pulse-glow {
+    0%, 100% {
+        box-shadow: 0 4px 20px rgba(220, 53, 69, 0.5);
+    }
+    50% {
+        box-shadow: 0 4px 30px rgba(220, 53, 69, 0.8);
+    }
+}

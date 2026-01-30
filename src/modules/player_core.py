@@ -65,6 +65,9 @@ class Player:
         # Legacy single source (backward compatibility wrapper)
         self._legacy_source = frame_source
         
+        # Track which clip is actually loaded (separate from property-based current_clip_id)
+        self._loaded_clip_id = None
+        
         self.points_json_path = points_json_path
         self.target_ip = target_ip
         self.start_universe = start_universe
@@ -80,8 +83,25 @@ class Player:
         points_data = PointsLoader.load_points(points_json_path, validate_bounds=validate_bounds)
         
         self.point_coords = points_data['point_coords']
-        self.canvas_width = points_data['canvas_width']
-        self.canvas_height = points_data['canvas_height']
+        
+        # Canvas size: Use frame source dimensions for video player, points file for artnet
+        if enable_artnet:
+            # Art-Net player: Use points file canvas dimensions
+            self.canvas_width = points_data['canvas_width']
+            self.canvas_height = points_data['canvas_height']
+        else:
+            # Video player: Use frame source dimensions (check both width and canvas_width)
+            if hasattr(frame_source, 'width'):
+                self.canvas_width = frame_source.width
+                self.canvas_height = frame_source.height
+            elif hasattr(frame_source, 'canvas_width'):
+                self.canvas_width = frame_source.canvas_width
+                self.canvas_height = frame_source.canvas_height
+            else:
+                # Fallback to points file dimensions
+                self.canvas_width = points_data['canvas_width']
+                self.canvas_height = points_data['canvas_height']
+        
         self.universe_mapping = points_data['universe_mapping']
         self.total_points = points_data['total_points']
         self.total_channels = points_data['total_channels']
@@ -172,10 +192,20 @@ class Player:
                     player_name=self.player_name,
                     canvas_width=self.canvas_width,
                     canvas_height=self.canvas_height,
-                    config={}  # Empty config - all settings from session state
+                    config={}  # Empty config - settings from session state or config.json
                 )
                 
-                # Restore output state from session (all outputs and slices)
+                # Load output definitions from config.json
+                outputs_config = config.get('outputs', {})
+                output_definitions = outputs_config.get('definitions', [])
+                
+                if output_definitions:
+                    created = self.output_manager.load_outputs_from_config(output_definitions)
+                    logger.info(f"✅ Loaded {created} outputs from config.json")
+                else:
+                    logger.warning("No output definitions found in config.json")
+                
+                # Restore output state from session (routing, slices, etc.)
                 from .session_state import get_session_state
                 session_state = get_session_state()
                 if not session_state:
@@ -187,7 +217,7 @@ class Player:
                 if saved_state:
                     try:
                         self.output_manager.set_state(saved_state)
-                        logger.info(f"Output state restored for {self.player_name}: {len(saved_state.get('outputs', {}))} outputs, {len(saved_state.get('slices', {}))} slices")
+                        logger.info(f"Output state restored for {self.player_name}: {len(saved_state.get('outputs', {}))} output configs, {len(saved_state.get('slices', {}))} slices")
                     except Exception as e:
                         logger.warning(f"Failed to restore output state: {e}")
                 else:
@@ -1207,10 +1237,14 @@ class Player:
                                 )
                         
                         # Only reload layers if switching to a different clip
-                        logger.debug(f"🔍 [{self.player_name}] Comparing clips: current={self.current_clip_id}, next={next_clip_id}, equal={self.current_clip_id == next_clip_id}")
-                        if self.current_clip_id != next_clip_id:
-                            self.current_clip_id = next_clip_id
+                        # Use _loaded_clip_id to avoid property getter issues during layer reload
+                        logger.debug(f"🔍 [{self.player_name}] Comparing clips: current={self._loaded_clip_id}, next={next_clip_id}, equal={self._loaded_clip_id == next_clip_id}")
+                        if self._loaded_clip_id != next_clip_id:
                             logger.info(f"🔄 [{self.player_name}] Different clip detected, reloading layers")
+                            
+                            # Update tracking variable FIRST, before loading layers
+                            self._loaded_clip_id = next_clip_id
+                            self.current_clip_id = next_clip_id
                             
                             # 🎬 Check for custom transition effect on new clip
                             clip_data = self._find_clip_by_id(next_clip_id)
@@ -1269,6 +1303,7 @@ class Player:
                             debug_layers(logger, f"🔄 [{self.player_name}] Layers reloaded for new clip {next_clip_id}")
                         else:
                             # Same clip - just reset the source, keep existing layer objects
+                            self._loaded_clip_id = next_clip_id
                             self.current_clip_id = next_clip_id
                             debug_layers(logger, f"🔁 [{self.player_name}] Same clip {next_clip_id}, reusing existing layers")
                         

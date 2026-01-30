@@ -18,7 +18,7 @@ from .session_state import get_session_state
 logger = get_logger(__name__)
 
 
-def register_unified_routes(app, player_manager, config, socketio=None):
+def register_unified_routes(app, player_manager, config, socketio=None, playlist_system=None):
     """
     Registriert vereinheitlichte Player-API-Routes.
     
@@ -27,6 +27,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
         player_manager: PlayerManager-Instanz
         config: Konfiguration
         socketio: SocketIO instance for WebSocket events (optional)
+        playlist_system: MultiPlaylistSystem instance for playlist-aware operations (optional)
     """
     clip_registry = get_clip_registry()
     video_dir = config['paths']['video_dir']
@@ -878,6 +879,48 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
+            # Debug: Log playlist state
+            logger.info(f"[EFFECT ADD DEBUG] playlist_system exists: {playlist_system is not None}")
+            if playlist_system:
+                logger.info(f"[EFFECT ADD DEBUG] viewed={playlist_system.viewed_playlist_id}, active={playlist_system.active_playlist_id}")
+            
+            # Check if we're viewing a different playlist than the active one
+            if playlist_system and playlist_system.viewed_playlist_id != playlist_system.active_playlist_id:
+                # Viewing non-active playlist - add to stored effects
+                viewed_playlist = playlist_system.playlists.get(playlist_system.viewed_playlist_id)
+                if viewed_playlist:
+                    player_state = viewed_playlist.players[player_id]
+                    
+                    # Create effect entry in playlist storage format
+                    effect_entry = {
+                        'index': len(player_state.global_effects),
+                        'plugin_id': plugin_id,
+                        'parameters': config,
+                        'enabled': True,
+                        'config': config
+                    }
+                    player_state.global_effects.append(effect_entry)
+                    
+                    logger.info(f"[EFFECT ADD] Added '{plugin_id}' to viewed playlist '{viewed_playlist.name}' {player_id} effects")
+                    
+                    # Save playlist state
+                    playlist_system._auto_save()
+                    
+                    # Emit WebSocket event
+                    if socketio:
+                        try:
+                            socketio.emit('effects.changed', {
+                                'player_id': player_id,
+                                'action': 'add',
+                                'effect_name': plugin_id
+                            }, namespace='/effects')
+                        except Exception as e:
+                            logger.error(f"❌ Error emitting effects.changed: {e}")
+                    
+                    return jsonify({"success": True, "message": f"Effect '{plugin_id}' added to viewed playlist", "player_id": player_id})
+            
+            # Otherwise add to physical player (active playlist)
+            logger.info(f"[EFFECT ADD DEBUG] Adding to physical player (active playlist)")
             # Use appropriate chain type
             chain_type = 'artnet' if player_id == 'artnet' else 'video'
             success, message = player.add_effect_to_chain(plugin_id, config, chain_type=chain_type)
@@ -916,6 +959,41 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
+            # Check if we're viewing a different playlist than the active one
+            if playlist_system and playlist_system.viewed_playlist_id != playlist_system.active_playlist_id:
+                # Viewing non-active playlist - remove from stored effects
+                viewed_playlist = playlist_system.playlists.get(playlist_system.viewed_playlist_id)
+                if viewed_playlist:
+                    player_state = viewed_playlist.players[player_id]
+                    
+                    if 0 <= index < len(player_state.global_effects):
+                        removed_effect = player_state.global_effects.pop(index)
+                        
+                        # Re-index remaining effects
+                        for i, effect in enumerate(player_state.global_effects):
+                            effect['index'] = i
+                        
+                        logger.info(f"[EFFECT REMOVE] Removed effect at index {index} from viewed playlist '{viewed_playlist.name}' {player_id}")
+                        
+                        # Save playlist state
+                        playlist_system._auto_save()
+                        
+                        # Emit WebSocket event
+                        if socketio:
+                            try:
+                                socketio.emit('effects.changed', {
+                                    'player_id': player_id,
+                                    'action': 'remove',
+                                    'index': index
+                                }, namespace='/effects')
+                            except Exception as e:
+                                logger.error(f"❌ Error emitting effects.changed: {e}")
+                        
+                        return jsonify({"success": True, "message": f"Effect removed from viewed playlist", "player_id": player_id})
+                    else:
+                        return jsonify({"success": False, "error": f"Invalid index {index}"}), 400
+            
+            # Otherwise remove from physical player (active playlist)
             chain_type = 'artnet' if player_id == 'artnet' else 'video'
             success, message = player.remove_effect_from_chain(index, chain_type=chain_type)
             
@@ -953,6 +1031,32 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
+            # Check if we're viewing a different playlist than the active one
+            if playlist_system and playlist_system.viewed_playlist_id != playlist_system.active_playlist_id:
+                # Viewing non-active playlist - clear stored effects
+                viewed_playlist = playlist_system.playlists.get(playlist_system.viewed_playlist_id)
+                if viewed_playlist:
+                    player_state = viewed_playlist.players[player_id]
+                    player_state.global_effects = []
+                    
+                    logger.info(f"[EFFECT CLEAR] Cleared all effects from viewed playlist '{viewed_playlist.name}' {player_id}")
+                    
+                    # Save playlist state
+                    playlist_system._auto_save()
+                    
+                    # Emit WebSocket event
+                    if socketio:
+                        try:
+                            socketio.emit('effects.changed', {
+                                'player_id': player_id,
+                                'action': 'clear'
+                            }, namespace='/effects')
+                        except Exception as e:
+                            logger.error(f"❌ Error emitting effects.changed: {e}")
+                    
+                    return jsonify({"success": True, "message": "All effects cleared from viewed playlist", "player_id": player_id})
+            
+            # Otherwise clear from physical player (active playlist)
             chain_type = 'artnet' if player_id == 'artnet' else 'video'
             success, message = player.clear_effects_chain(chain_type=chain_type)
             
@@ -996,6 +1100,42 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
+            # Check if we're viewing a different playlist than the active one
+            if playlist_system and playlist_system.viewed_playlist_id != playlist_system.active_playlist_id:
+                # Viewing non-active playlist - update stored effect parameter
+                viewed_playlist = playlist_system.playlists.get(playlist_system.viewed_playlist_id)
+                if viewed_playlist:
+                    player_state = viewed_playlist.players[player_id]
+                    
+                    if 0 <= index < len(player_state.global_effects):
+                        effect = player_state.global_effects[index]
+                        
+                        # Update parameter with range metadata if provided
+                        if range_min is not None and range_max is not None:
+                            effect['parameters'][param_name] = {
+                                '_value': value,
+                                '_rangeMin': range_min,
+                                '_rangeMax': range_max
+                            }
+                            if uid:
+                                effect['parameters'][param_name]['_uid'] = uid
+                        else:
+                            effect['parameters'][param_name] = value
+                        
+                        # Also update config dict (they're separate in storage)
+                        if 'config' in effect:
+                            effect['config'][param_name] = effect['parameters'][param_name]
+                        
+                        logger.info(f"[EFFECT PARAM] Updated {param_name}={value} for effect at index {index} in viewed playlist '{viewed_playlist.name}' {player_id}")
+                        
+                        # Save playlist state
+                        playlist_system._auto_save()
+                        
+                        return jsonify({"success": True, "player_id": player_id, "index": index, "parameter": param_name, "value": value})
+                    else:
+                        return jsonify({"success": False, "error": f"Invalid index {index}"}), 400
+            
+            # Otherwise update physical player (active playlist)
             # Get appropriate chain from effect_processor
             chain = player.effect_processor.artnet_effect_chain if player_id == 'artnet' else player.effect_processor.video_effect_chain
             
@@ -1047,6 +1187,27 @@ def register_unified_routes(app, player_manager, config, socketio=None):
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
+            # Check if we're viewing a different playlist than the active one
+            if playlist_system and playlist_system.viewed_playlist_id != playlist_system.active_playlist_id:
+                # Viewing non-active playlist - toggle in stored effects
+                viewed_playlist = playlist_system.playlists.get(playlist_system.viewed_playlist_id)
+                if viewed_playlist:
+                    player_state = viewed_playlist.players[player_id]
+                    
+                    if 0 <= index < len(player_state.global_effects):
+                        effect = player_state.global_effects[index]
+                        effect['enabled'] = not effect.get('enabled', True)
+                        
+                        logger.info(f"[EFFECT TOGGLE] Toggled effect at index {index} to {effect['enabled']} in viewed playlist '{viewed_playlist.name}' {player_id}")
+                        
+                        # Save playlist state
+                        playlist_system._auto_save()
+                        
+                        return jsonify({"success": True, "enabled": effect['enabled'], "message": f"Effect toggled in viewed playlist"})
+                    else:
+                        return jsonify({"success": False, "message": f"Invalid index {index}"}), 400
+            
+            # Otherwise toggle on physical player (active playlist)
             # Determine chain type based on player_id
             chain_type = 'artnet' if player_id == 'artnet' else 'video'
             
@@ -1588,7 +1749,7 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                         relative_path = os.path.relpath(absolute_path, video_dir) if not absolute_path.startswith('generator:') else absolute_path
                         metadata = {'type': item_type, 'generator_id': generator_id, 'parameters': parameters} if item_type == 'generator' else {}
                         
-                        # Register with the provided UUID instead of generating new one
+                        # Register with a new UUID (default effects will be applied to this clip)
                         registered_id = clip_registry.register_clip(
                             player_id,
                             absolute_path,
@@ -1598,9 +1759,15 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                         
                         # Update the clip_id to use the provided one (overwrite generated UUID)
                         if registered_id != item_id:
+                            # Move the clip data (with effects) to the target ID
                             clip_registry.clips[item_id] = clip_registry.clips[registered_id]
                             clip_registry.clips[item_id]['clip_id'] = item_id
                             del clip_registry.clips[registered_id]
+                            # Also update version tracking if present
+                            if registered_id in clip_registry._clip_effects_version:
+                                clip_registry._clip_effects_version[item_id] = clip_registry._clip_effects_version[registered_id]
+                                del clip_registry._clip_effects_version[registered_id]
+                            logger.debug(f"📌 Moved clip data from {registered_id} to {item_id} (with effects intact)")
                     else:
                         debug_api(logger, f"✓ Clip {item_id} already registered, reusing existing clip")
                 else:
@@ -2194,3 +2361,106 @@ def register_unified_routes(app, player_manager, config, socketio=None):
                 'error': str(e)
             }), 500
     
+    # ========================================
+    # ART-NET RESOLUTION SETTINGS
+    # ========================================
+    
+    @app.route('/api/artnet/resolution', methods=['GET'])
+    def get_artnet_resolution():
+        """Get current Art-Net canvas resolution from points file"""
+        try:
+            from modules.points_loader import PointsLoader
+            import os
+            
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            points_json_path = os.path.join(base_path, 'data', 'punkte_export.json')
+            
+            points_data = PointsLoader.load_points(points_json_path, validate_bounds=False)
+            
+            return jsonify({
+                'success': True,
+                'resolution': {
+                    'width': points_data['canvas_width'],
+                    'height': points_data['canvas_height']
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting Art-Net resolution: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/artnet/resolution', methods=['POST'])
+    def update_artnet_resolution():
+        """Update Art-Net canvas resolution in points file"""
+        try:
+            import os
+            import json
+            
+            data = request.get_json()
+            preset = data.get('preset')
+            
+            # Calculate new resolution
+            if preset == 'custom':
+                new_width = int(data.get('custom_width', 1024))
+                new_height = int(data.get('custom_height', 768))
+            else:
+                preset_resolutions = {
+                    '720p': (1280, 720),
+                    '1080p': (1920, 1080),
+                    '1440p': (2560, 1440),
+                    '2160p': (3840, 2160)
+                }
+                new_width, new_height = preset_resolutions.get(preset, (1024, 768))
+            
+            # Validate resolution
+            if new_width < 640 or new_width > 7680 or new_height < 480 or new_height > 4320:
+                return jsonify({
+                    'success': False,
+                    'error': 'Resolution out of valid range (640x480 to 7680x4320)'
+                }), 400
+            
+            # Load points file
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            points_json_path = os.path.join(base_path, 'data', 'punkte_export.json')
+            
+            with open(points_json_path, 'r', encoding='utf-8') as f:
+                points_data = json.load(f)
+            
+            # Update canvas dimensions
+            old_width = points_data['canvas']['width']
+            old_height = points_data['canvas']['height']
+            
+            points_data['canvas']['width'] = new_width
+            points_data['canvas']['height'] = new_height
+            
+            # Create backup before saving
+            backup_path = points_json_path + '.backup'
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                json.dump(points_data, f, indent=2)
+            
+            # Save updated points file
+            with open(points_json_path, 'w', encoding='utf-8') as f:
+                json.dump(points_data, f, indent=2)
+            
+            logger.info(f"Art-Net canvas resolution updated from {old_width}x{old_height} to {new_width}x{new_height}")
+            logger.info(f"Backup created at {backup_path}")
+            
+            return jsonify({
+                'success': True,
+                'resolution': {
+                    'width': new_width,
+                    'height': new_height
+                },
+                'message': f'Resolution updated to {new_width}x{new_height}. Restart required to apply changes.',
+                'backup_created': backup_path
+            })
+            
+        except Exception as e:
+            logger.error(f"Error updating Art-Net resolution: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500

@@ -192,9 +192,36 @@
     "recording_stop_delay": 0.3,
     "shutdown_delay": 0.5
   },
-  "output_routing": {
-    "_comment": "Output routing system - all configuration is stored per-session in session_state.json",
-    "_info": "Use the output-settings.html UI or /api/outputs endpoints to configure outputs",
-    "_session_based": "All outputs, slices, and settings are dynamically created and stored in session state, not here"
+  "outputs": {
+    "_comment": "Output definitions - hardware/infrastructure configuration",
+    "_info": "These are the available outputs. Actual routing is in session_state.json",
+    "definitions": [
+      {
+        "id": "main_display",
+        "type": "display",
+        "enabled": true,
+        "_implementation": "Multiprocessing-based display with isolated process for OpenCV window",
+        "monitor_index": 0,
+        "fullscreen": true,
+        "resolution": [1920, 1080],
+        "fps": 60,
+        "enable_capture": true,
+        "description": "Main display output (production-ready multiprocessing implementation)"
+      },
+      {
+        "id": "preview_virtual",
+        "type": "virtual",
+        "enabled": true,
+        "resolution": [640, 360],
+        "fps": 30,
+        "enable_capture": true,
+        "description": "Virtual output for web preview streaming"
+      }
+    ],
+    "default_routing": {
+      "_comment": "Default routing used on startup",
+      "video": ["main_display", "preview_virtual"],
+      "artnet": []
+    }
   }
 }

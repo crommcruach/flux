@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Logger Test</title>
+    
+    <!-- Client Logger - MUST BE FIRST -->
+    <script src="js/client-logger.js"></script>
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #e0e0e0;
+        }
+        h1 {
+            color: #4CAF50;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #2d2d2d;
+            border-radius: 5px;
+            border-left: 4px solid #4CAF50;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .info {
+            background: #2196F3;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .code {
+            background: #000;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            overflow-x: auto;
+        }
+        .status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="status" id="status">✅ Logger Active</div>
+    
+    <h1>🔍 Client Logger Test Page</h1>
+    
+    <div class="info">
+        <strong>📋 Instructions:</strong>
+        <ul>
+            <li>Click the buttons below to test different log types</li>
+            <li>Open your server logs to see the messages appear</li>
+            <li>Check browser console to verify logs still appear locally</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h3>1️⃣ Basic Logging</h3>
+        <p>Test different console log levels:</p>
+        <button onclick="testLog()">console.log()</button>
+        <button onclick="testInfo()">console.info()</button>
+        <button onclick="testWarn()">console.warn()</button>
+        <button onclick="testError()">console.error()</button>
+        <button onclick="testDebug()">console.debug()</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>2️⃣ Complex Objects</h3>
+        <p>Test logging objects, arrays, and errors:</p>
+        <button onclick="testObject()">Log Object</button>
+        <button onclick="testArray()">Log Array</button>
+        <button onclick="testError2()">Log Error Object</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>3️⃣ Error Handling</h3>
+        <p>Test automatic error capture:</p>
+        <button onclick="throwError()">Throw Error</button>
+        <button onclick="promiseRejection()">Promise Rejection</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>4️⃣ Logger Control</h3>
+        <p>Control the logger:</p>
+        <button onclick="disableLogger()">Disable Logger</button>
+        <button onclick="enableLogger()">Enable Logger</button>
+        <button onclick="flushLogs()">Flush Logs Now</button>
+        <button onclick="showConfig()">Show Config</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>5️⃣ Spam Test</h3>
+        <p>Test rate limiting (will log 150 messages):</p>
+        <button onclick="spamLogs()">Spam Logs</button>
+        <small>Note: Only first 100 will be sent (rate limit)</small>
+    </div>
+    
+    <div class="test-section">
+        <h3>📊 Results</h3>
+        <div class="code" id="results">
+            Waiting for tests...
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h3>🔗 View Server Logs</h3>
+        <button onclick="viewServerLogs()">Fetch Server Logs</button>
+        <div class="code" id="serverLogs" style="margin-top: 10px; max-height: 300px; overflow-y: auto;">
+            Click "Fetch Server Logs" to view
+        </div>
+    </div>
+    
+    <script>
+        let testResults = [];
+        
+        function addResult(message) {
+            testResults.push(`[${new Date().toLocaleTimeString()}] ${message}`);
+            document.getElementById('results').textContent = testResults.join('\n');
+        }
+        
+        function updateStatus(message, color) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.style.background = color;
+        }
+        
+        // Test functions
+        function testLog() {
+            console.log('🔵 This is a LOG message');
+            addResult('✅ Sent console.log()');
+        }
+        
+        function testInfo() {
+            console.info('ℹ️ This is an INFO message');
+            addResult('✅ Sent console.info()');
+        }
+        
+        function testWarn() {
+            console.warn('⚠️ This is a WARNING message');
+            addResult('✅ Sent console.warn()');
+        }
+        
+        function testError() {
+            console.error('❌ This is an ERROR message');
+            addResult('✅ Sent console.error()');
+        }
+        
+        function testDebug() {
+            console.debug('🐛 This is a DEBUG message (may not send if disabled)');
+            addResult('✅ Sent console.debug() - check config if disabled');
+        }
+        
+        function testObject() {
+            const obj = { 
+                name: 'Test User', 
+                age: 30, 
+                metadata: { 
+                    role: 'tester', 
+                    active: true 
+                } 
+            };
+            console.log('📦 Complex object:', obj);
+            addResult('✅ Sent object');
+        }
+        
+        function testArray() {
+            const arr = [1, 2, 3, 'test', { key: 'value' }];
+            console.log('📋 Array:', arr);
+            addResult('✅ Sent array');
+        }
+        
+        function testError2() {
+            const error = new Error('Test error object');
+            console.error('🚨 Error object:', error);
+            addResult('✅ Sent error object');
+        }
+        
+        function throwError() {
+            try {
+                throw new Error('Intentional test error');
+            } catch (e) {
+                console.error('Caught error:', e);
+                addResult('✅ Threw and logged error');
+            }
+        }
+        
+        function promiseRejection() {
+            Promise.reject(new Error('Unhandled promise rejection'))
+                .catch(err => {
+                    console.error('Promise rejected:', err);
+                    addResult('✅ Triggered promise rejection');
+                });
+        }
+        
+        function disableLogger() {
+            ClientLogger.disable();
+            updateStatus('❌ Logger Disabled', '#f44336');
+            addResult('⚠️ Logger disabled - logs will not be sent to server');
+        }
+        
+        function enableLogger() {
+            ClientLogger.enable();
+            updateStatus('✅ Logger Active', '#4CAF50');
+            addResult('✅ Logger enabled - logs will be sent to server');
+        }
+        
+        function flushLogs() {
+            ClientLogger.flush();
+            addResult('🚀 Forced log flush to server');
+        }
+        
+        function showConfig() {
+            console.log('⚙️ Logger Configuration:', ClientLogger.config);
+            addResult('✅ Logged configuration - check browser console');
+        }
+        
+        function spamLogs() {
+            addResult('🔥 Starting spam test...');
+            for (let i = 0; i < 150; i++) {
+                console.log(`Spam message ${i + 1}`);
+            }
+            addResult('⚠️ Sent 150 logs - only ~100 should reach server (rate limit)');
+        }
+        
+        async function viewServerLogs() {
+            try {
+                const response = await fetch('/api/logs?lines=50');
+                const data = await response.json();
+                
+                // Filter for JS logs
+                const jsLogs = data.lines.filter(line => 
+                    line.includes('[JS LOG]') || 
+                    line.includes('[JS WARN]') || 
+                    line.includes('[JS ERROR]') ||
+                    line.includes('[JS INFO]')
+                );
+                
+                const serverLogsDiv = document.getElementById('serverLogs');
+                if (jsLogs.length === 0) {
+                    serverLogsDiv.textContent = 'No JS logs found. Try clicking some test buttons first!';
+                } else {
+                    serverLogsDiv.textContent = jsLogs.join('\n');
+                }
+                
+                addResult(`📥 Fetched ${jsLogs.length} JS logs from server`);
+            } catch (error) {
+                document.getElementById('serverLogs').textContent = 
+                    `❌ Error fetching logs: ${error.message}`;
+                addResult('❌ Failed to fetch server logs');
+            }
+        }
+        
+        // Initial test
+        console.log('🚀 Client Logger Test Page loaded');
+        addResult('✅ Test page initialized');
+        addResult('ℹ️ Click buttons above to test logging');
+    </script>
+</body>
+</html>

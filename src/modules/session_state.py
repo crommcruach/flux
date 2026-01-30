@@ -133,14 +133,26 @@ class SessionStateManager:
                     "current_index": -1,
                     "autoplay": True,
                     "loop": True,
-                    "global_effects": []
+                    "global_effects": [],
+                    "transition_config": {
+                        "enabled": False,
+                        "effect": "fade",
+                        "duration": 1.0,
+                        "easing": "ease_in_out"
+                    }
                 },
                 "artnet": {
                     "playlist": [],
                     "current_index": -1,
                     "autoplay": True,
                     "loop": True,
-                    "global_effects": []
+                    "global_effects": [],
+                    "transition_config": {
+                        "enabled": False,
+                        "effect": "fade",
+                        "duration": 1.0,
+                        "easing": "ease_in_out"
+                    }
                 }
             },
             "sequencer": {

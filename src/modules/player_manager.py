@@ -36,14 +36,28 @@ class PlayerManager:
         # Main player reference
         self._player = player
         
-        # Dual-player system
+        # OUTPUT PLAYERS (Active Playlist - control physical output)
         self.video_player = player  # Player for video preview (no Art-Net)
         self.artnet_player = artnet_player  # Player for Art-Net output (no preview)
+        
+        # PREVIEW PLAYERS (Viewed Playlist - UI only, no output)
+        # Lazy-initialized when viewing non-active playlist
+        self.video_preview_player = None
+        self.artnet_preview_player = None
+        self._preview_players_created = False
+        self._preview_last_used = 0  # Timestamp for cleanup
+        
+        # TAKEOVER PREVIEW MODE
+        # Pauses active playlist and plays preview on main output players
+        self._takeover_mode_active = False
+        self._takeover_saved_state = {}  # Stores active playlist state
         
         # Unified player registry with IDs
         self.players = {
             'video': self.video_player,
-            'artnet': self.artnet_player
+            'artnet': self.artnet_player,
+            'video_preview': None,  # Will be set when created
+            'artnet_preview': None  # Will be set when created
         }
         
         # Master/Slave Synchronization
@@ -139,7 +153,7 @@ class PlayerManager:
         Get player by ID (unified access method).
         
         Args:
-            player_id: Player identifier ('video' or 'artnet')
+            player_id: Player identifier ('video', 'artnet', 'video_preview', 'artnet_preview')
         
         Returns:
             Player instance or None if not found
@@ -166,6 +180,374 @@ class PlayerManager:
     def has_artnet_player(self):
         """Check if Art-Net player is set."""
         return self.artnet_player is not None
+    
+    # Preview Player Management (Dual-Player Architecture)
+    def create_preview_players(self):
+        """
+        Create preview player instances on-demand.
+        Preview players run viewed (non-active) playlists without affecting output.
+        
+        Returns:
+            bool: True if created or already exist, False on error
+        """
+        if self._preview_players_created:
+            # Update last used timestamp
+            self._preview_last_used = time.time()
+            return True
+        
+        try:
+            from .player_core import Player
+            from .frame_source import VideoSource
+            
+            # Create video preview player (clone video player config)
+            if self.video_player:
+                logger.info("Creating video preview player...")
+                
+                # Clone config but disable display output for preview
+                preview_config = self.video_player.config.copy() if self.video_player.config else {}
+                if 'outputs' in preview_config and 'definitions' in preview_config['outputs']:
+                    # Filter out display outputs from definitions
+                    preview_config['outputs'] = preview_config['outputs'].copy()
+                    preview_config['outputs']['definitions'] = [
+                        output for output in preview_config['outputs']['definitions']
+                        if output.get('type') != 'display'
+                    ]
+                    # Also update routing to exclude display outputs
+                    if 'default_routing' in preview_config['outputs']:
+                        preview_config['outputs']['default_routing'] = {
+                            k: [v for v in route_list if not any(
+                                d.get('id') == v and d.get('type') == 'display'
+                                for d in preview_config.get('outputs', {}).get('definitions', [])
+                            )]
+                            for k, route_list in preview_config['outputs']['default_routing'].items()
+                        }
+                
+                self.video_preview_player = Player(
+                    frame_source=VideoSource(
+                        video_path=None,
+                        canvas_width=self.video_player.canvas_width,
+                        canvas_height=self.video_player.canvas_height,
+                        config=preview_config
+                    ),
+                    points_json_path=self.video_player.points_json_path,
+                    target_ip=self.video_player.target_ip,
+                    start_universe=self.video_player.start_universe,
+                    fps_limit=15,  # Lower FPS for preview (optimization)
+                    config=preview_config,
+                    enable_artnet=False,  # NO OUTPUT - preview only
+                    player_name="VideoPreview",
+                    clip_registry=self.video_player.clip_registry
+                )
+                self.players['video_preview'] = self.video_preview_player
+                logger.info("✅ Video preview player created (display output disabled)")
+            
+            # Create artnet preview player (clone artnet player config)
+            if self.artnet_player:
+                logger.info("Creating Art-Net preview player...")
+                
+                # Clone config but disable display output for preview
+                preview_config = self.artnet_player.config.copy() if self.artnet_player.config else {}
+                if 'outputs' in preview_config and 'definitions' in preview_config['outputs']:
+                    # Filter out display outputs from definitions
+                    preview_config['outputs'] = preview_config['outputs'].copy()
+                    preview_config['outputs']['definitions'] = [
+                        output for output in preview_config['outputs']['definitions']
+                        if output.get('type') != 'display'
+                    ]
+                    # Also update routing to exclude display outputs
+                    if 'default_routing' in preview_config['outputs']:
+                        preview_config['outputs']['default_routing'] = {
+                            k: [v for v in route_list if not any(
+                                d.get('id') == v and d.get('type') == 'display'
+                                for d in preview_config.get('outputs', {}).get('definitions', [])
+                            )]
+                            for k, route_list in preview_config['outputs']['default_routing'].items()
+                        }
+                
+                self.artnet_preview_player = Player(
+                    frame_source=VideoSource(
+                        video_path=None,
+                        canvas_width=self.artnet_player.canvas_width,
+                        canvas_height=self.artnet_player.canvas_height,
+                        config=preview_config
+                    ),
+                    points_json_path=self.artnet_player.points_json_path,
+                    target_ip=self.artnet_player.target_ip,
+                    start_universe=self.artnet_player.start_universe,
+                    fps_limit=15,  # Lower FPS for preview (optimization)
+                    config=preview_config,
+                    enable_artnet=False,  # NO OUTPUT - preview only
+                    player_name="ArtNetPreview",
+                    clip_registry=self.artnet_player.clip_registry
+                )
+                self.players['artnet_preview'] = self.artnet_preview_player
+                logger.info("✅ Art-Net preview player created (display output disabled)")
+            
+            self._preview_players_created = True
+            self._preview_last_used = time.time()
+            logger.info("🎭 Preview players initialized (isolated from output)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to create preview players: {e}", exc_info=True)
+            return False
+    
+    def destroy_preview_players(self):
+        """
+        Clean up preview players to free resources.
+        Called when switching back to active playlist or after timeout.
+        """
+        if not self._preview_players_created:
+            return
+        
+        try:
+            if self.video_preview_player:
+                logger.info("Destroying video preview player...")
+                if self.video_preview_player.is_running:
+                    self.video_preview_player.stop()
+                self.video_preview_player = None
+                self.players['video_preview'] = None
+            
+            if self.artnet_preview_player:
+                logger.info("Destroying Art-Net preview player...")
+                if self.artnet_preview_player.is_running:
+                    self.artnet_preview_player.stop()
+                self.artnet_preview_player = None
+                self.players['artnet_preview'] = None
+            
+            self._preview_players_created = False
+            logger.info("🗑️ Preview players destroyed")
+            
+        except Exception as e:
+            logger.error(f"Error destroying preview players: {e}", exc_info=True)
+    
+    def has_preview_players(self):
+        """Check if preview players are created."""
+        return self._preview_players_created
+    
+    def get_preview_player(self, player_id: str):
+        """
+        Get preview player by ID.
+        
+        Args:
+            player_id: 'video' or 'artnet' (automatically adds '_preview' suffix)
+        
+        Returns:
+            Preview player instance or None
+        """
+        preview_id = f"{player_id}_preview"
+        return self.players.get(preview_id)
+    
+    def check_preview_timeout(self, timeout_seconds: int = 300):
+        """
+        Check if preview players should be destroyed due to inactivity.
+        
+        Args:
+            timeout_seconds: Timeout in seconds (default: 5 minutes)
+        
+        Returns:
+            bool: True if players were destroyed
+        """
+        if not self._preview_players_created:
+            return False
+        
+        inactive_time = time.time() - self._preview_last_used
+        if inactive_time > timeout_seconds:
+            logger.info(f"Preview players inactive for {inactive_time:.0f}s - destroying")
+            self.destroy_preview_players()
+            return True
+        
+        return False
+    
+    # Takeover Preview Mode (Pause active playlist, use output players for preview)
+    def start_takeover_preview(self, playlist_id: str, player_id: str = None):
+        """
+        Start takeover preview mode: Pause active playlist and load preview playlist into output players.
+        This lets you preview on the actual output (Art-Net) without running separate players.
+        
+        Args:
+            playlist_id: ID of playlist to preview
+            player_id: Specific player to takeover ('video' or 'artnet'), or None for both
+        
+        Returns:
+            dict: Status with success, saved state info
+        """
+        if self._takeover_mode_active:
+            return {
+                "success": False,
+                "error": "Takeover preview already active",
+                "mode": "takeover_active"
+            }
+        
+        try:
+            # Stop any isolated preview players first (they conflict with takeover mode)
+            if self._preview_players_created:
+                logger.info("🛑 Stopping isolated preview players for takeover mode")
+                self.destroy_preview_players()
+            
+            from .api_playlists import get_playlist_system
+            playlist_system = get_playlist_system()
+            
+            if not playlist_system:
+                return {"success": False, "error": "Playlist system not available"}
+            
+            # Get active and preview playlists
+            active_playlist = playlist_system.get_active_playlist()
+            preview_playlist = playlist_system.get_playlist(playlist_id)
+            
+            if not active_playlist:
+                return {"success": False, "error": "No active playlist"}
+            
+            if not preview_playlist:
+                return {"success": False, "error": f"Preview playlist {playlist_id} not found"}
+            
+            # Determine which players to takeover
+            players_to_takeover = []
+            if player_id:
+                players_to_takeover = [player_id]
+            else:
+                players_to_takeover = ['video', 'artnet']
+            
+            # Save current state for each player
+            self._takeover_saved_state = {
+                'active_playlist_id': active_playlist.id,
+                'preview_playlist_id': playlist_id,
+                'players': {}
+            }
+            
+            for pid in players_to_takeover:
+                player = self.get_player(pid)
+                if not player:
+                    continue
+                
+                # Save current player state
+                self._takeover_saved_state['players'][pid] = {
+                    'is_playing': player.is_playing,
+                    'is_paused': player.is_paused,
+                    'current_clip_index': player.current_clip_index,
+                    'playlist': player.playlist.copy() if hasattr(player, 'playlist') and player.playlist else [],
+                    'playlist_ids': player.playlist_ids.copy() if hasattr(player, 'playlist_ids') and player.playlist_ids else [],
+                    'autoplay': player.autoplay if hasattr(player, 'autoplay') else False,
+                    'loop_playlist': player.loop_playlist if hasattr(player, 'loop_playlist') else False,
+                    'current_position': player.source.get_current_frame() if hasattr(player, 'source') and hasattr(player.source, 'get_current_frame') else 0
+                }
+                
+                # Pause active playback
+                if player.is_playing:
+                    player.pause()
+                    logger.info(f"⏸️ Paused {pid} player for takeover preview")
+            
+            self._takeover_mode_active = True
+            logger.info(f"🎬 Takeover preview mode activated: {preview_playlist.name}")
+            
+            return {
+                "success": True,
+                "mode": "takeover_started",
+                "active_playlist": active_playlist.name,
+                "preview_playlist": preview_playlist.name,
+                "players_paused": players_to_takeover,
+                "saved_state": True
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to start takeover preview: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+    
+    def stop_takeover_preview(self):
+        """
+        Stop takeover preview mode and restore active playlist state.
+        
+        Returns:
+            dict: Status with success, restored state info
+        """
+        if not self._takeover_mode_active:
+            return {
+                "success": False,
+                "error": "No takeover preview active",
+                "mode": "not_active"
+            }
+        
+        try:
+            from .api_playlists import get_playlist_system
+            playlist_system = get_playlist_system()
+            
+            if not playlist_system:
+                return {"success": False, "error": "Playlist system not available"}
+            
+            # Get active playlist
+            active_playlist_id = self._takeover_saved_state.get('active_playlist_id')
+            active_playlist = playlist_system.get_playlist(active_playlist_id)
+            
+            if not active_playlist:
+                logger.warning(f"Active playlist {active_playlist_id} not found, cannot restore")
+                self._takeover_mode_active = False
+                self._takeover_saved_state = {}
+                return {"success": False, "error": "Active playlist not found"}
+            
+            # Restore each player
+            restored_players = []
+            for pid, saved_state in self._takeover_saved_state.get('players', {}).items():
+                player = self.get_player(pid)
+                if not player:
+                    continue
+                
+                # Stop current playback
+                if player.is_playing:
+                    player.stop()
+                
+                # Restore playlist
+                player.playlist = saved_state['playlist']
+                player.playlist_ids = saved_state['playlist_ids']
+                player.autoplay = saved_state['autoplay']
+                player.loop_playlist = saved_state['loop_playlist']
+                
+                # Restore clip position
+                if saved_state['current_clip_index'] >= 0 and saved_state['current_clip_index'] < len(player.playlist):
+                    player.load_clip_by_index(saved_state['current_clip_index'], notify_manager=False)
+                
+                # Restore playback state
+                if saved_state['is_playing'] and not saved_state['is_paused']:
+                    player.play()
+                    logger.info(f"▶️ Resumed {pid} player after takeover preview")
+                elif saved_state['is_paused']:
+                    player.pause()
+                    logger.info(f"⏸️ Restored paused state for {pid} player")
+                
+                restored_players.append(pid)
+            
+            self._takeover_mode_active = False
+            prev_playlist_name = self._takeover_saved_state.get('preview_playlist_id', 'unknown')
+            self._takeover_saved_state = {}
+            
+            logger.info(f"🎬 Takeover preview mode stopped, active playlist restored")
+            
+            return {
+                "success": True,
+                "mode": "takeover_stopped",
+                "active_playlist": active_playlist.name,
+                "players_restored": restored_players
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to stop takeover preview: {e}", exc_info=True)
+            self._takeover_mode_active = False
+            self._takeover_saved_state = {}
+            return {"success": False, "error": str(e)}
+    
+    def is_takeover_preview_active(self):
+        """Check if takeover preview mode is active."""
+        return self._takeover_mode_active
+    
+    def get_takeover_preview_state(self):
+        """Get current takeover preview state info."""
+        if not self._takeover_mode_active:
+            return None
+        return {
+            "active": True,
+            "active_playlist_id": self._takeover_saved_state.get('active_playlist_id'),
+            "preview_playlist_id": self._takeover_saved_state.get('preview_playlist_id'),
+            "players_taken": list(self._takeover_saved_state.get('players', {}).keys())
+        }
     
     # Master/Slave Synchronization Methods
     

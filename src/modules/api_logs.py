@@ -208,3 +208,79 @@ def register_log_routes(app):
                 'success': False,
                 'error': str(e)
             }), 500
+    
+    @app.route('/api/logs/js-log', methods=['POST'])
+    def log_js_console():
+        """
+        Loggt alle JavaScript-Console-Ausgaben (log, warn, error, info, debug).
+        
+        Expected JSON:
+            {
+                "level": "log|warn|error|info|debug",
+                "message": "Log message",
+                "args": ["arg1", "arg2", ...],
+                "url": "http://localhost:5000/page.html",
+                "timestamp": 1234567890.123,
+                "stack": "Stack trace (optional)"
+            }
+        
+        Returns:
+            JSON mit Bestätigung
+        """
+        try:
+            data = request.get_json()
+            
+            level = data.get('level', 'log')
+            message = data.get('message', '')
+            args = data.get('args', [])
+            url = data.get('url', '')
+            timestamp = data.get('timestamp', '')
+            stack = data.get('stack', '')
+            
+            # Logging über den Python Logger
+            logger = logging.getLogger('flux')
+            
+            # Kombiniere Message und Args
+            if args:
+                full_message = f"{message} {' '.join(str(arg) for arg in args)}"
+            else:
+                full_message = message
+            
+            # Baue Log-Message
+            log_msg = f"[JS {level.upper()}]"
+            if url:
+                # Extrahiere nur den Pfad ohne Domain
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                path = parsed.path if parsed.path else 'unknown'
+                log_msg += f" [{path}]"
+            log_msg += f" {full_message}"
+            
+            # Logge mit entsprechendem Level
+            if level == 'error':
+                logger.error(log_msg)
+                if stack:
+                    for stack_line in stack.split('\n'):
+                        if stack_line.strip():
+                            logger.error(f"[JS STACK] {stack_line.strip()}")
+            elif level == 'warn':
+                logger.warning(log_msg)
+            elif level == 'info':
+                logger.info(log_msg)
+            elif level == 'debug':
+                logger.debug(log_msg)
+            else:  # log
+                logger.info(log_msg)
+            
+            return jsonify({
+                'success': True,
+                'message': 'Log sent to server'
+            })
+            
+        except Exception as e:
+            logger = logging.getLogger('flux')
+            logger.error(f"Fehler beim Loggen von JS-Console: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500

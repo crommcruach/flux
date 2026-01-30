@@ -62,6 +62,62 @@ class OutputManager:
         
         logger.info(f"✅ OutputManager initialized for '{player_name}' ({canvas_width}x{canvas_height})")
     
+    def load_outputs_from_config(self, output_definitions: list) -> int:
+        """
+        Load and register outputs from config definitions
+        
+        Args:
+            output_definitions: List of output configuration dicts from config.json
+            
+        Returns:
+            int: Number of outputs successfully created
+        """
+        from .plugins import DisplayOutput, VirtualOutput
+        
+        created_count = 0
+        
+        for output_def in output_definitions:
+            output_id = output_def.get('id')
+            output_type = output_def.get('type')
+            enabled = output_def.get('enabled', True)
+            
+            if not output_id or not output_type:
+                logger.warning(f"[{self.player_name}] Skipping invalid output definition: {output_def}")
+                continue
+            
+            # Skip if output already exists
+            if output_id in self.outputs:
+                logger.debug(f"[{self.player_name}] Output '{output_id}' already registered")
+                continue
+            
+            try:
+                # Create output instance based on type
+                if output_type == 'display':
+                    output = DisplayOutput(output_id, output_def)
+                elif output_type == 'virtual':
+                    output = VirtualOutput(output_id, output_def)
+                else:
+                    logger.warning(f"[{self.player_name}] Unknown output type '{output_type}' for '{output_id}'")
+                    continue
+                
+                # Register output
+                self.outputs[output_id] = output
+                logger.info(f"✅ [{self.player_name}] Output '{output_id}' created (type: {output_type})")
+                
+                # Enable if configured
+                if enabled:
+                    if output.enable():
+                        logger.info(f"✅ [{self.player_name}] Output '{output_id}' enabled")
+                    else:
+                        logger.error(f"❌ [{self.player_name}] Failed to enable output '{output_id}'")
+                
+                created_count += 1
+                
+            except Exception as e:
+                logger.error(f"[{self.player_name}] Failed to create output '{output_id}': {e}", exc_info=True)
+        
+        return created_count
+    
     def register_output(self, output_id: str, output: OutputBase):
         """
         Register an output plugin
@@ -146,6 +202,13 @@ class OutputManager:
             self.composite_frame = composite_frame
             self.layer_manager = layer_manager
             self.current_clip_id = current_clip_id
+        
+        # Debug: Log first few frames
+        if not hasattr(self, '_frame_count'):
+            self._frame_count = 0
+        self._frame_count += 1
+        if self._frame_count <= 5:
+            logger.info(f"[{self.player_name}] update_frame called (frame #{self._frame_count}), outputs: {len(self.outputs)}, enabled: {sum(1 for o in self.outputs.values() if o.enabled)}")
         
         # Distribute to all enabled outputs
         for output_id, output in self.outputs.items():

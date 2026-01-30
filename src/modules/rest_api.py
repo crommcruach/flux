@@ -118,6 +118,18 @@ class RestAPI:
         """Set player via PlayerManager."""
         self.player_manager.player = new_player
     
+    def register_unified_player_routes(self, playlist_system=None):
+        """Register unified player routes after playlist system is available."""
+        from .api_player_unified import register_unified_routes
+        register_unified_routes(self.app, self.player_manager, self.config, self.socketio, playlist_system)
+        logger.info(f"Unified Player API routes registered (playlist_system={'available' if playlist_system else 'None'})")
+    
+    def register_transition_routes(self, playlist_system=None):
+        """Register transition routes after playlist system is available."""
+        from .api_transitions import register_transition_routes
+        register_transition_routes(self.app, self.player_manager, playlist_system)
+        logger.info(f"Transition API routes registered (playlist_system={'available' if playlist_system else 'None'})")
+    
     def _register_routes(self):
         """Registriert alle API-Routen."""
         
@@ -174,13 +186,9 @@ class RestAPI:
         from .api_files import register_files_api
         register_files_api(self.app, self.video_dir, self.config)
         
-        # Register Unified Player API
-        from .api_player_unified import register_unified_routes
-        register_unified_routes(self.app, self.player_manager, self.config, self.socketio)
+        # NOTE: Unified Player API routes registered later in main.py after playlist_system is initialized
         
-        # Register Transition API
-        from .api_transitions import register_transition_routes
-        register_transition_routes(self.app, self.player_manager)
+        # NOTE: Transition API routes will be registered later after playlist_system is available
         
         # Register Debug API
         from .api_debug import register_debug_routes

@@ -54,7 +54,12 @@ class OutputBase(ABC):
         # Thread lock for statistics
         self.stats_lock = threading.Lock()
         
-        logger.debug(f"[{self.output_id}] Output base initialized (FPS: {self.target_fps})")
+        # Frame capture for streaming (optional per output)
+        self.enable_capture = config.get('enable_capture', False)
+        self.latest_frame: Optional[np.ndarray] = None
+        self.frame_capture_lock = threading.Lock()
+        
+        logger.debug(f"[{self.output_id}] Output base initialized (FPS: {self.target_fps}, capture: {self.enable_capture})")
     
     @abstractmethod
     def initialize(self) -> bool:
@@ -150,12 +155,26 @@ class OutputBase(ABC):
     
     def _output_loop(self):
         """Output thread loop - processes frames from queue"""
+        from queue import Empty
         logger.debug(f"[{self.output_id}] Output thread started")
+        
+        # Debug counter
+        frame_count = 0
         
         while self.running:
             try:
                 # Get frame from queue (blocking with timeout)
                 frame = self.frame_queue.get(timeout=0.1)
+                
+                # Debug: Log first few frames
+                frame_count += 1
+                if frame_count <= 5:
+                    logger.info(f"[{self.output_id}] Received frame #{frame_count} from queue (shape: {frame.shape})")
+                
+                # Capture frame for streaming if enabled
+                if self.enable_capture:
+                    with self.frame_capture_lock:
+                        self.latest_frame = frame.copy()
                 
                 # FPS throttling
                 if self.frame_interval > 0:
@@ -168,13 +187,27 @@ class OutputBase(ABC):
                     with self.stats_lock:
                         self.frames_sent += 1
                         self.last_frame_time = time.time()
+                    if frame_count <= 5:
+                        logger.info(f"[{self.output_id}] Frame #{frame_count} sent successfully")
                 else:
                     with self.stats_lock:
                         self.frames_dropped += 1
+                    if frame_count <= 5:
+                        logger.warning(f"[{self.output_id}] Frame #{frame_count} send failed")
+            
+            except Empty:
+                # Queue empty - process window events if this is a display output
+                # This keeps cv2 windows responsive even when no frames are coming
+                try:
+                    if hasattr(self, 'process_window_events'):
+                        self.process_window_events()
+                except Exception as e:
+                    logger.error(f"[{self.output_id}] Error processing window events: {e}", exc_info=True)
+                continue
                 
             except Exception as e:
                 if self.running:  # Only log if not shutting down
-                    logger.error(f"[{self.output_id}] Output loop error: {e}")
+                    logger.error(f"[{self.output_id}] Output loop error: {e}", exc_info=True)
                     time.sleep(0.1)
         
         logger.debug(f"[{self.output_id}] Output thread stopped")
@@ -202,3 +235,16 @@ class OutputBase(ABC):
             self.frames_sent = 0
             self.frames_dropped = 0
         logger.debug(f"[{self.output_id}] Statistics reset")
+    
+    def get_latest_frame(self) -> Optional[np.ndarray]:
+        """
+        Get latest captured frame for streaming
+        
+        Returns:
+            np.ndarray or None: Copy of latest frame, or None if capture disabled or no frame available
+        """
+        if not self.enable_capture:
+            return None
+        
+        with self.frame_capture_lock:
+            return self.latest_frame.copy() if self.latest_frame is not None else None

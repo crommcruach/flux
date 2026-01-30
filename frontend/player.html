@@ -142,11 +142,12 @@
                 <span>📋 Playlist Management</span>
             </div>
             <div class="playlist-management-bar-actions">
-                <button class="btn btn-info btn-sm" onclick="showVideoPlayerSettingsModal()" title="Configure Input Settings">⚙️ Input Settings</button>
                 <button class="btn btn-success btn-sm" onclick="savePlaylists()" title="Save Both Playlists">💾 Save Playlists</button>
                 <button class="btn btn-primary btn-sm" onclick="saveSnapshot()" title="Create Snapshot">📸 Snapshot</button>
                 <button class="btn btn-info btn-sm" onclick="loadPlaylists()" title="Load Both Playlists">📂 Load Playlists</button>
                 <button class="btn btn-warning btn-sm" onclick="loadSnapshotModal()" title="Load Snapshot">🔄 Restore</button>
+                <button class="btn btn-outline-secondary btn-sm" id="sequencerModeBtn" onclick="toggleSequencerMode()" title="Toggle Sequencer Mode">🎵 Sequencer Mode</button>
+                <button class="btn btn-outline-info btn-sm" onclick="showVideoPlayerSettingsModal()" title="Configure Input Settings">⚙️ Input Settings</button>
             </div>
         </div>
         
@@ -648,16 +649,24 @@
         })();
     </script>
     
+    <script src="js/components/color-picker.js"></script>
+    <script src="js/circular-slider.js"></script>
+    <script src="js/sequences.js"></script>
+    <script src="js/bpm-widget.js"></script>
+    <script src="js/components/playlist-tabs.js"></script>
+    <script src="js/player.js" type="module"></script>
+    <script type="module" src="js/waveform-analyzer.js"></script>
     <script>
-        // Sequencer Mode Toggle (exposed on window for playlist context menu)
+        // Sequencer Mode Toggle (exposed on window for state restoration)
         window.sequencerModeActive = false;
         
         async function toggleSequencerMode() {
             window.sequencerModeActive = !window.sequencerModeActive;
             const waveformSection = document.querySelector('.waveform-analyzer-section');
+            const btn = document.getElementById('sequencerModeBtn');
             
             try {
-                // Call backend API to enable/disable master mode (playlist-aware)
+                // Call backend API to enable/disable master mode
                 const response = await fetch('/api/sequencer/mode', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -669,15 +678,16 @@
                 if (result.success) {
                     if (window.sequencerModeActive) {
                         waveformSection.style.display = 'grid';
+                        btn.classList.remove('btn-outline-secondary');
+                        btn.classList.add('btn-success');
+                        btn.textContent = '🎵 Sequencer: MASTER';
                         console.log('✅ Sequencer mode ENABLED (MASTER)');
                     } else {
                         waveformSection.style.display = 'none';
+                        btn.classList.remove('btn-success');
+                        btn.classList.add('btn-outline-secondary');
+                        btn.textContent = '🎵 Sequencer Mode';
                         console.log('✅ Sequencer mode DISABLED');
-                    }
-                    
-                    // Update master/slave UI to reflect sequencer mode change
-                    if (typeof window.updateMasterUI === 'function') {
-                        window.updateMasterUI();
                     }
                 } else {
                     console.error('Failed to toggle sequencer mode');

@@ -512,6 +512,182 @@ def register_info_routes(app, player_manager, api=None, config=None):
             # Return original frame on error
             return frame
     
+    @app.route('/api/outputs/<player_id>/stream/<output_id>')
+    def stream_output(player_id, output_id):
+        """
+        MJPEG stream for any output (generalized streaming endpoint)
+        
+        Args:
+            player_id: Player identifier (e.g., 'video', 'artnet')
+            output_id: Output identifier from OutputManager
+        
+        Query Parameters:
+            fps: Stream FPS (default: 25)
+            quality: JPEG quality 0-100 (default: 85)
+            max_width: Max width scaling (default: 640, 0=no scaling)
+        """
+        from flask import Response, request
+        import cv2
+        import numpy as np
+        import time
+        
+        # Get query parameters
+        stream_fps = int(request.args.get('fps', 25))
+        jpeg_quality = int(request.args.get('quality', 85))
+        max_width = int(request.args.get('max_width', 640))
+        frame_delay = 1.0 / stream_fps if stream_fps > 0 else 0.04
+        
+        def generate_frames():
+            """Generator for MJPEG stream"""
+            while True:
+                try:
+                    # Get player
+                    player = player_manager.get_player(player_id)
+                    
+                    if not player or not hasattr(player, 'output_manager') or not player.output_manager:
+                        # Black frame if player or output manager not found
+                        frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                    else:
+                        # Get output
+                        output = player.output_manager.outputs.get(output_id)
+                        
+                        if not output or not output.enabled:
+                            # Black frame if output not found or disabled
+                            frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                        else:
+                            # Get latest frame from output
+                            frame = output.get_latest_frame()
+                            
+                            if frame is None:
+                                # Black frame if no frame available yet
+                                frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                    
+                    # Scale if needed
+                    if max_width > 0 and frame.shape[1] > max_width:
+                        scale = max_width / frame.shape[1]
+                        new_width = int(frame.shape[1] * scale)
+                        new_height = int(frame.shape[0] * scale)
+                        frame = cv2.resize(frame, (new_width, new_height))
+                    
+                    # Encode as JPEG
+                    ret, buffer = cv2.imencode('.jpg', frame, 
+                                              [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+                    if not ret:
+                        time.sleep(frame_delay)
+                        continue
+                    
+                    frame_bytes = buffer.tobytes()
+                    
+                    # MJPEG format
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + 
+                           frame_bytes + b'\r\n')
+                    
+                    time.sleep(frame_delay)
+                
+                except Exception as e:
+                    logger.error(f"Stream error for {player_id}/{output_id}: {e}")
+                    # Black frame on error
+                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    if ret:
+                        frame_bytes = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + 
+                               frame_bytes + b'\r\n')
+                    time.sleep(0.1)
+        
+        return Response(generate_frames(), 
+                       mimetype='multipart/x-mixed-replace; boundary=frame')
+    
+    @app.route('/api/outputs/<player_id>/stream/preview_live')
+    def stream_preview_player(player_id):
+        """
+        MJPEG stream for preview players (non-active playlist preview)
+        
+        Args:
+            player_id: 'video' or 'artnet' (preview player automatically selected)
+        
+        Query Parameters:
+            fps: Stream FPS (default: 15)
+            quality: JPEG quality 0-100 (default: 80)
+            max_width: Max width scaling (default: 640)
+        """
+        from flask import Response, request
+        import cv2
+        import numpy as np
+        import time
+        
+        # Get query parameters (lower defaults for preview)
+        stream_fps = int(request.args.get('fps', 15))
+        jpeg_quality = int(request.args.get('quality', 80))
+        max_width = int(request.args.get('max_width', 640))
+        frame_delay = 1.0 / stream_fps if stream_fps > 0 else 0.066
+        
+        def generate_preview_frames():
+            """Generator for preview player MJPEG stream"""
+            while True:
+                try:
+                    # Get preview player
+                    preview_player_id = f"{player_id}_preview"
+                    preview_player = player_manager.get_player(preview_player_id)
+                    
+                    if not preview_player:
+                        # Black frame with text if preview player not found
+                        frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                        cv2.putText(frame, "Preview not active", (10, 90),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    else:
+                        # Get last video frame from preview player
+                        if player_id == 'video':
+                            frame = preview_player.last_video_frame
+                        else:  # artnet
+                            frame = preview_player.last_video_frame
+                        
+                        if frame is None:
+                            # Black frame if no frame available yet
+                            frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                            cv2.putText(frame, "Loading preview...", (10, 90),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    
+                    # Scale if needed
+                    if max_width > 0 and frame.shape[1] > max_width:
+                        scale = max_width / frame.shape[1]
+                        new_width = int(frame.shape[1] * scale)
+                        new_height = int(frame.shape[0] * scale)
+                        frame = cv2.resize(frame, (new_width, new_height))
+                    
+                    # Encode as JPEG
+                    ret, buffer = cv2.imencode('.jpg', frame, 
+                                              [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+                    if not ret:
+                        time.sleep(frame_delay)
+                        continue
+                    
+                    frame_bytes = buffer.tobytes()
+                    
+                    # MJPEG format
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + 
+                           frame_bytes + b'\r\n')
+                    
+                    time.sleep(frame_delay)
+                
+                except Exception as e:
+                    logger.error(f"Preview stream error for {player_id}: {e}")
+                    # Black frame on error
+                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    if ret:
+                        frame_bytes = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + 
+                               frame_bytes + b'\r\n')
+                    time.sleep(0.1)
+        
+        return Response(generate_preview_frames(), 
+                       mimetype='multipart/x-mixed-replace; boundary=frame')
+    
     @app.route('/api/preview/stream')
     def preview_stream():
         """MJPEG Video-Stream des aktuellen Frames mit optionalem Slice-Parameter."""

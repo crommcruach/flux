@@ -15,13 +15,14 @@ from plugins.plugin_base import PluginType
 logger = get_logger(__name__)
 
 
-def register_transition_routes(app, player_manager):
+def register_transition_routes(app, player_manager, playlist_system=None):
     """
     Registriert Transition-API-Routes.
     
     Args:
         app: Flask-App-Instanz
         player_manager: PlayerManager-Instanz
+        playlist_system: MultiPlaylistSystem instance for playlist-aware operations (optional)
     """
     plugin_manager = get_plugin_manager()
     
@@ -75,12 +76,51 @@ def register_transition_routes(app, player_manager):
             duration = data.get('duration', 1.0)
             easing = data.get('easing', 'ease_in_out')
             
+            # Debug: Log playlist state
+            logger.info(f"[TRANSITION CONFIG DEBUG] playlist_system exists: {playlist_system is not None}")
+            if playlist_system:
+                logger.info(f"[TRANSITION CONFIG DEBUG] viewed={playlist_system.viewed_playlist_id}, active={playlist_system.active_playlist_id}")
+            
             # Validate duration range
             if not (0.1 <= duration <= 5.0):
                 return jsonify({
                     "success": False,
                     "error": "Duration must be between 0.1 and 5.0 seconds"
                 }), 400
+            
+            # Check if we're viewing a different playlist than the active one
+            if playlist_system and playlist_system.viewed_playlist_id != playlist_system.active_playlist_id:
+                # Viewing non-active playlist - update stored transition config
+                viewed_playlist = playlist_system.playlists.get(playlist_system.viewed_playlist_id)
+                if viewed_playlist:
+                    player_state = viewed_playlist.players[player_id]
+                    
+                    # Update transition config in playlist storage
+                    player_state.transition_config = {
+                        'enabled': enabled,
+                        'effect': effect,
+                        'duration': duration,
+                        'easing': easing
+                    }
+                    
+                    logger.info(f"[TRANSITION CONFIG] Updated transition config for viewed playlist '{viewed_playlist.name}' {player_id}: enabled={enabled}, effect={effect}")
+                    
+                    # Save playlist state
+                    playlist_system._auto_save()
+                    
+                    return jsonify({
+                        "success": True,
+                        "player_id": player_id,
+                        "config": {
+                            "enabled": enabled,
+                            "effect": effect,
+                            "duration": duration,
+                            "easing": easing
+                        }
+                    })
+            
+            # Otherwise apply to physical player (active playlist)
+            logger.info(f"[TRANSITION CONFIG DEBUG] Applying to physical player (active playlist)")
             
             # Check if transition plugin exists
             transition_plugin = None

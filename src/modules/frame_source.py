@@ -93,7 +93,7 @@ class VideoSource(FrameSource):
     
     def _is_gif_file(self, path):
         """Prüft ob Datei ein GIF ist."""
-        return path.lower().endswith('.gif')
+        return path and path.lower().endswith('.gif')
     
     def _load_gif_frame_delays(self):
         """Lädt Frame-Delays aus GIF mit Pillow."""

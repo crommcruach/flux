@@ -27,6 +27,12 @@ class PlayerState:
         self.loop: bool = True               # Loop playlist
         self.is_playing: bool = False        # Playing state
         self.global_effects: List = []       # Global effects for this player
+        self.transition_config: Dict = {     # Transition configuration
+            'enabled': False,
+            'effect': 'fade',
+            'duration': 1.0,
+            'easing': 'ease_in_out'
+        }
     
     def to_dict(self) -> dict:
         """Serialize to dictionary"""
@@ -38,7 +44,8 @@ class PlayerState:
             'autoplay': self.autoplay,
             'loop': self.loop,
             'is_playing': self.is_playing,
-            'global_effects': self.global_effects.copy()
+            'global_effects': self.global_effects.copy(),
+            'transition_config': self.transition_config.copy()
         }
     
     @staticmethod
@@ -53,6 +60,12 @@ class PlayerState:
         state.loop = data.get('loop', False)
         state.is_playing = data.get('is_playing', False)
         state.global_effects = data.get('global_effects', []).copy()
+        state.transition_config = data.get('transition_config', {
+            'enabled': False,
+            'effect': 'fade',
+            'duration': 1.0,
+            'easing': 'ease_in_out'
+        }).copy()
         return state
 
 
@@ -133,10 +146,11 @@ class Playlist:
 class MultiPlaylistSystem:
     """Manages multiple playlists and switching between them"""
     
-    def __init__(self, player_manager, session_state, websocket_manager):
+    def __init__(self, player_manager, session_state, websocket_manager, config=None):
         self.player_manager = player_manager
         self.session_state = session_state
         self.websocket_manager = websocket_manager
+        self.config = config  # Store config for default effects
         
         self.playlists: Dict[str, Playlist] = {}  # {playlist_id: Playlist}
         self.active_playlist_id: Optional[str] = None   # Currently controlling playback
@@ -149,8 +163,28 @@ class MultiPlaylistSystem:
     # ========================================
     
     def create_playlist(self, name: str, playlist_type: str = 'standard') -> Playlist:
-        """Create a new playlist"""
+        """Create a new playlist with default effects applied"""
         playlist = Playlist(name, playlist_type)
+        
+        # Apply default effects from config to new playlist
+        if self.config:
+            effects_config = self.config.get('effects', {})
+            logger.info(f"[CREATE DEBUG] Effects config: video={len(effects_config.get('video', []))}, artnet={len(effects_config.get('artnet', []))}")
+            
+            # Apply video default effects
+            video_defaults = effects_config.get('video', [])
+            if video_defaults:
+                playlist.players['video'].global_effects = self._serialize_default_effects(video_defaults)
+                logger.info(f"  ✅ Applied {len(video_defaults)} default effects to video player")
+            
+            # Apply artnet default effects
+            artnet_defaults = effects_config.get('artnet', [])
+            if artnet_defaults:
+                playlist.players['artnet'].global_effects = self._serialize_default_effects(artnet_defaults)
+                logger.info(f"  ✅ Applied {len(artnet_defaults)} default effects to artnet player")
+        else:
+            logger.warning(f"[CREATE DEBUG] No config available for default effects")
+        
         self.playlists[playlist.id] = playlist
         
         # Set as viewed if it's the first playlist
@@ -190,6 +224,28 @@ class MultiPlaylistSystem:
         self._auto_save()
         
         return True
+    
+    def _serialize_default_effects(self, effects_config: List[Dict]) -> List[Dict]:
+        """
+        Serialize default effects from config format to storage format.
+        Config format: [{'plugin_id': 'transform', 'params': {...}}, ...]
+        Storage format: [{'index': 0, 'plugin_id': 'transform', 'parameters': {...}, ...}, ...]
+        """
+        serialized = []
+        for idx, effect_cfg in enumerate(effects_config):
+            plugin_id = effect_cfg.get('plugin_id')
+            params = effect_cfg.get('params', {})
+            
+            # Create a minimal effect representation (will be fully initialized when applied)
+            serialized.append({
+                'index': idx,
+                'plugin_id': plugin_id,
+                'parameters': params.copy(),
+                'enabled': True,
+                'config': params.copy()
+            })
+        
+        return serialized
     
     def rename_playlist(self, playlist_id: str, new_name: str) -> bool:
         """Rename a playlist"""
@@ -321,6 +377,30 @@ class MultiPlaylistSystem:
                     if hasattr(player, 'playlist_params'):
                         player.playlist_params = player_state.clip_params.copy()
                     
+                    # Apply global effects to player
+                    if hasattr(player, 'effect_processor') and player.effect_processor:
+                        chain_type = 'artnet' if player_id == 'artnet' else 'video'
+                        try:
+                            # Clear existing chain
+                            player.effect_processor.clear_chain(chain_type=chain_type)
+                            
+                            # Restore effects from playlist
+                            for effect_data in player_state.global_effects:
+                                plugin_id = effect_data.get('plugin_id') or effect_data.get('id')
+                                config = effect_data.get('config', {})
+                                
+                                # Extract parameter values from parameters dict if present
+                                if 'parameters' in effect_data:
+                                    config = effect_data['parameters']
+                                
+                                success, msg = player.add_effect_to_chain(plugin_id, config, chain_type=chain_type)
+                                if not success:
+                                    logger.warning(f"[APPLY DEBUG] {player_id} - Failed to restore effect '{plugin_id}': {msg}")
+                            
+                            logger.info(f"[APPLY DEBUG] {player_id} - Restored {len(player_state.global_effects)} global effects")
+                        except Exception as e:
+                            logger.error(f"[APPLY DEBUG] {player_id} - Error applying effects: {e}")
+                    
                     logger.debug(f"Applied playlist '{playlist.name}' to {player_id}: "
                                f"{len(player_state.clips)} clips, autoplay={player_state.autoplay}, "
                                f"loop={player_state.loop}, index={player_state.index}")
@@ -382,6 +462,17 @@ class MultiPlaylistSystem:
                     player_state.autoplay = player.autoplay if hasattr(player, 'autoplay') else False
                     player_state.loop = player.loop_playlist if hasattr(player, 'loop_playlist') else False
                     player_state.is_playing = player.is_playing if hasattr(player, 'is_playing') else False
+                    
+                    # Capture global effects from player
+                    if hasattr(player, 'effect_processor'):
+                        chain_type = 'artnet' if player_id == 'artnet' else 'video'
+                        try:
+                            # Get serialized effect chain (includes config, enabled state, etc.)
+                            player_state.global_effects = player.get_effect_chain(chain_type=chain_type)
+                            logger.info(f"[CAPTURE DEBUG] {player_id} - Captured {len(player_state.global_effects)} global effects")
+                        except Exception as e:
+                            logger.error(f"[CAPTURE DEBUG] {player_id} - Error capturing effects: {e}")
+                            player_state.global_effects = []
                     
                     if hasattr(player, 'playlist_params'):
                         player_state.clip_params = player.playlist_params.copy()

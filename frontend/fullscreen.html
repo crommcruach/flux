@@ -5,6 +5,71 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flux - Fullscreen</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        /* Context Menu Styles */
+        .context-menu {
+            display: none;
+            position: fixed;
+            background: rgba(30, 30, 30, 0.95);
+            border: 1px solid #444;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            min-width: 200px;
+            padding: 4px 0;
+            backdrop-filter: blur(10px);
+        }
+        
+        .context-menu-header {
+            padding: 8px 16px;
+            color: #888;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #444;
+            margin-bottom: 4px;
+        }
+        
+        .context-menu-item {
+            padding: 10px 16px;
+            color: #fff;
+            cursor: pointer;
+            transition: background 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        
+        .context-menu-item:hover {
+            background: rgba(66, 133, 244, 0.3);
+        }
+        
+        .context-menu-item.active {
+            background: rgba(66, 133, 244, 0.5);
+            font-weight: bold;
+        }
+        
+        .context-menu-item.active::before {
+            content: '✓';
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .context-menu-separator {
+            height: 1px;
+            background: #444;
+            margin: 4px 0;
+        }
+        
+        .output-type-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            margin-left: auto;
+        }
+    </style>
 </head>
 <body class="fullscreen-body">
     <div id="streamContainer" class="fullscreen-container">
@@ -16,16 +81,118 @@
             </div>
         </div>
     </div>
+    
+    <!-- Context Menu -->
+    <div id="contextMenu" class="context-menu">
+        <div class="context-menu-header">Switch Output</div>
+        <div id="contextMenuItems"></div>
+    </div>
+    
     <script>
         let holdTimer = null;
         let fpsVisible = false;
         let lastFrameTime = Date.now();
         let frameCount = 0;
         let fps = 0;
+        let currentOutput = null;
+        let outputs = [];
         
         const streamImg = document.getElementById('previewStream');
         const fpsOverlay = document.getElementById('fpsOverlay');
         const fpsValue = document.getElementById('fpsValue');
+        const contextMenu = document.getElementById('contextMenu');
+        const contextMenuItems = document.getElementById('contextMenuItems');
+        
+        // Load available outputs
+        async function loadOutputs() {
+            try {
+                const response = await fetch('/api/outputs/video');
+                const data = await response.json();
+                
+                if (data.success) {
+                    outputs = Object.entries(data.outputs).map(([id, config]) => ({
+                        id,
+                        description: config.description || id,
+                        type: config.type,
+                        enabled: data.enabled_outputs.includes(id)
+                    }));
+                    
+                    // Check URL for output parameter
+                    const urlParams = new URLSearchParams(window.location.search);
+                    currentOutput = urlParams.get('output') || outputs[0]?.id;
+                    
+                    updateContextMenu();
+                    updateStream();
+                }
+            } catch (error) {
+                console.error('Failed to load outputs:', error);
+            }
+        }
+        
+        // Update context menu items
+        function updateContextMenu() {
+            contextMenuItems.innerHTML = outputs.map(output => `
+                <div class="context-menu-item ${output.id === currentOutput ? 'active' : ''}" 
+                     data-output="${output.id}"
+                     ${!output.enabled ? 'style="opacity: 0.5;"' : ''}>
+                    <span>${output.description}</span>
+                    <span class="output-type-badge">${output.type}</span>
+                </div>
+            `).join('');
+            
+            // Add click handlers
+            contextMenuItems.querySelectorAll('.context-menu-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    switchOutput(item.dataset.output);
+                    hideContextMenu();
+                });
+            });
+        }
+        
+        // Switch to different output
+        function switchOutput(outputId) {
+            if (outputId === currentOutput) return;
+            
+            currentOutput = outputId;
+            updateStream();
+            updateContextMenu();
+            
+            // Update URL without reload
+            const url = new URL(window.location);
+            url.searchParams.set('output', outputId);
+            window.history.pushState({}, '', url);
+        }
+        
+        // Update stream URL
+        function updateStream() {
+            const timestamp = Date.now();
+            streamImg.src = `/api/outputs/video/stream/${currentOutput}?t=${timestamp}`;
+        }
+        
+        // Show context menu
+        function showContextMenu(x, y) {
+            contextMenu.style.left = x + 'px';
+            contextMenu.style.top = y + 'px';
+            contextMenu.style.display = 'block';
+        }
+        
+        // Hide context menu
+        function hideContextMenu() {
+            contextMenu.style.display = 'none';
+        }
+        
+        // Right-click handler
+        streamImg.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showContextMenu(e.clientX, e.clientY);
+        });
+        
+        // Click outside to close menu
+        document.addEventListener('click', (e) => {
+            if (!contextMenu.contains(e.target) && e.target !== streamImg) {
+                hideContextMenu();
+            }
+        });
         
         // FPS Berechnung durch Überwachung des Stream-Updates
         function updateFPS() {
@@ -51,10 +218,12 @@
         
         // Mouse Events
         streamImg.addEventListener('mousedown', (e) => {
-            holdTimer = setTimeout(() => {
-                fpsVisible = !fpsVisible;
-                fpsOverlay.style.display = fpsVisible ? 'flex' : 'none';
-            }, 500); // 500ms hold
+            if (e.button === 0) { // Left click only
+                holdTimer = setTimeout(() => {
+                    fpsVisible = !fpsVisible;
+                    fpsOverlay.style.display = fpsVisible ? 'flex' : 'none';
+                }, 500); // 500ms hold
+            }
         });
         
         streamImg.addEventListener('mouseup', () => {
@@ -94,6 +263,9 @@
                 holdTimer = null;
             }
         });
+        
+        // Initialize
+        loadOutputs();
     </script>
 </body>
 </html>
