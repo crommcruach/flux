@@ -13,7 +13,7 @@
  * - Gamma correction (overall + RGB channels)
  * - Context menu with positioning shortcuts
  * - Export/Import JSON configuration
- * - LocalStorage persistence
+ * - Backend session state persistence (no localStorage)
  * 
  * SECTIONS:
  * - Application State
@@ -82,7 +82,7 @@ const app = {
     // ========================================
     // INITIALIZATION
     // ========================================
-    init() {
+    async init() {
         this.canvas = document.getElementById('sliceCanvas');
         this.ctx = this.canvas.getContext('2d');
         this.videoCanvas = document.getElementById('videoCanvas');
@@ -128,7 +128,14 @@ const app = {
 
         this.updateCanvasSize();
         this.loadVideoPlayerSettings();
-        this.loadFromLocalStorage();
+        
+        // Load outputs first (to get compositions and output configs)
+        await this.loadExistingOutputs();
+        
+        // Then load slices (which will restore output assignments)
+        await this.loadFromBackend();
+        
+        this.setType('slice'); // Set default to slice mode with correct UI state
         this.updateScreenButtons();
         this.updateUI();
         this.render();
@@ -263,7 +270,7 @@ const app = {
     },
 
     createShapeFromDrawing() {
-        const id = 'shape_' + Date.now();
+        const id = crypto.randomUUID();
         const color = this.colors[this.colorIndex % this.colors.length];
         this.colorIndex++;
         
@@ -279,6 +286,8 @@ const app = {
         // Only slices have screens and masks
         if (this.currentType === 'slice') {
     shape.screens = [];
+    shape.outputs = []; // Initialize outputs array for slice-to-output assignment
+    shape.name = shape.label; // Also set name for backend consistency
     shape.masks = [];
     shape.brightness = 0;
     shape.contrast = 0;
@@ -335,7 +344,7 @@ const app = {
 
         this.updateUI();
         this.render();
-        this.saveToLocalStorage();
+        this.saveToBackend(); // Auto-save to backend
         this.showToast(`${shape.label} created`);
     },
 
@@ -474,7 +483,7 @@ const app = {
         this.resizeHandle = null;
 
         if (!this.drawingMode) {
-    this.saveToLocalStorage();
+            this.saveToBackend(); // Auto-save to backend
         }
         this.updateUI();
         this.render();
@@ -1437,7 +1446,6 @@ const app = {
     this.selectedSlice = null;
     this.updateUI();
     this.render();
-    this.saveToLocalStorage();
         }
     },
 
@@ -1459,50 +1467,46 @@ const app = {
     // Duplicate mask
     const mask = this.selectedSlice;
     const duplicate = JSON.parse(JSON.stringify(mask));
-    duplicate.id = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    duplicate.label = mask.label + ' Copy';
-    
-    // Offset position
-    if (duplicate.shape === 'rectangle') {
-        duplicate.x += 20;
-        duplicate.y += 20;
-    } else if (duplicate.shape === 'circle') {
-        duplicate.centerX += 20;
-        duplicate.centerY += 20;
-    } else if (duplicate.points) {
-        duplicate.points = duplicate.points.map(p => ({x: p.x + 20, y: p.y + 20}));
-    }
-    
-    parentSlice.masks.push(duplicate);
-    this.selectedSlice = duplicate;
-    this.showToast('Mask duplicated');
+	duplicate.id = crypto.randomUUID();
+	duplicate.label = mask.label + ' Copy';
+	
+	// Offset position
+	if (duplicate.shape === 'rectangle') {
+	    duplicate.x += 20;
+	    duplicate.y += 20;
+	} else if (duplicate.shape === 'circle') {
+	    duplicate.centerX += 20;
+	    duplicate.centerY += 20;
+	} else if (duplicate.points) {
+	    duplicate.points = duplicate.points.map(p => ({x: p.x + 20, y: p.y + 20}));
+	}
+	
+	parentSlice.masks.push(duplicate);
+	this.selectedSlice = duplicate;
+	this.showToast('Mask duplicated');
         } else if (this.selectedSlice.type === 'slice') {
-    // Duplicate slice
-    const slice = this.selectedSlice;
-    const duplicate = JSON.parse(JSON.stringify(slice));
-    duplicate.id = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    duplicate.label = slice.label + ' Copy';
-    
-    // Offset position
-    if (duplicate.shape === 'rectangle') {
-        duplicate.x += 20;
-        duplicate.y += 20;
-    } else if (duplicate.shape === 'circle') {
-        duplicate.centerX += 20;
-        duplicate.centerY += 20;
-    } else if (duplicate.points) {
-        duplicate.points = duplicate.points.map(p => ({x: p.x + 20, y: p.y + 20}));
-    }
-    
-    // Duplicate masks with new IDs
-    if (duplicate.masks && duplicate.masks.length > 0) {
-        duplicate.masks = duplicate.masks.map(m => {
-    const newMask = JSON.parse(JSON.stringify(m));
-    newMask.id = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    return newMask;
-        });
-    }
-    
+	// Duplicate slice
+	const slice = this.selectedSlice;
+	const duplicate = JSON.parse(JSON.stringify(slice));
+	duplicate.id = crypto.randomUUID();
+	duplicate.label = slice.label + ' Copy';
+	
+	// Offset position
+	if (duplicate.shape === 'rectangle') {
+	    duplicate.x += 20;
+	    duplicate.y += 20;
+	} else if (duplicate.shape === 'circle') {
+	    duplicate.centerX += 20;
+	    duplicate.centerY += 20;
+	} else if (duplicate.points) {
+	    duplicate.points = duplicate.points.map(p => ({x: p.x + 20, y: p.y + 20}));
+	}
+	
+	// Duplicate masks with new IDs
+	if (duplicate.masks && duplicate.masks.length > 0) {
+	    duplicate.masks = duplicate.masks.map(m => {
+		const newMask = JSON.parse(JSON.stringify(m));
+		newMask.id = crypto.randomUUID();
     this.slices.push(duplicate);
     this.selectedSlice = duplicate;
     this.showToast('Slice duplicated');
@@ -1510,7 +1514,11 @@ const app = {
         
         this.updateUI();
         this.render();
-        this.saveToLocalStorage();
+        
+        // Save duplicated slice to backend
+        if (duplicate && duplicate.id) {
+            this.saveSliceToBackend(duplicate);
+        }
     },
 
     toggleSnap() {
@@ -1897,7 +1905,6 @@ const app = {
     }
     this.selectedSlice.screens = screens;
     this.updateUI();
-    this.saveToLocalStorage();
         } else {
     this.showToast('Select a slice (not mask) to assign outputs', 'error');
         }
@@ -1916,6 +1923,24 @@ const app = {
             if (Object.keys(outputTypes).length === 0) {
                 throw new Error('No output types available');
             }
+            
+            // Fetch existing outputs to check for monitor usage
+            const existingResponse = await fetch('/api/outputs/video');
+            let usedMonitors = new Set();
+            if (existingResponse.ok) {
+                const existingData = await existingResponse.json();
+                if (existingData.success && existingData.outputs) {
+                    // Track which monitors are already in use
+                    Object.values(existingData.outputs).forEach(output => {
+                        if (output.type === 'display' && output.monitor_index !== undefined) {
+                            usedMonitors.add(output.monitor_index);
+                        }
+                    });
+                }
+            }
+            
+            // Store used monitors for validation
+            this.usedMonitors = usedMonitors;
             
             // Create modal content
             let modalContent = `
@@ -2020,9 +2045,19 @@ const app = {
                     html += '<option value="">-- Select --</option>';
                 }
                 fieldConfig.options.forEach(opt => {
-                    html += `<option value="${opt.value}">${opt.label}</option>`;
+                    // Check if this monitor is already in use
+                    const isMonitorField = fieldName === 'monitor_index';
+                    const monitorInUse = isMonitorField && this.usedMonitors && this.usedMonitors.has(opt.value);
+                    const disabledAttr = monitorInUse ? 'disabled' : '';
+                    const usedSuffix = monitorInUse ? ' ⚠️ (In Use)' : '';
+                    html += `<option value="${opt.value}" ${disabledAttr}>${opt.label}${usedSuffix}</option>`;
                 });
                 html += '</select>';
+                
+                // Add warning for monitor field
+                if (fieldName === 'monitor_index' && this.usedMonitors && this.usedMonitors.size > 0) {
+                    html += '<small style="color: #ff9800; display: block; margin-top: 5px;">⚠️ Some monitors are already in use by other outputs</small>';
+                }
                 break;
                 
             case 'resolution':
@@ -2134,6 +2169,14 @@ const app = {
                 }
             }
             
+            // VALIDATION: Check for duplicate monitor usage
+            if (config.type === 'display' && config.monitor_index !== undefined) {
+                if (this.usedMonitors && this.usedMonitors.has(config.monitor_index)) {
+                    this.showToast('⚠️ This monitor is already in use by another output. Please select a different monitor.', 'error');
+                    return;
+                }
+            }
+            
             // Add default values from type
             Object.assign(config, typeInfo.default_config);
             config.type = outputType; // Ensure type is correct
@@ -2155,11 +2198,10 @@ const app = {
                 throw new Error(data.error || 'Failed to create output');
             }
             
-            // Add to screens list
-            this.customScreens.push(outputName);
-            this.updateScreenButtons();
-            this.saveToLocalStorage();
             this.showToast(`✅ Output "${outputName}" created successfully`);
+            
+            // Reload outputs list
+            await this.loadExistingOutputs();
             
             // Close modal
             const modal = ModalManager.get('addOutputModal');
@@ -2173,38 +2215,127 @@ const app = {
 
     updateScreenButtons() {
         const container = document.getElementById('screenButtonsContainer');
-        const allScreens = [...this.screens, ...this.customScreens];
-        const selectedScreens = (this.selectedSlice && this.selectedSlice.type === 'slice') ? (this.selectedSlice.screens || []) : [];
-        const disabled = (!this.selectedSlice || this.selectedSlice.type !== 'slice') ? 'disabled' : '';
+        
+        // Check if we have loaded outputs from backend
+        if (!this.existingOutputs) {
+            container.innerHTML = '<div style="color: #888; font-size: 12px;">Loading outputs...</div>';
+            return;
+        }
+        
+        const selectedSlice = this.selectedSlice && this.selectedSlice.type === 'slice' ? this.selectedSlice : null;
+        const disabled = !selectedSlice ? 'disabled' : '';
         
         let html = '';
-        this.screens.forEach(screen => {
-    const displayName = screen;
-    const checked = selectedScreens.includes(screen) ? 'checked' : '';
-    html += `
-        <div class="screen-checkbox-item ${disabled}">
-    <input type="checkbox" id="screen_${screen}" ${checked} ${disabled ? 'disabled' : ''}
-                   onchange="app.toggleScreen('${screen}')">
-    <label for="screen_${screen}">${displayName}</label>
-        </div>
-    `;
-        });
         
-        this.customScreens.forEach(screen => {
-    const checked = selectedScreens.includes(screen) ? 'checked' : '';
-    html += `
-        <div style="display: flex; gap: 5px;">
-    <div class="screen-checkbox-item ${disabled}" style="flex: 1;">
-        <input type="checkbox" id="screen_${screen}" ${checked} ${disabled ? 'disabled' : ''}
-                       onchange="app.toggleScreen('${screen}')">
-        <label for="screen_${screen}">${screen}</label>
-    </div>
-    <button onclick="app.removeOutput('${screen}')" style="padding: 8px;">×</button>
-        </div>
-    `;
-        });
+        // Display existing outputs from backend as simple checkboxes
+        if (Object.keys(this.existingOutputs).length > 0) {
+            Object.entries(this.existingOutputs).forEach(([outputId, output]) => {
+                const typeIcon = output.type === 'display' ? '🖥️' : 
+                               output.type === 'virtual' ? '💾' : 
+                               output.type === 'ndi' ? '📡' : '🎨';
+                
+                const monitorInfo = output.type === 'display' && output.monitor_index !== undefined 
+                    ? `Monitor ${output.monitor_index}` 
+                    : output.type === 'virtual' 
+                    ? `${output.resolution[0]}x${output.resolution[1]}`
+                    : 'Network';
+                
+                // Check if this output is assigned to selected slice
+                const isChecked = selectedSlice && output.slice === (selectedSlice.id || selectedSlice.label);
+                
+                html += `
+                    <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
+                        <div class="screen-checkbox-item ${disabled}" style="flex: 1;">
+                            <input type="checkbox" 
+                                   id="output_${outputId}" 
+                                   ${isChecked ? 'checked' : ''} 
+                                   ${disabled ? 'disabled' : ''}
+                                   onchange="app.toggleOutputForSlice('${outputId}')">
+                            <label for="output_${outputId}">
+                                ${typeIcon} ${outputId} <span style="color: #666; font-size: 10px;">(${monitorInfo})</span>
+                            </label>
+                        </div>
+                        <button class="small" onclick="app.openOutputComposer('${outputId}'); event.stopPropagation();" 
+                                style="padding: 4px 8px; font-size: 10px; background: #2a5a8a; border: 1px solid #3a7aaa; flex-shrink: 0;" 
+                                title="Compose multiple slices for this output">
+                            🎨
+                        </button>
+                    </div>
+                `;
+            });
+        } else {
+            html += '<div style="color: #888; font-size: 11px;">No outputs configured</div>';
+        }
         
         container.innerHTML = html;
+    },
+    
+    async toggleOutputForSlice(outputId) {
+        if (!this.selectedSlice || this.selectedSlice.type !== 'slice') {
+            return;
+        }
+        
+        const checkbox = document.getElementById(`output_${outputId}`);
+        
+        if (checkbox.checked) {
+            // First, ensure the slice exists in the backend
+            await this.saveSliceToBackend(this.selectedSlice);
+            
+            // Then assign this slice to the output
+            const sliceId = this.selectedSlice.id || this.selectedSlice.label;
+            const sliceName = this.selectedSlice.name || this.selectedSlice.label;
+            await this.updateOutputSlice(outputId, sliceId);
+            this.showToast(`${outputId} ← ${sliceName}`, 'success');
+        } else {
+            // Unassign (set to full)
+            await this.updateOutputSlice(outputId, 'full');
+            this.showToast(`${outputId} ← Full Canvas`, 'info');
+        }
+    },
+    
+    async updateOutputSource(outputId, newSource) {
+        try {
+            const response = await fetch(`/api/outputs/video/${outputId}/source`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: newSource })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                this.showToast(`${outputId}: Source → ${newSource}`, 'success');
+                await this.loadExistingOutputs(); // Reload to update display
+            } else {
+                this.showToast(`Failed: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Failed to update source:', error);
+            this.showToast('Failed to update source', 'error');
+        }
+    },
+    
+    async updateOutputSlice(outputId, newSlice) {
+        try {
+            console.log(`Updating output ${outputId} slice to:`, newSlice);
+            const response = await fetch(`/api/outputs/video/${outputId}/slice`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slice_id: newSlice })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                this.showToast(`${outputId}: Slice → ${newSlice}`, 'success');
+                await this.loadExistingOutputs(); // Reload to update display
+                this.updateUI(); // Refresh right sidebar to show new assignments
+            } else {
+                console.error('API error:', data.error);
+                this.showToast(`Failed: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Failed to update slice:', error);
+            this.showToast('Failed to update slice', 'error');
+        }
     },
 
     removeOutput(screen) {
@@ -2218,7 +2349,117 @@ const app = {
     this.customScreens = this.customScreens.filter(s => s !== screen);
     this.updateScreenButtons();
     this.updateUI();
-    this.saveToLocalStorage();
+    this.saveToBackend();
+        }
+    },
+    
+    async loadExistingOutputs() {
+        try {
+            const response = await fetch('/api/outputs/video');
+            
+            if (!response.ok) {
+                console.warn('Failed to load existing outputs:', response.statusText);
+                this.existingOutputs = {};
+                this.updateScreenButtons();
+                return;
+            }
+            
+            const data = await response.json();
+            
+            if (data.success && data.outputs) {
+                // Filter out internal outputs like preview_virtual
+                this.existingOutputs = {};
+                
+                // Initialize compositions object if not exists
+                if (!this.compositions) this.compositions = {};
+                
+                for (const [outputId, config] of Object.entries(data.outputs)) {
+                    if (outputId !== 'preview_virtual') {
+                        this.existingOutputs[outputId] = config;
+                        
+                        // Extract and restore composition data from output config
+                        if (config.composition && config.composition.slices && config.composition.slices.length > 0) {
+                            this.compositions[outputId] = {
+                                width: config.composition.width,
+                                height: config.composition.height,
+                                slices: config.composition.slices.map(s => ({
+                                    sliceId: s.sliceId,
+                                    x: s.x,
+                                    y: s.y,
+                                    width: s.width,
+                                    height: s.height,
+                                    scale: s.scale || 1.0
+                                }))
+                            };
+                            console.log(`✅ Restored composition for ${outputId}:`, this.compositions[outputId]);
+                        }
+                    }
+                }
+                console.log('✅ Loaded existing outputs:', Object.keys(this.existingOutputs).length);
+                console.log('✅ Loaded compositions:', Object.keys(this.compositions).length, this.compositions);
+            } else {
+                this.existingOutputs = {};
+            }
+            
+            this.updateScreenButtons();
+            
+        } catch (error) {
+            console.error('Failed to load existing outputs:', error);
+            this.existingOutputs = {};
+            this.updateScreenButtons();
+        }
+    },
+    
+    async toggleOutputEnabled(outputId, enable) {
+        try {
+            const action = enable ? 'enable' : 'disable';
+            const response = await fetch(`/api/outputs/video/${outputId}/${action}`, {
+                method: 'POST'
+            });
+            
+            const data = await response.json();
+            
+            if (!data.success) {
+                this.showToast(`❌ Failed to ${action} output: ${data.error}`, 'error');
+                return;
+            }
+            
+            this.showToast(`✅ Output ${enable ? 'enabled' : 'disabled'}`, 'success');
+            
+            // Reload outputs
+            await this.loadExistingOutputs();
+            
+        } catch (error) {
+            console.error('Failed to toggle output:', error);
+            this.showToast('❌ Failed to toggle output', 'error');
+        }
+    },
+    
+    async deleteOutput(outputId) {
+        if (!confirm(`Delete output "${outputId}"?\n\nThis will remove the output configuration.`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/outputs/video/${outputId}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            
+            if (!data.success) {
+                this.showToast(`❌ Failed to delete output: ${data.error}`, 'error');
+                return;
+            }
+            
+            this.showToast('✅ Output deleted', 'success');
+            
+            // Reload outputs
+            await this.loadExistingOutputs();
+            
+        } catch (error) {
+            console.error('Failed to delete output:', error);
+            this.showToast('❌ Failed to delete output', 'error');
         }
     },
 
@@ -2230,67 +2471,88 @@ const app = {
 
         this.updateScreenButtons();
 
-        const allScreens = [...this.screens, ...this.customScreens];
-        const slicesByScreen = {};
-        allScreens.forEach(screen => {
-    slicesByScreen[screen] = this.slices.filter(s => {
-        if (s.type !== 'slice') return false;
-        const screens = s.screens || [];
-        return screens.includes(screen);
-    });
-        });
-
+        // Build grouped slices list (by outputs and compositions)
         let listHtml = '';
-        allScreens.forEach(screen => {
-    const slices = slicesByScreen[screen];
-    const displayName = screen;
-    listHtml += `
-        <div class="screen-group">
-    <div class="screen-group-header" style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-            <strong>${displayName}</strong>
-            <span style="color: #888;">${slices.length} slices</span>
-        </div>
-        <button class="small" onclick="app.openOutputComposer('${screen}'); event.stopPropagation();" 
-                style="padding: 4px 8px; font-size: 11px; background: #2a5a8a; border: 1px solid #3a7aaa;" 
-                title="Compose Output">
-            🎨 Compose
-        </button>
-    </div>
-    `;
-
-    if (slices.length === 0) {
-        listHtml += '<div style="color: #666; font-size: 12px; padding: 8px;">No slices</div>';
-    } else {
-        slices.forEach(slice => {
-    const isActive = slice === this.selectedSlice ? 'active' : '';
-    const shapeScreens = slice.screens || [];
-    const badge = shapeScreens.length > 1 ? 
-        `<span style="background: #4CAF50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">${shapeScreens.length} outputs</span>` : '';
-    const maskCount = slice.masks ? slice.masks.length : 0;
-    const maskBadge = maskCount > 0 ? 
-        `<span style="background: #f44336; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">${maskCount} masks</span>` : '';
+        
+        const sliceList = this.slices.filter(s => s.type === 'slice');
+        
+        if (sliceList.length === 0) {
+            listHtml = '<div style="color: #666; font-size: 12px; padding: 8px; text-align: center;">No slices created. Draw a shape to get started.</div>';
+        } else {
+            // Track which slices are assigned
+            const assignedSlices = new Set();
             
-    listHtml += `
-        <div class="slice-item ${isActive}" onclick="app.selectSlice('${slice.id}')">
-                    <div class="slice-item-header">
-                        <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
-                            <span style="color: #4CAF50">✓</span>
-                            <span class="slice-color-indicator" style="background: ${slice.color}"></span>
-                            <input type="text" value="${slice.label}" onchange="app.updateProperty('${slice.id}', 'label', this.value); event.stopPropagation();" onclick="event.stopPropagation();" style="background: transparent; border: none; color: #fff; font-size: 14px; padding: 2px 4px; width: 150px; border-bottom: 1px solid transparent;" onfocus="this.style.borderBottomColor='#4CAF50'" onblur="this.style.borderBottomColor='transparent'">
-                            ${badge}
-                            ${maskBadge}
-                        </div>
-                        <div class="slice-item-actions">
-                            <button class="small" onclick="app.toggleVisibility('${slice.id}'); event.stopPropagation();" style="padding: 4px 8px; font-size: 12px;">${slice.visible !== false ? '👁️' : '🚫'}</button>
-                            <button class="small danger" onclick="app.deleteSliceById('${slice.id}'); event.stopPropagation();" style="padding: 4px 8px; font-size: 10px;">Del</button>
-                        </div>
+            // Group by outputs
+            if (this.existingOutputs && Object.keys(this.existingOutputs).length > 0) {
+                Object.entries(this.existingOutputs).forEach(([outputId, output]) => {
+                    // Check if output has a composition
+                    const composition = this.compositions && this.compositions[outputId];
+                    const hasComposition = composition && composition.slices && composition.slices.length > 0;
+                    
+                    // Check if output has a single slice assigned
+                    const singleSlice = output.slice && output.slice !== 'full' ? 
+                        sliceList.find(s => (s.id || s.label) === output.slice) : null;
+                    
+                    if (hasComposition || singleSlice) {
+                        // Output header
+                        listHtml += `
+                            <div style="background: #2a5a8a; padding: 6px 10px; margin-bottom: 4px; border-radius: 4px; font-size: 12px; font-weight: bold;">
+                                📺 ${outputId}
+                            </div>
+                        `;
+                        
+                        if (hasComposition) {
+                            // Show composition with remove button
+                            listHtml += `
+                                <div style="padding-left: 15px; margin-bottom: 8px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                        <div style="color: #aaa; font-size: 11px;">🎨 Composition (${composition.slices.length} slices):</div>
+                                        <button class="small danger" onclick="app.removeComposition('${outputId}'); event.stopPropagation();" 
+                                                style="padding: 2px 6px; font-size: 10px;" title="Remove composition">✕</button>
+                                    </div>
+                            `;
+                            
+                            composition.slices.forEach(compSlice => {
+                                const slice = sliceList.find(s => s.id === compSlice.sliceId);
+                                if (slice) {
+                                    assignedSlices.add(slice.id);
+                                    const isActive = slice === this.selectedSlice ? 'active' : '';
+                                    listHtml += this.renderSliceItem(slice, isActive, true);
+                                }
+                            });
+                            
+                            listHtml += `</div>`;
+                        } else if (singleSlice) {
+                            // Show single slice
+                            assignedSlices.add(singleSlice.id);
+                            const isActive = singleSlice === this.selectedSlice ? 'active' : '';
+                            listHtml += `<div style="padding-left: 15px; margin-bottom: 8px;">`;
+                            listHtml += this.renderSliceItem(singleSlice, isActive, true);
+                            listHtml += `</div>`;
+                        }
+                    }
+                });
+            }
+            
+            // Show unassigned slices
+            const unassignedSlices = sliceList.filter(s => !assignedSlices.has(s.id));
+            if (unassignedSlices.length > 0) {
+                listHtml += `
+                    <div style="background: #444; padding: 6px 10px; margin-top: 12px; margin-bottom: 4px; border-radius: 4px; font-size: 12px; font-weight: bold;">
+                        📦 Unassigned (${unassignedSlices.length})
                     </div>
-                    <div class="slice-item-info">
-                        <span>${slice.shape}</span>
-                    </div>
-        </div>
-    `;
+                `;
+                
+                unassignedSlices.forEach(slice => {
+                    const isActive = slice === this.selectedSlice ? 'active' : '';
+                    listHtml += this.renderSliceItem(slice, isActive, false);
+                });
+            }
+        }
+        
+        // Insert dummy slice item for property editor reference
+        sliceList.forEach(slice => {
+            const isActive = slice === this.selectedSlice ? 'active' : '';
             
     // Show property editor for selected slice
     if (isActive && slice.shape === 'rectangle') {
@@ -2438,15 +2700,70 @@ const app = {
         });
     }
         });
-    }
-    listHtml += '</div>';
-        });
 
         document.getElementById('slicesList').innerHTML = listHtml;
     },
 
+    renderSliceItem(slice, isActive, isAssigned = false) {
+        const maskCount = slice.masks ? slice.masks.length : 0;
+        const maskBadge = maskCount > 0 ? 
+            `<span style="background: #f44336; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">${maskCount} masks</span>` : '';
+        
+        // Unassign button (only show if slice is assigned to outputs)
+        const unassignBtn = isAssigned ? 
+            `<button class="small" onclick="app.unassignSlice('${slice.id}'); event.stopPropagation();" style="padding: 4px 8px; font-size: 10px; background: #FF9800; border-color: #F57C00;" title="Unassign from all outputs">⊗</button>` : '';
+        
+        return `
+            <div class="slice-item ${isActive}" onclick="app.selectSlice('${slice.id}')" style="margin-bottom: 4px;">
+                <div class="slice-item-header">
+                    <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
+                        <span class="slice-color-indicator" style="background: ${slice.color}"></span>
+                        <span style="font-size: 12px; color: #fff;">${slice.label || slice.name}</span>
+                        ${maskBadge}
+                    </div>
+                    <div class="slice-item-actions">
+                        <button class="small" onclick="app.toggleVisibility('${slice.id}'); event.stopPropagation();" style="padding: 4px 8px; font-size: 12px;">${slice.visible !== false ? '👁️' : '🚫'}</button>
+                        ${unassignBtn}
+                        <button class="small danger" onclick="app.deleteSliceById('${slice.id}'); event.stopPropagation();" style="padding: 4px 8px; font-size: 10px;">Del</button>
+                    </div>
+                </div>
+                <div class="slice-item-info">
+                    <span>${slice.shape} - ${Math.round(slice.width)}×${Math.round(slice.height)}</span>
+                </div>
+            </div>
+        `;
+    },
+
+    async unassignSlice(sliceId) {
+        if (!confirm('Unassign this slice from all outputs?')) {
+            return;
+        }
+
+        // Find all outputs using this slice and set them to 'full'
+        const promises = [];
+        if (this.existingOutputs) {
+            Object.entries(this.existingOutputs).forEach(([outputId, output]) => {
+                if (output.slice === sliceId) {
+                    promises.push(this.updateOutputSlice(outputId, 'full'));
+                }
+            });
+        }
+
+        // Wait for all unassignments to complete
+        await Promise.all(promises);
+        
+        this.showToast('✅ Slice unassigned from all outputs', 'success');
+        this.updateUI();
+    },
+
     selectSlice(id) {
-        this.selectedSlice = this.slices.find(s => s.id === id) || null;
+        const slice = this.slices.find(s => s.id === id);
+        // Toggle selection if clicking the same slice
+        if (this.selectedSlice === slice) {
+            this.selectedSlice = null;
+        } else {
+            this.selectedSlice = slice || null;
+        }
         this.updateUI();
         this.render();
     },
@@ -2469,20 +2786,35 @@ const app = {
     }
     this.updateUI();
     this.render();
-    this.saveToLocalStorage();
     this.showToast('Mask deleted');
         }
     },
 
-    deleteSliceById(id) {
+    async deleteSliceById(id) {
+        // Remove from frontend
         this.slices = this.slices.filter(s => s.id !== id);
         if (this.selectedSlice && this.selectedSlice.id === id) {
-    this.selectedSlice = null;
+            this.selectedSlice = null;
         }
         this.updateUI();
         this.render();
-        this.saveToLocalStorage();
-        this.showToast('Slice deleted');
+        
+        // Delete from backend
+        try {
+            const response = await fetch(`/api/slices/${id}`, {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showToast('✅ Slice deleted from backend');
+            } else {
+                this.showToast('⚠️ Slice removed locally but backend delete failed', 'warning');
+            }
+        } catch (error) {
+            console.error('Failed to delete slice from backend:', error);
+            this.showToast('⚠️ Slice removed locally but backend delete failed', 'warning');
+        }
     },
 
     toggleVisibility(id) {
@@ -2491,7 +2823,11 @@ const app = {
     slice.visible = slice.visible === false ? true : false;
     this.updateUI();
     this.render();
-    this.saveToLocalStorage();
+    
+    // Save to backend
+    if (slice.id) {
+        this.saveSliceToBackend(slice);
+    }
         }
     },
 
@@ -2503,69 +2839,74 @@ const app = {
         mask.visible = mask.visible === false ? true : false;
         this.updateUI();
         this.render();
-        this.saveToLocalStorage();
-    }
-        }
-    },
-
-    updateProperty(id, property, value) {
-        const slice = this.slices.find(s => s.id === id);
-        if (slice) {
-    if (property === 'label') {
-        slice[property] = value;
+	    
+	    // Save to backend (masks are part of slice data)
+	    if (slice.id) {
+		this.saveSliceToBackend(slice);
+	    }
     } else if (!isNaN(value)) {
         slice[property] = value;
     }
     this.updateUI();
     this.render();
-    this.saveToLocalStorage();
+    
+    // Save to backend
+    if (slice.id) {
+        this.saveSliceToBackend(slice);
+    }
         }
     },
 
     updateMaskProperty(sliceId, maskId, property, value) {
         const slice = this.slices.find(s => s.id === sliceId);
         if (slice && slice.masks) {
-    const mask = slice.masks.find(m => m.id === maskId);
-    if (mask) {
-        if (property === 'label') {
-    mask[property] = value;
-        } else if (!isNaN(value)) {
-    mask[property] = value;
-        }
-        this.updateUI();
-        this.render();
-        this.saveToLocalStorage();
-    }
+	const mask = slice.masks.find(m => m.id === maskId);
+	if (mask) {
+	    if (property === 'label') {
+		mask[property] = value;
+	    } else if (!isNaN(value)) {
+		mask[property] = value;
+	    }
+	    this.updateUI();
+	    this.render();
+	    
+	    // Save to backend (masks are part of slice data)
+	    if (slice.id) {
+		this.saveSliceToBackend(slice);
+	    }
+	}
         }
     },
 
     // ========================================
     // EXPORT / IMPORT
     // ========================================
+    
     exportJSON() {
         const data = {
-    version: '2.0',
-    canvas: { width: this.canvasWidth, height: this.canvasHeight },
-    customScreens: this.customScreens,
-    slices: this.slices.filter(s => s.type === 'slice').map(s => {
+    canvas: {
+        width: this.canvasWidth,
+        height: this.canvasHeight
+    },
+    slices: this.slices.map(s => {
         const sliceData = {
-    id: s.id,
-    label: s.label,
-    type: s.type,
-    shape: s.shape,
-    screens: s.screens || [],
-    color: s.color,
-    visible: s.visible !== false,
-    rotation: s.rotation || 0,
-    brightness: s.brightness || 0,
-    contrast: s.contrast || 0,
-    red: s.red || 0,
-    green: s.green || 0,
-    blue: s.blue || 0,
-    softEdge: s.softEdge && typeof s.softEdge === 'object' ? s.softEdge : { enabled: false, autoDetect: true, width: { top: 50, bottom: 50, left: 50, right: 50 }, curve: 'smooth', strength: 1.0, gamma: 1.0, gammaR: 1.0, gammaG: 1.0, gammaB: 1.0 },
-    mirror: s.mirror || 'none',
-    ...this.getShapeData(s),
-    transformCorners: s.transformCorners || null
+	id: s.id,
+	label: s.label,
+	type: s.type,
+	shape: s.shape,
+	screens: s.screens || [],
+	color: s.color,
+	visible: s.visible !== false,
+	rotation: s.rotation || 0,
+	brightness: s.brightness || 0,
+	contrast: s.contrast || 0,
+	red: s.red || 0,
+	green: s.green || 0,
+	blue: s.blue || 0,
+	softEdge: s.softEdge && typeof s.softEdge === 'object' ? s.softEdge : { enabled: false, autoDetect: true, width: { top: 50, bottom: 50, left: 50, right: 50 }, curve: 'smooth', strength: 1.0, gamma: 1.0, gammaR: 1.0, gammaG: 1.0, gammaB: 1.0 },
+	mirror: s.mirror || 'none',
+	...this.getShapeData(s),
+	transformCorners: s.transformCorners || null
         };
         
         // Add masks if any
@@ -2640,7 +2981,6 @@ const app = {
     this.updateScreenButtons();
     this.updateUI();
     this.render();
-    this.saveToLocalStorage();
     this.showToast('Imported!');
         } catch (err) {
     this.showToast('Import failed', 'error');
@@ -2657,35 +2997,235 @@ const app = {
     this.selectedSlice = null;
     this.updateUI();
     this.render();
-    this.saveToLocalStorage();
     this.showToast('Cleared');
         }
     },
 
-    saveToLocalStorage() {
-        try {
-    localStorage.setItem('sliceEditor', JSON.stringify({
-        canvas: { width: this.canvasWidth, height: this.canvasHeight },
-        slices: this.slices,
-        customScreens: this.customScreens,
-        compositions: this.compositions || {}
-    }));
-        } catch (e) {}
-    },
-
-    loadFromLocalStorage() {
-        try {
-    const data = JSON.parse(localStorage.getItem('sliceEditor'));
-    if (data) {
-        if (data.canvas) {
-    this.canvasWidth = data.canvas.width;
-    this.canvasHeight = data.canvas.height;
+    // ========================================
+    // BACKEND PERSISTENCE (Session State)
+    // ========================================
+    
+    async saveToBackend() {
+        // Auto-save to backend session state (debounced)
+        if (this._saveTimeout) {
+            clearTimeout(this._saveTimeout);
         }
-        if (data.slices) this.slices = data.slices;
-        if (data.customScreens) this.customScreens = data.customScreens;
-        if (data.compositions) this.compositions = data.compositions;
-    }
-        } catch (e) {}
+        
+        this._saveTimeout = setTimeout(async () => {
+            try {
+                // Prepare slice data for backend
+                const slicesData = {};
+                
+                this.slices.forEach(slice => {
+                    const sliceId = slice.id || crypto.randomUUID();
+                    
+                    // Store ID back on object if new
+                    if (!slice.id) {
+                        slice.id = sliceId;
+                    }
+                    
+                    slicesData[sliceId] = {
+                        x: Math.round(slice.x),
+                        y: Math.round(slice.y),
+                        width: Math.round(slice.width),
+                        height: Math.round(slice.height),
+                        rotation: slice.rotation || 0,
+                        shape: slice.shape || 'rectangle',
+                        soft_edge: slice.softEdge || null,
+                        description: slice.name || '',
+                        points: slice.points || null,
+                        outputs: slice.outputs || [],
+                        source: slice.source || 'canvas'
+                    };
+                });
+                
+                // Send to backend using import endpoint
+                const response = await fetch('/api/slices/import', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        slices: slicesData,
+                        canvas: {
+                            width: this.canvasWidth,
+                            height: this.canvasHeight
+                        },
+                        customScreens: this.customScreens,
+                        compositions: this.compositions || {}
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        this.updateBackendStatus(true, `Auto-saved ${Object.keys(slicesData).length} slices`);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Auto-save to backend failed:', error);
+            }
+        }, 1000); // Debounce 1 second
+    },
+    
+    async saveSliceToBackend(slice) {
+        try {
+            // Generate ID if not present
+            if (!slice.id) {
+                slice.id = crypto.randomUUID();
+            }
+            
+            const sliceData = {
+                [slice.id]: {
+                    x: Math.round(slice.x),
+                    y: Math.round(slice.y),
+                    width: Math.round(slice.width),
+                    height: Math.round(slice.height),
+                    rotation: slice.rotation || 0,
+                    shape: slice.shape || 'rectangle',
+                    soft_edge: slice.softEdge || null,
+                    description: slice.name || slice.label || '',
+                    points: slice.points || null,
+                    outputs: slice.outputs || [],
+                    source: slice.source || 'canvas'
+                }
+            };
+            
+            const response = await fetch('/api/slices/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    slices: sliceData,
+                    canvas: { width: this.canvasWidth, height: this.canvasHeight }
+                })
+            });
+            
+            const data = await response.json();
+            if (!data.success) {
+                console.error('Failed to save slice to backend:', data.error);
+                return false;
+            }
+            
+            console.log(`✅ Saved slice ${slice.id} to backend`);
+            return true;
+            
+        } catch (error) {
+            console.error('Error saving slice to backend:', error);
+            return false;
+        }
+    },
+    
+    async loadFromBackend() {
+        try {
+            // Load slices from backend session state
+            const response = await fetch('/api/slices/export');
+            const data = await response.json();
+            
+            if (data.success) {
+                // Restore canvas dimensions
+                if (data.canvas) {
+                    this.canvasWidth = data.canvas.width;
+                    this.canvasHeight = data.canvas.height;
+                }
+                
+                // Restore slices
+                if (data.slices) {
+                    this.slices = [];
+                    Object.entries(data.slices).forEach(([sliceId, sliceData]) => {
+                        if (sliceId === 'full') return; // Skip default full slice
+                        
+                        this.slices.push({
+                            id: sliceId,
+                            x: sliceData.x,
+                            y: sliceData.y,
+                            width: sliceData.width,
+                            height: sliceData.height,
+                            rotation: sliceData.rotation || 0,
+                            shape: sliceData.shape || 'rectangle',
+                            softEdge: sliceData.soft_edge || null,
+                            name: sliceData.description || sliceId,
+                            label: sliceData.description || sliceId,
+                            points: sliceData.points || null,
+                            outputs: sliceData.outputs || [],
+                            source: sliceData.source || 'canvas',
+                            color: this.colors[this.colorIndex % this.colors.length],
+                            masks: [],
+                            type: 'slice'
+                        });
+                        this.colorIndex++;
+                    });
+                    
+                    // Restore output assignments from backend output configs
+                    // This ensures slice.outputs array reflects actual backend state
+                    this.restoreSliceOutputAssignments();
+                }
+                
+                this.updateBackendStatus(true, `Loaded ${this.slices.length} slices`);
+                console.log('✅ Loaded from backend session state:', this.slices.length, 'slices');
+                
+                // Render after loading
+                this.updateUI();
+                this.render();
+                
+            } else {
+                // No backend data - start with empty state
+                console.log('No backend data, starting with empty state');
+                this.slices = [];
+                this.updateUI();
+                this.render();
+            }
+            
+        } catch (error) {
+            console.error('Failed to load from backend:', error);
+            this.updateBackendStatus(false, 'Backend connection failed');
+            this.slices = [];
+            this.updateUI();
+            this.render();
+        }
+    },
+    
+    updateBackendStatus(connected, message) {
+        const statusEl = document.getElementById('backendStatusText');
+        if (statusEl) {
+            statusEl.textContent = message;
+            statusEl.style.color = connected ? '#4CAF50' : '#f44336';
+        }
+    },
+    
+    restoreSliceOutputAssignments() {
+        // Restore slice.outputs array based on backend output configurations
+        // This ensures the UI shows correct assignments after reload
+        
+        if (!this.existingOutputs) return;
+        
+        // First, clear all existing output assignments
+        this.slices.forEach(slice => {
+            slice.outputs = [];
+        });
+        
+        // Then restore from backend output configs
+        Object.entries(this.existingOutputs).forEach(([outputId, config]) => {
+            // Check if output has a single slice assigned
+            if (config.slice && config.slice !== 'full') {
+                const slice = this.slices.find(s => s.id === config.slice);
+                if (slice && !slice.outputs.includes(outputId)) {
+                    slice.outputs.push(outputId);
+                }
+            }
+            
+            // Check if output has a composition with multiple slices
+            if (config.composition && config.composition.slices) {
+                config.composition.slices.forEach(compSlice => {
+                    const slice = this.slices.find(s => s.id === compSlice.sliceId);
+                    if (slice && !slice.outputs.includes(outputId)) {
+                        slice.outputs.push(outputId);
+                    }
+                });
+            }
+        });
+        
+        console.log('✅ Restored slice output assignments from backend');
     },
 
     togglePanel(side) {
@@ -2877,6 +3417,12 @@ const app = {
         this.showToast('Slice set to whole area');
         break;
         
+    case 'ratio16_9':
+        // Calculate width based on current height (16:9 aspect ratio)
+        slice.width = Math.round(slice.height * (16 / 9));
+        this.showToast(`Slice resized to 16:9 (${slice.width}×${slice.height})`);
+        break;
+        
     case 'preview':
         this.selectedSlice = slice;
         this.showRealtimeSlicePreview();
@@ -2894,8 +3440,12 @@ const app = {
         break;
         }
         
-        // Force immediate update
-        this.saveToLocalStorage();
+        // Force immediate update and save to backend
+        // Save the modified slice to backend to ensure composition uses updated dimensions
+        if (slice && slice.id) {
+            this.saveSliceToBackend(slice);
+        }
+        
         this.updateUI();
         
         // Use requestAnimationFrame to ensure render happens after DOM updates
@@ -3031,26 +3581,28 @@ const app = {
 
     openOutputComposer(outputId) {
         console.log('Opening output composer for:', outputId);
+        console.log('Current compositions:', this.compositions);
+        console.log('Composition for this output:', this.compositions?.[outputId]);
         
-        // Get slices assigned to this output
-        const assignedSlices = this.slices.filter(s => {
-            if (s.type !== 'slice') return false;
-            const screens = s.screens || [];
-            return screens.includes(outputId);
-        });
+        // Get ALL slices (not just assigned ones - user can add any slice)
+        const availableSlices = this.slices.filter(s => s.type !== 'mask');
         
-        // Output resolution (default to 1920x1080, could be configurable later)
-        const outputWidth = 1920;
-        const outputHeight = 1080;
+        // Get output info to determine resolution
+        const output = this.existingOutputs[outputId];
+        const outputWidth = output?.resolution?.[0] || output?.resolution?.width || 1920;
+        const outputHeight = output?.resolution?.[1] || output?.resolution?.height || 1080;
         
         // Get or initialize composition for this output
         if (!this.compositions) this.compositions = {};
         if (!this.compositions[outputId]) {
+            console.log(`Creating new empty composition for ${outputId}`);
             this.compositions[outputId] = {
                 width: outputWidth,
                 height: outputHeight,
                 slices: []
             };
+        } else {
+            console.log(`Using existing composition for ${outputId} with ${this.compositions[outputId].slices.length} slices`);
         }
         
         const composition = this.compositions[outputId];
@@ -3062,9 +3614,9 @@ const app = {
                 <div style="width: 250px; background: #1a1a1a; border-radius: 6px; padding: 15px; overflow-y: auto;">
                     <h6 style="margin-bottom: 15px; color: #aaa;">Available Slices</h6>
                     <div id="composerSliceList">
-                        ${assignedSlices.length === 0 ? 
-                            '<div style="color: #666; font-size: 12px;">No slices assigned to this output</div>' :
-                            assignedSlices.map(s => `
+                        ${availableSlices.length === 0 ? 
+                            '<div style="color: #666; font-size: 12px;">No slices created yet. Create slices first!</div>' :
+                            availableSlices.map(s => `
                                 <div class="composer-slice-item" data-slice-id="${s.id}" draggable="true"
                                      style="padding: 8px; margin-bottom: 8px; background: #2a2a2a; border-radius: 4px; cursor: grab; border-left: 3px solid ${s.color};">
                                     <div style="font-size: 12px; font-weight: bold;">${s.label}</div>
@@ -3106,6 +3658,13 @@ const app = {
             content: modalContent,
             size: 'xl',
             buttons: [
+                {
+                    label: '📐 Auto-Arrange',
+                    class: 'btn-info',
+                    callback: () => {
+                        this.autoArrangeComposition(outputId);
+                    }
+                },
                 {
                     label: 'Clear All',
                     class: 'btn-warning',
@@ -3149,7 +3708,19 @@ const app = {
         const ctx = canvas.getContext('2d');
         const composition = this.compositions[outputId];
         
-        // Setup drag and drop
+        console.log(`initComposer for ${outputId}, composition:`, composition);
+        
+        // Initialize composer state for dragging
+        if (!this.composerState) {
+            this.composerState = {};
+        }
+        this.composerState[outputId] = {
+            isDragging: false,
+            dragIndex: -1,
+            dragOffset: { x: 0, y: 0 }
+        };
+        
+        // Setup drag and drop from sidebar
         const sliceItems = document.querySelectorAll('.composer-slice-item');
         sliceItems.forEach(item => {
             item.addEventListener('dragstart', (e) => {
@@ -3187,6 +3758,57 @@ const app = {
             });
             
             this.renderComposition(outputId);
+        });
+        
+        // Mouse events for moving slices on canvas
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            
+            // Find clicked slice (iterate backwards for top-most)
+            for (let i = composition.slices.length - 1; i >= 0; i--) {
+                const cs = composition.slices[i];
+                if (x >= cs.x && x <= cs.x + cs.width && 
+                    y >= cs.y && y <= cs.y + cs.height) {
+                    this.composerState[outputId].isDragging = true;
+                    this.composerState[outputId].dragIndex = i;
+                    this.composerState[outputId].dragOffset = {
+                        x: x - cs.x,
+                        y: y - cs.y
+                    };
+                    break;
+                }
+            }
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            const state = this.composerState[outputId];
+            if (!state.isDragging) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            
+            const compSlice = composition.slices[state.dragIndex];
+            compSlice.x = Math.round(x - state.dragOffset.x);
+            compSlice.y = Math.round(y - state.dragOffset.y);
+            
+            this.renderComposition(outputId);
+        });
+        
+        canvas.addEventListener('mouseup', () => {
+            this.composerState[outputId].isDragging = false;
+            this.composerState[outputId].dragIndex = -1;
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            this.composerState[outputId].isDragging = false;
+            this.composerState[outputId].dragIndex = -1;
         });
         
         // Initial render
@@ -3306,11 +3928,128 @@ const app = {
         this.renderComposition(outputId);
     },
 
-    saveComposition(outputId) {
-        // Save composition data - will be sent to backend when saving outputs
-        console.log('Saving composition for', outputId, this.compositions[outputId]);
-        this.saveToLocalStorage();
-        this.showToast(`Composition saved for ${outputId}`);
+    autoArrangeComposition(outputId) {
+        const composition = this.compositions[outputId];
+        if (!composition || composition.slices.length === 0) {
+            this.showToast('Add some slices first!', 'warning');
+            return;
+        }
+
+        const sliceCount = composition.slices.length;
+        const outputWidth = composition.width;
+        const outputHeight = composition.height;
+
+        // Smart grid calculation
+        let cols, rows;
+        if (sliceCount === 1) {
+            cols = 1; rows = 1;
+        } else if (sliceCount === 2) {
+            cols = 2; rows = 1; // Horizontal split
+        } else if (sliceCount === 3) {
+            cols = 3; rows = 1; // Three columns
+        } else if (sliceCount === 4) {
+            cols = 2; rows = 2; // 2x2 grid
+        } else {
+            // For 5+, calculate optimal grid (roughly square)
+            cols = Math.ceil(Math.sqrt(sliceCount));
+            rows = Math.ceil(sliceCount / cols);
+        }
+
+        // Calculate cell dimensions
+        const cellWidth = Math.floor(outputWidth / cols);
+        const cellHeight = Math.floor(outputHeight / rows);
+
+        // Arrange slices in grid
+        composition.slices.forEach((compSlice, index) => {
+            const slice = this.slices.find(s => s.id === compSlice.sliceId);
+            if (!slice) return;
+
+            const col = index % cols;
+            const row = Math.floor(index / cols);
+
+            // Position in grid
+            compSlice.x = col * cellWidth;
+            compSlice.y = row * cellHeight;
+
+            // Scale to fit cell while maintaining aspect ratio
+            const originalAspect = slice.width / slice.height;
+            const cellAspect = cellWidth / cellHeight;
+
+            if (originalAspect > cellAspect) {
+                // Wider than cell - fit to width
+                compSlice.width = cellWidth;
+                compSlice.height = Math.round(cellWidth / originalAspect);
+                compSlice.scale = cellWidth / slice.width;
+            } else {
+                // Taller than cell - fit to height
+                compSlice.height = cellHeight;
+                compSlice.width = Math.round(cellHeight * originalAspect);
+                compSlice.scale = cellHeight / slice.height;
+            }
+
+            // Center in cell
+            if (compSlice.width < cellWidth) {
+                compSlice.x += Math.floor((cellWidth - compSlice.width) / 2);
+            }
+            if (compSlice.height < cellHeight) {
+                compSlice.y += Math.floor((cellHeight - compSlice.height) / 2);
+            }
+        });
+
+        this.renderComposition(outputId);
+        this.showToast(`✅ Arranged ${sliceCount} slices in ${cols}×${rows} grid`, 'success');
+    },
+
+    async saveComposition(outputId) {
+        const composition = this.compositions[outputId];
+        
+        if (!composition || !composition.slices || composition.slices.length === 0) {
+            this.showToast('⚠️ No slices in composition', 'warning');
+            return;
+        }
+        
+        try {
+            console.log('Saving composition for', outputId, composition);
+            
+            // Send composition to backend
+            const response = await fetch(`/api/outputs/video/${outputId}/composition`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ composition: composition })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showToast(`✅ Composition saved with ${composition.slices.length} slices`, 'success');
+                await this.loadExistingOutputs(); // Reload to update display
+                this.updateUI();
+            } else {
+                this.showToast(`❌ Failed: ${data.error}`, 'error');
+            }
+            
+        } catch (error) {
+            console.error('Failed to save composition:', error);
+            this.showToast('❌ Failed to save composition', 'error');
+        }
+    },
+
+    async removeComposition(outputId) {
+        if (!confirm(`Remove composition from ${outputId}? Slices will be unassigned.`)) {
+            return;
+        }
+
+        // Clear composition data
+        if (this.compositions && this.compositions[outputId]) {
+            delete this.compositions[outputId];
+        }
+
+        // Set output back to full canvas
+        await this.updateOutputSlice(outputId, 'full');
+
+        // Update UI to show slices as unassigned
+        this.updateUI();
+        this.showToast(`✅ Composition removed from ${outputId}`, 'success');
     }
 };
 
@@ -3321,6 +4060,165 @@ const app = {
 
 // Make app globally accessible
 window.app = app;
+
+// ========================================
+// GLOBAL FUNCTIONS (called from HTML)
+// ========================================
+
+async function loadMonitors() {
+    try {
+        const response = await fetch('/api/monitors');
+        const data = await response.json();
+        
+        if (!data.success) {
+            app.showToast('❌ Failed to load monitors: ' + data.error, 'error');
+            app.updateBackendStatus(false, 'API error');
+            return;
+        }
+        
+        // Update backend status
+        app.updateBackendStatus(true, `Connected (${data.count} monitors)`);
+        
+        // Update monitor count display
+        const monitorCountEl = document.getElementById('monitorCount');
+        const monitorCountNumEl = document.getElementById('monitorCountNum');
+        if (monitorCountEl && monitorCountNumEl) {
+            monitorCountEl.style.display = 'block';
+            monitorCountNumEl.textContent = data.count;
+        }
+        
+        // Update outputs list with monitors
+        app.screens = data.monitors.map((monitor, index) => ({
+            id: `monitor_${index}`,
+            name: monitor.name,
+            width: monitor.width,
+            height: monitor.height,
+            x: monitor.x,
+            y: monitor.y,
+            type: 'monitor',
+            monitor_index: index
+        }));
+        
+        // Update UI
+        app.updateScreenButtons();
+        
+        app.showToast(`✅ Loaded ${data.count} monitor(s)`, 'success');
+        
+    } catch (error) {
+        console.error('Failed to load monitors:', error);
+        app.showToast('❌ Backend connection failed', 'error');
+        app.updateBackendStatus(false, 'Connection error');
+    }
+}
+
+async function saveSlicesToBackend() {
+    try {
+        // Prepare slice data
+        const slicesData = {};
+        
+        app.slices.forEach(slice => {
+            const sliceId = slice.id || crypto.randomUUID();
+            
+            slicesData[sliceId] = {
+                x: Math.round(slice.x),
+                y: Math.round(slice.y),
+                width: Math.round(slice.width),
+                height: Math.round(slice.height),
+                rotation: slice.rotation || 0,
+                shape: slice.shape || 'rectangle',
+                soft_edge: slice.softEdge || null,
+                description: slice.name || '',
+                points: slice.points || null,
+                outputs: slice.outputs || [],
+                source: slice.source || 'canvas'
+            };
+            
+            // Store slice ID back on object
+            if (!slice.id) {
+                slice.id = sliceId;
+            }
+        });
+        
+        // Send to backend
+        const response = await fetch('/api/slices/import', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                slices: slicesData,
+                canvas: {
+                    width: app.canvasWidth,
+                    height: app.canvasHeight
+                }
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            app.showToast('❌ Failed to save slices: ' + data.error, 'error');
+            return;
+        }
+        
+        app.showToast(`✅ Saved ${Object.keys(slicesData).length} slice(s) to backend`, 'success');
+        app.updateBackendStatus(true, `Saved ${Object.keys(slicesData).length} slices`);
+        
+    } catch (error) {
+        console.error('Failed to save slices:', error);
+        app.showToast('❌ Backend save failed', 'error');
+    }
+}
+
+async function loadSlicesFromBackend() {
+    try {
+        const response = await fetch('/api/slices/export');
+        const data = await response.json();
+        
+        if (!data.success) {
+            app.showToast('❌ Failed to load slices: ' + data.error, 'error');
+            return;
+        }
+        
+        // Clear current slices
+        app.slices = [];
+        
+        // Load slices from backend
+        Object.entries(data.slices || {}).forEach(([sliceId, sliceData]) => {
+            if (sliceId === 'full') return; // Skip default full slice
+            
+            app.slices.push({
+                id: sliceId,
+                x: sliceData.x,
+                y: sliceData.y,
+                width: sliceData.width,
+                height: sliceData.height,
+                rotation: sliceData.rotation || 0,
+                shape: sliceData.shape || 'rectangle',
+                softEdge: sliceData.soft_edge || null,
+                name: sliceData.description || sliceId,
+                points: sliceData.points || null,
+                outputs: sliceData.outputs || [],
+                source: sliceData.source || 'canvas',
+                color: app.colors[app.colorIndex % app.colors.length],
+                masks: [],
+                type: 'slice'
+            });
+            app.colorIndex++;
+        });
+        
+        // Update UI
+        app.updateSlicesList();
+        app.render();
+        
+        app.showToast(`✅ Loaded ${app.slices.length} slice(s) from backend`, 'success');
+        app.updateBackendStatus(true, `Loaded ${app.slices.length} slices`);
+        
+    } catch (error) {
+        console.error('Failed to load slices:', error);
+        app.showToast('❌ Backend load failed', 'error');
+    }
+}
 
 // Initialize on page load
 window.addEventListener('load', () => {

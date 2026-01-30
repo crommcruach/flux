@@ -130,6 +130,42 @@ class OutputManager:
         logger.debug(f"[{self.player_name}] Output '{output_id}' registered")
         self._save_state()
     
+    def create_output(self, output_id: str, config: dict) -> bool:
+        """
+        Create a new output dynamically
+        
+        Args:
+            output_id: Unique output identifier
+            config: Output configuration dict
+            
+        Returns:
+            bool: True if created successfully
+        """
+        try:
+            output_type = config.get('type')
+            
+            if output_type == 'display':
+                from .plugins import DisplayOutput
+                output = DisplayOutput(output_id, config)
+            elif output_type == 'virtual':
+                from .plugins import VirtualOutput
+                output = VirtualOutput(output_id, config)
+            else:
+                logger.error(f"[{self.player_name}] Unknown output type: {output_type}")
+                return False
+            
+            self.register_output(output_id, output)
+            
+            if config.get('enabled', False):
+                self.enable_output(output_id)
+            
+            logger.info(f"✅ [{self.player_name}] Output '{output_id}' created dynamically (type: {output_type})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[{self.player_name}] Failed to create output '{output_id}': {e}", exc_info=True)
+            return False
+    
     def unregister_output(self, output_id: str) -> bool:
         """
         Unregister and cleanup an output plugin
@@ -210,8 +246,8 @@ class OutputManager:
         if self._frame_count <= 5:
             logger.info(f"[{self.player_name}] update_frame called (frame #{self._frame_count}), outputs: {len(self.outputs)}, enabled: {sum(1 for o in self.outputs.values() if o.enabled)}")
         
-        # Distribute to all enabled outputs
-        for output_id, output in self.outputs.items():
+        # Distribute to all enabled outputs (use list() to avoid RuntimeError if outputs dict changes during iteration)
+        for output_id, output in list(self.outputs.items()):
             if not output.enabled:
                 continue
             
@@ -224,7 +260,7 @@ class OutputManager:
                     output.queue_frame(frame)
             
             except Exception as e:
-                logger.error(f"[{self.player_name}] Error distributing to '{output_id}': {e}")
+                logger.error(f"[{self.player_name}] Error distributing to '{output_id}': {e}", exc_info=True)
     
     def _get_frame_for_output(self, output: OutputBase) -> Optional[np.ndarray]:
         """
@@ -574,23 +610,19 @@ class OutputManager:
             np.ndarray or None: Extracted slice frame
         """
         try:
-            # Get slice definitions from session state
-            session_state = self.session_state_manager.get_session_state()
-            slices = session_state.get('slices', [])
+            # Use slice_manager to get and extract the slice
+            if slice_id == 'full':
+                return source_frame
             
-            # Find slice by ID
-            slice_def = None
-            for s in slices:
-                if s.get('id') == slice_id:
-                    slice_def = s
-                    break
+            # Get slice from slice_manager and extract it
+            # Note: get_slice(slice_id, frame) - correct order!
+            slice_frame = self.slice_manager.get_slice(slice_id, source_frame)
             
-            if not slice_def:
-                logger.warning(f"Slice '{slice_id}' not found in session state")
+            if slice_frame is None:
+                logger.warning(f"Slice '{slice_id}' not found or failed to extract")
                 return None
             
-            # Extract slice using inline slice logic
-            return self._apply_inline_slice(source_frame, slice_def)
+            return slice_frame
             
         except Exception as e:
             logger.error(f"Failed to get slice frame '{slice_id}': {e}")
@@ -634,7 +666,46 @@ class OutputManager:
             return False
         
         self.outputs[output_id].config['slice'] = slice_id
+        # Clear composition when setting single slice
+        self.outputs[output_id].config.pop('composition', None)
         logger.info(f"[{self.player_name}] Output '{output_id}' slice set to '{slice_id}'")
+        self._save_state()
+        return True
+    
+    def set_output_composition(self, output_id: str, composition: dict) -> bool:
+        """
+        Set composition (multiple slices) for specific output
+        
+        Args:
+            output_id: Output to configure
+            composition: Composition dict with 'width', 'height', 'slices' array
+                        Each slice in array: {sliceId, x, y, width, height, scale}
+            
+        Returns:
+            bool: True if set successfully
+        """
+        if output_id not in self.outputs:
+            logger.error(f"Output '{output_id}' not found")
+            return False
+        
+        # Validate composition structure
+        if 'slices' not in composition or not isinstance(composition['slices'], list):
+            logger.error(f"Invalid composition structure for '{output_id}'")
+            return False
+        
+        # Validate all slices exist
+        for comp_slice in composition['slices']:
+            slice_id = comp_slice.get('sliceId')
+            if not slice_id or (slice_id not in self.slice_manager.slices and slice_id != 'full'):
+                logger.warning(f"Slice '{slice_id}' in composition not found")
+                return False
+        
+        # Store composition in output config
+        self.outputs[output_id].config['composition'] = composition
+        # Clear single slice when setting composition
+        self.outputs[output_id].config.pop('slice', None)
+        
+        logger.info(f"[{self.player_name}] Output '{output_id}' composition set with {len(composition['slices'])} slices")
         self._save_state()
         return True
     
@@ -675,6 +746,7 @@ class OutputManager:
                     'type': output.config.get('type'),
                     'source': output.config.get('source', 'canvas'),
                     'slice': output.config.get('slice', 'full'),
+                    'composition': output.config.get('composition'),  # Include composition data
                     'monitor_index': output.config.get('monitor_index', 0),
                     'resolution': output.config.get('resolution', [1920, 1080]),
                     'fps': output.config.get('fps', 30),
@@ -752,22 +824,30 @@ class OutputManager:
             bool: True if added
         """
         try:
+            # Ensure coordinates are integers (convert if needed)
+            x = int(slice_data.get('x', 0))
+            y = int(slice_data.get('y', 0))
+            width = int(slice_data.get('width', self.canvas_width))
+            height = int(slice_data.get('height', self.canvas_height))
+            rotation = float(slice_data.get('rotation', 0))
+            
+            # Ignore complex soft_edge for now (SliceDefinition only supports int)
+            soft_edge = None
+            
             self.slice_manager.add_slice(
                 slice_id=slice_id,
-                x=slice_data.get('x', 0),
-                y=slice_data.get('y', 0),
-                width=slice_data.get('width', self.canvas_width),
-                height=slice_data.get('height', self.canvas_height),
-                rotation=slice_data.get('rotation', 0),
+                x=x, y=y,
+                width=width, height=height,
+                rotation=rotation,
                 shape=slice_data.get('shape', 'rectangle'),
-                soft_edge=slice_data.get('soft_edge'),
+                soft_edge=soft_edge,
                 description=slice_data.get('description', ''),
                 points=slice_data.get('points')
             )
             self._save_state()
             return True
         except Exception as e:
-            logger.error(f"Failed to add slice '{slice_id}': {e}")
+            logger.error(f"Failed to add slice '{slice_id}': {e}", exc_info=True)
             return False
     
     def remove_slice(self, slice_id: str) -> bool:
@@ -829,22 +909,30 @@ class OutputManager:
             bool: True if added
         """
         try:
+            # Ensure coordinates are integers (convert if needed)
+            x = int(slice_data.get('x', 0))
+            y = int(slice_data.get('y', 0))
+            width = int(slice_data.get('width', self.canvas_width))
+            height = int(slice_data.get('height', self.canvas_height))
+            rotation = float(slice_data.get('rotation', 0))
+            
+            # Ignore complex soft_edge for now (SliceDefinition only supports int)
+            soft_edge = None
+            
             self.slice_manager.add_slice(
                 slice_id=slice_id,
-                x=slice_data.get('x', 0),
-                y=slice_data.get('y', 0),
-                width=slice_data.get('width', self.canvas_width),
-                height=slice_data.get('height', self.canvas_height),
-                rotation=slice_data.get('rotation', 0),
+                x=x, y=y,
+                width=width, height=height,
+                rotation=rotation,
                 shape=slice_data.get('shape', 'rectangle'),
-                soft_edge=slice_data.get('soft_edge'),
+                soft_edge=soft_edge,
                 description=slice_data.get('description', ''),
                 points=slice_data.get('points')
             )
             self._save_state()
             return True
         except Exception as e:
-            logger.error(f"Failed to add slice '{slice_id}': {e}")
+            logger.error(f"Failed to add slice '{slice_id}': {e}", exc_info=True)
             return False
     
     def remove_slice(self, slice_id: str) -> bool:

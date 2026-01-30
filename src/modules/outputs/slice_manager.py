@@ -259,8 +259,19 @@ class SliceManager:
         
         return rotated
     
-    def _apply_soft_edge(self, frame: np.ndarray, blur_radius: int) -> np.ndarray:
+    def _apply_soft_edge(self, frame: np.ndarray, blur_radius) -> np.ndarray:
         """Apply soft edge (fade to black at edges)"""
+        # Handle dict format (legacy) - convert to int or skip
+        if isinstance(blur_radius, dict):
+            logger.warning(f"Soft edge dict format not supported, skipping soft edge")
+            return frame
+        
+        if blur_radius is None or blur_radius <= 0:
+            return frame
+        
+        # Ensure blur_radius is an integer
+        blur_radius = int(blur_radius)
+        
         h, w = frame.shape[:2]
         
         # Create gradient mask

@@ -393,6 +393,19 @@ def register_output_routes(app, player_manager):
                     'error': f'Output {output_id} already exists'
                 }), 400
             
+            # VALIDATION: Check for duplicate monitor usage (display outputs only)
+            if output_type == 'display':
+                monitor_index = data.get('monitor_index')
+                if monitor_index is not None:
+                    # Check if any existing output is using this monitor
+                    for existing_id, existing_output in player_obj.output_manager.outputs.items():
+                        if existing_output.config.get('type') == 'display':
+                            if existing_output.config.get('monitor_index') == monitor_index:
+                                return jsonify({
+                                    'success': False,
+                                    'error': f'Monitor {monitor_index} is already in use by output "{existing_id}"'
+                                }), 400
+            
             # Create output config
             output_config = {
                 'type': output_type,
@@ -550,6 +563,46 @@ def register_output_routes(app, player_manager):
         
         except Exception as e:
             logger.error(f"Failed to set output slice: {e}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/outputs/<player>/<output_id>/composition', methods=['PUT'])
+    def set_output_composition(player, output_id):
+        """Set composition (multiple slices) for output"""
+        try:
+            data = request.get_json()
+            composition = data.get('composition')
+            
+            if not composition:
+                return jsonify({
+                    'success': False,
+                    'error': 'Missing composition parameter'
+                }), 400
+            
+            player_obj = player_manager.get_player(player)
+            if not player_obj or not player_obj.output_manager:
+                return jsonify({
+                    'success': False,
+                    'error': 'Output manager not available'
+                }), 404
+            
+            success = player_obj.output_manager.set_output_composition(output_id, composition)
+            
+            if success:
+                return jsonify({
+                    'success': True,
+                    'message': f'Output {output_id} composition set with {len(composition.get("slices", []))} slices'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to set composition for output {output_id}'
+                }), 400
+        
+        except Exception as e:
+            logger.error(f"Failed to set output composition: {e}", exc_info=True)
             return jsonify({
                 'success': False,
                 'error': str(e)

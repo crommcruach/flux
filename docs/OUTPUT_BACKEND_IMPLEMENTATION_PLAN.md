@@ -37,6 +37,19 @@
    - ✅ REST API framework with WebSocket support
    - ✅ Points loader for LED mapping
 
+6. **Multi-Playlist Preview System** (NEW - v1.5.0)
+   - ✅ Dual-player architecture: 4 player instances (video, artnet, video_preview, artnet_preview)
+   - ✅ Isolated preview mode: View non-active playlists without affecting output
+   - ✅ Takeover preview mode: Pause active playlist and play preview on actual output
+   - ✅ Preview players run at 15 FPS with display outputs disabled (web stream only)
+   - ✅ Context menu integration: Right-click playlist tabs or clips for preview options
+   - ✅ State management: Save/restore active playlist state (position, settings, clip index)
+   - ✅ Visual indicators: Red banner with "Stop & Restore" button during takeover
+   - ✅ API endpoints: `/api/playlists/<id>/takeover-preview/start`, `/stop`, `/status`
+   - ✅ Preview streaming: `/api/outputs/<player_id>/stream/preview_live` (MJPEG at 15 FPS)
+   - ✅ Display output filtering: Preview players exclude OpenCV display outputs from config
+   - ✅ Clip-specific preview: Start takeover at specific clip index via `clip_index` parameter
+
 ### ❌ What We DON'T Have:
 
 1. **Backend Modules** (Phase 1 - COMPLETED ✅)
@@ -69,18 +82,168 @@
 6. **Professional Video Routing** (NOT IMPLEMENTED - Future Enhancement)
    - ❌ No NDI output support (ndi-python not in requirements.txt)
    - ❌ No Spout output support (SpoutGL not in requirements.txt)
-   - ❌ No network video streaming
+   - ❌ No network video streaming (except internal MJPEG preview streams)
    - ❌ No GPU texture sharing
 
-7. **Session State Integration** (Phase 3 - COMPLETED ✅)
+7. **Advanced Output Slicing** (PARTIAL - Frontend Ready, Backend Pending)
+   - ✅ Frontend slice editor exists ([output-settings.html](../frontend/output-settings.html))
+   - ✅ Slice definitions: Rectangle, Polygon, Circle with masks and soft edges
+   - ❌ Backend output manager not yet implemented
+   - ❌ No multi-screen slice routing (canvas regions → different displays)
+   - ❌ No per-output clip/layer source selection
+   - ⚠️  Current output: Single display window via DisplayOutput plugin (multiprocessing-based)
+
+8. **Session State Integration** (COMPLETED ✅)
    - ✅ Session state system exists ([session_state.py](../src/modules/session_state.py))
    - ✅ Session state saved to [session_state.json](../session_state.json)
-   - ✅ Output settings included in session state
-   - ✅ Slice definitions persisted across sessions
+   - ✅ Multi-playlist system state persisted across sessions
+   - ✅ Preview player state management (takeover mode save/restore)
+   - ⚠️  Output slice settings NOT yet integrated (pending backend implementation)
 
 ---
 
-## � Clip & Layer Routing Feature
+## 🎭 Multi-Playlist Preview System (v1.5.0)
+
+### Overview
+
+The multi-playlist preview system allows viewing and testing non-active playlists without affecting the main output. This is essential for live performance workflows where you need to prepare and preview content before switching.
+
+### Architecture
+
+**Dual-Player System:**
+- **Output Players** (2): `video`, `artnet` - Main output players for active playlist
+- **Preview Players** (2): `video_preview`, `artnet_preview` - Isolated preview players for non-active playlists
+
+**Key Features:**
+- Preview players run at 15 FPS (optimization)
+- Display outputs disabled for preview players (no OpenCV windows)
+- Preview accessible only via HTTP MJPEG streams in web UI
+- Preview players created on-demand when viewing non-active playlists
+
+### Preview Modes
+
+#### 1. Isolated Preview (Default)
+When viewing a non-active playlist:
+- Automatically loads into `video_preview` and `artnet_preview` players
+- Plays in background without affecting main output
+- Visible in web UI preview streams at `/api/outputs/<player_id>/stream/preview_live`
+- Active playlist continues playing normally on main output
+- No physical display windows created
+
+#### 2. Takeover Preview (Live Testing)
+When you need full-quality testing on actual output:
+- Right-click playlist tab → "🎬 Live Preview (Takeover Output)"
+- Right-click clip → "🎬 Live Preview This Clip"
+- **Actions:**
+  1. Stops and destroys isolated preview players
+  2. Saves active playlist state (position, settings, clip index, playback state)
+  3. Pauses main output players
+  4. Loads preview playlist into main output players
+  5. Starts playback at specified clip (default: first clip)
+- **Visual Indicator:** Red banner with "Stop & Restore" button
+- **Restoration:** Click "Stop & Restore" to resume active playlist at exact saved position
+
+### API Endpoints
+
+```bash
+# Start takeover preview
+POST /api/playlists/<playlist_id>/takeover-preview/start
+Body: {
+  "player_id": "video" | "artnet" | null,  # null = both players
+  "clip_index": 0  # Optional: Start at specific clip
+}
+
+# Stop takeover preview and restore active playlist
+POST /api/playlists/takeover-preview/stop
+
+# Get takeover preview status
+GET /api/playlists/takeover-preview/status
+
+# Preview player MJPEG streams (isolated preview)
+GET /api/outputs/video_preview/stream/preview_live
+GET /api/outputs/artnet_preview/stream/preview_live
+```
+
+### Implementation Details
+
+**PlayerManager** ([player_manager.py](../src/modules/player_manager.py)):
+- `create_preview_players()` - Creates preview players with display outputs filtered
+- `destroy_preview_players()` - Cleans up preview players
+- `start_takeover_preview(playlist_id, player_id)` - Saves state and starts takeover
+- `stop_takeover_preview()` - Restores active playlist state
+- `is_takeover_preview_active()` - Check if takeover mode active
+- `get_takeover_preview_state()` - Get current takeover state
+
+**Frontend** ([player.js](../frontend/js/player.js)):
+- `startTakeoverPreview(playlistId, playerType, clipIndex)` - Initiate takeover
+- `stopTakeoverPreview()` - Stop and restore
+- `updateTakeoverPreviewUI(active, playlistId)` - Show/hide red banner
+- Context menu integration for playlist tabs and clips
+
+**Configuration Filtering:**
+Preview players inherit config from main players but exclude display outputs:
+```python
+preview_config = main_player.config.copy()
+if 'outputs' in preview_config and 'definitions' in preview_config['outputs']:
+    # Filter out display outputs from definitions
+    preview_config['outputs']['definitions'] = [
+        output for output in preview_config['outputs']['definitions']
+        if output.get('type') != 'display'
+    ]
+```
+
+### Use Cases
+
+1. **Live VJ Performance**
+   - Prepare next playlist while current one plays
+   - Preview transitions and effects before switching
+   - Test clip in full quality on output (takeover mode)
+
+2. **Event Setup**
+   - Preview multiple playlists to plan show flow
+   - Test clips on actual hardware before show starts
+   - Quick A/B comparison between playlists
+
+3. **Content Creation**
+   - Edit playlist while another plays
+   - Preview changes without interrupting output
+   - Test new effects on real output hardware
+
+### State Management
+
+**Saved State During Takeover:**
+```python
+{
+    'active_playlist_id': 'uuid',
+    'preview_playlist_id': 'uuid',
+    'players': {
+        'video': {
+            'is_playing': True,
+            'is_paused': False,
+            'current_clip_index': 2,
+            'playlist': [...],
+            'playlist_ids': [...],
+            'autoplay': True,
+            'loop_playlist': True,
+            'current_position': 1234  # Frame position
+        },
+        'artnet': {...}
+    }
+}
+```
+
+**Restoration Process:**
+1. Stop preview playlist on main players
+2. Reload saved playlist content
+3. Restore playback position
+4. Restore settings (autoplay, loop)
+5. Resume playback if was playing
+6. Destroy preview players
+7. Update UI to remove banner
+
+---
+
+## 🎯 Clip & Layer Routing Feature
 
 ### Overview
 
