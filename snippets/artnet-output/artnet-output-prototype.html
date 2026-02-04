@@ -1,0 +1,2527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArtNet Output Routing - Prototype</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1e1e1e;
+            color: #cccccc;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        /* Left Panel */
+        .left-panel {
+            width: 280px;
+            background: #252526;
+            border-right: 1px solid #3c3c3c;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-section {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex: 1;
+        }
+
+        .panel-header {
+            background: #2d2d30;
+            padding: 12px 16px;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+        }
+
+        /* Objects List */
+        .object-item {
+            padding: 8px;
+            margin-bottom: 4px;
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .object-item:hover {
+            background: #2a2d2e;
+            border-color: #007acc;
+        }
+
+        .object-item.selected {
+            background: #094771;
+            border-color: #007acc;
+        }
+
+        .object-item-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .object-checkbox {
+            width: 16px;
+            height: 16px;
+        }
+
+        .object-name {
+            font-weight: 500;
+            font-size: 13px;
+            flex: 1;
+        }
+
+        .object-type {
+            font-size: 11px;
+            color: #858585;
+            background: #3c3c3c;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        .object-details {
+            font-size: 11px;
+            color: #858585;
+            padding-left: 24px;
+        }
+
+        /* Outputs List */
+        .output-item {
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .output-item:hover {
+            background: #2a2d2e;
+            border-color: #505050;
+        }
+
+        .output-item.selected {
+            background: #094771;
+            border-color: #007acc;
+        }
+
+        .output-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+
+        .output-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4ec9b0;
+            flex-shrink: 0;
+        }
+
+        .output-status.inactive {
+            background: #858585;
+        }
+
+        .output-name {
+            font-weight: 600;
+            font-size: 14px;
+            flex: 1;
+        }
+
+        .output-info {
+            font-size: 12px;
+            color: #858585;
+            padding-left: 20px;
+            line-height: 1.4;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 10px;
+            background: #0e639c;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #1177bb;
+        }
+
+        .btn-secondary {
+            background: #3c3c3c;
+        }
+
+        .btn-secondary:hover {
+            background: #505050;
+        }
+
+        .btn-danger {
+            background: #d13438;
+        }
+
+        .btn-danger:hover {
+            background: #e81123;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-group .btn {
+            flex: 1;
+        }
+
+        /* Center Panel - Canvas */
+        .center-panel {
+            flex: 1;
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .canvas-toolbar {
+            background: #2d2d30;
+            padding: 8px 12px;
+            border-bottom: 1px solid #3c3c3c;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .toolbar-btn {
+            padding: 4px 12px;
+            background: #3c3c3c;
+            border: 1px solid #505050;
+            border-radius: 3px;
+            color: #cccccc;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .toolbar-btn:hover {
+            background: #505050;
+        }
+
+        .toolbar-btn.active {
+            background: #094771;
+            border-color: #007acc;
+        }
+
+        .toolbar-select {
+            padding: 4px 8px;
+            background: #3c3c3c;
+            border: 1px solid #505050;
+            border-radius: 3px;
+            color: #cccccc;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .toolbar-select:hover {
+            background: #505050;
+        }
+
+        .toolbar-select:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+
+        .toolbar-input {
+            padding: 4px 8px;
+            background: #3c3c3c;
+            border: 1px solid #505050;
+            border-radius: 3px;
+            color: #cccccc;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .toolbar-input:focus {
+            outline: none;
+            border-color: #007acc;
+            background: #2d2d30;
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #1e1e1e;
+        }
+
+        #previewCanvas {
+            border: 1px solid #3c3c3c;
+            image-rendering: crisp-edges;
+        }
+
+        .canvas-info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Zoom Controls */
+        #zoomControls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px;
+            border-radius: 4px;
+            z-index: 100;
+        }
+
+        .zoom-btn {
+            width: 36px;
+            height: 36px;
+            background: #3c3c3c;
+            border: 1px solid #505050;
+            border-radius: 3px;
+            color: #cccccc;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .zoom-btn:hover {
+            background: #505050;
+            border-color: #007acc;
+        }
+
+        #zoomLevel {
+            text-align: center;
+            padding: 4px 0;
+            font-size: 11px;
+            color: #cccccc;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Right Panel - Like Editor Sidebar */
+        .right-panel {
+            width: 320px;
+            background: #252526;
+            border-left: 1px solid #3c3c3c;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .right-panel-section {
+            display: flex;
+            flex-direction: column;
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        .right-panel-section:last-child {
+            border-bottom: none;
+        }
+
+        .properties-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 32px 16px;
+            color: #858585;
+        }
+
+        .property-group {
+            margin-bottom: 16px;
+        }
+
+        .property-label {
+            font-size: 11px;
+            color: #858585;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .property-value {
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            padding: 8px 10px;
+            border-radius: 3px;
+            font-size: 13px;
+            width: 100%;
+            color: #cccccc;
+        }
+
+        .property-value:focus {
+            outline: none;
+            border-color: #007acc;
+            background: #252526;
+        }
+
+        select.property-value {
+            cursor: pointer;
+        }
+
+        .assigned-objects-list {
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 3px;
+            padding: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .assigned-object {
+            padding: 4px 8px;
+            margin-bottom: 4px;
+            background: #2d2d30;
+            border-radius: 3px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .assigned-object-name {
+            flex: 1;
+        }
+
+        .remove-btn {
+            background: none;
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .remove-btn:hover {
+            background: #d13438;
+            color: #fff
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 32px;
+            color: #858585;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            width: 500px;
+            max-width: 90vw;
+        }
+
+        .modal-header {
+            background: #2d2d30;
+            padding: 12px 16px;
+            border-bottom: 1px solid #3c3c3c;
+            font-weight: 600;
+        }
+
+        .modal-body {
+            padding: 16px;
+        }
+
+        .modal-footer {
+            padding: 12px 16px;
+            border-top: 1px solid #3c3c3c;
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            color: #cccccc;
+            margin-bottom: 4px;
+        }
+
+        .form-input {
+            width: 100%;
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            padding: 6px 8px;
+            border-radius: 3px;
+            font-size: 13px;
+            color: #cccccc;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #424242;
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4e4e4e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Left Panel - Outputs & Properties -->
+        <div class="left-panel">
+            <!-- Outputs List Section -->
+            <div class="panel-section" style="flex: 0 0 auto; max-height: 40%;">
+                <div class="panel-header">ArtNet Outputs</div>
+                <div class="panel-content" id="outputsList" style="overflow-y: auto;">
+                    <!-- Outputs populated by JS -->
+                </div>
+                <div style="padding: 16px; padding-top: 8px;">
+                    <button class="btn" onclick="app.showAddOutputModal()">+ Add Output</button>
+                </div>
+            </div>
+
+            <!-- Output Properties Section -->
+            <div class="panel-section" style="flex: 1;">
+                <div class="panel-header">Output Properties</div>
+                <div class="panel-content" id="propertiesPanel" style="overflow-y: auto;">
+                    <div class="empty-state">
+                        <p>Select an output to view properties</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Panel - Canvas -->
+        <div class="center-panel">
+            <div class="canvas-toolbar">
+                <!-- Resolution Selector -->
+                <label style="margin: 0; white-space: nowrap; font-size: 12px; color: #cccccc;">Resolution:</label>
+                <select id="resolutionSelect" class="toolbar-select" onchange="app.changeResolution()">
+                    <option value="1024x768" selected>1024 × 768</option>
+                    <option value="1280x720">1280 × 720</option>
+                    <option value="1920x1080">1920 × 1080</option>
+                    <option value="2560x1440">2560 × 1440</option>
+                    <option value="3840x2160">3840 × 2160</option>
+                    <option value="custom">Custom...</option>
+                </select>
+                <input type="number" id="customWidth" class="toolbar-input" placeholder="Width" 
+                       style="display: none; width: 80px;" min="100" max="10000">
+                <input type="number" id="customHeight" class="toolbar-input" placeholder="Height" 
+                       style="display: none; width: 80px;" min="100" max="10000">
+                <button id="customApply" class="toolbar-btn" style="display: none;" 
+                        onclick="app.applyCustomResolution()">✓</button>
+                
+                <div style="width: 1px; height: 20px; background: #505050; margin: 0 8px;"></div>
+                
+                <button class="toolbar-btn active" onclick="app.setViewMode('all')">All Objects</button>
+                <button class="toolbar-btn" onclick="app.setViewMode('selected')">Selected Only</button>
+                <button class="toolbar-btn" onclick="app.setViewMode('output')">Output Preview</button>
+                <div style="flex: 1;"></div>
+                <button class="toolbar-btn" onclick="app.flipSelectedObjects()" title="Reverse point order">Flip Points</button>
+                <button class="toolbar-btn" onclick="app.showLinkDialog()" title="Link objects (master-slave)">Link Objects</button>
+                <button class="toolbar-btn" onclick="app.togglePreviewMode()" id="previewModeBtn">Color Preview</button>
+                <button class="toolbar-btn" onclick="app.generateTestPattern()">Test Pattern</button>
+                <button class="toolbar-btn" onclick="app.loadBackgroundImage()">Load Image</button>
+                <button class="toolbar-btn" onclick="app.togglePointNumbers()">Point IDs</button>
+                <button class="toolbar-btn" onclick="app.toggleUniverseBounds()">Universe Bounds</button>
+            </div>
+            <div class="canvas-container" id="canvasContainer">
+                <canvas id="previewCanvas" width="1024" height="768"></canvas>
+                <div class="canvas-info">
+                    <div>Canvas: <span id="canvasSize">1024 x 768</span></div>
+                    <div>Objects: <span id="objectCount">0</span></div>
+                    <div>Total Points: <span id="pointCount">0</span></div>
+                    <div>View Mode: <span id="viewMode">All Objects</span></div>
+                    <div>Zoom: <span id="zoomDisplay">100%</span></div>
+                    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); font-size: 10px;">
+                        <div>Ctrl+Click: Multi-select</div>
+                        <div>Drag: Move selection</div>
+                        <div>Middle/Right: Pan view</div>
+                        <div style="margin-top: 4px; color: #ff00ff;">Magenta line: Linked slave</div>
+                    </div>
+                </div>
+                <!-- Zoom Controls -->
+                <div id="zoomControls">
+                    <button class="zoom-btn" onclick="app.zoomIn()" title="Zoom In">+</button>
+                    <div id="zoomLevel">100%</div>
+                    <button class="zoom-btn" onclick="app.zoomOut()" title="Zoom Out">−</button>
+                    <button class="zoom-btn" onclick="app.resetZoom()" title="Reset Zoom" style="font-size: 12px; font-weight: normal;">1:1</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel - Like Editor Sidebar -->
+        <div class="right-panel">
+            <!-- Objects Section -->
+            <div class="right-panel-section" style="flex: 1;">
+                <div class="panel-header">ArtNet Objects</div>
+                <div class="panel-content" id="objectsList" style="overflow-y: auto;">
+                    <!-- Objects populated by JS -->
+                </div>
+            </div>
+
+            <!-- Stats Section -->
+            <div class="right-panel-section" style="flex: 0 0 auto;">
+                <div class="panel-header">📊 Statistiken</div>
+                <div style="padding: 16px;">
+                    <div class="property-group" style="margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                            <span style="color: #858585;">Objekte gesamt:</span>
+                            <span id="statsObjects" style="font-weight: 600;">0</span>
+                        </div>
+                    </div>
+                    <div class="property-group" style="margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                            <span style="color: #858585;">Pixel gesamt:</span>
+                            <span id="statsPixels" style="font-weight: 600;">0</span>
+                        </div>
+                    </div>
+                    <div class="property-group" style="margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                            <span style="color: #858585;">Kanäle (RGB):</span>
+                            <span id="statsChannels" style="font-weight: 600;">0</span>
+                        </div>
+                    </div>
+                    <div class="property-group" style="margin-bottom: 0;">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                            <span style="color: #858585;">Universen:</span>
+                            <span id="statsUniverses" style="font-weight: 600;">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Output Modal -->
+    <div class="modal" id="outputModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span id="modalTitle">Add Output</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Output Name</label>
+                    <input type="text" class="form-input" id="outputName" placeholder="e.g., Main Output">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Target IP Address</label>
+                    <input type="text" class="form-input" id="outputIP" placeholder="e.g., 192.168.1.10">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Subnet Mask (optional)</label>
+                    <input type="text" class="form-input" id="outputSubnet" placeholder="e.g., 255.255.255.0" value="255.255.255.0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Start Universe</label>
+                    <input type="number" class="form-input" id="outputUniverse" value="1" min="1" max="32768">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">FPS</label>
+                    <input type="number" class="form-input" id="outputFPS" value="30" min="1" max="60">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Delay (ms)</label>
+                    <input type="number" class="form-input" id="outputDelay" value="0" min="0" placeholder="0">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeOutputModal()">Cancel</button>
+                <button class="btn" onclick="app.saveOutput()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Mock Data
+        const mockObjects = [
+            {
+                id: 'shape-1',
+                name: 'Matrix 1',
+                type: 'matrix',
+                points: generateMatrixPoints(16, 8, 50, 50, 40),
+                universeStart: 1,
+                universeEnd: 2,
+                delay: 0,
+                brightness: 0,
+                contrast: 0,
+                red: 0,
+                green: 0,
+                blue: 0,
+                rgbFormat: 'RGB',
+                input: 'player'
+            },
+            {
+                id: 'shape-2',
+                name: 'Circle LED',
+                type: 'circle',
+                points: generateCirclePoints(60, 512, 384, 150),
+                universeStart: 3,
+                universeEnd: 4,
+                delay: 0,
+                brightness: 0,
+                contrast: 0,
+                red: 0,
+                green: 0,
+                blue: 0,
+                rgbFormat: 'RGB',
+                input: 'player'
+            },
+            {
+                id: 'shape-3',
+                name: 'LED Strip Left',
+                type: 'line',
+                points: generateLinePoints(40, 100, 100, 100, 600),
+                universeStart: 5,
+                universeEnd: 5,
+                delay: 0,
+                brightness: 0,
+                contrast: 0,
+                red: 0,
+                green: 0,
+                blue: 0,
+                rgbFormat: 'RGB',
+                input: 'player'
+            },
+            {
+                id: 'shape-4',
+                name: 'LED Strip Right',
+                type: 'line',
+                points: generateLinePoints(40, 924, 100, 924, 600),
+                universeStart: 6,
+                universeEnd: 6,
+                delay: 0,
+                brightness: 0,
+                contrast: 0,
+                red: 0,
+                green: 0,
+                blue: 0,
+                rgbFormat: 'RGB',
+                input: 'player'
+            },
+            {
+                id: 'shape-5',
+                name: 'Star Shape',
+                type: 'star',
+                points: generateStarPoints(5, 30, 512, 600, 80, 40),
+                universeStart: 7,
+                universeEnd: 7,
+                delay: 0,
+                brightness: 0,
+                contrast: 0,
+                red: 0,
+                green: 0,
+                blue: 0,
+                rgbFormat: 'RGB',
+                input: 'player'
+            }
+        ];
+
+        let mockOutputs = [
+            {
+                id: 'output-1',
+                name: 'Main Output',
+                targetIP: '192.168.1.10',
+                subnet: '255.255.255.0',
+                startUniverse: 1,
+                fps: 30,
+                delay: 0,
+                brightness: 0,
+                contrast: 0,
+                red: 0,
+                green: 0,
+                blue: 0,
+                assignedObjects: ['shape-1', 'shape-2'],
+                active: true
+            },
+            {
+                id: 'output-2',
+                name: 'Secondary Output',
+                targetIP: '192.168.1.11',
+                subnet: '255.255.255.0',
+                startUniverse: 5,
+                fps: 30,
+                delay: 0,
+                brightness: 0,
+                contrast: 0,
+                red: 0,
+                green: 0,
+                blue: 0,
+                assignedObjects: ['shape-3', 'shape-4'],
+                active: false
+            }
+        ];
+
+        // Point generation functions
+        function generateMatrixPoints(cols, rows, startX, startY, spacing) {
+            const points = [];
+            let id = 1;
+            for (let row = 0; row < rows; row++) {
+                for (let col = 0; col < cols; col++) {
+                    points.push({
+                        id: id++,
+                        x: startX + col * spacing,
+                        y: startY + row * spacing
+                    });
+                }
+            }
+            return points;
+        }
+
+        function generateCirclePoints(count, centerX, centerY, radius) {
+            const points = [];
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                points.push({
+                    id: i + 1,
+                    x: centerX + Math.cos(angle) * radius,
+                    y: centerY + Math.sin(angle) * radius
+                });
+            }
+            return points;
+        }
+
+        function generateLinePoints(count, startX, startY, endX, endY) {
+            const points = [];
+            for (let i = 0; i < count; i++) {
+                const t = i / (count - 1);
+                points.push({
+                    id: i + 1,
+                    x: startX + (endX - startX) * t,
+                    y: startY + (endY - startY) * t
+                });
+            }
+            return points;
+        }
+
+        function generateStarPoints(numPoints, pointsPerLine, centerX, centerY, outerRadius, innerRadius) {
+            const points = [];
+            let id = 1;
+            for (let i = 0; i < numPoints * 2; i++) {
+                const angle = (i / (numPoints * 2)) * Math.PI * 2 - Math.PI / 2;
+                const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+                
+                if (i < numPoints * 2 - 1) {
+                    const nextAngle = ((i + 1) / (numPoints * 2)) * Math.PI * 2 - Math.PI / 2;
+                    const nextRadius = (i + 1) % 2 === 0 ? outerRadius : innerRadius;
+                    const nextX = centerX + Math.cos(nextAngle) * nextRadius;
+                    const nextY = centerY + Math.sin(nextAngle) * nextRadius;
+                    
+                    for (let p = 0; p < pointsPerLine; p++) {
+                        const t = p / (pointsPerLine - 1);
+                        points.push({
+                            id: id++,
+                            x: x + (nextX - x) * t,
+                            y: y + (nextY - y) * t
+                        });
+                    }
+                }
+            }
+            return points;
+        }
+
+        // Application State
+        const app = {
+            selectedObjects: new Set(),
+            selectedOutput: null,
+            viewMode: 'all',
+            showPointNumbers: false,
+            showUniverseBounds: false,
+            editingOutput: null,
+            // Preview state
+            previewMode: true,
+            backgroundImage: null,
+            backgroundCanvas: null,
+            backgroundCtx: null,
+            // Resolution state
+            canvasWidth: 1024,
+            canvasHeight: 768,
+            // Object linking (master-slave)
+            objectLinks: {}, // { slaveId: masterId }
+            // Object expanded state
+            expandedObjects: new Set(), // Set of object IDs that are expanded
+            // Zoom and Pan state
+            zoom: 1.0,
+            panX: 0,
+            panY: 0,
+            isPanning: false,
+            lastMouseX: 0,
+            lastMouseY: 0,
+            // Object transform state
+            selectedCanvasObject: null,
+            selectedCanvasObjects: new Set(), // Multi-selection
+            isDragging: false,
+            isScaling: false,
+            isRotating: false,
+            dragStartX: 0,
+            dragStartY: 0,
+            activeHandle: null,
+
+            init() {
+                this.renderObjects();
+                this.renderOutputs();
+                this.renderCanvas();
+                this.updateStats();
+                this.setupCanvasInteraction();
+                this.initBackgroundCanvas();
+                
+                // Set preview button active by default
+                document.getElementById('previewModeBtn').classList.add('active');
+                
+                // Create hidden file input for background image
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = 'image/*';
+                fileInput.style.display = 'none';
+                fileInput.id = 'bgImageInput';
+                fileInput.addEventListener('change', (e) => this.handleBackgroundImage(e));
+                document.body.appendChild(fileInput);
+            },
+
+            initBackgroundCanvas() {
+                // Create offscreen canvas for background image
+                this.backgroundCanvas = document.createElement('canvas');
+                this.backgroundCanvas.width = this.canvasWidth;
+                this.backgroundCanvas.height = this.canvasHeight;
+                this.backgroundCtx = this.backgroundCanvas.getContext('2d', { willReadFrequently: true });
+                
+                // Generate default test pattern
+                this.generateTestPattern();
+            },
+
+            generateTestPattern() {
+                const ctx = this.backgroundCtx;
+                const w = this.backgroundCanvas.width;
+                const h = this.backgroundCanvas.height;
+                
+                // Create test pattern image
+                const img = new Image();
+                img.onload = () => {
+                    this.backgroundImage = img;
+                    ctx.drawImage(img, 0, 0, w, h);
+                    this.renderCanvas();
+                };
+                
+                // Create temporary canvas to draw test pattern
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = w;
+                tempCanvas.height = h;
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                // Background
+                tempCtx.fillStyle = '#2a2a2a';
+                tempCtx.fillRect(0, 0, w, h);
+                
+                // Color bars (top section)
+                const barHeight = h / 3;
+                const colors = [
+                    '#FFFFFF', // White
+                    '#FFFF00', // Yellow
+                    '#00FFFF', // Cyan
+                    '#00FF00', // Green
+                    '#FF00FF', // Magenta
+                    '#FF0000', // Red
+                    '#0000FF'  // Blue
+                ];
+                
+                const barWidth = w / colors.length;
+                colors.forEach((color, i) => {
+                    tempCtx.fillStyle = color;
+                    tempCtx.fillRect(i * barWidth, 0, barWidth, barHeight);
+                });
+                
+                // Horizontal gradient (middle section)
+                const gradient = tempCtx.createLinearGradient(0, barHeight, w, barHeight);
+                gradient.addColorStop(0, '#000000');
+                gradient.addColorStop(0.25, '#FF0000');
+                gradient.addColorStop(0.5, '#FFFF00');
+                gradient.addColorStop(0.75, '#00FF00');
+                gradient.addColorStop(1, '#0000FF');
+                tempCtx.fillStyle = gradient;
+                tempCtx.fillRect(0, barHeight, w, barHeight);
+                
+                // Checkerboard pattern (bottom section)
+                const checkSize = 40;
+                for (let y = barHeight * 2; y < h; y += checkSize) {
+                    for (let x = 0; x < w; x += checkSize) {
+                        const isEven = (Math.floor(x / checkSize) + Math.floor(y / checkSize)) % 2 === 0;
+                        tempCtx.fillStyle = isEven ? '#FFFFFF' : '#000000';
+                        tempCtx.fillRect(x, y, checkSize, checkSize);
+                    }
+                }
+                
+                // Add grid lines
+                tempCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                tempCtx.lineWidth = 1;
+                const gridSize = 64;
+                
+                // Vertical lines
+                for (let x = 0; x < w; x += gridSize) {
+                    tempCtx.beginPath();
+                    tempCtx.moveTo(x, 0);
+                    tempCtx.lineTo(x, h);
+                    tempCtx.stroke();
+                }
+                
+                // Horizontal lines
+                for (let y = 0; y < h; y += gridSize) {
+                    tempCtx.beginPath();
+                    tempCtx.moveTo(0, y);
+                    tempCtx.lineTo(w, y);
+                    tempCtx.stroke();
+                }
+                
+                // Add labels
+                tempCtx.fillStyle = '#FFFFFF';
+                tempCtx.font = 'bold 24px Arial';
+                tempCtx.strokeStyle = '#000000';
+                tempCtx.lineWidth = 3;
+                
+                tempCtx.strokeText('COLOR BARS', 20, 40);
+                tempCtx.fillText('COLOR BARS', 20, 40);
+                
+                tempCtx.strokeText('GRADIENT', 20, barHeight + 40);
+                tempCtx.fillText('GRADIENT', 20, barHeight + 40);
+                
+                tempCtx.strokeText('CHECKERBOARD', 20, barHeight * 2 + 40);
+                tempCtx.fillText('CHECKERBOARD', 20, barHeight * 2 + 40);
+                
+                // Convert to image
+                img.src = tempCanvas.toDataURL();
+            },
+
+            setupCanvasInteraction() {
+                const canvas = document.getElementById('previewCanvas');
+                const container = document.getElementById('canvasContainer');
+
+                // Mouse wheel zoom
+                canvas.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    const rect = canvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+                    
+                    // Convert mouse position to canvas coordinates
+                    const canvasX = (mouseX - canvas.width / 2 - this.panX) / this.zoom;
+                    const canvasY = (mouseY - canvas.height / 2 - this.panY) / this.zoom;
+                    
+                    // Zoom
+                    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                    this.zoom = Math.max(0.1, Math.min(10, this.zoom * delta));
+                    
+                    // Adjust pan to keep mouse position fixed
+                    this.panX = mouseX - canvas.width / 2 - canvasX * this.zoom;
+                    this.panY = mouseY - canvas.height / 2 - canvasY * this.zoom;
+                    
+                    this.updateZoomDisplay();
+                    this.renderCanvas();
+                });
+
+                canvas.addEventListener('mousedown', (e) => {
+                    const coords = this.getCanvasCoords(e);
+                    
+                    // Pan with middle or right mouse button
+                    if (e.button === 1 || e.button === 2) {
+                        e.preventDefault();
+                        this.isPanning = true;
+                        this.lastMouseX = e.clientX;
+                        this.lastMouseY = e.clientY;
+                        canvas.style.cursor = 'grabbing';
+                        return;
+                    }
+                    
+                    // Left click - check for object selection or handle
+                    if (e.button === 0) {
+                        // Check if clicking on a transform handle
+                        if (this.selectedCanvasObjects.size > 0) {
+                            const handle = this.getHandleAtPoint(coords.x, coords.y);
+                            if (handle) {
+                                this.activeHandle = handle;
+                                if (handle === 'rotate') {
+                                    this.isRotating = true;
+                                } else {
+                                    this.isScaling = true;
+                                }
+                                this.dragStartX = coords.x;
+                                this.dragStartY = coords.y;
+                                return;
+                            }
+                        }
+                        
+                        // Check if clicking on an object
+                        const clickedObj = this.getObjectAtPoint(coords.x, coords.y);
+                        if (clickedObj) {
+                            // Multi-select with Ctrl key
+                            if (e.ctrlKey || e.metaKey) {
+                                if (this.selectedCanvasObjects.has(clickedObj)) {
+                                    this.selectedCanvasObjects.delete(clickedObj);
+                                } else {
+                                    this.selectedCanvasObjects.add(clickedObj);
+                                }
+                            } else {
+                                // Single select (clear previous selection if not in it)
+                                if (!this.selectedCanvasObjects.has(clickedObj)) {
+                                    this.selectedCanvasObjects.clear();
+                                    this.selectedCanvasObjects.add(clickedObj);
+                                }
+                            }
+                            this.selectedCanvasObject = clickedObj;
+                            this.isDragging = true;
+                            this.dragStartX = coords.x;
+                            this.dragStartY = coords.y;
+                            this.renderCanvas();
+                        } else {
+                            // Click on empty space - clear selection
+                            if (!e.ctrlKey && !e.metaKey) {
+                                this.selectedCanvasObject = null;
+                                this.selectedCanvasObjects.clear();
+                                this.renderCanvas();
+                            }
+                        }
+                    }
+                });
+
+                canvas.addEventListener('mousemove', (e) => {
+                    const coords = this.getCanvasCoords(e);
+                    
+                    if (this.isPanning) {
+                        const dx = e.clientX - this.lastMouseX;
+                        const dy = e.clientY - this.lastMouseY;
+                        this.panX += dx;
+                        this.panY += dy;
+                        this.lastMouseX = e.clientX;
+                        this.lastMouseY = e.clientY;
+                        this.renderCanvas();
+                    } else if (this.isDragging && this.selectedCanvasObjects.size > 0) {
+                        const dx = coords.x - this.dragStartX;
+                        const dy = coords.y - this.dragStartY;
+                        // Move all selected objects
+                        this.selectedCanvasObjects.forEach(obj => {
+                            this.moveObject(obj, dx, dy);
+                        });
+                        this.dragStartX = coords.x;
+                        this.dragStartY = coords.y;
+                        this.renderCanvas();
+                    } else if (this.isScaling && this.selectedCanvasObjects.size > 0) {
+                        const dx = coords.x - this.dragStartX;
+                        const dy = coords.y - this.dragStartY;
+                        // Scale all selected objects together
+                        const bounds = this.getMultiSelectionBounds();
+                        this.selectedCanvasObjects.forEach(obj => {
+                            this.scaleObjectRelativeTo(obj, dx, dy, this.activeHandle, bounds);
+                        });
+                        this.dragStartX = coords.x;
+                        this.dragStartY = coords.y;
+                        this.renderCanvas();
+                    } else if (this.isRotating && this.selectedCanvasObjects.size > 0) {
+                        // Rotate all selected objects around group center
+                        const bounds = this.getMultiSelectionBounds();
+                        const centerX = (bounds.minX + bounds.maxX) / 2;
+                        const centerY = (bounds.minY + bounds.maxY) / 2;
+                        this.selectedCanvasObjects.forEach(obj => {
+                            this.rotateObjectAround(obj, coords.x, coords.y, centerX, centerY);
+                        });
+                        this.renderCanvas();
+                    } else {
+                        // Update cursor based on what's under mouse
+                        if (this.selectedCanvasObjects.size > 0) {
+                            const handle = this.getHandleAtPoint(coords.x, coords.y);
+                            if (handle === 'rotate') {
+                                canvas.style.cursor = 'crosshair';
+                            } else if (handle) {
+                                canvas.style.cursor = 'nwse-resize';
+                            } else if (this.isPointInAnySelectedObject(coords.x, coords.y)) {
+                                canvas.style.cursor = 'move';
+                            } else {
+                                canvas.style.cursor = 'default';
+                            }
+                        } else {
+                            const obj = this.getObjectAtPoint(coords.x, coords.y);
+                            canvas.style.cursor = obj ? 'pointer' : 'default';
+                        }
+                    }
+                });
+
+                canvas.addEventListener('mouseup', (e) => {
+                    if (e.button === 1 || e.button === 2) {
+                        this.isPanning = false;
+                        canvas.style.cursor = 'default';
+                    } else if (e.button === 0) {
+                        this.isDragging = false;
+                        this.isScaling = false;
+                        this.isRotating = false;
+                        this.activeHandle = null;
+                    }
+                });
+
+                canvas.addEventListener('mouseleave', () => {
+                    if (this.isPanning) {
+                        this.isPanning = false;
+                        canvas.style.cursor = 'default';
+                    }
+                    this.isDragging = false;
+                    this.isScaling = false;
+                    this.isRotating = false;
+                    this.activeHandle = null;
+                });
+
+                // Disable context menu on canvas
+                canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            },
+
+            zoomIn() {
+                this.zoom = Math.min(10, this.zoom * 1.2);
+                this.updateZoomDisplay();
+                this.renderCanvas();
+            },
+
+            zoomOut() {
+                this.zoom = Math.max(0.1, this.zoom / 1.2);
+                this.updateZoomDisplay();
+                this.renderCanvas();
+            },
+
+            resetZoom() {
+                this.zoom = 1.0;
+                this.panX = 0;
+                this.panY = 0;
+                this.updateZoomDisplay();
+                this.renderCanvas();
+            },
+
+            updateZoomDisplay() {
+                const zoomPercent = Math.round(this.zoom * 100);
+                document.getElementById('zoomLevel').textContent = zoomPercent + '%';
+                document.getElementById('zoomDisplay').textContent = zoomPercent + '%';
+            },
+
+            loadBackgroundImage() {
+                document.getElementById('bgImageInput').click();
+            },
+
+            handleBackgroundImage(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        this.backgroundImage = img;
+                        // Draw to background canvas
+                        this.backgroundCtx.drawImage(img, 0, 0, this.backgroundCanvas.width, this.backgroundCanvas.height);
+                        this.renderCanvas();
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            },
+
+            togglePreviewMode() {
+                this.previewMode = !this.previewMode;
+                const btn = document.getElementById('previewModeBtn');
+                if (this.previewMode) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+                this.renderCanvas();
+            },
+
+            getColorAtPoint(x, y) {
+                if (!this.backgroundImage) {
+                    return { r: 200, g: 200, b: 200 }; // Default gray
+                }
+                
+                // Get pixel data from background canvas
+                const imageData = this.backgroundCtx.getImageData(
+                    Math.floor(x),
+                    Math.floor(y),
+                    1,
+                    1
+                ).data;
+                
+                return {
+                    r: imageData[0],
+                    g: imageData[1],
+                    b: imageData[2]
+                };
+            },
+
+            getCanvasCoords(e) {
+                const canvas = document.getElementById('previewCanvas');
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                // Convert screen coordinates to canvas coordinates considering zoom and pan
+                const x = (mouseX - canvas.width / 2 - this.panX) / this.zoom + canvas.width / 2;
+                const y = (mouseY - canvas.height / 2 - this.panY) / this.zoom + canvas.height / 2;
+                
+                return { x, y };
+            },
+
+            getObjectAtPoint(x, y) {
+                // Check objects in reverse order (top to bottom)
+                const objectsToCheck = this.getVisibleObjects();
+                
+                for (let i = objectsToCheck.length - 1; i >= 0; i--) {
+                    const obj = objectsToCheck[i];
+                    if (this.isPointInObject(x, y, obj)) {
+                        return obj;
+                    }
+                }
+                return null;
+            },
+
+            isPointInObject(x, y, obj) {
+                const bounds = this.calculateBounds(obj.points);
+                const padding = 10; // Click padding
+                return x >= bounds.minX - padding && x <= bounds.maxX + padding &&
+                       y >= bounds.minY - padding && y <= bounds.maxY + padding;
+            },
+
+            getHandleAtPoint(x, y) {
+                if (this.selectedCanvasObjects.size === 0) return null;
+                
+                const bounds = this.getMultiSelectionBounds();
+                const handleSize = 10 / this.zoom;
+                
+                const handles = {
+                    'nw': { x: bounds.minX, y: bounds.minY },
+                    'ne': { x: bounds.maxX, y: bounds.minY },
+                    'sw': { x: bounds.minX, y: bounds.maxY },
+                    'se': { x: bounds.maxX, y: bounds.maxY },
+                    'rotate': { x: (bounds.minX + bounds.maxX) / 2, y: bounds.minY - 30 }
+                };
+                
+                for (const [name, pos] of Object.entries(handles)) {
+                    const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
+                    if (dist < handleSize) {
+                        return name;
+                    }
+                }
+                return null;
+            },
+
+            getMultiSelectionBounds() {
+                if (this.selectedCanvasObjects.size === 0) return null;
+                
+                let minX = Infinity, minY = Infinity;
+                let maxX = -Infinity, maxY = -Infinity;
+                
+                this.selectedCanvasObjects.forEach(obj => {
+                    obj.points.forEach(point => {
+                        minX = Math.min(minX, point.x);
+                        maxX = Math.max(maxX, point.x);
+                        minY = Math.min(minY, point.y);
+                        maxY = Math.max(maxY, point.y);
+                    });
+                });
+                
+                return { minX, maxX, minY, maxY };
+            },
+
+            isPointInAnySelectedObject(x, y) {
+                for (const obj of this.selectedCanvasObjects) {
+                    if (this.isPointInObject(x, y, obj)) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+
+            scaleObjectRelativeTo(obj, dx, dy, handle, groupBounds) {
+                const centerX = (groupBounds.minX + groupBounds.maxX) / 2;
+                const centerY = (groupBounds.minY + groupBounds.maxY) / 2;
+                
+                let scaleX = 1, scaleY = 1;
+                
+                const currentWidth = groupBounds.maxX - groupBounds.minX;
+                const currentHeight = groupBounds.maxY - groupBounds.minY;
+                
+                if (handle === 'se' || handle === 'ne') {
+                    scaleX = 1 + dx / (currentWidth || 1);
+                }
+                if (handle === 'se' || handle === 'sw') {
+                    scaleY = 1 + dy / (currentHeight || 1);
+                }
+                if (handle === 'nw' || handle === 'sw') {
+                    scaleX = 1 - dx / (currentWidth || 1);
+                }
+                if (handle === 'nw' || handle === 'ne') {
+                    scaleY = 1 - dy / (currentHeight || 1);
+                }
+                
+                // Apply scale relative to group center
+                obj.points.forEach(point => {
+                    const relX = point.x - centerX;
+                    const relY = point.y - centerY;
+                    point.x = centerX + relX * scaleX;
+                    point.y = centerY + relY * scaleY;
+                });
+            },
+
+            rotateObjectAround(obj, mouseX, mouseY, centerX, centerY) {
+                const angle = Math.atan2(mouseY - centerY, mouseX - centerX);
+                
+                if (!this.lastGroupRotationAngle) {
+                    this.lastGroupRotationAngle = angle;
+                    return;
+                }
+                
+                const deltaAngle = angle - this.lastGroupRotationAngle;
+                this.lastGroupRotationAngle = angle;
+                
+                // Rotate all points around group center
+                obj.points.forEach(point => {
+                    const relX = point.x - centerX;
+                    const relY = point.y - centerY;
+                    const cos = Math.cos(deltaAngle);
+                    const sin = Math.sin(deltaAngle);
+                    point.x = centerX + (relX * cos - relY * sin);
+                    point.y = centerY + (relX * sin + relY * cos);
+                });
+            },
+
+            moveObject(obj, dx, dy) {
+                obj.points.forEach(point => {
+                    point.x += dx;
+                    point.y += dy;
+                });
+            },
+
+            scaleObject(obj, dx, dy, handle) {
+                const bounds = this.calculateBounds(obj.points);
+                const centerX = (bounds.minX + bounds.maxX) / 2;
+                const centerY = (bounds.minY + bounds.maxY) / 2;
+                
+                let scaleX = 1, scaleY = 1;
+                
+                const currentWidth = bounds.maxX - bounds.minX;
+                const currentHeight = bounds.maxY - bounds.minY;
+                
+                if (handle === 'se' || handle === 'ne') {
+                    scaleX = 1 + dx / (currentWidth || 1);
+                }
+                if (handle === 'se' || handle === 'sw') {
+                    scaleY = 1 + dy / (currentHeight || 1);
+                }
+                if (handle === 'nw' || handle === 'sw') {
+                    scaleX = 1 - dx / (currentWidth || 1);
+                }
+                if (handle === 'nw' || handle === 'ne') {
+                    scaleY = 1 - dy / (currentHeight || 1);
+                }
+                
+                // Apply scale
+                obj.points.forEach(point => {
+                    const relX = point.x - centerX;
+                    const relY = point.y - centerY;
+                    point.x = centerX + relX * scaleX;
+                    point.y = centerY + relY * scaleY;
+                });
+            },
+
+            rotateObject(obj, mouseX, mouseY) {
+                const bounds = this.calculateBounds(obj.points);
+                const centerX = (bounds.minX + bounds.maxX) / 2;
+                const centerY = (bounds.minY + bounds.maxY) / 2;
+                
+                const angle = Math.atan2(mouseY - centerY, mouseX - centerX);
+                
+                if (!obj.lastRotationAngle) {
+                    obj.lastRotationAngle = angle;
+                    return;
+                }
+                
+                const deltaAngle = angle - obj.lastRotationAngle;
+                obj.lastRotationAngle = angle;
+                
+                // Rotate all points
+                obj.points.forEach(point => {
+                    const relX = point.x - centerX;
+                    const relY = point.y - centerY;
+                    const cos = Math.cos(deltaAngle);
+                    const sin = Math.sin(deltaAngle);
+                    point.x = centerX + (relX * cos - relY * sin);
+                    point.y = centerY + (relX * sin + relY * cos);
+                });
+            },
+
+            getVisibleObjects() {
+                if (this.viewMode === 'selected' && this.selectedObjects.size > 0) {
+                    return mockObjects.filter(obj => this.selectedObjects.has(obj.id));
+                } else if (this.viewMode === 'output' && this.selectedOutput) {
+                    return mockObjects.filter(obj => 
+                        this.selectedOutput.assignedObjects.includes(obj.id)
+                    );
+                }
+                return mockObjects;
+            },
+
+            renderObjects() {
+                const container = document.getElementById('objectsList');
+                container.innerHTML = mockObjects.map(obj => {
+                    const isSlave = !!this.objectLinks[obj.id];
+                    const masterId = this.objectLinks[obj.id];
+                    const isExpanded = this.expandedObjects.has(obj.id);
+                    // Filter masters: same type AND same number of points
+                    const availableMasters = mockObjects.filter(m => 
+                        m.id !== obj.id && 
+                        m.type === obj.type && 
+                        m.points.length === obj.points.length
+                    );
+                    
+                    return `
+                    <div class="object-item ${this.selectedObjects.has(obj.id) ? 'selected' : ''}">
+                        <div class="object-item-header" onclick="app.toggleObjectSelection('${obj.id}')">
+                            <input type="checkbox" class="object-checkbox" 
+                                   ${this.selectedObjects.has(obj.id) ? 'checked' : ''}
+                                   onchange="app.toggleObjectSelection('${obj.id}')"
+                                   onclick="event.stopPropagation()">
+                            <span class="object-name">${obj.name}</span>
+                            <span class="object-type">${obj.type}</span>
+                            <button class="btn" style="padding: 2px 6px; font-size: 10px; margin-left: auto;" 
+                                    onclick="app.toggleObjectExpand('${obj.id}'); event.stopPropagation();">
+                                ${isExpanded ? '▼' : '▶'}
+                            </button>
+                        </div>
+                        <div class="object-details" onclick="app.toggleObjectSelection('${obj.id}')">
+                            ${obj.points.length} points • U${obj.universeStart}-${obj.universeEnd}
+                        </div>
+                        ${isExpanded ? `
+                        <div class="object-details" style="margin-top: 4px;">
+                            <label style="font-size: 10px; color: #858585;">Delay (ms):</label>
+                            <input type="number" class="property-value" 
+                                   style="width: 60px; padding: 2px 4px; font-size: 11px; display: inline-block;" 
+                                   value="${obj.delay || 0}" 
+                                   min="0" placeholder="0"
+                                   onclick="event.stopPropagation()"
+                                   onchange="app.updateObjectDelay('${obj.id}', parseInt(this.value))">
+                        </div>
+                        <div class="object-details" style="margin-top: 4px;">
+                            <label style="font-size: 10px; color: #858585;">Input:</label>
+                            <select class="property-value" 
+                                    style="width: 100%; padding: 2px 4px; font-size: 11px; margin-top: 2px;"
+                                    onclick="event.stopPropagation()"
+                                    onchange="app.updateObjectColorCorrection('${obj.id}', 'input', this.value)">
+                                <option value="player" ${(obj.input || 'player') === 'player' ? 'selected' : ''}>Player (Layer 0)</option>
+                                <option value="layer1" ${obj.input === 'layer1' ? 'selected' : ''}>Layer 1</option>
+                                <option value="layer2" ${obj.input === 'layer2' ? 'selected' : ''}>Layer 2</option>
+                                <option value="layer3" ${obj.input === 'layer3' ? 'selected' : ''}>Layer 3</option>
+                                <option value="layer4" ${obj.input === 'layer4' ? 'selected' : ''}>Layer 4</option>
+                                <option value="layer5" ${obj.input === 'layer5' ? 'selected' : ''}>Layer 5</option>
+                                <option value="layer6" ${obj.input === 'layer6' ? 'selected' : ''}>Layer 6</option>
+                                <option value="layer7" ${obj.input === 'layer7' ? 'selected' : ''}>Layer 7</option>
+                                <option value="layer8" ${obj.input === 'layer8' ? 'selected' : ''}>Layer 8</option>
+                                <option value="layer9" ${obj.input === 'layer9' ? 'selected' : ''}>Layer 9</option>
+                                <option value="layer10" ${obj.input === 'layer10' ? 'selected' : ''}>Layer 10</option>
+                            </select>
+                        </div>
+                        <div class="object-details" style="margin-top: 6px; border-top: 1px solid #3c3c3c; padding-top: 6px;">
+                            <label style="font-size: 10px; color: #858585; margin-bottom: 4px; display: block;">Color Correction:</label>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px;">
+                                <div>
+                                    <label style="color: #858585;">Brightness: <span id="obj-${obj.id}-brightness">${obj.brightness || 0}</span></label>
+                                    <input type="range" class="property-value" 
+                                           style="width: 100%;" 
+                                           value="${obj.brightness || 0}" min="-255" max="255"
+                                           onclick="event.stopPropagation()"
+                                           oninput="document.getElementById('obj-${obj.id}-brightness').textContent = this.value"
+                                           onchange="app.updateObjectColorCorrection('${obj.id}', 'brightness', parseInt(this.value))">
+                                </div>
+                                </div>
+                                <div>
+                                    <label style="color: #858585;">Contrast: <span id="obj-${obj.id}-contrast">${obj.contrast || 0}</span></label>
+                                    <input type="range" class="property-value" 
+                                           style="width: 100%;" 
+                                           value="${obj.contrast || 0}" min="-255" max="255"
+                                           onclick="event.stopPropagation()"
+                                           oninput="document.getElementById('obj-${obj.id}-contrast').textContent = this.value"
+                                           onchange="app.updateObjectColorCorrection('${obj.id}', 'contrast', parseInt(this.value))">
+                                </div>
+                                <div>
+                                    <label style="color: #858585;">Red: <span id="obj-${obj.id}-red">${obj.red || 0}</span></label>
+                                    <input type="range" class="property-value" 
+                                           style="width: 100%;" 
+                                           value="${obj.red || 0}" min="-255" max="255"
+                                           onclick="event.stopPropagation()"
+                                           oninput="document.getElementById('obj-${obj.id}-red').textContent = this.value"
+                                           onchange="app.updateObjectColorCorrection('${obj.id}', 'red', parseInt(this.value))">
+                                </div>
+                                <div>
+                                    <label style="color: #858585;">Green: <span id="obj-${obj.id}-green">${obj.green || 0}</span></label>
+                                    <input type="range" class="property-value" 
+                                           style="width: 100%;" 
+                                           value="${obj.green || 0}" min="-255" max="255"
+                                           onclick="event.stopPropagation()"
+                                           oninput="document.getElementById('obj-${obj.id}-green').textContent = this.value"
+                                           onchange="app.updateObjectColorCorrection('${obj.id}', 'green', parseInt(this.value))">
+                                </div>
+                                <div>
+                                    <label style="color: #858585;">Blue: <span id="obj-${obj.id}-blue">${obj.blue || 0}</span></label>
+                                    <input type="range" class="property-value" 
+                                           style="width: 100%;" 
+                                           value="${obj.blue || 0}" min="-255" max="255"
+                                           onclick="event.stopPropagation()"
+                                           oninput="document.getElementById('obj-${obj.id}-blue').textContent = this.value"
+                                           onchange="app.updateObjectColorCorrection('${obj.id}', 'blue', parseInt(this.value))">
+                                </div>
+                                <div>
+                                    <label style="color: #858585;">RGB Format:</label>
+                                    <select class="property-value" 
+                                            style="width: 100%; padding: 2px 4px; font-size: 10px;"
+                                            onclick="event.stopPropagation()"
+                                            onchange="app.updateObjectColorCorrection('${obj.id}', 'rgbFormat', this.value)">
+                                        <option value="RGB" ${obj.rgbFormat === 'RGB' ? 'selected' : ''}>RGB</option>
+                                        <option value="RBG" ${obj.rgbFormat === 'RBG' ? 'selected' : ''}>RBG</option>
+                                        <option value="GRB" ${obj.rgbFormat === 'GRB' ? 'selected' : ''}>GRB</option>
+                                        <option value="GBR" ${obj.rgbFormat === 'GBR' ? 'selected' : ''}>GBR</option>
+                                        <option value="BRG" ${obj.rgbFormat === 'BRG' ? 'selected' : ''}>BRG</option>
+                                        <option value="BGR" ${obj.rgbFormat === 'BGR' ? 'selected' : ''}>BGR</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="object-details" style="margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="slave-${obj.id}" 
+                                   ${isSlave ? 'checked' : ''}
+                                   onclick="event.stopPropagation()"
+                                   onchange="app.toggleSlaveMode('${obj.id}', this.checked)">
+                            <label for="slave-${obj.id}" style="font-size: 11px; color: #cccccc; cursor: pointer;">Is Slave</label>
+                        </div>
+                        ${isSlave ? `
+                        <div class="object-details" style="margin-top: 4px;">
+                            <label style="font-size: 10px; color: #858585;">Master:</label>
+                            <select class="property-value" 
+                                    style="width: 100%; padding: 2px 4px; font-size: 11px; margin-top: 2px;"
+                                    onclick="event.stopPropagation()"
+                                    onchange="app.linkObjectToMaster('${obj.id}', this.value)">
+                                ${availableMasters.map(master => `
+                                    <option value="${master.id}" ${masterId === master.id ? 'selected' : ''}>
+                                        ${master.name} (${master.points.length} pts)
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        ` : ''}
+                        ` : ''}
+                    </div>
+                `;
+                }).join('');
+            },
+
+            updateObjectDelay(objectId, delay) {
+                const obj = mockObjects.find(o => o.id === objectId);
+                if (obj) {
+                    obj.delay = delay || 0;
+                }
+            },
+
+            updateObjectColorCorrection(objectId, property, value) {
+                const obj = mockObjects.find(o => o.id === objectId);
+                if (obj) {
+                    obj[property] = value;
+                }
+            },
+
+            toggleObjectExpand(objectId) {
+                if (this.expandedObjects.has(objectId)) {
+                    this.expandedObjects.delete(objectId);
+                } else {
+                    this.expandedObjects.add(objectId);
+                }
+                this.renderObjects();
+            },
+
+            toggleSlaveMode(objectId, isSlave) {
+                const obj = mockObjects.find(o => o.id === objectId);
+                if (!obj) return;
+                
+                if (isSlave) {
+                    // Find first available master: same type AND same number of points
+                    const availableMasters = mockObjects.filter(m => 
+                        m.id !== objectId && 
+                        m.type === obj.type && 
+                        m.points.length === obj.points.length
+                    );
+                    if (availableMasters.length > 0) {
+                        this.objectLinks[objectId] = availableMasters[0].id;
+                    } else {
+                        // No compatible masters available
+                        alert(`No compatible master objects found.\nNeeds same type (${obj.type}) and same point count (${obj.points.length}).`);
+                        return;
+                    }
+                } else {
+                    // Unlink
+                    delete this.objectLinks[objectId];
+                }
+                this.renderObjects();
+                this.renderCanvas();
+            },
+
+            linkObjectToMaster(slaveId, masterId) {
+                if (masterId && masterId !== slaveId) {
+                    this.objectLinks[slaveId] = masterId;
+                    this.renderCanvas();
+                }
+            },
+
+            renderOutputs() {
+                const container = document.getElementById('outputsList');
+                container.innerHTML = mockOutputs.map(output => `
+                    <div class="output-item ${this.selectedOutput?.id === output.id ? 'selected' : ''}"
+                         onclick="app.selectOutput('${output.id}')">
+                        <div class="output-header">
+                            <div class="output-status ${output.active ? '' : 'inactive'}"></div>
+                            <span class="output-name">${output.name}</span>
+                        </div>
+                        <div class="output-info">
+                            ${output.targetIP} • Universe ${output.startUniverse}
+                        </div>
+                        <div class="output-info">
+                            ${output.assignedObjects.length} objects assigned
+                        </div>
+                    </div>
+                `).join('');
+            },
+
+            renderCanvas() {
+                const canvas = document.getElementById('previewCanvas');
+                const ctx = canvas.getContext('2d');
+                
+                // Clear canvas
+                ctx.fillStyle = '#1e1e1e';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Save context and apply transformations
+                ctx.save();
+                
+                // Move origin to center
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                
+                // Apply pan and zoom
+                ctx.translate(this.panX, this.panY);
+                ctx.scale(this.zoom, this.zoom);
+                
+                // Move origin back for drawing (so 0,0 is top-left of canvas)
+                ctx.translate(-canvas.width / 2, -canvas.height / 2);
+
+                // Draw background image if available
+                if (this.backgroundImage) {
+                    ctx.globalAlpha = 0.5; // Semi-transparent background
+                    ctx.drawImage(this.backgroundImage, 0, 0, canvas.width, canvas.height);
+                    ctx.globalAlpha = 1.0;
+                }
+
+                // Determine which objects to show
+                let objectsToShow = mockObjects;
+                if (this.viewMode === 'selected' && this.selectedObjects.size > 0) {
+                    objectsToShow = mockObjects.filter(obj => this.selectedObjects.has(obj.id));
+                } else if (this.viewMode === 'output' && this.selectedOutput) {
+                    objectsToShow = mockObjects.filter(obj => 
+                        this.selectedOutput.assignedObjects.includes(obj.id)
+                    );
+                }
+
+                // Draw objects
+                objectsToShow.forEach((obj, idx) => {
+                    const isSelected = this.selectedObjects.has(obj.id);
+                    const isCanvasSelected = this.selectedCanvasObjects.has(obj);
+                    const color = this.getObjectColor(idx, isSelected || isCanvasSelected);
+                    
+                    // Draw points
+                    obj.points.forEach((point, pointIdx) => {
+                        let pointColor = color;
+                        
+                        // In preview mode, check for linked object first, then sample background
+                        if (this.previewMode) {
+                            // Check if this object is linked as slave
+                            const linkedColor = this.getColorForLinkedPoint(obj, pointIdx);
+                            if (linkedColor) {
+                                pointColor = `rgb(${linkedColor.r}, ${linkedColor.g}, ${linkedColor.b})`;
+                            } else if (this.backgroundImage) {
+                                // Not linked, sample from background
+                                const sampledColor = this.getColorAtPoint(point.x, point.y);
+                                pointColor = `rgb(${sampledColor.r}, ${sampledColor.g}, ${sampledColor.b})`;
+                            }
+                        }
+                        
+                        ctx.fillStyle = pointColor;
+                        ctx.beginPath();
+                        const pointSize = (isSelected || isCanvasSelected) ? 4 : 3;
+                        ctx.arc(point.x, point.y, pointSize, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Draw point numbers if enabled
+                        if (this.showPointNumbers && (isSelected || isCanvasSelected)) {
+                            ctx.fillStyle = '#ffffff';
+                            ctx.font = '8px monospace';
+                            ctx.fillText(point.id, point.x + 6, point.y + 3);
+                        }
+                    });
+
+                    // Draw connections for certain types
+                    if (obj.type === 'circle' || obj.type === 'line' || obj.type === 'star') {
+                        ctx.strokeStyle = color + '40';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        obj.points.forEach((point, i) => {
+                            if (i === 0) ctx.moveTo(point.x, point.y);
+                            else ctx.lineTo(point.x, point.y);
+                        });
+                        if (obj.type === 'circle' || obj.type === 'star') {
+                            ctx.closePath();
+                        }
+                        ctx.stroke();
+                    }
+                    
+                    // Draw link indicator
+                    if (this.objectLinks[obj.id]) {
+                        const masterObj = this.getMasterObject(obj);
+                        if (masterObj) {
+                            const slaveBounds = this.calculateBounds(obj.points);
+                            const masterBounds = this.calculateBounds(masterObj.points);
+                            
+                            // Draw line from slave to master
+                            ctx.strokeStyle = '#ff00ff';
+                            ctx.lineWidth = 2 / this.zoom;
+                            ctx.setLineDash([10 / this.zoom, 5 / this.zoom]);
+                            ctx.beginPath();
+                            ctx.moveTo(
+                                (slaveBounds.minX + slaveBounds.maxX) / 2,
+                                (slaveBounds.minY + slaveBounds.maxY) / 2
+                            );
+                            ctx.lineTo(
+                                (masterBounds.minX + masterBounds.maxX) / 2,
+                                (masterBounds.minY + masterBounds.maxY) / 2
+                            );
+                            ctx.stroke();
+                            ctx.setLineDash([]);
+                            
+                            // Draw "S" on slave
+                            ctx.fillStyle = '#ff00ff';
+                            ctx.font = 'bold 16px Arial';
+                            ctx.strokeStyle = '#000000';
+                            ctx.lineWidth = 3 / this.zoom;
+                            ctx.strokeText('S', slaveBounds.maxX + 5, slaveBounds.minY + 15);
+                            ctx.fillText('S', slaveBounds.maxX + 5, slaveBounds.minY + 15);
+                            
+                            // Draw "M" on master
+                            ctx.fillStyle = '#00ff00';
+                            ctx.strokeText('M', masterBounds.maxX + 5, masterBounds.minY + 15);
+                            ctx.fillText('M', masterBounds.maxX + 5, masterBounds.minY + 15);
+                        }
+                    }
+                });
+
+                // Draw universe bounds if enabled
+                if (this.showUniverseBounds) {
+                    ctx.strokeStyle = '#007acc80';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    
+                    objectsToShow.forEach(obj => {
+                        const bounds = this.calculateBounds(obj.points);
+                        ctx.strokeRect(
+                            bounds.minX - 10,
+                            bounds.minY - 10,
+                            bounds.maxX - bounds.minX + 20,
+                            bounds.maxY - bounds.minY + 20
+                        );
+                        
+                        ctx.fillStyle = '#007acc';
+                        ctx.font = '10px monospace';
+                        ctx.fillText(
+                            `U${obj.universeStart}-${obj.universeEnd}`,
+                            bounds.minX - 5,
+                            bounds.minY - 15
+                        );
+                    });
+                    
+                    ctx.setLineDash([]);
+                }
+
+                // Draw transform handles for selected object(s)
+                if (this.selectedCanvasObjects.size > 0) {
+                    const bounds = this.getMultiSelectionBounds();
+                    
+                    // Draw bounding box
+                    ctx.strokeStyle = '#007acc';
+                    ctx.lineWidth = 2 / this.zoom;
+                    ctx.setLineDash([5 / this.zoom, 5 / this.zoom]);
+                    ctx.strokeRect(
+                        bounds.minX - 5,
+                        bounds.minY - 5,
+                        bounds.maxX - bounds.minX + 10,
+                        bounds.maxY - bounds.minY + 10
+                    );
+                    ctx.setLineDash([]);
+                    
+                    // Show selection count if multiple
+                    if (this.selectedCanvasObjects.size > 1) {
+                        ctx.fillStyle = '#007acc';
+                        ctx.font = 'bold 14px Arial';
+                        ctx.strokeStyle = '#000000';
+                        ctx.lineWidth = 3 / this.zoom;
+                        const text = `${this.selectedCanvasObjects.size} objects`;
+                        ctx.strokeText(text, bounds.minX, bounds.minY - 15);
+                        ctx.fillText(text, bounds.minX, bounds.minY - 15);
+                    }
+                    
+                    // Draw corner handles
+                    const handleSize = 8 / this.zoom;
+                    const handles = [
+                        { x: bounds.minX, y: bounds.minY }, // NW
+                        { x: bounds.maxX, y: bounds.minY }, // NE
+                        { x: bounds.minX, y: bounds.maxY }, // SW
+                        { x: bounds.maxX, y: bounds.maxY }  // SE
+                    ];
+                    
+                    ctx.fillStyle = '#007acc';
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1 / this.zoom;
+                    
+                    handles.forEach(handle => {
+                        ctx.fillRect(
+                            handle.x - handleSize / 2,
+                            handle.y - handleSize / 2,
+                            handleSize,
+                            handleSize
+                        );
+                        ctx.strokeRect(
+                            handle.x - handleSize / 2,
+                            handle.y - handleSize / 2,
+                            handleSize,
+                            handleSize
+                        );
+                    });
+                    
+                    // Draw rotation handle
+                    const rotateX = (bounds.minX + bounds.maxX) / 2;
+                    const rotateY = bounds.minY - 30;
+                    
+                    // Line to rotation handle
+                    ctx.strokeStyle = '#007acc';
+                    ctx.lineWidth = 1 / this.zoom;
+                    ctx.beginPath();
+                    ctx.moveTo((bounds.minX + bounds.maxX) / 2, bounds.minY - 5);
+                    ctx.lineTo(rotateX, rotateY);
+                    ctx.stroke();
+                    
+                    // Rotation handle circle
+                    ctx.fillStyle = '#4ec9b0';
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(rotateX, rotateY, handleSize / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+
+                // Restore context
+                ctx.restore();
+            },
+
+            calculateBounds(points) {
+                return {
+                    minX: Math.min(...points.map(p => p.x)),
+                    maxX: Math.max(...points.map(p => p.x)),
+                    minY: Math.min(...points.map(p => p.y)),
+                    maxY: Math.max(...points.map(p => p.y))
+                };
+            },
+
+            getObjectColor(index, isSelected) {
+                const colors = [
+                    '#4ec9b0', // Teal
+                    '#ce9178', // Orange
+                    '#dcdcaa', // Yellow
+                    '#c586c0', // Purple
+                    '#569cd6', // Blue
+                    '#9cdcfe', // Light blue
+                    '#d16969', // Red
+                    '#b5cea8'  // Green
+                ];
+                const color = colors[index % colors.length];
+                return isSelected ? color : color + '80';
+            },
+
+            toggleObjectSelection(objectId) {
+                if (this.selectedObjects.has(objectId)) {
+                    this.selectedObjects.delete(objectId);
+                } else {
+                    this.selectedObjects.add(objectId);
+                }
+                this.renderObjects();
+                this.renderCanvas();
+                this.updateStats();
+            },
+
+            selectOutput(outputId) {
+                this.selectedOutput = mockOutputs.find(o => o.id === outputId);
+                this.renderOutputs();
+                this.renderProperties();
+            },
+
+            renderProperties() {
+                const panel = document.getElementById('propertiesPanel');
+                if (!this.selectedOutput) {
+                    panel.innerHTML = '<div class="empty-state"><p>Select an output to view properties</p></div>';
+                    return;
+                }
+
+                const output = this.selectedOutput;
+                const assignedObjs = mockObjects.filter(obj => 
+                    output.assignedObjects.includes(obj.id)
+                );
+
+                panel.innerHTML = `
+                    <div class="property-group">
+                        <div class="property-label">Output Name</div>
+                        <input type="text" class="property-value" value="${output.name}" 
+                               onchange="app.updateOutputProperty('name', this.value)">
+                    </div>
+                    <div class="property-group">
+                        <div class="property-label">Target IP</div>
+                        <input type="text" class="property-value" value="${output.targetIP}"
+                               onchange="app.updateOutputProperty('targetIP', this.value)">
+                    </div>
+                    <div class="property-group">
+                        <div class="property-label">Subnet Mask</div>
+                        <input type="text" class="property-value" value="${output.subnet || '255.255.255.0'}"
+                               onchange="app.updateOutputProperty('subnet', this.value)">
+                    </div>
+                    <div class="property-group">
+                        <div class="property-label">Start Universe</div>
+                        <input type="number" class="property-value" value="${output.startUniverse}"
+                               onchange="app.updateOutputProperty('startUniverse', parseInt(this.value))">
+                    </div>
+                    <div class="property-group">
+                        <div class="property-label">FPS</div>
+                        <input type="number" class="property-value" value="${output.fps}"
+                               onchange="app.updateOutputProperty('fps', parseInt(this.value))">
+                    </div>
+                    <div class="property-group">
+                        <div class="property-label">Delay (ms)</div>
+                        <input type="number" class="property-value" value="${output.delay || 0}" min="0"
+                               onchange="app.updateOutputProperty('delay', parseInt(this.value))">
+                    </div>
+                    <div class="property-group">
+                        <div class="property-label" style="margin-bottom: 8px; border-bottom: 1px solid #3c3c3c; padding-bottom: 4px;">Color Correction</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <div>
+                                <label style="font-size: 10px; color: #858585;">Brightness: <span id="out-brightness-val">${output.brightness || 0}</span></label>
+                                <input type="range" class="property-value" style="width: 100%;" 
+                                       value="${output.brightness || 0}" min="-255" max="255"
+                                       oninput="document.getElementById('out-brightness-val').textContent = this.value"
+                                       onchange="app.updateOutputProperty('brightness', parseInt(this.value))">
+                            </div>
+                            <div>
+                                <label style="font-size: 10px; color: #858585;">Contrast: <span id="out-contrast-val">${output.contrast || 0}</span></label>
+                                <input type="range" class="property-value" style="width: 100%;" 
+                                       value="${output.contrast || 0}" min="-255" max="255"
+                                       oninput="document.getElementById('out-contrast-val').textContent = this.value"
+                                       onchange="app.updateOutputProperty('contrast', parseInt(this.value))">
+                            </div>
+                            <div>
+                                <label style="font-size: 10px; color: #858585;">Red: <span id="out-red-val">${output.red || 0}</span></label>
+                                <input type="range" class="property-value" style="width: 100%;" 
+                                       value="${output.red || 0}" min="-255" max="255"
+                                       oninput="document.getElementById('out-red-val').textContent = this.value"
+                                       onchange="app.updateOutputProperty('red', parseInt(this.value))">
+                            </div>
+                            <div>
+                                <label style="font-size: 10px; color: #858585;">Green: <span id="out-green-val">${output.green || 0}</span></label>
+                                <input type="range" class="property-value" style="width: 100%;" 
+                                       value="${output.green || 0}" min="-255" max="255"
+                                       oninput="document.getElementById('out-green-val').textContent = this.value"
+                                       onchange="app.updateOutputProperty('green', parseInt(this.value))">
+                            </div>
+                            <div>
+                                <label style="font-size: 10px; color: #858585;">Blue: <span id="out-blue-val">${output.blue || 0}</span></label>
+                                <input type="range" class="property-value" style="width: 100%;" 
+                                       value="${output.blue || 0}" min="-255" max="255"
+                                       oninput="document.getElementById('out-blue-val').textContent = this.value"
+                                       onchange="app.updateOutputProperty('blue', parseInt(this.value))">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="property-group">
+                        <div class="property-label">Status</div>
+                        <select class="property-value" 
+                                onchange="app.updateOutputProperty('active', this.value === 'true')">
+                            <option value="true" ${output.active ? 'selected' : ''}>Active</option>
+                            <option value="false" ${!output.active ? 'selected' : ''}>Inactive</option>
+                        </select>
+                    </div>
+                    <div class="property-group">
+                        <div class="property-label">Assigned Objects (${assignedObjs.length})</div>
+                        <div class="assigned-objects-list">
+                            ${assignedObjs.length === 0 ? 
+                                '<div style="color: #858585; padding: 8px;">No objects assigned</div>' :
+                                assignedObjs.map(obj => `
+                                    <div class="assigned-object">
+                                        <span class="assigned-object-name">${obj.name}</span>
+                                        <span style="color: #858585; font-size: 11px;">${obj.points.length} pts</span>
+                                        <button class="remove-btn" onclick="app.removeObjectFromOutput('${obj.id}')">×</button>
+                                    </div>
+                                `).join('')
+                            }
+                        </div>
+                        <button class="btn" style="margin-top: 8px;" onclick="app.showAssignObjectsDialog()">
+                            Assign Objects
+                        </button>
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-top: 16px;">
+                        <button class="btn" onclick="app.testOutput()">Test Output</button>
+                        <button class="btn btn-secondary" onclick="app.editOutput()">Edit</button>
+                    </div>
+                    <button class="btn btn-danger" style="margin-top: 8px;" onclick="app.deleteOutput()">
+                        Delete Output
+                    </button>
+                `;
+            },
+
+            updateOutputProperty(property, value) {
+                if (this.selectedOutput) {
+                    this.selectedOutput[property] = value;
+                    this.renderOutputs();
+                    this.renderProperties();
+                }
+            },
+
+            removeObjectFromOutput(objectId) {
+                if (this.selectedOutput) {
+                    this.selectedOutput.assignedObjects = 
+                        this.selectedOutput.assignedObjects.filter(id => id !== objectId);
+                    this.renderOutputs();
+                    this.renderProperties();
+                    if (this.viewMode === 'output') {
+                        this.renderCanvas();
+                    }
+                }
+            },
+
+            showAssignObjectsDialog() {
+                if (!this.selectedOutput) return;
+                
+                const unassigned = mockObjects.filter(obj => 
+                    !this.selectedOutput.assignedObjects.includes(obj.id)
+                );
+
+                if (unassigned.length === 0) {
+                    alert('All objects are already assigned to this output');
+                    return;
+                }
+
+                const selected = prompt(
+                    'Enter object IDs to assign (comma-separated):\n\n' +
+                    'Available objects:\n' +
+                    unassigned.map(obj => `${obj.id}: ${obj.name} (${obj.points.length} points)`).join('\n')
+                );
+
+                if (selected) {
+                    const ids = selected.split(',').map(s => s.trim());
+                    ids.forEach(id => {
+                        if (unassigned.find(obj => obj.id === id)) {
+                            this.selectedOutput.assignedObjects.push(id);
+                        }
+                    });
+                    this.renderOutputs();
+                    this.renderProperties();
+                    if (this.viewMode === 'output') {
+                        this.renderCanvas();
+                    }
+                }
+            },
+
+            showAddOutputModal() {
+                this.editingOutput = null;
+                document.getElementById('modalTitle').textContent = 'Add Output';
+                document.getElementById('outputName').value = 'New Output';
+                document.getElementById('outputIP').value = '192.168.1.10';
+                document.getElementById('outputSubnet').value = '255.255.255.0';
+                document.getElementById('outputUniverse').value = '1';
+                document.getElementById('outputFPS').value = '30';
+                document.getElementById('outputDelay').value = '0';
+                document.getElementById('outputModal').classList.add('active');
+            },
+
+            editOutput() {
+                if (!this.selectedOutput) return;
+                this.editingOutput = this.selectedOutput;
+                document.getElementById('modalTitle').textContent = 'Edit Output';
+                document.getElementById('outputName').value = this.selectedOutput.name;
+                document.getElementById('outputIP').value = this.selectedOutput.targetIP;
+                document.getElementById('outputSubnet').value = this.selectedOutput.subnet || '255.255.255.0';
+                document.getElementById('outputUniverse').value = this.selectedOutput.startUniverse;
+                document.getElementById('outputFPS').value = this.selectedOutput.fps;
+                document.getElementById('outputDelay').value = this.selectedOutput.delay || 0;
+                document.getElementById('outputModal').classList.add('active');
+            },
+
+            closeOutputModal() {
+                document.getElementById('outputModal').classList.remove('active');
+                this.editingOutput = null;
+            },
+
+            saveOutput() {
+                const name = document.getElementById('outputName').value;
+                const ip = document.getElementById('outputIP').value;
+                const subnet = document.getElementById('outputSubnet').value;
+                const universe = parseInt(document.getElementById('outputUniverse').value);
+                const fps = parseInt(document.getElementById('outputFPS').value);
+                const delay = parseInt(document.getElementById('outputDelay').value) || 0;
+
+                if (!name || !ip) {
+                    alert('Please fill in all required fields');
+                    return;
+                }
+
+                if (this.editingOutput) {
+                    // Edit existing
+                    this.editingOutput.name = name;
+                    this.editingOutput.targetIP = ip;
+                    this.editingOutput.subnet = subnet;
+                    this.editingOutput.startUniverse = universe;
+                    this.editingOutput.fps = fps;
+                    this.editingOutput.delay = delay;
+                } else {
+                    // Add new
+                    const newOutput = {
+                        id: 'output-' + (mockOutputs.length + 1),
+                        name,
+                        targetIP: ip,
+                        subnet: subnet,
+                        startUniverse: universe,
+                        fps,
+                        delay,
+                        assignedObjects: [],
+                        active: false
+                    };
+                    mockOutputs.push(newOutput);
+                }
+
+                this.renderOutputs();
+                this.renderProperties();
+                this.closeOutputModal();
+            },
+
+            deleteOutput() {
+                if (!this.selectedOutput) return;
+                if (confirm(`Delete output "${this.selectedOutput.name}"?`)) {
+                    mockOutputs = mockOutputs.filter(o => o.id !== this.selectedOutput.id);
+                    this.selectedOutput = null;
+                    this.renderOutputs();
+                    this.renderProperties();
+                }
+            },
+
+            testOutput() {
+                if (!this.selectedOutput) return;
+                alert(`Testing output "${this.selectedOutput.name}"\n\n` +
+                      `IP: ${this.selectedOutput.targetIP}\n` +
+                      `Universe: ${this.selectedOutput.startUniverse}\n` +
+                      `Objects: ${this.selectedOutput.assignedObjects.length}\n\n` +
+                      `A test pattern would be sent to the ArtNet output.`);
+            },
+
+            setViewMode(mode) {
+                this.viewMode = mode;
+                document.querySelectorAll('.toolbar-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                event.target.classList.add('active');
+                
+                const modes = {
+                    'all': 'All Objects',
+                    'selected': 'Selected Only',
+                    'output': 'Output Preview'
+                };
+                document.getElementById('viewMode').textContent = modes[mode];
+                this.renderCanvas();
+            },
+
+            togglePointNumbers() {
+                this.showPointNumbers = !this.showPointNumbers;
+                event.target.classList.toggle('active');
+                this.renderCanvas();
+            },
+
+            toggleUniverseBounds() {
+                this.showUniverseBounds = !this.showUniverseBounds;
+                event.target.classList.toggle('active');
+                this.renderCanvas();
+            },
+
+            flipSelectedObjects() {
+                if (this.selectedCanvasObjects.size === 0) {
+                    alert('Please select object(s) to flip');
+                    return;
+                }
+                
+                this.selectedCanvasObjects.forEach(obj => {
+                    // Reverse the points array
+                    obj.points.reverse();
+                    // Update IDs to maintain sequential order
+                    obj.points.forEach((point, idx) => {
+                        point.id = idx + 1;
+                    });
+                });
+                
+                this.renderCanvas();
+                alert(`Flipped ${this.selectedCanvasObjects.size} object(s)`);
+            },
+
+            showLinkDialog() {
+                if (this.selectedCanvasObjects.size === 0) {
+                    alert('Please select object(s) to link');
+                    return;
+                }
+                
+                // Get list of available objects as masters
+                const availableObjects = mockObjects.filter(obj => 
+                    !this.selectedCanvasObjects.has(obj)
+                );
+                
+                if (availableObjects.length === 0) {
+                    alert('No other objects available to link to');
+                    return;
+                }
+                
+                const objectList = availableObjects.map((obj, idx) => 
+                    `${idx + 1}. ${obj.name} (${obj.id}) - ${obj.points.length} points`
+                ).join('\n');
+                
+                const selection = prompt(
+                    `Link selected object(s) as SLAVE to a MASTER object:\n\n` +
+                    `Available master objects:\n${objectList}\n\n` +
+                    `Enter the number of the master object (or 0 to unlink):`
+                );
+                
+                if (selection === null) return; // Cancelled
+                
+                const masterIndex = parseInt(selection) - 1;
+                
+                if (selection === '0') {
+                    // Unlink
+                    this.selectedCanvasObjects.forEach(slaveObj => {
+                        delete this.objectLinks[slaveObj.id];
+                    });
+                    alert('Objects unlinked');
+                } else if (masterIndex >= 0 && masterIndex < availableObjects.length) {
+                    const masterObj = availableObjects[masterIndex];
+                    
+                    // Link selected objects to master
+                    this.selectedCanvasObjects.forEach(slaveObj => {
+                        this.objectLinks[slaveObj.id] = masterObj.id;
+                    });
+                    
+                    alert(`Linked ${this.selectedCanvasObjects.size} object(s) to ${masterObj.name}`);
+                } else {
+                    alert('Invalid selection');
+                }
+                
+                this.renderCanvas();
+            },
+
+            getMasterObject(slaveObj) {
+                const masterId = this.objectLinks[slaveObj.id];
+                if (!masterId) return null;
+                return mockObjects.find(obj => obj.id === masterId);
+            },
+
+            getColorForLinkedPoint(slaveObj, pointIndex) {
+                const masterObj = this.getMasterObject(slaveObj);
+                if (!masterObj) return null;
+                
+                // Map slave point index to master point index
+                const slavePointCount = slaveObj.points.length;
+                const masterPointCount = masterObj.points.length;
+                
+                // Scale index if different point counts
+                let masterIndex = pointIndex;
+                if (slavePointCount !== masterPointCount) {
+                    masterIndex = Math.floor((pointIndex / slavePointCount) * masterPointCount);
+                    masterIndex = Math.min(masterIndex, masterPointCount - 1);
+                }
+                
+                const masterPoint = masterObj.points[masterIndex];
+                if (!masterPoint) return null;
+                
+                // Sample color from master point's position
+                return this.getColorAtPoint(masterPoint.x, masterPoint.y);
+            },
+
+            changeResolution() {
+                const select = document.getElementById('resolutionSelect');
+                const value = select.value;
+                
+                if (value === 'custom') {
+                    document.getElementById('customWidth').style.display = 'inline-block';
+                    document.getElementById('customHeight').style.display = 'inline-block';
+                    document.getElementById('customApply').style.display = 'inline-block';
+                    document.getElementById('customWidth').value = this.canvasWidth;
+                    document.getElementById('customHeight').value = this.canvasHeight;
+                } else {
+                    document.getElementById('customWidth').style.display = 'none';
+                    document.getElementById('customHeight').style.display = 'none';
+                    document.getElementById('customApply').style.display = 'none';
+                    
+                    const [width, height] = value.split('x').map(Number);
+                    this.applyResolution(width, height);
+                }
+            },
+
+            applyCustomResolution() {
+                const width = parseInt(document.getElementById('customWidth').value);
+                const height = parseInt(document.getElementById('customHeight').value);
+                
+                if (width >= 100 && width <= 10000 && height >= 100 && height <= 10000) {
+                    this.applyResolution(width, height);
+                } else {
+                    alert('Please enter valid dimensions (100-10000)');
+                }
+            },
+
+            applyResolution(width, height) {
+                this.canvasWidth = width;
+                this.canvasHeight = height;
+                
+                // Update canvas size
+                const canvas = document.getElementById('previewCanvas');
+                canvas.width = width;
+                canvas.height = height;
+                
+                // Update background canvas
+                this.backgroundCanvas.width = width;
+                this.backgroundCanvas.height = height;
+                
+                // Regenerate test pattern or redraw background image
+                if (this.backgroundImage) {
+                    const img = this.backgroundImage;
+                    // Check if it's the test pattern or a loaded image
+                    if (img.src.startsWith('data:image')) {
+                        // It's likely the test pattern, regenerate it
+                        this.generateTestPattern();
+                    } else {
+                        // It's a loaded image, redraw it
+                        this.backgroundCtx.drawImage(img, 0, 0, width, height);
+                        this.renderCanvas();
+                    }
+                } else {
+                    this.generateTestPattern();
+                }
+                
+                // Update canvas info
+                document.getElementById('canvasSize').textContent = `${width} x ${height}`;
+                
+                // Reset zoom and pan
+                this.resetZoom();
+            },
+
+            updateStats() {
+                const totalPoints = mockObjects.reduce((sum, obj) => sum + obj.points.length, 0);
+                const totalChannels = totalPoints * 3;
+                const maxUniverse = Math.max(...mockObjects.map(obj => obj.universeEnd));
+                
+                document.getElementById('objectCount').textContent = mockObjects.length;
+                document.getElementById('pointCount').textContent = totalPoints;
+                
+                document.getElementById('statsObjects').textContent = mockObjects.length;
+                document.getElementById('statsPixels').textContent = totalPoints;
+                document.getElementById('statsChannels').textContent = totalChannels;
+                document.getElementById('statsUniverses').textContent = maxUniverse;
+            }
+        };
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', () => {
+            app.init();
+        });
+    </script>
+</body>
+</html>
