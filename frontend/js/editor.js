@@ -118,6 +118,7 @@ let dragStartRotation = 0;
 let dragStartScaleX = 0, dragStartScaleY = 0;
 let selectionBox = null; // For marquee selection: {startX, startY, endX, endY}
 let backgroundImage = null;
+let backgroundImagePath = null; // Path to current background image on server
 let flipIconImage = null; // Bootstrap icon for flip handle
 let rotateIconImage = null; // Bootstrap icon for rotate handle
 let scaleYIconImage = null; // Bootstrap icon for Y-axis scale handle
@@ -307,46 +308,19 @@ document.getElementById('allowOutOfBounds').addEventListener('change', e => {
     updateCanvasOverflow();
 });
 
-// Project file input handler
-document.getElementById('projectFileInput').addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            try {
-                const projectData = JSON.parse(event.target.result);
-                loadProject(projectData);
-            } catch (error) {
-                showToast('Ungültige Projektdatei!', 'error');
-                console.error(error);
-            }
-        };
-        reader.readAsText(file);
-        // Reset input so same file can be loaded again
-        e.target.value = '';
-    }
-});
-
 document.getElementById('bgImageInput').addEventListener('change', e => {
     const file = e.target.files[0];
     if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const img = new Image();
-            img.onload = () => {
-                backgroundImage = img;
-                markForRedraw();
-            };
-            img.src = event.target.result;
-        };
-        reader.readAsDataURL(file);
+        uploadBackground(file);
     }
 });
 
 function clearBackgroundImage() {
     backgroundImage = null;
+    backgroundImagePath = null;
     document.getElementById('bgImageInput').value = '';
     markForRedraw();
+    saveEditorStateToSession();
 }
 
 const pointCountInput = document.getElementById('pointCount');
@@ -479,6 +453,7 @@ function addShape(type) {
     selectedShape = base;
     updateToolbarSections();
     markForRedraw(); updateObjectList();
+    saveEditorStateToSession();  // Auto-save
 }
 
 // ========================================
@@ -514,6 +489,7 @@ function resetSelectedShape() {
 
     showToast('Form(en) zurückgesetzt', 'success');
     markForRedraw(); updateObjectList();
+    saveEditorStateToSession();  // Auto-save
 }
 
 function selectAllShapes() {
@@ -541,6 +517,7 @@ function deleteSelectedShape() {
     }
     updateToolbarSections();
     markForRedraw(); updateObjectList();
+    saveEditorStateToSession();  // Auto-save
 }
 
 function fitToCanvas() {
@@ -569,6 +546,7 @@ function fitToCanvas() {
     showToast(`${shapesToFit.length} Form(en) an Canvas angepasst`, 'success');
     markForRedraw();
     updateObjectList();
+    saveEditorStateToSession();  // Auto-save
 }
 
 function duplicateSelectedShape() {
@@ -609,6 +587,7 @@ function duplicateSelectedShape() {
     updateToolbarSections();
     markForRedraw();
     updateObjectList();
+    saveEditorStateToSession();  // Auto-save
 }
 
 // ========================================
@@ -1211,6 +1190,223 @@ function exportPoints() {
     a.click();
     URL.revokeObjectURL(url);
 }
+
+// ========================================
+// SESSION STATE AUTO-SAVE
+// ========================================
+const AUTO_SAVE_DELAY = 1000; // 1 second debounce
+
+/**
+ * Save current editor state to backend session state
+ */
+async function saveEditorStateToSession() {
+    const editorState = {
+        version: '2.0',
+        canvas: {
+            width: actualCanvasWidth,
+            height: actualCanvasHeight
+        },
+        backgroundImagePath: backgroundImagePath || null,
+        settings: {
+            snapToGrid: snapToGrid,
+            snapToObjects: snapToObjects,
+            allowOutOfBounds: allowOutOfBounds,
+            gridSize: gridSize,
+            showGrid: showGrid,
+            showConnectionLines: showConnectionLines
+        },
+        shapes: shapes.map(s => ({
+            id: s.id,
+            alias: s.alias,
+            type: s.type,
+            name: s.name,
+            x: s.x,
+            y: s.y,
+            size: s.size,
+            rotation: s.rotation,
+            scaleX: s.scaleX,
+            scaleY: s.scaleY,
+            color: s.color,
+            pointCount: s.pointCount,
+            rows: s.rows,
+            cols: s.cols,
+            rowSpacing: s.rowSpacing,
+            colSpacing: s.colSpacing,
+            pattern: s.pattern,
+            spikes: s.spikes,
+            innerRatio: s.innerRatio,
+            sides: s.sides,
+            control: s.control,
+            controls: s.controls,
+            controlPoints: s.controlPoints,
+            freehandPoints: s.freehandPoints
+        })),
+        groups: groups,
+        savedAt: new Date().toISOString()
+    };
+
+    try {
+        await window.sessionStateManager.saveEditor(editorState, {
+            debounce: AUTO_SAVE_DELAY,
+            onStatusChange: updateAutoSaveStatus
+        });
+    } catch (error) {
+        console.error('Save failed:', error);
+        updateAutoSaveStatus('error');
+    }
+}
+
+/**
+ * Update auto-save status badge
+ */
+function updateAutoSaveStatus(status) {
+    const badge = document.getElementById('autoSaveStatus');
+    if (!badge) return;
+    
+    switch (status) {
+        case 'saving':
+            badge.className = 'badge bg-warning';
+            badge.textContent = '⏳ Speichert...';
+            break;
+        case 'saved':
+            badge.className = 'badge bg-success';
+            badge.textContent = '✓ Gespeichert';
+            break;
+        case 'error':
+            badge.className = 'badge bg-danger';
+            badge.textContent = '❌ Fehler';
+            break;
+    }
+}
+
+/**
+ * Load editor state from session on page load
+ */
+async function loadEditorStateFromSession() {
+    try {
+        await window.sessionStateManager.load();
+        
+        const state = window.sessionStateManager.get('editor');
+        if (!state) {
+            console.debug('No editor state found - using defaults');
+            return;
+        }
+
+        // Restore canvas size
+        if (state.canvas) {
+            setCanvasSize(state.canvas.width, state.canvas.height);
+            
+            const sizeSelect = document.getElementById('canvasSize');
+            const sizeValue = `${state.canvas.width}x${state.canvas.height}`;
+            if ([...sizeSelect.options].some(opt => opt.value === sizeValue)) {
+                sizeSelect.value = sizeValue;
+            } else {
+                sizeSelect.value = 'custom';
+                document.getElementById('customWidth').value = state.canvas.width;
+                document.getElementById('customHeight').value = state.canvas.height;
+            }
+        }
+
+        // Restore background image
+        if (state.backgroundImagePath) {
+            backgroundImagePath = state.backgroundImagePath;
+            const img = new Image();
+            img.onload = () => {
+                backgroundImage = img;
+                markForRedraw();
+            };
+            img.src = '/' + state.backgroundImagePath;
+        }
+        
+        // Restore settings
+        if (state.settings) {
+            snapToGrid = state.settings.snapToGrid ?? true;
+            snapToObjects = state.settings.snapToObjects ?? true;
+            allowOutOfBounds = state.settings.allowOutOfBounds ?? false;
+            gridSize = state.settings.gridSize ?? 10;
+            showGrid = state.settings.showGrid ?? true;
+            showConnectionLines = state.settings.showConnectionLines ?? true;
+            
+            const snapToGridEl = document.getElementById('snapToGrid');
+            const snapToObjectsEl = document.getElementById('snapToObjects');
+            const allowOutOfBoundsEl = document.getElementById('allowOutOfBounds');
+            const gridSizeEl = document.getElementById('gridSize');
+            const showGridEl = document.getElementById('showGrid');
+            const showConnectionLinesEl = document.getElementById('showConnectionLines');
+            
+            if (snapToGridEl) snapToGridEl.checked = snapToGrid;
+            if (snapToObjectsEl) snapToObjectsEl.checked = snapToObjects;
+            if (allowOutOfBoundsEl) allowOutOfBoundsEl.checked = allowOutOfBounds;
+            if (gridSizeEl) gridSizeEl.value = gridSize;
+            if (showGridEl) showGridEl.checked = showGrid;
+            if (showConnectionLinesEl) showConnectionLinesEl.checked = showConnectionLines;
+        }
+        
+        // Restore shapes
+        if (state.shapes) {
+            shapes = state.shapes;
+            shapeCounter = Math.max(...shapes.map(s => parseInt(s.id.split('-')[1]) || 0), 0) + 1;
+        }
+        
+        // Restore groups
+        if (state.groups) {
+            groups = state.groups;
+            groupCounter = groups.length + 1;
+        }
+        
+        markForRedraw();
+        updateObjectList();
+        updateProjectStats();
+        
+        console.log('✅ Editor state loaded from session');
+        showToast('Editor state restored', 'success');
+        
+    } catch (error) {
+        console.error('Failed to load editor state:', error);
+    }
+}
+
+/**
+ * Upload background image
+ */
+async function uploadBackground(file) {
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/backgrounds/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            backgroundImagePath = result.path;
+            
+            // Load and display image
+            const img = new Image();
+            img.onload = () => {
+                backgroundImage = img;
+                markForRedraw();
+                showToast(`Background uploaded: ${result.filename}`, 'success');
+                saveEditorStateToSession();
+            };
+            img.src = '/' + result.path;
+        } else {
+            showToast(`Upload failed: ${result.error}`, 'error');
+        }
+        
+    } catch (error) {
+        console.error('Background upload error:', error);
+        showToast('Upload error', 'error');
+    }
+}
+
+// Call on page load
+window.addEventListener('load', () => {
+    loadEditorStateFromSession();
+});
 
 // ========================================
 // DRAWING FUNCTIONS [Lines 544-640]
@@ -2771,7 +2967,13 @@ canvas.addEventListener('mouseup', () => {
         markForRedraw();
     }
 
+    // Save state after any drag operation
+    const hadDragMode = dragMode !== null;
     dragMode = null; scaleHandleIndex = null; updateObjectList();
+    
+    if (hadDragMode) {
+        saveEditorStateToSession();
+    }
 });
 
 function findShape(mx, my) {
@@ -3038,6 +3240,7 @@ function updateObjectList() {
                     }
                     onChange(val);
                     markForRedraw();
+                    saveEditorStateToSession();
                 });
 
                 sliderContainer.appendChild(input);
@@ -3060,6 +3263,7 @@ function updateObjectList() {
                 input.addEventListener('input', (e) => {
                     onChange(parseFloat(e.target.value));
                     markForRedraw();
+                    saveEditorStateToSession();
                 });
                 input.addEventListener('focus', (e) => {
                     e.stopPropagation();

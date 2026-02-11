@@ -39,7 +39,8 @@ class ClipRegistry:
     ) -> str:
         """
         Registriert einen neuen Clip mit eindeutiger UUID.
-        Jeder Call erzeugt eine NEUE Clip-Instanz, auch bei gleichem Pfad.
+        IDEMPOTENT: Wenn Clip bereits existiert (player_id + absolute_path), 
+        wird die existierende clip_id zurückgegeben (OHNE Daten zu überschreiben).
         
         Args:
             player_id: ID des Players ('video' oder 'artnet')
@@ -50,7 +51,15 @@ class ClipRegistry:
         Returns:
             clip_id: Eindeutige UUID für diesen Clip
         """
-        # Erstelle IMMER neue Clip-ID (jede Playlist-Instanz ist unabhängig)
+        # CRITICAL FIX: Check if clip already exists (for session restore)
+        # When restoring from saved state, clips are already in registry with effects/layers
+        # We must NOT overwrite them with fresh registrations!
+        existing_clip_id = self.find_clip_by_path(player_id, absolute_path)
+        if existing_clip_id:
+            logger.debug(f"🔄 Clip already registered: {existing_clip_id} → {player_id}/{os.path.basename(absolute_path)} (reusing existing data)")
+            return existing_clip_id
+        
+        # Create NEW clip only if it doesn't exist yet
         clip_id = str(uuid.uuid4())
         
         # Speichere Clip-Daten
@@ -116,10 +125,33 @@ class ClipRegistry:
         Returns:
             clip_id oder None wenn nicht gefunden
         """
+        # Normalize path for comparison (handle forward/backward slashes, case)
+        normalized_search_path = os.path.normpath(absolute_path).lower()
+        
+        # Also try matching by filename if exact match fails (for path prefix mismatches)
+        search_filename = os.path.basename(normalized_search_path)
+        
         # Suche in allen Clips (kann mehrere mit gleichem Pfad geben)
         for clip_id, clip_data in self.clips.items():
-            if clip_data['player_id'] == player_id and clip_data['absolute_path'] == absolute_path:
-                return clip_id
+            if clip_data['player_id'] == player_id:
+                normalized_clip_path = os.path.normpath(clip_data['absolute_path']).lower()
+                
+                # Try exact path match first
+                if normalized_clip_path == normalized_search_path:
+                    return clip_id
+                
+                # Try suffix match (e.g., "converted\test.mov" matches "video\converted\test.mov")
+                if normalized_clip_path.endswith(normalized_search_path) or normalized_search_path.endswith(normalized_clip_path):
+                    logger.debug(f"🔍 Found clip by suffix match: {clip_data['absolute_path']} ≈ {absolute_path}")
+                    return clip_id
+                
+                # Last resort: match by filename only (weakest match, only if path components match)
+                clip_filename = os.path.basename(normalized_clip_path)
+                if clip_filename == search_filename:
+                    # Verify filename matches and paths overlap
+                    logger.debug(f"🔍 Found clip by filename match: {clip_data['absolute_path']} ≈ {absolute_path}")
+                    return clip_id
+        
         return None
     
     def get_clips_for_player(self, player_id: str) -> List[Dict]:
@@ -301,6 +333,43 @@ class ClipRegistry:
         self.clips[clip_id]['metadata'].update(metadata)
         return True
     
+    def update_clip_effect_parameter(self, clip_id: str, effect_index: int, param_name: str, value) -> bool:
+        """
+        Updates a specific parameter of a clip effect in the registry.
+        
+        Args:
+            clip_id: Unique clip ID
+            effect_index: Index of effect in clip's effects array
+            param_name: Name of parameter to update
+            value: New parameter value
+        
+        Returns:
+            True if successful
+        """
+        if clip_id not in self.clips:
+            logger.debug(f"Clip not found in registry: {clip_id}")
+            return False
+        
+        effects = self.clips[clip_id].get('effects', [])
+        if effect_index < 0 or effect_index >= len(effects):
+            logger.debug(f"Invalid effect index {effect_index} for clip {clip_id}")
+            return False
+        
+        effect = effects[effect_index]
+        if 'parameters' not in effect:
+            effect['parameters'] = {}
+        
+        effect['parameters'][param_name] = value
+        
+        # Increment version for cache invalidation
+        if clip_id in self._clip_effects_version:
+            self._clip_effects_version[clip_id] += 1
+        else:
+            self._clip_effects_version[clip_id] = 1
+        
+        logger.debug(f"📝 Updated clip {clip_id} effect {effect_index} parameter '{param_name}' = {value}")
+        return True
+    
     # ========================================
     # LAYER MANAGEMENT (Clip-based)
     # ========================================
@@ -327,11 +396,15 @@ class ClipRegistry:
             return None
         
         layers = self.clips[clip_id]['layers']
-        # Layer 0 is always the base clip, so start additional layers at 1
-        layer_id = len(layers) + 1
         
-        # Füge layer_id hinzu
-        layer_config['layer_id'] = layer_id
+        # If layer_config already has layer_id, use it (from layer_manager)
+        # Otherwise assign next available ID (Layer 0 is always the base clip, so start at 1)
+        if 'layer_id' not in layer_config:
+            layer_id = len(layers) + 1
+            layer_config['layer_id'] = layer_id
+        else:
+            layer_id = layer_config['layer_id']
+        
         layers.append(layer_config)
         
         logger.info(f"✅ Layer {layer_id} zu Clip {clip_id} hinzugefügt: {layer_config['source_type']}")
@@ -682,6 +755,55 @@ class ClipRegistry:
             return {}
         
         return self.clips[clip_id].get('sequences', {})
+    
+    def serialize(self) -> Dict:
+        """
+        Serialize the entire clip registry to a dictionary.
+        This saves the complete state including all clips, effects, and parameters.
+        
+        Returns:
+            Dictionary containing complete registry state
+        """
+        # DEBUG: Log actual parameter values in memory before serializing
+        for clip_id, clip_data in self.clips.items():
+            if 'effects' in clip_data:
+                logger.info(f"[SERIALIZE DEBUG] Clip {clip_id[:8]}... has {len(clip_data['effects'])} effects in memory")
+                for i, effect in enumerate(clip_data['effects']):
+                    if 'parameters' in effect:
+                        for param_name, param_value in list(effect['parameters'].items())[:5]:
+                            logger.info(f"[SERIALIZE DEBUG]   effect[{i}].{param_name} = {param_value}")
+        
+        return {
+            'clips': self.clips.copy(),
+            'effects_versions': self._clip_effects_version.copy()
+        }
+    
+    def deserialize(self, data: Dict) -> None:
+        """
+        Restore the clip registry from serialized data.
+        This completely replaces the current registry state.
+        
+        Args:
+            data: Dictionary containing registry state from serialize()
+        """
+        if not data:
+            logger.warning("⚠️ No clip registry data to deserialize")
+            return
+        
+        self.clips = data.get('clips', {}).copy()
+        self._clip_effects_version = data.get('effects_versions', {}).copy()
+        
+        # Rebuild path index from clips
+        self._path_index = {}
+        for clip_id, clip_data in self.clips.items():
+            index_key = (clip_data['player_id'], clip_data['absolute_path'])
+            self._path_index[index_key] = clip_id
+        
+        # DEBUG: Log layer counts after deserialize
+        total_layers = sum(len(clip.get('layers', [])) for clip in self.clips.values())
+        clips_with_layers = sum(1 for clip in self.clips.values() if len(clip.get('layers', [])) > 0)
+        logger.info(f"📋 ClipRegistry deserialized: {len(self.clips)} clips restored with complete state ({total_layers} total layers, {clips_with_layers} clips with layers)")
+
 
 
 # Globale Singleton-Instanz

@@ -81,7 +81,11 @@ def register_layer_routes(app, player_manager, config):
             layer_type = data.get('type', 'video')
             blend_mode = data.get('blend_mode', 'normal')
             opacity = float(data.get('opacity', 100))
-            clip_id = data.get('clip_id')
+            # Base clip ID - the clip this layer belongs to
+            base_clip_id = data.get('clip_id') or getattr(player, 'current_clip_id', None)
+            
+            if not base_clip_id:
+                return jsonify({"success": False, "error": "No active clip - cannot add layer without a base clip"}), 400
             
             # Erstelle FrameSource basierend auf Typ
             if layer_type == 'generator':
@@ -101,16 +105,6 @@ def register_layer_routes(app, player_manager, config):
                 
                 if not source.initialize():
                     return jsonify({"success": False, "error": f"Failed to initialize generator '{generator_id}'"}), 500
-                
-                # Register clip wenn nicht vorhanden
-                gen_path = f"generator:{generator_id}"
-                if not clip_id:
-                    clip_id = clip_registry.register_clip(
-                        player_id=player_id,
-                        absolute_path=gen_path,
-                        relative_path=gen_path,
-                        metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
-                    )
                 
             elif layer_type == 'video':
                 video_path = data.get('path')
@@ -134,22 +128,13 @@ def register_layer_routes(app, player_manager, config):
                 if not source.initialize():
                     return jsonify({"success": False, "error": f"Failed to initialize video '{video_path}'"}), 500
                 
-                # Register clip wenn nicht vorhanden
-                if not clip_id:
-                    relative_path = os.path.relpath(video_path, video_dir)
-                    clip_id = clip_registry.register_clip(
-                        player_id=player_id,
-                        absolute_path=video_path,
-                        relative_path=relative_path,
-                        metadata={'type': 'video'}
-                    )
             else:
                 return jsonify({"success": False, "error": f"Unknown type: {layer_type}"}), 400
             
-            # Füge Layer hinzu
+            # Add layer - layer_manager will register the layer source as a clip
             layer_id = player.add_layer(
                 source=source,
-                clip_id=clip_id,
+                clip_id=base_clip_id,  # Base clip this layer belongs to
                 blend_mode=blend_mode,
                 opacity=opacity
             )
@@ -157,6 +142,7 @@ def register_layer_routes(app, player_manager, config):
             # Get layer info
             layer = player.get_layer(layer_id)
             layer_dict = layer.to_dict() if layer else {}
+            layer_clip_id = layer.clip_id if layer else None
             
             logger.info(f"✅ Layer {layer_id} added to player {player_id}: {source.get_source_name()}")
             
@@ -164,7 +150,8 @@ def register_layer_routes(app, player_manager, config):
                 "success": True,
                 "player_id": player_id,
                 "layer_id": layer_id,
-                "clip_id": clip_id,
+                "clip_id": base_clip_id,  # Base clip the layer belongs to
+                "layer_clip_id": layer_clip_id,  # Layer's own clip ID
                 "layer": layer_dict
             }), 201
             

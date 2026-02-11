@@ -522,11 +522,24 @@ def main():
     set_playlist_system(playlist_system)
     player_manager.playlist_system = playlist_system
     
-    # Create default playlist if none exist
+    # Always try to restore playlists from session_state.json
+    try:
+        if os.path.exists(session_state_path):
+            with open(session_state_path, 'r', encoding='utf-8') as f:
+                saved_state = json.load(f)
+                playlists_data = saved_state.get('playlists', {})
+                if playlists_data and isinstance(playlists_data, dict) and playlists_data.get('items'):
+                    # Has playlists data - restore it
+                    if playlist_system.load_from_dict(playlists_data):
+                        logger.info(f"✅ Restored {len(playlist_system.playlists)} playlists from session state")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to restore playlists from session state: {e}")
+    
+    # Create default playlist only if nothing was restored
     if len(playlist_system.playlists) == 0:
         default_playlist = playlist_system.create_playlist("Default", "standard")
         playlist_system.activate_playlist(default_playlist.id)
-        logger.debug("Created and activated Default playlist")
+        logger.debug("Created and activated Default playlist (first start or empty session)")
     
     logger.debug("Multi-Playlist System initialisiert")
     
@@ -622,6 +635,8 @@ def main():
     # Register Multi-Playlist API routes
     register_playlist_routes(rest_api.app, player_manager, config, rest_api.socketio)
     logger.debug("Multi-Playlist API routes registered")
+    
+    # Background Images routes registered in rest_api.py
     
     # Connect websocket to playlist system
     player_manager.playlist_system.websocket_manager = rest_api.socketio

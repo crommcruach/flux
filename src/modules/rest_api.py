@@ -9,6 +9,7 @@ import threading
 from collections import deque
 from .logger import get_logger, debug_api, debug_log, DebugCategories
 from .command_executor import CommandExecutor
+from .clip_registry import get_clip_registry
 
 logger = get_logger(__name__)
 from .constants import (
@@ -29,6 +30,7 @@ class RestAPI:
         self.config = config or {}
         self.replay_manager = replay_manager
         self.logger = logger  # Add logger as instance attribute
+        self.clip_registry = get_clip_registry()  # Get singleton instance
         
         # Traffic Counter für Stream-APIs
         import time
@@ -145,7 +147,8 @@ class RestAPI:
             register_info_routes,
             register_recording_routes,
             register_cache_routes,
-            register_script_routes
+            register_script_routes,
+            register_background_routes
         )
         from .api_points import register_points_routes
         from .api_console import register_console_routes
@@ -178,6 +181,7 @@ class RestAPI:
         register_layer_routes(self.app, self.player_manager, self.config)
         register_clip_layer_routes(self.app, get_clip_registry(), self.player_manager, self.video_dir)
         register_output_routes(self.app, self.player_manager)
+        register_background_routes(self.app)
         
         # Register Converter Blueprint
         self.app.register_blueprint(converter_bp)
@@ -196,6 +200,10 @@ class RestAPI:
         
         # Store config in app for route access
         self.app.flux_config = self.config
+        
+        # Store player_manager and clip_registry for session save routes
+        self.app.flux_player_manager = self.player_manager
+        self.app.flux_clip_registry = self.clip_registry
         
         # Register Session Snapshot API
         from .api_session import register_session_routes
@@ -447,6 +455,7 @@ class RestAPI:
                         if 'parameters' not in effect:
                             effect['parameters'] = {}
                         
+                        # Store parameter value in registry (keep original format - DO NOT CHANGE!)
                         # For triple sliders with range data, store as dict with metadata
                         param_value_to_store = None
                         if range_min is not None and range_max is not None:
@@ -459,7 +468,7 @@ class RestAPI:
                             if uid:
                                 param_value_to_store['_uid'] = uid
                             effect['parameters'][param_name] = param_value_to_store
-                            logger.debug(f"✅ WebSocket: Updated {player_id} clip {clip_id} effect[{effect_index}].{param_name} = {value} (range: {range_min}-{range_max})")
+                            logger.info(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value} (range: {range_min}-{range_max})")
                         else:
                             # For simple values, store as dict if UID is present, otherwise plain value
                             if uid:
@@ -470,7 +479,7 @@ class RestAPI:
                             else:
                                 param_value_to_store = value
                             effect['parameters'][param_name] = param_value_to_store
-                            logger.debug(f"✅ WebSocket: Updated {player_id} clip {clip_id} effect[{effect_index}].{param_name} = {value}")
+                            logger.info(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value}")
                         
                         # Update LIVE effect instance in player layers (critical for transport trim!)
                         if player.layers and len(player.layers) > 0:

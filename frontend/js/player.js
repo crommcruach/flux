@@ -4258,8 +4258,8 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                     });
                     
                     // Update UI to remove sequence indicators
-                    if (window.sessionStateLoader) {
-                        window.sessionStateLoader.reload().catch(() => {
+                    if (window.sessionStateManager) {
+                        window.sessionStateManager.reload().catch(() => {
                             // Ignore reload errors
                         });
                     }

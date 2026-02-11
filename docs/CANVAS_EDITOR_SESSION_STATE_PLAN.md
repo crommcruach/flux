@@ -25,7 +25,7 @@ Rework the canvas editor (`frontend/editor.html` + `frontend/js/editor.js`) to:
 - ✅ Project name → `session_state.editor.projectName`
 - ✅ Canvas shapes (all properties) → `session_state.editor.shapes[]`
 - ✅ Canvas dimensions → `session_state.editor.canvas`
-- ✅ Background image (base64) → `session_state.editor.backgroundImage`
+- ✅ Background image path → `session_state.editor.backgroundImagePath` (file saved in `backgrounds/` folder)
 - ✅ Editor settings → `session_state.editor.settings`
   - Snap to grid
   - Snap to objects
@@ -39,7 +39,7 @@ Rework the canvas editor (`frontend/editor.html` + `frontend/js/editor.js`) to:
 - ✅ Move/resize/rotate shape
 - ✅ Change project name
 - ✅ Change canvas size
-- ✅ Upload background image
+- ✅ Upload background image (saves to `backgrounds/` folder, stores path only)
 - ✅ Toggle settings
 
 **Debouncing:** 1 second delay after last change
@@ -81,74 +81,131 @@ Rework the canvas editor (`frontend/editor.html` + `frontend/js/editor.js`) to:
 
 ## 🏗️ Implementation Steps
 
-### Phase 1: Backend API Endpoint (30 min)
+### Phase 1: Reuse Existing Session State (No Backend Changes Needed!)
 
-#### Create `/api/editor/state` endpoints
+**The editor will use the existing session state system** - no new API endpoints required!
 
-**File:** `src/modules/api_editor.py` (NEW)
+#### Existing Infrastructure:
+
+✅ **Endpoint:** `GET /api/session/state` (already exists in `src/modules/api_session.py`)  
+✅ **Session Manager:** `SessionStateManager` with auto-save and debouncing  
+✅ **Integration:** Already used by player, sequencer, output settings
+
+**Session State Structure:**
+```json
+{
+  "players": { ... },      // Video/ArtNet players
+  "sequencer": { ... },    // Audio sequencer
+  "output": { ... },       // Output routing
+  "editor": {              // 👈 Canvas editor (NEW section)
+    "shapes": [...],
+    "settings": {...},
+    "canvas": {...}
+  }
+}
+```
+
+**How Editor Saves:**
+```javascript
+// Editor modifies session state directly
+const response = await fetch('/api/session/state');
+const {state} = await response.json();
+
+// Update editor section
+state.editor = editorState;
+
+// Session manager handles auto-save with debouncing
+// (Triggered automatically by session state manager)
+```
+
+**No custom routes needed** - session state manager already:
+- ✅ Auto-saves with 1-second debounce
+- ✅ Includes editor data in snapshots
+- ✅ Handles restore from snapshots
+- ✅ Thread-safe async I/O
+
+---
+
+### Phase 1: Background Upload Endpoint (15 min)
+
+#### Create `/api/backgrounds/upload` endpoint
+
+**File:** `src/modules/api_backgrounds.py` (NEW)
 
 ```python
-from flask import jsonify, request
+from flask import jsonify, request, send_from_directory
+from pathlib import Path
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
-def register_editor_routes(app, player_manager):
-    """Register canvas editor session state API endpoints"""
+def register_background_routes(app):
+    """Register background image upload/serve endpoints"""
     
-    @app.route('/api/editor/state', methods=['GET'])
-    def get_editor_state():
-        """Get editor state from session"""
+    # Background folder at project root
+    BACKGROUNDS_DIR = Path.cwd() / 'backgrounds'
+    BACKGROUNDS_DIR.mkdir(exist_ok=True)
+    
+    @app.route('/api/backgrounds/upload', methods=['POST'])
+    def upload_background():
+        """Upload background image for canvas editor"""
         try:
-            session_state = player_manager.session_state.get_state()
-            editor_state = session_state.get('editor', {})
+            if 'file' not in request.files:
+                return jsonify({'success': False, 'error': 'No file provided'}), 400
+            
+            file = request.files['file']
+            
+            if file.filename == '':
+                return jsonify({'success': False, 'error': 'No file selected'}), 400
+            
+            # Validate image extension
+            allowed_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
+            if not file.filename.lower().endswith(allowed_extensions):
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid file type. Allowed: PNG, JPG, GIF, BMP'
+                }), 400
+            
+            # Sanitize filename
+            safe_filename = re.sub(r'[^\w\-_\. ]', '_', file.filename)
+            
+            # Save file
+            file_path = BACKGROUNDS_DIR / safe_filename
+            file.save(str(file_path))
+            
+            # Return relative path
+            relative_path = f"backgrounds/{safe_filename}"
+            
+            logger.info(f"Background uploaded: {relative_path}")
             
             return jsonify({
                 'success': True,
-                'editor': editor_state
+                'path': relative_path,
+                'filename': safe_filename
             })
+        
         except Exception as e:
-            logger.error(f"Failed to get editor state: {e}")
+            logger.error(f"Error uploading background: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
     
-    @app.route('/api/editor/state', methods=['POST'])
-    def save_editor_state():
-        """Save editor state to session"""
+    @app.route('/backgrounds/<path:filename>', methods=['GET'])
+    def serve_background(filename):
+        """Serve background images"""
         try:
-            data = request.get_json()
-            
-            # Validate required fields
-            if 'editor' not in data:
-                return jsonify({'success': False, 'error': 'Missing editor data'}), 400
-            
-            # Get current session state
-            session_state = player_manager.session_state.get_state()
-            
-            # Update editor section
-            session_state['editor'] = data['editor']
-            
-            # Save async (debounced)
-            player_manager.session_state.save_async(
-                player_manager,
-                player_manager.clip_registry
-            )
-            
-            return jsonify({
-                'success': True,
-                'message': 'Editor state saved'
-            })
+            return send_from_directory(BACKGROUNDS_DIR, filename)
         except Exception as e:
-            logger.error(f"Failed to save editor state: {e}")
-            return jsonify({'success': False, 'error': str(e)}), 500
+            logger.error(f"Error serving background: {e}")
+            return jsonify({'error': 'File not found'}), 404
 ```
 
-#### Register routes in `src/main.py`
+**Register in `flux_web.py`:**
 
 ```python
-from modules.api_editor import register_editor_routes
+from modules.api_backgrounds import register_background_routes
 
 # After other route registrations
-register_editor_routes(app, player_manager)
+register_background_routes(app)
 ```
 
 ---
@@ -169,6 +226,7 @@ const AUTO_SAVE_DELAY = 1000; // 1 second debounce
 
 /**
  * Save current editor state to backend session state
+ * Uses existing /api/session/state endpoint (no custom routes needed)
  */
 async function saveEditorStateToSession() {
     // Clear existing timeout
@@ -181,25 +239,19 @@ async function saveEditorStateToSession() {
         try {
             updateAutoSaveStatus('saving');
             
-            // Convert background image to base64 if present
-            let bgImageData = null;
-            if (backgroundImage) {
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = backgroundImage.width;
-                tempCanvas.height = backgroundImage.height;
-                const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.drawImage(backgroundImage, 0, 0);
-                bgImageData = tempCanvas.toDataURL('image/png');
-            }
+            // Get current session state
+            const getResponse = await fetch('/api/session/state');
+            const {state} = await getResponse.json();
             
-            const editorState = {
+            // Update editor section
+            state.editor = {
                 projectName: document.getElementById('projectName').value || 'Untitled Project',
                 version: '2.0',
                 canvas: {
                     width: actualCanvasWidth,
                     height: actualCanvasHeight
                 },
-                backgroundImage: bgImageData,
+                backgroundImagePath: backgroundImagePath || null,  // Path to file in backgrounds/
                 settings: {
                     snapToGrid: snapToGrid,
                     snapToObjects: snapToObjects,
@@ -237,10 +289,12 @@ async function saveEditorStateToSession() {
                 savedAt: new Date().toISOString()
             };
             
-            const response = await fetch('/api/editor/state', {
+            // Session state manager will auto-save (backend handles debouncing)
+            // No explicit save call needed - modification triggers auto-save
+            const response = await fetch('/api/session/state', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ editor: editorState })
+                body: JSON.stringify(state)  // Send complete state with updated editor section
             });
             
             const result = await response.json();
@@ -295,10 +349,10 @@ async function loadEditorStateFromSession() {
             return;
         }
         
-        const state = result.editor;
+        const state = result.state.editor;
         
         // Restore project name
-        if (state.projectName) {
+        if (state && state.projectName) {
             document.getElementById('projectName').value = state.projectName;
         }
         
@@ -307,14 +361,15 @@ async function loadEditorStateFromSession() {
             setCanvasSize(state.canvas.width, state.canvas.height);
         }
         
-        // Restore background image
-        if (state.backgroundImage) {
+        // Restore background image from file path
+        if (state.backgroundImagePath) {
+            backgroundImagePath = state.backgroundImagePath;
             const img = new Image();
             img.onload = () => {
                 backgroundImage = img;
                 markForRedraw();
             };
-            img.src = state.backgroundImage;
+            img.src = '/' + state.backgroundImagePath;  // Load from backgrounds/ folder
         }
         
         // Restore settings
@@ -359,6 +414,44 @@ async function loadEditorStateFromSession() {
     }
 }
 
+/**
+ * Upload background image to backgrounds/ folder
+ * Uses existing /api/backgrounds/upload endpoint
+ */
+async function uploadBackgroundImage(file) {
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/backgrounds/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Store path to uploaded file
+            backgroundImagePath = result.path;  // e.g., "backgrounds/myimage.png"
+            
+            // Load image for display
+            const img = new Image();
+            img.onload = () => {
+                backgroundImage = img;
+                markForRedraw();
+                saveEditorStateToSession();  // Auto-save with new background path
+                showToast('Background uploaded', 'success');
+            };
+            img.src = '/' + result.path;  // Load from server
+        } else {
+            showToast('Upload failed: ' + result.error, 'error');
+        }
+    } catch (error) {
+        console.error('Background upload error:', error);
+        showToast('Upload error', 'error');
+    }
+}
+
 // Call on page load
 window.addEventListener('load', () => {
     loadEditorStateFromSession();
@@ -368,17 +461,79 @@ window.addEventListener('load', () => {
 **Trigger auto-save on every change:**
 
 Add `saveEditorStateToSession()` calls after:
-- `addShape()`
-- `deleteSelectedShape()`
-- `duplicateSelectedShape()`
-- `resetSelectedShape()`
-- `groupSelectedShapes()`
-- `ungroupSelectedShapes()`
-- Canvas mouseup (after move/resize/rotate)
-- Project name input change
-- Canvas size change
-- Background image upload
-- Settings checkbox change
+
+**Shape modifications (in `editor.js`):**
+```javascript
+function addShape(type) {
+    // ... existing code ...
+    shapes.push(base);
+    selectedShape = base;
+    updateToolbarSections();
+    markForRedraw();
+    updateObjectList();
+    saveEditorStateToSession();  // 👈 ADD THIS
+}
+
+function deleteSelectedShape() {
+    // ... existing code ...
+    markForRedraw();
+    updateObjectList();
+    saveEditorStateToSession();  // 👈 ADD THIS
+}
+
+function duplicateSelectedShape() {
+    // ... existing code ...
+    markForRedraw();
+    updateObjectList();
+    saveEditorStateToSession();  // 👈 ADD THIS
+}
+
+function resetSelectedShape() {
+    // ... existing code ...
+    markForRedraw();
+    saveEditorStateToSession();  // 👈 ADD THIS
+}
+
+function groupSelectedShapes() {
+    // ... existing code ...
+    markForRedraw();
+    saveEditorStateToSession();  // 👈 ADD THIS
+}
+
+function ungroupSelectedShapes() {
+    // ... existing code ...
+    markForRedraw();
+    saveEditorStateToSession();  // 👈 ADD THIS
+}
+```
+
+**Mouse interactions (in canvas event handlers):**
+```javascript
+canvas.addEventListener('mouseup', (e) => {
+    // ... existing drag/resize/rotate logic ...
+    
+    if (dragMode) {
+        // Shape was moved/resized/rotated
+        saveEditorStateToSession();  // 👈 ADD THIS
+    }
+    
+    dragMode = null;
+    // ... rest of code ...
+});
+```
+
+**Settings changes:**
+```javascript
+document.getElementById('projectName').addEventListener('change', saveEditorStateToSession);
+document.getElementById('artnetWidth').addEventListener('change', saveEditorStateToSession);
+document.getElementById('artnetHeight').addEventListener('change', saveEditorStateToSession);
+document.getElementById('snapToGrid').addEventListener('change', saveEditorStateToSession);
+document.getElementById('snapToObjects').addEventListener('change', saveEditorStateToSession);
+document.getElementById('showGrid').addEventListener('change', saveEditorStateToSession);
+document.getElementById('showConnectionLines').addEventListener('change', saveEditorStateToSession);
+```
+
+**Result:** Every shape add/modify/delete/move/rotate/resize triggers auto-save with 1-second debounce.
 
 ---
 
@@ -447,47 +602,205 @@ Remove from global exports:
 
 ## 📊 Session State Structure
 
+### ✅ **Clear Separation: Editor Settings vs Object Settings**
+
 ```json
 {
   "editor": {
+    // ========================================
+    // GLOBAL EDITOR SETTINGS (Canvas-level)
+    // ========================================
     "projectName": "My LED Matrix",
     "version": "2.0",
+    
     "canvas": {
-      "width": 1920,
+      "width": 1920,           // ArtNet resolution (not visual canvas size)
       "height": 1080
     },
-    "backgroundImage": "data:image/png;base64,...",
+    
+    "backgroundImagePath": "backgrounds/stage_layout.png",
+    
+    // EDITOR BEHAVIOR SETTINGS (apply to all editing operations)
     "settings": {
-      "snapToGrid": true,
-      "snapToObjects": true,
-      "allowOutOfBounds": false,
-      "gridSize": 10,
-      "showGrid": true,
-      "showConnectionLines": true
+      "snapToGrid": true,           // Global: snap any object to grid
+      "snapToObjects": true,         // Global: snap any object to other objects
+      "allowOutOfBounds": false,     // Global: allow any object outside canvas
+      "gridSize": 10,                // Global: grid spacing in pixels
+      "showGrid": true,              // Global: grid visibility toggle
+      "showConnectionLines": true    // Global: connection lines visibility
     },
+    
+    // ========================================
+    // OBJECT-SPECIFIC SETTINGS (per shape)
+    // ========================================
     "shapes": [
       {
+        // SHAPE IDENTITY
         "id": "shape-1",
         "type": "matrix",
         "name": "Matrix 1",
+        
+        // SHAPE TRANSFORM (position, size, rotation)
         "x": 500,
         "y": 400,
         "size": 200,
         "rotation": 0,
         "scaleX": 1,
         "scaleY": 1,
+        
+        // SHAPE APPEARANCE
         "color": "cyan",
+        
+        // SHAPE-SPECIFIC PROPERTIES (different per type)
         "pointCount": 64,
         "rows": 8,
         "cols": 8,
-        "pattern": "zigzag-left"
+        "pattern": "zigzag-left"      // Matrix-specific
+      },
+      {
+        // Another shape with different properties
+        "id": "shape-2",
+        "type": "circle",
+        "name": "Circle Ring",
+        "x": 800,
+        "y": 600,
+        "size": 150,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "color": "magenta",
+        "pointCount": 32              // Circle-specific (no rows/cols/pattern)
+      },
+      {
+        "id": "shape-3",
+        "type": "star",
+        "name": "Star Fixture",
+        "x": 300,
+        "y": 200,
+        "size": 100,
+        "rotation": 45,
+        "scaleX": 1,
+        "scaleY": 1,
+        "color": "yellow",
+        "pointCount": 25,
+        "spikes": 5,                  // Star-specific
+        "innerRatio": 0.5             // Star-specific
       }
     ],
-    "groups": [],
+    
+    // ========================================
+    // GROUPING (object relationships)
+    // ========================================
+    "groups": [
+      {
+        "id": "group-1",
+        "name": "Left Side Matrices",
+        "shapeIds": ["shape-1", "shape-4"]
+      }
+    ],
+    
     "savedAt": "2026-02-05T10:30:00.000Z"
   }
 }
 ```
+
+---
+
+### � **Relationship: Editor Shapes vs Art-Net Objects**
+
+**Two-tier storage system:**
+
+| Tier | Location | Purpose | Content |
+|------|----------|---------|---------|
+| **Editor Shapes** | `editor.shapes[]` | Shape parameters for editing | Position, size, rotation, rows/cols, pattern, etc. |
+| **Art-Net Objects** | `output.artnet.objects[]` | Actual LED coordinates for output | Calculated x/y pixel coordinates for each LED |
+
+**Data Flow:**
+
+1. **User edits shape** → Update `editor.shapes[n]` parameters
+2. **Auto-save triggered** → Calculate all LED coordinates from shape parameters
+3. **Save both tiers**:
+   - `editor.shapes[]` → For editing/manipulation
+   - `output.artnet.objects[]` → For Art-Net rendering
+
+**Why both?**
+- **Editor shapes** = Compact (8-10 properties per shape)
+- **Art-Net objects** = Expanded (100+ coordinate pairs per object)
+- **Backend needs coordinates** for rendering video to LEDs
+- **Frontend needs parameters** for interactive editing
+
+**Example:**
+```javascript
+// Editor shape (compact)
+editor.shapes[0] = { type: "matrix", x: 500, y: 400, rows: 8, cols: 10 }
+
+// Generated Art-Net object (expanded)
+output.artnet.objects[0] = { 
+  id: "shape-1", 
+  points: [
+    {id: 1, x: 450, y: 350}, 
+    {id: 2, x: 470, y: 350},
+    // ... 80 total coordinate pairs
+  ]
+}
+```
+
+---
+
+### �📋 **Settings Location Reference**
+
+| Setting Type | Location in Session State | Scope |
+|--------------|---------------------------|-------|
+| **GLOBAL EDITOR** | `editor.settings.*` | Applies to all objects |
+| Snap to Grid | `editor.settings.snapToGrid` | Global behavior |
+| Snap to Objects | `editor.settings.snapToObjects` | Global behavior |
+| Allow Out of Bounds | `editor.settings.allowOutOfBounds` | Global constraint |
+| Grid Size | `editor.settings.gridSize` | Global grid spacing |
+| Show Grid | `editor.settings.showGrid` | Global visibility |
+| Show Connection Lines | `editor.settings.showConnectionLines` | Global visibility |
+| | | |
+| **CANVAS PROPERTIES** | `editor.canvas.*` | Canvas-level |
+| ArtNet Width | `editor.canvas.width` | Resolution width |
+| ArtNet Height | `editor.canvas.height` | Resolution height |
+| Background Image | `editor.backgroundImagePath` | Visual reference |
+| | | |
+| **OBJECT PROPERTIES** | `editor.shapes[n].*` | Per-shape only |
+| Position | `shapes[n].x`, `shapes[n].y` | Individual shape |
+| Size/Scale | `shapes[n].size`, `shapes[n].scaleX/Y` | Individual shape |
+| Rotation | `shapes[n].rotation` | Individual shape |
+| Color | `shapes[n].color` | Individual shape |
+| Type-specific | `shapes[n].rows`, `spikes`, etc. | Individual shape |
+
+**Note:** LED dot coordinates are **calculated on-demand** (not stored in session state).  
+Art-Net Output Routing page will load shapes and calculate dots using same logic.
+
+---
+
+### 🔍 **Example: How Settings Are Applied**
+
+**Scenario: User drags a shape**
+
+1. **Check global editor setting:** `editor.settings.snapToGrid`
+   - If `true` → apply grid snapping to this shape
+   - Grid spacing from: `editor.settings.gridSize`
+
+2. **Check global editor setting:** `editor.settings.snapToObjects`
+   - If `true` → check distance to all other shapes
+   - Snap if within threshold
+
+3. **Check global constraint:** `editor.settings.allowOutOfBounds`
+   - If `false` → constrain shape position to canvas bounds
+   - Canvas bounds from: `editor.canvas.width` × `editor.canvas.height`
+
+4. **Update individual shape:** `editor.shapes[n].x`, `editor.shapes[n].y`
+   - Store new position in shape's own properties
+   - Other shapes not affected
+
+5. **Auto-save to session state**
+   - Shape parameters persisted
+   - Dots recalculated by Art-Net page when needed
+
+**Result:** Global settings control behavior, shape stores parameters, dots calculated on-demand.
 
 ---
 
@@ -502,7 +815,9 @@ Remove from global exports:
 - [ ] Delete shape → auto-save → reload → shape gone
 - [ ] Group shapes → auto-save → reload → groups restored
 - [ ] Auto-save status badge updates correctly (⏳ → ✓)
-- [ ] Works offline (graceful fallback if backend unavailable)
+- [ ] Background image uploads to `backgrounds/` folder
+- [ ] Background image path persists in session state
+- [ ] Background image loads correctly after reload
 - [ ] Session state included in snapshot system
 - [ ] Export still works (shapes exported at ArtNet resolution)
 
@@ -510,11 +825,11 @@ Remove from global exports:
 
 ## 📝 Notes
 
-- **Migration:** Existing server-saved projects can be manually loaded once, then auto-saved to session
 - **Export:** Keep manual export functionality for sharing projects
-- **Compatibility:** Version 2.0 format (session state) vs 1.x (server files)
 - **Performance:** Debouncing prevents excessive API calls
 - **Snapshots:** Editor state automatically included in global snapshots
+- **Background Images:** Stored as files in `backgrounds/` folder (not base64)
+- **No Migration:** Fresh start - no backward compatibility with old server-saved projects
 
 ---
 

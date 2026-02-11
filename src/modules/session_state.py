@@ -11,7 +11,6 @@ Speichert automatisch:
 """
 
 import os
-import json
 import time
 import queue
 import threading
@@ -19,6 +18,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from .logger import get_logger
 from .uid_registry import get_uid_registry
+from .session import SessionPersistence
 
 logger = get_logger(__name__)
 
@@ -36,6 +36,11 @@ class SessionStateManager:
         """
         self.state_file_path = state_file_path
         self.sequence_manager = sequence_manager
+        
+        # Initialize persistence layer
+        data_dir = os.path.dirname(state_file_path)
+        self.persistence = SessionPersistence(data_dir)
+        
         self._state = self._load_or_create()
         self._last_save_time = 0
         self._min_save_interval = 0.5  # Minimum 500ms zwischen Saves (Debouncing)
@@ -48,22 +53,16 @@ class SessionStateManager:
         self._save_thread = threading.Thread(target=self._save_worker, daemon=True, name="SessionStateSaver")
         self._save_thread.start()
         
-        logger.info(f"SessionStateManager initialisiert: {state_file_path} (async mode)")
+        logger.info(f"SessionStateManager initialized: {os.path.basename(state_file_path)} (async mode)")
     
     def _load_or_create(self) -> Dict[str, Any]:
-        """Lädt existierenden State oder erstellt leeren."""
-        if os.path.exists(self.state_file_path):
-            try:
-                with open(self.state_file_path, 'r', encoding='utf-8') as f:
-                    state = json.load(f)
-                logger.info(f"✅ Session State geladen: {len(state.get('players', {}))} Player")
-                return state
-            except Exception as e:
-                logger.error(f"❌ Fehler beim Laden von session_state.json: {e}")
-                return self._create_empty_state()
+        """Load existing state or create empty."""
+        state = self.persistence.read_from_file(self.state_file_path)
+        if state:
+            return state
         else:
-            logger.info("📄 Keine session_state.json gefunden - erstelle neue")
-            return self._create_empty_state()
+            logger.info("No session found - creating new")
+            return SessionPersistence.create_empty_state()
     
     def _save_worker(self):
         """Background thread for async file I/O with debouncing."""
@@ -95,88 +94,13 @@ class SessionStateManager:
     
     def _do_file_write(self, state: Dict[str, Any]):
         """Perform the actual file write operation."""
-        try:
-            # State in Datei schreiben mit Retry-Logik für Windows File-Locking
-            os.makedirs(os.path.dirname(self.state_file_path), exist_ok=True)
-            
-            # Versuche bis zu 3x zu speichern (Windows kann Dateien kurzzeitig locken)
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    with open(self.state_file_path, 'w', encoding='utf-8') as f:
-                        json.dump(state, f, indent=2, ensure_ascii=False)
-                    break  # Erfolg - raus aus Retry-Loop
-                except PermissionError as perm_err:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"⚠️ Permission denied beim Speichern (Versuch {attempt + 1}/{max_retries}), retry in 0.5s...")
-                        time.sleep(0.5)
-                    else:
-                        logger.warning(f"⚠️ Session State konnte nicht gespeichert werden (Datei gesperrt): {perm_err}")
-                        logger.info("💡 Tipp: Schließe alle Programme die session_state.json geöffnet haben")
-                        return
-            
+        success = self.persistence.write_to_file(state, self.state_file_path)
+        if success:
             self._last_save_time = time.time()
-            logger.debug(f"💾 Session State async saved: {len(state.get('players', {}))} Player")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim async Speichern von session_state.json: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
     
     def _create_empty_state(self) -> Dict[str, Any]:
-        """Erstellt leere State-Struktur."""
-        return {
-            "last_updated": datetime.now().isoformat(),
-            "players": {
-                "video": {
-                    "playlist": [],
-                    "current_index": -1,
-                    "autoplay": True,
-                    "loop": True,
-                    "global_effects": [],
-                    "transition_config": {
-                        "enabled": False,
-                        "effect": "fade",
-                        "duration": 1.0,
-                        "easing": "ease_in_out"
-                    }
-                },
-                "artnet": {
-                    "playlist": [],
-                    "current_index": -1,
-                    "autoplay": True,
-                    "loop": True,
-                    "global_effects": [],
-                    "transition_config": {
-                        "enabled": False,
-                        "effect": "fade",
-                        "duration": 1.0,
-                        "easing": "ease_in_out"
-                    }
-                }
-            },
-            "sequencer": {
-                "mode_active": False,
-                "audio_file": None,
-                "timeline": {
-                    "duration": 0.0,
-                    "splits": [],
-                    "clip_mapping": {}
-                },
-                "last_position": 0.0
-            },
-            "audio_analyzer": {
-                "device": None,
-                "running": False,
-                "config": {},
-                "bpm": {
-                    "enabled": False,
-                    "bpm": 0.0,
-                    "mode": "auto",
-                    "manual_bpm": None
-                }
-            }
-        }
+        """Create empty state structure (delegated to persistence layer)."""
+        return SessionPersistence.create_empty_state()
     
     def save_async(self, player_manager, clip_registry, force: bool = False) -> bool:
         """
@@ -206,7 +130,6 @@ class SessionStateManager:
                 # Queue for async write with debouncing
                 self._pending_save = True
                 self._pending_save_data = state
-                logger.debug(f"📝 Session State queued for async save (debouncing: 1s)")
                 return True
                 
         except Exception as e:
@@ -219,6 +142,7 @@ class SessionStateManager:
         """
         Speichert aktuellen Player-Status synchron (DEPRECATED - use save_async instead).
         This method is kept for backward compatibility and critical operations only.
+        Flushes ALL session data from RAM to disk immediately, including any pending async writes.
         
         Args:
             player_manager: PlayerManager-Instanz
@@ -229,8 +153,17 @@ class SessionStateManager:
             True bei Erfolg
         """
         try:
+            # Build complete state from self._state (includes editor, outputs, etc.)
             state = self._build_state_dict(player_manager, clip_registry, capture_active=True)
+            
+            # Update in-memory state
             self._state = state
+            
+            # Clear any pending async save (we're doing immediate write)
+            self._pending_save = False
+            self._pending_save_data = None
+            
+            # Write to disk immediately
             self._do_file_write(state)
             return True
         except Exception as e:
@@ -243,6 +176,7 @@ class SessionStateManager:
         """
         Save session state WITHOUT capturing active playlist state.
         Use this when you've already explicitly updated playlist state and don't want it overwritten.
+        Flushes ALL session data from RAM to disk immediately, including any pending async writes.
         
         Args:
             player_manager: PlayerManager instance
@@ -253,8 +187,17 @@ class SessionStateManager:
             True on success
         """
         try:
+            # Build complete state from self._state (includes editor, outputs, etc.)
             state = self._build_state_dict(player_manager, clip_registry, capture_active=False)
+            
+            # Update in-memory state
             self._state = state
+            
+            # Clear any pending async save (we're doing immediate write)
+            self._pending_save = False
+            self._pending_save_data = None
+            
+            # Write to disk immediately
             self._do_file_write(state)
             return True
         except Exception as e:
@@ -265,9 +208,11 @@ class SessionStateManager:
     
     def _build_state_dict(self, player_manager, clip_registry, capture_active: bool = True) -> Dict[str, Any]:
         """Build the complete state dictionary for saving."""
-        state = {
-            "last_updated": datetime.now().isoformat()
-        }
+        # Start with existing state to preserve editor, outputs, and other sections
+        state = self._state.copy() if self._state else {}
+        
+        # Update timestamp
+        state["last_updated"] = datetime.now().isoformat()
         
         # LEGACY: Old player state save code removed (200+ lines)
         # All player/playlist/sequencer state is now saved by playlists system
@@ -299,13 +244,24 @@ class SessionStateManager:
         # Master/Slave state is now stored per-playlist (playlist.master_player)
         # No need for root-level master_playlist field
         
-        # Video player settings speichern (resolution, autosize)
+        # Explicitly preserve sections that are updated via separate methods
+        # (Even though they're in the initial copy, make it explicit for clarity)
+        
+        # Video player settings
         if 'video_player_settings' in self._state:
             state["video_player_settings"] = self._state['video_player_settings'].copy()
-            logger.debug(f"🎬 Video player settings saved: {state['video_player_settings']}")
         
-        # LEGACY: Sequences removed from root - now stored per-clip/per-playlist
-        # Sequences are managed by SequenceManager and linked to specific parameters
+        # Output routing (updated via save_output_state())
+        if 'outputs' in self._state:
+            state['outputs'] = self._state['outputs'].copy()
+        
+        # Canvas editor state (updated via set_editor_state())
+        if 'editor' in self._state:
+            state['editor'] = self._state['editor'].copy()
+        
+        # Sequences (if stored at root level - legacy)
+        if 'sequences' in self._state:
+            state['sequences'] = self._state['sequences'].copy()
         
         # Save playlists system
         if hasattr(player_manager, 'playlist_system') and player_manager.playlist_system:
@@ -313,7 +269,9 @@ class SessionStateManager:
             if capture_active:
                 player_manager.playlist_system.capture_active_playlist_state()
             state['playlists'] = player_manager.playlist_system.serialize_all()
-            logger.debug(f"💾 Saved playlists system: {len(state['playlists'].get('items', {}))} playlists (capture_active={capture_active})")
+        
+        # Save complete clip registry (all clips, effects, parameters)
+        state['clip_registry'] = clip_registry.serialize()
         
         return state
     
@@ -454,8 +412,21 @@ class SessionStateManager:
             # Master/Slave state is now restored per-playlist when activated
             # No need to restore root-level master_playlist field
             
+            # ========== CLIP REGISTRY RESTAURIEREN ==========
+            # CRITICAL: Restore clip registry BEFORE playlists!
+            # When playlists load, they will use the restored clip data (layers, params)
+            # If we restore playlists first, they register clips with default state and overwrite saved data
+            clip_registry_data = state.get('clip_registry')
+            if clip_registry_data:
+                try:
+                    clip_registry.deserialize(clip_registry_data)
+                    logger.info(f"📋 Clip registry restored: {len(clip_registry.clips)} clips with complete state")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to restore clip registry: {e}")
+            
             # ========== PLAYLISTS SYSTEM RESTAURIEREN ==========
             # Try new name first, fallback to old name for backward compatibility
+            # Playlists load AFTER clip registry so they use the restored clip data
             playlists_data = state.get('playlists') or state.get('multi_playlist_system')
             if playlists_data and hasattr(player_manager, 'playlist_system'):
                 try:
@@ -478,19 +449,19 @@ class SessionStateManager:
     
     def clear(self) -> bool:
         """
-        Löscht Session-State (Reset).
+        Reset session state (clear all data).
         
         Returns:
-            True bei Erfolg
+            True on success
         """
         try:
-            self._state = self._create_empty_state()
-            if os.path.exists(self.state_file_path):
-                os.remove(self.state_file_path)
-            logger.info("🗑️ Session State gelöscht")
+            self._state = SessionPersistence.create_empty_state()
+            success = self.persistence.delete_file(self.state_file_path)
+            if success:
+                logger.info("Session state cleared")
             return True
         except Exception as e:
-            logger.error(f"❌ Fehler beim Löschen von session_state.json: {e}")
+            logger.error(f"Error clearing session state: {e}")
             return False
     
     def save_output_state(self, player_name: str, output_state: dict):
@@ -568,6 +539,30 @@ class SessionStateManager:
             Dictionary with video player settings
         """
         return self._state.get('video_player_settings', {}).copy()
+    
+    def set_editor_state(self, editor_data: dict):
+        """
+        Save editor state (canvas, shapes, settings, etc.)
+        
+        Args:
+            editor_data: Dictionary with editor state
+        """
+        if 'editor' not in self._state:
+            self._state['editor'] = {}
+        self._state['editor'] = editor_data.copy()
+        # Trigger async save
+        self._pending_save = True
+        self._pending_save_data = self._state.copy()
+        logger.debug(f"🎨 Editor state updated")
+    
+    def get_editor_state(self) -> dict:
+        """
+        Get editor state.
+        
+        Returns:
+            Dictionary with editor state
+        """
+        return self._state.get('editor', {}).copy()
     
     def get_state_file_path(self) -> str:
         """

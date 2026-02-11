@@ -236,10 +236,13 @@ class LayerManager:
         if self.clip_registry and clip_id:
             # Determine source path for registration
             source_path = ""
+            source_type = "video"
             if hasattr(source, 'video_path'):
                 source_path = source.video_path
+                source_type = "video"
             elif hasattr(source, 'generator_id'):
                 source_path = f"generator:{source.generator_id}"
+                source_type = "generator"
             
             # Register layer as clip with metadata
             layer_clip_id = self.clip_registry.register_clip(
@@ -256,8 +259,18 @@ class LayerManager:
             )
             logger.debug(f"📐 Layer {layer_id} registered as clip: {layer_clip_id}")
             
-            # Store clip_id in base clip's layer config for API access
-            self.clip_registry.update_clip_layer(clip_id, layer_id, {'clip_id': layer_clip_id})
+            # Add layer config to base clip's layers array (persist for save/restore)
+            layer_config = {
+                'source_type': source_type,
+                'source_path': source_path,
+                'blend_mode': blend_mode,
+                'opacity': opacity / 100.0,  # Convert to 0-1 range for storage
+                'enabled': True,
+                'layer_id': layer_id,
+                'clip_id': layer_clip_id
+            }
+            self.clip_registry.add_layer_to_clip(clip_id, layer_config)
+            logger.info(f"💾 Layer {layer_id} added to clip {clip_id} registry for persistence")
         
         # Create layer with clip_id
         layer = Layer(layer_id, source, blend_mode, opacity, layer_clip_id)
@@ -370,6 +383,27 @@ class LayerManager:
             status = "enabled" if enabled else "disabled"
             logger.debug(f"🔧 [{player_name}] Layer {layer_id} → {status}")
         
+        # Persist changes to clip_registry for save/restore
+        if self.clip_registry and layer.clip_id:
+            clip_data = self.clip_registry.get_clip(layer.clip_id)
+            if clip_data:
+                # Get the base clip this layer belongs to
+                layer_of = clip_data.get('metadata', {}).get('layer_of')
+                if layer_of:
+                    # Build update dict with only changed values
+                    update_data = {}
+                    if blend_mode is not None:
+                        update_data['blend_mode'] = blend_mode
+                    if opacity is not None:
+                        update_data['opacity'] = opacity / 100.0  # Convert to 0-1 range for storage
+                    if enabled is not None:
+                        update_data['enabled'] = enabled
+                    
+                    # Update the layer config in the base clip's layers array
+                    if update_data:
+                        self.clip_registry.update_clip_layer(layer_of, layer_id, update_data)
+                        logger.debug(f"💾 [{player_name}] Layer {layer_id} config persisted to registry")
+        
         return True
     
     def apply_layer_effects(self, layer, frame, player_name=""):
@@ -460,9 +494,21 @@ class LayerManager:
                 continue
             
             # Special handling for transport
+            # CRITICAL: Only call _initialize_state() if transport has NO saved parameters
+            # Otherwise we'd overwrite restored values (e.g., transport_position=6 → 0)
             if plugin_id == 'transport' and hasattr(plugin_instance, '_initialize_state') and layer.source:
-                plugin_instance._initialize_state(layer.source)
-                debug_transport(logger, f"🎬 [{player_name}] Transport initialized for Layer {layer.layer_id}: out_point={plugin_instance.out_point}")
+                # Check if we have saved transport parameters (not just defaults)
+                has_saved_params = params and any(key != 'metadata' for key in params.keys())
+                
+                if not has_saved_params:
+                    # No saved params - initialize from source
+                    plugin_instance._initialize_state(layer.source)
+                    debug_transport(logger, f"🎬 [{player_name}] Transport initialized from source for Layer {layer.layer_id}: out_point={plugin_instance.out_point}")
+                else:
+                    # Has saved params - just update source reference without resetting
+                    if hasattr(plugin_instance, '_frame_source'):
+                        plugin_instance._frame_source = layer.source
+                    debug_transport(logger, f"🎬 [{player_name}] Transport restored from saved params for Layer {layer.layer_id}: position={plugin_instance.current_position}, out_point={plugin_instance.out_point}")
                 
                 # Set WebSocket context for position updates (need to get player reference)
                 # This needs to be done after layers are attached to player

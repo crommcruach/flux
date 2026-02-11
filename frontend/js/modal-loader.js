@@ -29,6 +29,12 @@
             document.head.appendChild(scriptElement);
         }
         
+        // Wait a bit for ModalComponent to be defined
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        // Dispatch event to signal modal is ready
+        window.dispatchEvent(new CustomEvent('modalComponentReady'));
+        
         if (window.DEBUG) console.log('✅ Modal component loaded');
     } catch (error) {
         console.error('❌ Failed to load modal component:', error);

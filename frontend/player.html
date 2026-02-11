@@ -127,29 +127,63 @@
         </div>
     </div>
     
-    <!-- Centralized Session State Loader (load first!) -->
-    <script src="js/session-loader.js" defer></script>
-    
-    <script src="js/menu-loader.js" defer></script>
+    <script src="js/menu-loader.js"></script>
     <script src="js/transition-menu-loader.js" defer></script>
-    <script src="js/modal-loader.js" defer></script>
+    
+    <!-- Modal Component (must load before session-manager) -->
+    <script src="js/modal-loader.js"></script>
+    
+    <!-- Session Management (depends on modal) -->
+    <script src="js/session-manager.js"></script>
+    
+    <!-- Session State Manager -->
+    <script src="js/session-state-manager.js" defer></script>
+    
     <script src="js/search-filter-loader.js" defer></script>
     
     <div class="app-layout">
-        <!-- Global Playlist Controls -->
-        <div class="playlist-management-bar">
+        <!-- 
+        ⚠️ DEPRECATED: OLD PLAYLIST MANAGEMENT BAR - HIDDEN
+        ═══════════════════════════════════════════════════════════════════════════════
+        This section is DEPRECATED and replaced by the new Multi-Playlist System.
+        The functionality has been superseded by:
+        - Multi-playlist management (create/switch/delete multiple playlists)
+        - Per-playlist session state (independent clip selections, effects, settings)
+        - Improved session save/restore architecture
+        
+        ⚠️ DO NOT DELETE WITHOUT USER CONFIRMATION!
+        This code is preserved temporarily for reference and emergency fallback.
+        Before deleting:
+        1. Confirm new multi-playlist system is fully operational
+        2. Verify all session save/restore functionality works
+        3. Test with production workflows
+        4. Get explicit user approval
+        
+        Old functionality (now in new system):
+        - savePlaylists()     → New: Multi-playlist auto-save + session save
+        - loadPlaylists()     → New: Session restore
+        - Snapshot system     → New: Enhanced session snapshots
+        - Sequencer toggle    → New: Per-playlist sequencer mode
+        - Input settings      → New: Retained in new UI
+        
+        To restore if needed: Remove this comment wrapper
+        ═══════════════════════════════════════════════════════════════════════════════
+        
+        <div class="playlist-management-bar" style="display: none;">
             <div class="playlist-management-bar-title">
                 <span>📋 Playlist Management</span>
             </div>
             <div class="playlist-management-bar-actions">
                 <button class="btn btn-success btn-sm" onclick="savePlaylists()" title="Save Both Playlists">💾 Save Playlists</button>
-                <button class="btn btn-primary btn-sm" onclick="saveSnapshot()" title="Create Snapshot">📸 Snapshot</button>
+                <button class="btn btn-primary btn-sm" onclick="SessionManager.createSnapshot()" title="Create Snapshot">📸 Snapshot</button>
                 <button class="btn btn-info btn-sm" onclick="loadPlaylists()" title="Load Both Playlists">📂 Load Playlists</button>
-                <button class="btn btn-warning btn-sm" onclick="loadSnapshotModal()" title="Load Snapshot">🔄 Restore</button>
+                <button class="btn btn-warning btn-sm" onclick="SessionManager.showLoadModal()" title="Load Snapshot">🔄 Restore</button>
                 <button class="btn btn-outline-secondary btn-sm" id="sequencerModeBtn" onclick="toggleSequencerMode()" title="Toggle Sequencer Mode">🎵 Sequencer Mode</button>
                 <button class="btn btn-outline-info btn-sm" onclick="showVideoPlayerSettingsModal()" title="Configure Input Settings">⚙️ Input Settings</button>
             </div>
         </div>
+        
+        END DEPRECATED SECTION -->
         
         <!-- Waveform Analyzer Section -->
         <div class="waveform-analyzer-section" style="display: none;">
@@ -649,13 +683,6 @@
         })();
     </script>
     
-    <script src="js/components/color-picker.js"></script>
-    <script src="js/circular-slider.js"></script>
-    <script src="js/sequences.js"></script>
-    <script src="js/bpm-widget.js"></script>
-    <script src="js/components/playlist-tabs.js"></script>
-    <script src="js/player.js" type="module"></script>
-    <script type="module" src="js/waveform-analyzer.js"></script>
     <script>
         // Sequencer Mode Toggle (exposed on window for state restoration)
         window.sequencerModeActive = false;

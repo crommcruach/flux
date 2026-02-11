@@ -161,6 +161,14 @@ class Player:
         # Transition Manager
         self.transition_manager = TransitionManager()
         
+        # Transition Config (default settings for inter-clip transitions)
+        self.transition_config = {
+            'enabled': False,
+            'effect': 'fade',
+            'duration': 1.0,
+            'easing': 'ease_in_out'
+        }
+        
         # NICHT initialisieren im Konstruktor - wird lazy beim ersten play() gemacht
         # Grund: Verhindert dass mehrere Player dieselbe Video-Datei parallel öffnen (FFmpeg-Konflikt)
         self.source_initialized = False
@@ -695,6 +703,15 @@ class Player:
             # ✅ FIX: Set current_clip_id to prevent layer reload on loop
             self.current_clip_id = clip_id
             logger.debug(f"🆔 [{self.player_name}] Set current_clip_id = {clip_id}")
+            
+            # Load layers from clip_registry if available
+            if self.clip_registry and clip_id:
+                video_dir = self.config.get('paths', {}).get('video_dir', 'video')
+                try:
+                    self.load_clip_layers(clip_id, self.clip_registry, video_dir)
+                    logger.info(f"🎨 [{self.player_name}] Loaded layers for clip {clip_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ [{self.player_name}] Failed to load clip layers: {e}")
             
             # Reset transport effect completely if present (ensure clean start for new clip)
             if self.layers:
@@ -1629,8 +1646,24 @@ class Player:
         return self.effect_processor.get_chain(chain_type, layers=self.layers)
     
     def update_effect_parameter(self, index, param_name, value, chain_type='video'):
-        """Aktualisiert einen Parameter eines Effects - Delegiert an EffectProcessor."""
-        return self.effect_processor.update_parameter(index, param_name, value, chain_type)
+        """
+        Aktualisiert einen Parameter eines Effects.
+        Updates both the effect chain AND the clip registry to ensure persistence.
+        """
+        # Update the effect chain (in-memory)
+        success, message = self.effect_processor.update_parameter(index, param_name, value, chain_type)
+        
+        # If successful and we have a current clip, also update the registry
+        if success and self.clip_registry and hasattr(self, 'current_clip_id') and self.current_clip_id:
+            self.clip_registry.update_clip_effect_parameter(
+                self.current_clip_id, 
+                index, 
+                param_name, 
+                value
+            )
+            logger.debug(f"✅ Synced parameter to registry: clip={self.current_clip_id[:8]}, effect={index}, {param_name}={value}")
+        
+        return success, message
     
     def toggle_effect_enabled(self, index, chain_type='video'):
         """Toggles effect enabled/disabled state - Delegiert an EffectProcessor."""

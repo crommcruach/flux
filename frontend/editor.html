@@ -12,31 +12,10 @@
 
 <body>
   <script src="js/menu-loader.js"></script>
-  <script src="js/modal-loader.js"></script>
 
   <div class="app-container">
     <!-- Sub-Header für Canvas-Settings -->
     <div class="canvas-settings-bar d-flex align-items-center justify-content-between px-2" style="gap: 1rem; background: var(--panel-bg); border-bottom: 1px solid var(--border-color); padding: 0.5rem 1rem; grid-column: 2; overflow: visible; position: relative;">
-      <!-- Projektname Input -->
-      <input type="text" id="projectName" class="form-control form-control-sm" placeholder="Projektname"
-        value="Mein Projekt" style="width: 150px;">
-
-      <!-- Projekt Dropdown -->
-      <div class="dropdown">
-        <button class="btn btn-light btn-sm dropdown-toggle" type="button" id="projektDropdown" data-bs-toggle="dropdown"
-          aria-expanded="false">
-          Projekt
-        </button>
-        <ul class="dropdown-menu" aria-labelledby="projektDropdown">
-          <li><a class="dropdown-item" href="#" onclick="saveProjectToServer()">💾 Speichern auf Server</a></li>
-          <li><a class="dropdown-item" href="#" onclick="showProjectManager()">📂 Laden vom Server</a></li>
-          <li><hr class="dropdown-divider"></li>
-          <li><a class="dropdown-item" href="#" onclick="saveProject()">⬇️ Lokal herunterladen</a></li>
-          <li><a class="dropdown-item" href="#" onclick="document.getElementById('projectFileInput').click()">📁 Lokale Datei laden</a></li>
-        </ul>
-        <input type="file" id="projectFileInput" class="form-control form-control-sm" accept=".json"
-          style="display: none;">
-      </div>
 
       <!-- Canvas Size -->
       <div class="d-flex align-items-center" style="gap: 0.5rem;">
@@ -55,6 +34,11 @@
           style="width: 80px; display: none;" min="100" max="10000">
         <button id="customApply" class="btn btn-primary btn-sm" style="display: none;"
           onclick="applyCustomCanvasSize()">✓</button>
+      </div>
+
+      <!-- Auto-save status badge -->
+      <div class="d-flex align-items-center" style="gap: 0.5rem;">
+        <span id="autoSaveStatus" class="badge bg-secondary">⏳ Initialisiere...</span>
       </div>
 
       <!-- Background Image -->
@@ -279,6 +263,15 @@
 
   <!-- Toast Component -->
   <script src="js/toast-loader.js"></script>
+
+  <!-- Modal Component (must load before session-manager) -->
+  <script src="js/modal-loader.js"></script>
+  
+  <!-- Session Management (depends on modal) -->
+  <script src="js/session-manager.js"></script>
+
+  <!-- Session State Manager -->
+  <script src="js/session-state-manager.js" defer></script>
 
   <script src="libs/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="js/stroke-font.js"></script>

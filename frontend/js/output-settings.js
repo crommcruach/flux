@@ -3006,78 +3006,17 @@ const app = {
     // ========================================
     
     async saveToBackend() {
-        // Auto-save to backend session state (debounced)
-        if (this._saveTimeout) {
-            clearTimeout(this._saveTimeout);
-        }
-        
-        this._saveTimeout = setTimeout(async () => {
-            try {
-                // Prepare slice data for backend
-                const slicesData = {};
+        try {
+            const slicesData = {};
+            
+            this.slices.forEach(slice => {
+                const sliceId = slice.id || crypto.randomUUID();
                 
-                this.slices.forEach(slice => {
-                    const sliceId = slice.id || crypto.randomUUID();
-                    
-                    // Store ID back on object if new
-                    if (!slice.id) {
-                        slice.id = sliceId;
-                    }
-                    
-                    slicesData[sliceId] = {
-                        x: Math.round(slice.x),
-                        y: Math.round(slice.y),
-                        width: Math.round(slice.width),
-                        height: Math.round(slice.height),
-                        rotation: slice.rotation || 0,
-                        shape: slice.shape || 'rectangle',
-                        soft_edge: slice.softEdge || null,
-                        description: slice.name || '',
-                        points: slice.points || null,
-                        outputs: slice.outputs || [],
-                        source: slice.source || 'canvas'
-                    };
-                });
-                
-                // Send to backend using import endpoint
-                const response = await fetch('/api/slices/import', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        slices: slicesData,
-                        canvas: {
-                            width: this.canvasWidth,
-                            height: this.canvasHeight
-                        },
-                        customScreens: this.customScreens,
-                        compositions: this.compositions || {}
-                    })
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        this.updateBackendStatus(true, `Auto-saved ${Object.keys(slicesData).length} slices`);
-                    }
+                if (!slice.id) {
+                    slice.id = sliceId;
                 }
                 
-            } catch (error) {
-                console.error('Auto-save to backend failed:', error);
-            }
-        }, 1000); // Debounce 1 second
-    },
-    
-    async saveSliceToBackend(slice) {
-        try {
-            // Generate ID if not present
-            if (!slice.id) {
-                slice.id = crypto.randomUUID();
-            }
-            
-            const sliceData = {
-                [slice.id]: {
+                slicesData[sliceId] = {
                     x: Math.round(slice.x),
                     y: Math.round(slice.y),
                     width: Math.round(slice.width),
@@ -3085,96 +3024,92 @@ const app = {
                     rotation: slice.rotation || 0,
                     shape: slice.shape || 'rectangle',
                     soft_edge: slice.softEdge || null,
-                    description: slice.name || slice.label || '',
+                    description: slice.name || '',
                     points: slice.points || null,
                     outputs: slice.outputs || [],
                     source: slice.source || 'canvas'
-                }
-            };
-            
-            const response = await fetch('/api/slices/import', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    slices: sliceData,
-                    canvas: { width: this.canvasWidth, height: this.canvasHeight }
-                })
+                };
             });
             
-            const data = await response.json();
-            if (!data.success) {
-                console.error('Failed to save slice to backend:', data.error);
-                return false;
-            }
+            const slicesConfig = {
+                slices: slicesData,
+                canvas: {
+                    width: this.canvasWidth,
+                    height: this.canvasHeight
+                },
+                customScreens: this.customScreens,
+                compositions: this.compositions || {}
+            };
             
-            console.log(`✅ Saved slice ${slice.id} to backend`);
-            return true;
+            await window.sessionStateManager.saveSlices(slicesConfig, {
+                debounce: 1000,
+                onStatusChange: (status, message) => {
+                    if (status === 'saved') {
+                        this.updateBackendStatus(true, message || `Auto-saved ${Object.keys(slicesData).length} slices`);
+                    } else if (status === 'error') {
+                        this.updateBackendStatus(false, 'Save failed');
+                    }
+                }
+            });
             
         } catch (error) {
-            console.error('Error saving slice to backend:', error);
-            return false;
+            console.error('Auto-save to backend failed:', error);
+            this.updateBackendStatus(false, 'Save error');
         }
+    },
+    
+    async saveSliceToBackend(slice) {
+        if (!slice.id) {
+            slice.id = crypto.randomUUID();
+        }
+        
+        // Use unified save method (saves all slices with debouncing)
+        return this.saveToBackend();
     },
     
     async loadFromBackend() {
         try {
-            // Load slices from backend session state
-            const response = await fetch('/api/slices/export');
-            const data = await response.json();
+            const data = await window.sessionStateManager.loadSlices();
             
-            if (data.success) {
-                // Restore canvas dimensions
-                if (data.canvas) {
-                    this.canvasWidth = data.canvas.width;
-                    this.canvasHeight = data.canvas.height;
-                }
-                
-                // Restore slices
-                if (data.slices) {
-                    this.slices = [];
-                    Object.entries(data.slices).forEach(([sliceId, sliceData]) => {
-                        if (sliceId === 'full') return; // Skip default full slice
-                        
-                        this.slices.push({
-                            id: sliceId,
-                            x: sliceData.x,
-                            y: sliceData.y,
-                            width: sliceData.width,
-                            height: sliceData.height,
-                            rotation: sliceData.rotation || 0,
-                            shape: sliceData.shape || 'rectangle',
-                            softEdge: sliceData.soft_edge || null,
-                            name: sliceData.description || sliceId,
-                            label: sliceData.description || sliceId,
-                            points: sliceData.points || null,
-                            outputs: sliceData.outputs || [],
-                            source: sliceData.source || 'canvas',
-                            color: this.colors[this.colorIndex % this.colors.length],
-                            masks: [],
-                            type: 'slice'
-                        });
-                        this.colorIndex++;
-                    });
-                    
-                    // Restore output assignments from backend output configs
-                    // This ensures slice.outputs array reflects actual backend state
-                    this.restoreSliceOutputAssignments();
-                }
-                
-                this.updateBackendStatus(true, `Loaded ${this.slices.length} slices`);
-                console.log('✅ Loaded from backend session state:', this.slices.length, 'slices');
-                
-                // Render after loading
-                this.updateUI();
-                this.render();
-                
-            } else {
-                // No backend data - start with empty state
-                console.log('No backend data, starting with empty state');
-                this.slices = [];
-                this.updateUI();
-                this.render();
+            if (data.canvas) {
+                this.canvasWidth = data.canvas.width;
+                this.canvasHeight = data.canvas.height;
             }
+            
+            if (data.slices) {
+                this.slices = [];
+                Object.entries(data.slices).forEach(([sliceId, sliceData]) => {
+                    if (sliceId === 'full') return;
+                    
+                    this.slices.push({
+                        id: sliceId,
+                        x: sliceData.x,
+                        y: sliceData.y,
+                        width: sliceData.width,
+                        height: sliceData.height,
+                        rotation: sliceData.rotation || 0,
+                        shape: sliceData.shape || 'rectangle',
+                        softEdge: sliceData.soft_edge || null,
+                        name: sliceData.description || sliceId,
+                        label: sliceData.description || sliceId,
+                        points: sliceData.points || null,
+                        outputs: sliceData.outputs || [],
+                        source: sliceData.source || 'canvas',
+                        color: this.colors[this.colorIndex % this.colors.length],
+                        masks: [],
+                        type: 'slice'
+                    });
+                    this.colorIndex++;
+                });
+                
+                this.restoreSliceOutputAssignments();
+            }
+            
+            this.updateBackendStatus(true, `Loaded ${this.slices.length} slices`);
+            console.log('✅ Loaded from backend:', this.slices.length, 'slices');
+            
+            this.updateUI();
+            this.render();
             
         } catch (error) {
             console.error('Failed to load from backend:', error);

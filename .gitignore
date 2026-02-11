@@ -9,6 +9,7 @@ video/
 data/
 thumbnails/
 audio/
+backgrounds/
 
 # C extensions
 *.so

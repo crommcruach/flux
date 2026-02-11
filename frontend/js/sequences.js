@@ -324,8 +324,8 @@ class SequenceManager {
                     this.updateAudioStatus();
                     
                     // Still restore device info and gain from session if available
-                    if (window.sessionStateLoader && window.sessionStateLoader.isLoaded()) {
-                        const audioState = window.sessionStateLoader.get('audio_analyzer');
+                    if (window.sessionStateManager && window.sessionStateManager.isLoaded()) {
+                        const audioState = window.sessionStateManager.get('audio_analyzer');
                         if (audioState) {
                             if (audioState.device !== null && audioState.device !== undefined) {
                                 this.audioDevice = audioState.device;
@@ -366,12 +366,12 @@ class SequenceManager {
             }
             
             // Restore gain settings from session if available
-            if (window.sessionStateLoader) {
-                if (!window.sessionStateLoader.isLoaded()) {
-                    await window.sessionStateLoader.load();
+            if (window.sessionStateManager) {
+                if (!window.sessionStateManager.isLoaded()) {
+                    await window.sessionStateManager.load();
                 }
                 
-                const audioState = window.sessionStateLoader.get('audio_analyzer');
+                const audioState = window.sessionStateManager.get('audio_analyzer');
                 if (audioState) {
                     if (audioState.config?.gain !== undefined && this.audioGainKnob) {
                         this.audioGainKnob.setValue(audioState.config.gain);
@@ -693,7 +693,7 @@ class SequenceManager {
                 const result = await response.json();
                 console.log('✅ Audio sequence created:', result);
                 
-                await window.sessionStateLoader.reload();
+                await window.sessionStateManager.reload();
                 await this.loadSequencesFromSessionState();
                 
                 const savedSequence = this.sequences.find(s => s.target_parameter === parameterId);
@@ -915,7 +915,7 @@ class SequenceManager {
         // Try to get duration from current video player clip
         try {
             // Check session state for current clip
-            const sessionState = window.sessionStateLoader?.cachedState;
+            const sessionState = window.sessionStateManager?.state;
             if (!sessionState) {
                 console.debug('⚠️ No session state available, using default duration');
                 return 10.0; // Default 10 seconds
@@ -1039,7 +1039,7 @@ class SequenceManager {
                 const result = await response.json();
                 console.log('✅ Timeline sequence saved:', result);
                 
-                await window.sessionStateLoader.reload();
+                await window.sessionStateManager.reload();
                 await this.loadSequencesFromSessionState();
                 
                 const savedSequence = this.sequences.find(s => s.target_parameter === parameterId);
@@ -1305,7 +1305,7 @@ class SequenceManager {
                 const result = await response.json();
                 console.log('✅ BPM sequence created:', result);
                 
-                await window.sessionStateLoader.reload();
+                await window.sessionStateManager.reload();
                 await this.loadSequencesFromSessionState();
                 
                 const savedSequence = this.sequences.find(s => s.target_parameter === parameterId);
@@ -1441,7 +1441,7 @@ class SequenceManager {
                 const result = await response.json();
                 console.log('✅ BPM sequence updated:', result);
                 
-                await window.sessionStateLoader.reload();
+                await window.sessionStateManager.reload();
                 await this.loadSequencesFromSessionState();
             } else {
                 const error = await response.json();
@@ -1482,7 +1482,7 @@ class SequenceManager {
             });
             
             if (response.ok) {
-                await window.sessionStateLoader.reload();
+                await window.sessionStateManager.reload();
                 await this.loadSequencesFromSessionState();
                 
                 // Update UI to reflect changes
@@ -1820,7 +1820,7 @@ class SequenceManager {
             if (response.ok) {
                 const result = await response.json();
                 console.log('✅ Sequence saved:', result);
-                await window.sessionStateLoader.reload(); // Force reload to get updated state
+                await window.sessionStateManager.reload(); // Force reload to get updated state
                 await this.loadSequencesFromSessionState();
                 
                 // Show inline controls immediately if it's an audio sequence
@@ -1867,7 +1867,7 @@ class SequenceManager {
             
             if (response.ok) {
                 console.log('✅ Sequence deleted:', sequenceId);
-                await window.sessionStateLoader.reload(); // Force reload to get updated state
+                await window.sessionStateManager.reload(); // Force reload to get updated state
                 await this.loadSequencesFromSessionState();
                 // Clear references (modal is deprecated)
                 this.currentSequence = null;
@@ -2001,8 +2001,8 @@ class SequenceManager {
     async loadSequencesFromSessionState() {
         try {
             // Wait for session state to load
-            await window.sessionStateLoader.load();
-            const state = window.sessionStateLoader.state;
+            await window.sessionStateManager.load();
+            const state = window.sessionStateManager.state;
             
             console.log('🔍 Loading sequences from flat structure...');
             
@@ -3495,7 +3495,7 @@ class SequenceManager {
             });
             
             if (response.ok) {
-                await window.sessionStateLoader.reload(); // Force reload to get updated state
+                await window.sessionStateManager.reload(); // Force reload to get updated state
                 await this.loadSequencesFromSessionState();
                 
                 // Update UI to reflect changes

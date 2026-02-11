@@ -393,7 +393,7 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                 # Store generator parameters if present
                 if path.startswith('generator:') and 'parameters' in item:
                     if clip_id:
-                        clip_params[clip_id] = item['parameters']
+                        clip_params[clip_id] = {'parameters': item['parameters']}
                     clips.append(path)
                     clip_ids.append(clip_id or str(uuid.uuid4()))
                 else:
@@ -427,6 +427,16 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                                 del clip_registry.clips[registered_id]
                                 logger.debug(f"📌 Registered clip {final_clip_id} with default effects")
                         
+                        # ALWAYS extract clip effects from registry to clip_params (for both new and existing clips)
+                        if final_clip_id in clip_registry.clips:
+                            clip_data = clip_registry.clips[final_clip_id]
+                            if 'effects' in clip_data and clip_data['effects']:
+                                # Merge effects with existing clip_params (e.g., generator parameters)
+                                if final_clip_id not in clip_params:
+                                    clip_params[final_clip_id] = {}
+                                clip_params[final_clip_id]['effects'] = clip_data['effects']
+                                logger.info(f"📌 Extracted {len(clip_data['effects'])} effects for clip {final_clip_id[:8]}...")
+                        
                     except:
                         logger.warning(f"Failed to convert path: {path}")
                         continue
@@ -436,17 +446,19 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
             
             # DEBUG: Log what we're updating
             logger.info(f"[UPDATE DEBUG] Updating playlist: {target_playlist.name} (id={playlist_id})")
-            logger.info(f"[UPDATE DEBUG] Before update - clips: {player_state.clips}")
-            logger.info(f"[UPDATE DEBUG] New clips to set: {clips}")
+            logger.info(f"[UPDATE DEBUG] Processing {len(clips)} clips")
+            logger.info(f"[UPDATE DEBUG] clip_params populated for {len(clip_params)} clips")
+            
+            # Log per-clip effects summary
+            for cid, params in clip_params.items():
+                if 'effects' in params:
+                    logger.info(f"[UPDATE DEBUG]   Clip {cid[:8]}... has {len(params['effects'])} effects")
             
             player_state.clips = clips
             player_state.clip_ids = clip_ids
             player_state.clip_params = clip_params
             player_state.autoplay = autoplay
             player_state.loop = loop
-            
-            # DEBUG: Log after update
-            logger.info(f"[UPDATE DEBUG] After update - clips: {player_state.clips}")
             
             # If updating the active playlist, also update the live player
             is_active = target_playlist.id == playlist_system.active_playlist_id
@@ -457,9 +469,10 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                     player.playlist_ids = clip_ids
                     if hasattr(player, 'playlist_params'):
                         player.playlist_params = clip_params
+                        logger.info(f"[UPDATE DEBUG] Set player.playlist_params with {len(clip_params)} clip entries")
                     player.autoplay = autoplay
                     player.loop_playlist = loop
-                    logger.info(f"Updated live {player_id} player (active playlist)")
+                    logger.info(f"[UPDATE DEBUG] Updated live {player_id} player (active playlist)")
             
             # Save to session state WITHOUT capturing active playlist
             # (we just explicitly updated the playlist state above)

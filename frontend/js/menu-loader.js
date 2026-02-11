@@ -83,4 +83,29 @@
             displayDiv.style.background = 'rgba(40, 167, 69, 0.15)';
         }
     };
+    
+    // Global Auto-Save Status Update Function
+    window.updateGlobalAutoSaveStatus = function(status) {
+        const statusDiv = document.getElementById('globalAutoSaveStatus');
+        const badge = document.getElementById('autoSaveStatusBadge');
+        
+        if (!statusDiv || !badge) return;
+        
+        statusDiv.style.display = 'block';
+        
+        if (status === 'saving') {
+            badge.className = 'badge bg-warning';
+            badge.textContent = '⏳ Speichert...';
+        } else if (status === 'saved') {
+            badge.className = 'badge bg-success';
+            badge.textContent = '✓ Gespeichert';
+            // Auto-hide after 2 seconds
+            setTimeout(() => {
+                if (statusDiv) statusDiv.style.display = 'none';
+            }, 2000);
+        } else if (status === 'error') {
+            badge.className = 'badge bg-danger';
+            badge.textContent = '✗ Fehler';
+        }
+    };
 })();

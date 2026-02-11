@@ -33,17 +33,24 @@ class PlaylistTabsManager {
     
     async loadPlaylists() {
         try {
+            console.log('📡 Fetching playlists from /api/playlists/list...');
             const response = await fetch('/api/playlists/list');
             const data = await response.json();
+            
+            console.log('📊 Playlists API response:', data);
             
             if (data.success) {
                 this.playlists = data.playlists;
                 this.activePlaylistId = data.active_playlist_id;
                 this.viewedPlaylistId = data.viewed_playlist_id;
-                console.log('Loaded playlists:', this.playlists.length);
+                console.log(`✅ Loaded ${this.playlists.length} playlists:`, this.playlists.map(p => p.name));
+                console.log('   Active:', this.activePlaylistId);
+                console.log('   Viewed:', this.viewedPlaylistId);
+            } else {
+                console.error('❌ Playlists API returned error:', data.error);
             }
         } catch (error) {
-            console.error('Failed to load playlists:', error);
+            console.error('❌ Failed to load playlists:', error);
         }
     }
     

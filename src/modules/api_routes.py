@@ -1363,3 +1363,65 @@ def register_console_command_routes(app, player, dmx_controller, rest_api, video
                 "message": str(e),
                 "traceback": error_trace
             }), 500
+
+
+def register_background_routes(app):
+    """Registriert Background Image Upload/Serve Endpunkte."""
+    from pathlib import Path
+    from flask import send_from_directory
+    import re
+    
+    # Background folder at project root
+    BACKGROUNDS_DIR = Path.cwd() / 'backgrounds'
+    BACKGROUNDS_DIR.mkdir(exist_ok=True)
+    
+    @app.route('/api/backgrounds/upload', methods=['POST'])
+    def upload_background():
+        """Upload background image for canvas editor"""
+        try:
+            if 'file' not in request.files:
+                return jsonify({'success': False, 'error': 'No file provided'}), 400
+            
+            file = request.files['file']
+            
+            if file.filename == '':
+                return jsonify({'success': False, 'error': 'No file selected'}), 400
+            
+            # Validate image extension
+            allowed_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
+            if not file.filename.lower().endswith(allowed_extensions):
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid file type. Allowed: PNG, JPG, GIF, BMP'
+                }), 400
+            
+            # Sanitize filename
+            safe_filename = re.sub(r'[^\w\-_\. ]', '_', file.filename)
+            
+            # Save file
+            file_path = BACKGROUNDS_DIR / safe_filename
+            file.save(str(file_path))
+            
+            # Return relative path
+            relative_path = f"backgrounds/{safe_filename}"
+            
+            logger.info(f"Background uploaded: {relative_path}")
+            
+            return jsonify({
+                'success': True,
+                'path': relative_path,
+                'filename': safe_filename
+            })
+        
+        except Exception as e:
+            logger.error(f"Error uploading background: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+    
+    @app.route('/backgrounds/<path:filename>', methods=['GET'])
+    def serve_background(filename):
+        """Serve background images"""
+        try:
+            return send_from_directory(BACKGROUNDS_DIR, filename)
+        except Exception as e:
+            logger.error(f"Error serving background: {e}")
+            return jsonify({'error': 'File not found'}), 404

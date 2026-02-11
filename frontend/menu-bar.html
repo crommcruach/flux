@@ -25,7 +25,19 @@
             style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🖥️</a>
         <a href="/config" class="btn btn-primary btn-sm menu-btn" title="Config"
             style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">⚙️</a>
+        
+        <!-- Session Management Buttons -->
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem; padding-left: 1rem; border-left: 2px solid var(--border-color);">
+            <button class="btn btn-success btn-sm" onclick="SessionManager.saveSession()" title="Session speichern">💾</button>
+            <button class="btn btn-warning btn-sm" onclick="SessionManager.showLoadModal()" title="Session oder Snapshot laden">📂</button>
+            <button class="btn btn-info btn-sm" onclick="SessionManager.createSnapshot()" title="Schneller Snapshot">📸</button>
+        </div>
+        
         <div style="display: flex; align-items: center; gap: 2rem; margin-left: 2.2rem;">
+            <!-- Session State Auto-Save Status -->
+            <div id="globalAutoSaveStatus" style="display: none;">
+                <span id="autoSaveStatusBadge" class="badge bg-success" style="font-size: 0.75rem; padding: 4px 8px;">✓ Gespeichert</span>
+            </div>
             <div class="form-check form-switch" style="margin-bottom: 0;">
                 <input class="form-check-input" type="checkbox" id="themeToggle">
                 <label class="form-check-label" for="themeToggle" id="themeLabel">Dunkel</label>
