@@ -10,18 +10,28 @@ class SessionStateManager {
         this.loading = false;
         this.listeners = [];
         this._saveTimeouts = {};
+        this._loadPromise = null; // Track ongoing load promise
     }
 
     /**
      * Load session state from server (called once on page load)
      */
     async load() {
-        if (this.loaded || this.loading) {
-            console.log('⏭️ Session state already loaded/loading');
+        // If already loaded, return cached state
+        if (this.loaded) {
+            console.log('⏭️ Session state already loaded');
             return this.state;
         }
 
-        return this._fetchState();
+        // If currently loading, wait for existing load to complete
+        if (this.loading && this._loadPromise) {
+            console.log('⏭️ Session state loading in progress, waiting...');
+            return this._loadPromise;
+        }
+
+        // Start new load
+        this._loadPromise = this._fetchState();
+        return this._loadPromise;
     }
 
     /**
@@ -30,7 +40,8 @@ class SessionStateManager {
     async reload() {
         console.log('🔄 Reloading session state...');
         this.loaded = false;
-        return this._fetchState();
+        this._loadPromise = null; // Clear cached promise
+        return this.load();
     }
 
     /**
@@ -68,6 +79,7 @@ class SessionStateManager {
             return this.state;
         } finally {
             this.loading = false;
+            this._loadPromise = null; // Clear promise after completion
         }
     }
 

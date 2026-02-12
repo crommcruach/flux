@@ -40,14 +40,50 @@ const app = {
     ctx: null,
     videoCanvas: null,
     videoCtx: null,
+    videoStreamImg: null,
     canvasWidth: 1920,
     canvasHeight: 1080,
     canvasZoom: 1.0,
     scale: 1,
     
+    // Mode
+    currentMode: 'video', // 'video' or 'artnet'
+    
+    // Assignment update tracking
+    isUpdatingAssignment: false,  // Flag to prevent onchange during programmatic updates
+    
     // Slices & Selection
     slices: [],
     selectedSlice: null,
+    
+    // ArtNet State
+    artnetObjects: [],
+    artnetOutputs: [],
+    selectedArtNetObject: null,
+    dmxMonitorInterval: null,
+    artnetRenderInterval: null,
+    artnetCanvasObjects: new Set(), // Objects selected on canvas for manipulation
+    artnetDragging: false,
+    artnetScaling: false,
+    artnetRotating: false,
+    artnetDragStartX: 0,
+    artnetDragStartY: 0,
+    artnetActiveHandle: null,
+    artnetLastRotationAngle: null,
+    showPointIds: false,
+    showUniverseBounds: false,
+    showColoredOutlines: true,
+    showObjectNames: true,
+    showBoundingBox: true,
+    showColorPreview: true,
+    showGrid: true,
+    
+    // Canvas Panning
+    isPanning: false,
+    panStartX: 0,
+    panStartY: 0,
+    panScrollLeft: 0,
+    panScrollTop: 0,
     
     // Interaction State
     isDragging: false,
@@ -78,6 +114,7 @@ const app = {
     drawingPoints: [],
     tempShape: null,
     contextMenuTarget: null,
+    outputContextMenuTarget: null,
 
     // ========================================
     // INITIALIZATION
@@ -86,35 +123,46 @@ const app = {
         this.canvas = document.getElementById('sliceCanvas');
         this.ctx = this.canvas.getContext('2d');
         this.videoCanvas = document.getElementById('videoCanvas');
-        this.videoCtx = this.videoCanvas.getContext('2d');
+        this.videoCtx = this.videoCanvas.getContext('2d', { willReadFrequently: true });
+        this.videoStreamImg = document.getElementById('videoStream');
         
         // Initialize compositions object
         this.compositions = this.compositions || {};
+        
+        // Restore last selected mode from localStorage
+        const savedMode = localStorage.getItem('outputSettings_mode');
+        if (savedMode === 'artnet' || savedMode === 'video') {
+            this.currentMode = savedMode;
+        }
 
         this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
         this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
         this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
         this.canvas.addEventListener('contextmenu', (e) => this.onContextMenu(e));
+
+        // Close output context menu on outside click
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#outputContextMenu')) {
+                this.closeOutputContextMenu();
+            }
+        });
         
         // Close context menu on click outside
         document.addEventListener('click', (e) => {
-    if (!e.target.closest('#contextMenu')) {
-        this.closeContextMenu();
-    }
+            if (!e.target.closest('#contextMenu')) {
+                this.closeContextMenu();
+            }
+            if (!e.target.closest('#outputContextMenu')) {
+                this.closeOutputContextMenu();
+            }
         });
         
-        // Mouse wheel zoom
         const wrapper = document.getElementById('canvasWrapper');
         wrapper.addEventListener('wheel', (e) => {
-    if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? -1 : 1;
-        if (delta > 0) {
-    this.zoomIn();
-        } else {
-    this.zoomOut();
-        }
-    }
+    // Always zoom on wheel, no need for Ctrl/Cmd
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -1 : 1;
+    this.zoomToCursor(delta, e);
         }, { passive: false });
         
         document.addEventListener('keydown', (e) => {
@@ -136,8 +184,14 @@ const app = {
         await this.loadFromBackend();
         
         this.setType('slice'); // Set default to slice mode with correct UI state
+        
+        // Apply the restored mode (this will set up UI visibility), silent = true to avoid toast on init
+        this.setMode(this.currentMode, true);
+        
         this.updateScreenButtons();
         this.updateUI();
+        this.updateToggleButtonStates();
+        this.updateZoomControlsPosition(); // Set initial zoom controls position
         this.render();
     },
 
@@ -314,18 +368,21 @@ const app = {
     let w = Math.abs(this.tempShape.width);
     let h = Math.abs(this.tempShape.height);
     if (w < 10 || h < 10) return;
-    shape.x = x;
-    shape.y = y;
-    shape.width = w;
-    shape.height = h;
+    shape.x = Math.round(x);
+    shape.y = Math.round(y);
+    shape.width = Math.round(w);
+    shape.height = Math.round(h);
         } else if (this.currentShape === 'circle' && this.tempShape) {
     if (this.tempShape.radius < 5) return;
-    shape.centerX = this.tempShape.centerX;
-    shape.centerY = this.tempShape.centerY;
-    shape.radius = this.tempShape.radius;
+    shape.centerX = Math.round(this.tempShape.centerX);
+    shape.centerY = Math.round(this.tempShape.centerY);
+    shape.radius = Math.round(this.tempShape.radius);
         } else if (['triangle', 'polygon', 'freehand'].includes(this.currentShape)) {
     if (this.drawingPoints.length < 2) return;
-    shape.points = [...this.drawingPoints];
+    shape.points = this.drawingPoints.map(p => ({
+        x: Math.round(p.x),
+        y: Math.round(p.y)
+    }));
         }
 
         if (this.currentType === 'slice') {
@@ -354,27 +411,110 @@ const app = {
     onMouseDown(e) {
         const pos = this.getMousePos(e);
 
+        // ArtNet mode handling
+        if (this.currentMode === 'artnet') {
+            // Check if clicking on a transform handle
+            for (const obj of this.artnetCanvasObjects) {
+                const bounds = this.calculatePointsBounds(obj.points);
+                const handle = this.getArtNetHandleAtPoint(pos.x, pos.y, bounds);
+                if (handle) {
+                    this.artnetActiveHandle = handle;
+                    if (handle === 'rotate') {
+                        this.artnetRotating = true;
+                        this.artnetLastRotationAngle = Math.atan2(
+                            pos.y - (bounds.minY + bounds.maxY) / 2,
+                            pos.x - (bounds.minX + bounds.maxX) / 2
+                        );
+                    } else {
+                        this.artnetScaling = true;
+                    }
+                    this.artnetDragStartX = pos.x;
+                    this.artnetDragStartY = pos.y;
+                    return;
+                }
+            }
+
+            // Check if clicking on an object
+            let clickedObject = null;
+            for (const obj of Object.values(this.artnetObjects)) {
+                if (this.isPointInArtNetObject(pos.x, pos.y, obj)) {
+                    clickedObject = obj;
+                    break;
+                }
+            }
+
+            if (clickedObject) {
+                // Toggle selection with Ctrl, otherwise replace selection
+                if (e.ctrlKey || e.metaKey) {
+                    if (this.artnetCanvasObjects.has(clickedObject)) {
+                        this.artnetCanvasObjects.delete(clickedObject);
+                    } else {
+                        this.artnetCanvasObjects.add(clickedObject);
+                    }
+                } else {
+                    this.artnetCanvasObjects.clear();
+                    this.artnetCanvasObjects.add(clickedObject);
+                }
+                this.artnetDragging = true;
+                this.artnetDragStartX = pos.x;
+                this.artnetDragStartY = pos.y;
+                
+                // Update selected object for properties panel (single selection only)
+                if (this.artnetCanvasObjects.size === 1) {
+                    this.selectedArtNetObject = clickedObject;
+                    this.updateArtNetPropertiesPanel();
+                    this.updateArtNetObjectsList();
+                }
+            } else {
+                // Clicked on empty space - start panning
+                this.artnetCanvasObjects.clear();
+                this.startPanning(e);
+            }
+
+            this.updateSelectedObjectDisplay();
+            this.render();
+            return;
+        }
+
         if (this.drawingMode) {
     if (this.currentShape === 'rectangle') {
-        this.tempShape = { x: pos.x, y: pos.y, width: 0, height: 0 };
+        this.tempShape = {
+            x: Math.round(pos.x),
+            y: Math.round(pos.y),
+            width: 0,
+            height: 0
+        };
         this.isDragging = true;
     } else if (this.currentShape === 'circle') {
         if (!this.tempShape) {
-    this.tempShape = { centerX: pos.x, centerY: pos.y, radius: 0 };
+    this.tempShape = {
+        centerX: Math.round(pos.x),
+        centerY: Math.round(pos.y),
+        radius: 0
+    };
     this.isDragging = true;
         }
     } else if (this.currentShape === 'triangle') {
-        this.drawingPoints.push({x: pos.x, y: pos.y});
+        this.drawingPoints.push({
+            x: Math.round(pos.x),
+            y: Math.round(pos.y)
+        });
         if (this.drawingPoints.length === 3) {
     this.createShapeFromDrawing();
     this.cancelDrawing();
         }
         this.render();
     } else if (this.currentShape === 'polygon') {
-        this.drawingPoints.push({x: pos.x, y: pos.y});
+        this.drawingPoints.push({
+            x: Math.round(pos.x),
+            y: Math.round(pos.y)
+        });
         this.render();
     } else if (this.currentShape === 'freehand') {
-        this.drawingPoints = [{x: pos.x, y: pos.y}];
+        this.drawingPoints = [{
+            x: Math.round(pos.x),
+            y: Math.round(pos.y)
+        }];
         this.isDragging = true;
     }
     return;
@@ -424,7 +564,49 @@ const app = {
 
     onMouseMove(e) {
         const pos = this.getMousePos(e);
-        document.getElementById('mousePosition').textContent = `${Math.round(pos.x)}, ${Math.round(pos.y)}`;
+        const mouseText = `${Math.round(pos.x)}, ${Math.round(pos.y)}`;
+        document.getElementById('mousePosition').textContent = mouseText;
+
+        // Canvas panning (works in both modes)
+        if (this.isPanning) {
+            this.updatePanning(e);
+            return;
+        }
+
+        // ArtNet mode handling
+        if (this.currentMode === 'artnet') {
+            if (this.artnetDragging && this.artnetCanvasObjects.size > 0) {
+                const dx = pos.x - this.artnetDragStartX;
+                const dy = pos.y - this.artnetDragStartY;
+                for (const obj of this.artnetCanvasObjects) {
+                    this.moveArtNetObject(obj, dx, dy);
+                }
+                this.artnetDragStartX = pos.x;
+                this.artnetDragStartY = pos.y;
+                this.render();
+                return;
+            }
+
+            if (this.artnetScaling && this.artnetCanvasObjects.size > 0) {
+                const dx = pos.x - this.artnetDragStartX;
+                const dy = pos.y - this.artnetDragStartY;
+                for (const obj of this.artnetCanvasObjects) {
+                    this.scaleArtNetObject(obj, dx, dy, this.artnetActiveHandle);
+                }
+                this.artnetDragStartX = pos.x;
+                this.artnetDragStartY = pos.y;
+                this.render();
+                return;
+            }
+
+            if (this.artnetRotating && this.artnetCanvasObjects.size > 0) {
+                for (const obj of this.artnetCanvasObjects) {
+                    this.rotateArtNetObject(obj, pos.x, pos.y);
+                }
+                this.render();
+                return;
+            }
+        }
 
         if (this.isTransforming && this.draggingCorner !== null && this.selectedSlice) {
     this.moveTransformCorner(pos);
@@ -440,10 +622,13 @@ const app = {
     } else if (this.currentShape === 'circle' && this.tempShape) {
         const dx = pos.x - this.tempShape.centerX;
         const dy = pos.y - this.tempShape.centerY;
-        this.tempShape.radius = Math.sqrt(dx * dx + dy * dy);
+        this.tempShape.radius = Math.round(Math.sqrt(dx * dx + dy * dy));
         this.render();
     } else if (this.currentShape === 'freehand') {
-        this.drawingPoints.push({x: pos.x, y: pos.y});
+        this.drawingPoints.push({
+            x: Math.round(pos.x),
+            y: Math.round(pos.y)
+        });
         this.render();
     }
     return;
@@ -465,6 +650,36 @@ const app = {
     },
 
     onMouseUp(e) {
+        // Stop panning
+        if (this.isPanning) {
+            this.stopPanning();
+            return;
+        }
+
+        // ArtNet mode handling
+        if (this.currentMode === 'artnet') {
+            if ((this.artnetDragging || this.artnetScaling || this.artnetRotating) && this.artnetCanvasObjects.size > 0) {
+                // Save all modified objects
+                for (const obj of this.artnetCanvasObjects) {
+                    this.saveArtNetObjectPoints(obj);
+                }
+                
+                // Update properties panel if single object selected
+                if (this.artnetCanvasObjects.size === 1 && this.selectedArtNetObject) {
+                    this.updateArtNetPropertiesPanel();
+                }
+            }
+            
+            // Reset ArtNet manipulation state
+            this.artnetDragging = false;
+            this.artnetScaling = false;
+            this.artnetRotating = false;
+            this.artnetActiveHandle = null;
+            this.artnetLastRotationAngle = null;
+            this.render();
+            return;
+        }
+
         if (this.drawingMode && this.isDragging) {
     if (['rectangle', 'circle'].includes(this.currentShape)) {
         this.createShapeFromDrawing();
@@ -487,6 +702,31 @@ const app = {
         }
         this.updateUI();
         this.render();
+    },
+
+    startPanning(e) {
+        this.isPanning = true;
+        this.panStartX = e.clientX;
+        this.panStartY = e.clientY;
+        const wrapper = document.getElementById('canvasWrapper');
+        this.panScrollLeft = wrapper.scrollLeft;
+        this.panScrollTop = wrapper.scrollTop;
+        wrapper.classList.add('panning');
+    },
+
+    updatePanning(e) {
+        if (!this.isPanning) return;
+        const wrapper = document.getElementById('canvasWrapper');
+        const dx = e.clientX - this.panStartX;
+        const dy = e.clientY - this.panStartY;
+        wrapper.scrollLeft = this.panScrollLeft - dx;
+        wrapper.scrollTop = this.panScrollTop - dy;
+    },
+
+    stopPanning() {
+        this.isPanning = false;
+        const wrapper = document.getElementById('canvasWrapper');
+        wrapper.classList.remove('panning');
     },
 
     snapToGridPos(pos) {
@@ -526,6 +766,10 @@ const app = {
     newX = Math.max(0, Math.min(newX, this.canvasWidth - shape.width));
     newY = Math.max(0, Math.min(newY, this.canvasHeight - shape.height));
     
+    // Round to integers for pixel-perfect positioning
+    newX = Math.round(newX);
+    newY = Math.round(newY);
+    
     // Calculate actual movement after snapping and bounds
     const actualDx = newX - shape.x;
     const actualDy = newY - shape.y;
@@ -537,26 +781,28 @@ const app = {
     if (shape.type === 'slice' && shape.masks && shape.masks.length > 0) {
         shape.masks.forEach(mask => {
     if (mask.shape === 'rectangle') {
-        mask.x += actualDx;
-        mask.y += actualDy;
+        mask.x = Math.round(mask.x + actualDx);
+        mask.y = Math.round(mask.y + actualDy);
     } else if (mask.shape === 'circle') {
-        mask.centerX += actualDx;
-        mask.centerY += actualDy;
+        mask.centerX = Math.round(mask.centerX + actualDx);
+        mask.centerY = Math.round(mask.centerY + actualDy);
     } else if (mask.points) {
         mask.points.forEach(p => {
-                    p.x += actualDx;
-                    p.y += actualDy;
+                    p.x = Math.round(p.x + actualDx);
+                    p.y = Math.round(p.y + actualDy);
         });
     }
         });
     }
         } else if (shape.shape === 'circle') {
-    shape.centerX = Math.max(shape.radius, Math.min(shape.centerX + dx, this.canvasWidth - shape.radius));
-    shape.centerY = Math.max(shape.radius, Math.min(shape.centerY + dy, this.canvasHeight - shape.radius));
+    const newCenterX = Math.max(shape.radius, Math.min(shape.centerX + dx, this.canvasWidth - shape.radius));
+    const newCenterY = Math.max(shape.radius, Math.min(shape.centerY + dy, this.canvasHeight - shape.radius));
+    shape.centerX = Math.round(newCenterX);
+    shape.centerY = Math.round(newCenterY);
         } else if (shape.points) {
     shape.points.forEach(p => {
-        p.x += dx;
-        p.y += dy;
+        p.x = Math.round(p.x + dx);
+        p.y = Math.round(p.y + dy);
     });
         }
     },
@@ -611,8 +857,8 @@ const app = {
 
         // Update corner position relative to slice origin (no constraints)
         const corner = slice.transformCorners[this.draggingCorner];
-        corner.x = pos.x - slice.x;
-        corner.y = pos.y - slice.y;
+        corner.x = Math.round(pos.x - slice.x);
+        corner.y = Math.round(pos.y - slice.y);
         
         // Recalculate slice dimensions based on bounding box of transform corners
         this.updateSliceDimensionsFromTransform(slice);
@@ -638,17 +884,17 @@ const app = {
         const oldX = slice.x;
         const oldY = slice.y;
         
-        slice.x = minX;
-        slice.y = minY;
-        slice.width = maxX - minX;
-        slice.height = maxY - minY;
+        slice.x = Math.round(minX);
+        slice.y = Math.round(minY);
+        slice.width = Math.round(maxX - minX);
+        slice.height = Math.round(maxY - minY);
         
         // Adjust corner positions relative to new origin
         const deltaX = oldX - slice.x;
         const deltaY = oldY - slice.y;
         slice.transformCorners.forEach(corner => {
-    corner.x += deltaX;
-    corner.y += deltaY;
+    corner.x = Math.round(corner.x + deltaX);
+    corner.y = Math.round(corner.y + deltaY);
         });
     },
 
@@ -773,53 +1019,53 @@ const app = {
 
         switch (h) {
     case 'se':
-        slice.width = Math.max(10, pos.x - slice.x);
-        slice.height = Math.max(10, pos.y - slice.y);
+        slice.width = Math.round(Math.max(10, pos.x - slice.x));
+        slice.height = Math.round(Math.max(10, pos.y - slice.y));
         break;
     case 'sw':
         const newW = slice.width + (slice.x - pos.x);
         if (newW >= 10) {
-    slice.x = pos.x;
-    slice.width = newW;
+    slice.x = Math.round(pos.x);
+    slice.width = Math.round(newW);
         }
-        slice.height = Math.max(10, pos.y - slice.y);
+        slice.height = Math.round(Math.max(10, pos.y - slice.y));
         break;
     case 'ne':
-        slice.width = Math.max(10, pos.x - slice.x);
+        slice.width = Math.round(Math.max(10, pos.x - slice.x));
         const newH = slice.height + (slice.y - pos.y);
         if (newH >= 10) {
-    slice.y = pos.y;
-    slice.height = newH;
+    slice.y = Math.round(pos.y);
+    slice.height = Math.round(newH);
         }
         break;
     case 'nw':
         const nw = slice.width + (slice.x - pos.x);
         const nh = slice.height + (slice.y - pos.y);
         if (nw >= 10 && nh >= 10) {
-    slice.x = pos.x;
-    slice.y = pos.y;
-    slice.width = nw;
-    slice.height = nh;
+    slice.x = Math.round(pos.x);
+    slice.y = Math.round(pos.y);
+    slice.width = Math.round(nw);
+    slice.height = Math.round(nh);
         }
         break;
     case 'e': // East - change width only
-        slice.width = Math.max(10, pos.x - slice.x);
+        slice.width = Math.round(Math.max(10, pos.x - slice.x));
         break;
     case 'w': // West - change width only
         const newWest = slice.width + (slice.x - pos.x);
         if (newWest >= 10) {
-    slice.x = pos.x;
-    slice.width = newWest;
+    slice.x = Math.round(pos.x);
+    slice.width = Math.round(newWest);
         }
         break;
     case 's': // South - change height only
-        slice.height = Math.max(10, pos.y - slice.y);
+        slice.height = Math.round(Math.max(10, pos.y - slice.y));
         break;
     case 'n': // North - change height only
         const newNorth = slice.height + (slice.y - pos.y);
         if (newNorth >= 10) {
-    slice.y = pos.y;
-    slice.height = newNorth;
+    slice.y = Math.round(pos.y);
+    slice.height = Math.round(newNorth);
         }
         break;
         }
@@ -924,6 +1170,13 @@ const app = {
     // RENDERING
     // ========================================
     render() {
+        // ArtNet mode rendering
+        if (this.currentMode === 'artnet') {
+            this.renderArtNetMode();
+            return;
+        }
+        
+        // Video mode rendering (existing code)
         this.ctx.clearRect(0, 0, this.canvasWidth, this.canvasHeight);
 
         // Draw alignment guides if dragging or resizing
@@ -1507,9 +1760,13 @@ const app = {
 	    duplicate.masks = duplicate.masks.map(m => {
 		const newMask = JSON.parse(JSON.stringify(m));
 		newMask.id = crypto.randomUUID();
-    this.slices.push(duplicate);
-    this.selectedSlice = duplicate;
-    this.showToast('Slice duplicated');
+		return newMask;
+	    });
+	}
+	
+	this.slices.push(duplicate);
+	this.selectedSlice = duplicate;
+	this.showToast('Slice duplicated');
         }
         
         this.updateUI();
@@ -1852,18 +2109,101 @@ const app = {
     },
 
     zoomIn() {
-        this.canvasZoom = Math.min(this.canvasZoom * 1.2, 5.0);
-        this.updateCanvasZoom();
+        this.zoomToCenter(1);
     },
 
     zoomOut() {
-        this.canvasZoom = Math.max(this.canvasZoom / 1.2, 0.2);
-        this.updateCanvasZoom();
+        this.zoomToCenter(-1);
     },
 
     resetZoom() {
+        const wrapper = document.getElementById('canvasWrapper');
+        const rect = wrapper.getBoundingClientRect();
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+        const scrollX = wrapper.scrollLeft;
+        const scrollY = wrapper.scrollTop;
+        const contentX = scrollX + centerX;
+        const contentY = scrollY + centerY;
+        
+        const oldZoom = this.canvasZoom;
         this.canvasZoom = 1.0;
         this.updateCanvasZoom();
+        
+        // Adjust scroll to keep center point
+        requestAnimationFrame(() => {
+            const zoomRatio = 1.0 / oldZoom;
+            const newContentX = contentX * zoomRatio;
+            const newContentY = contentY * zoomRatio;
+            wrapper.scrollLeft = newContentX - centerX;
+            wrapper.scrollTop = newContentY - centerY;
+        });
+    },
+
+    zoomToCenter(delta) {
+        const wrapper = document.getElementById('canvasWrapper');
+        const rect = wrapper.getBoundingClientRect();
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+        const scrollX = wrapper.scrollLeft;
+        const scrollY = wrapper.scrollTop;
+        const contentX = scrollX + centerX;
+        const contentY = scrollY + centerY;
+        
+        const oldZoom = this.canvasZoom;
+        const zoomFactor = 1.2;
+        const newZoom = delta > 0 
+            ? Math.min(oldZoom * zoomFactor, 5.0)
+            : Math.max(oldZoom / zoomFactor, 0.2);
+        
+        this.canvasZoom = newZoom;
+        this.updateCanvasZoom();
+        
+        // Wait for DOM update before adjusting scroll
+        requestAnimationFrame(() => {
+            const zoomRatio = newZoom / oldZoom;
+            const newContentX = contentX * zoomRatio;
+            const newContentY = contentY * zoomRatio;
+            wrapper.scrollLeft = newContentX - centerX;
+            wrapper.scrollTop = newContentY - centerY;
+        });
+    },
+
+    zoomToCursor(delta, e) {
+        const wrapper = document.getElementById('canvasWrapper');
+        const rect = wrapper.getBoundingClientRect();
+        
+        // Get mouse position relative to wrapper viewport
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        // Get current scroll position
+        const scrollX = wrapper.scrollLeft;
+        const scrollY = wrapper.scrollTop;
+        
+        // Mouse position relative to scrolled content
+        const contentX = scrollX + mouseX;
+        const contentY = scrollY + mouseY;
+        
+        // Calculate zoom ratio before/after
+        const oldZoom = this.canvasZoom;
+        const zoomFactor = 1.1;
+        const newZoom = delta > 0 
+            ? Math.min(oldZoom * zoomFactor, 5.0)
+            : Math.max(oldZoom / zoomFactor, 0.2);
+        
+        // Update zoom
+        this.canvasZoom = newZoom;
+        this.updateCanvasZoom();
+        
+        // Wait for DOM update before adjusting scroll
+        requestAnimationFrame(() => {
+            const zoomRatio = newZoom / oldZoom;
+            const newContentX = contentX * zoomRatio;
+            const newContentY = contentY * zoomRatio;
+            wrapper.scrollLeft = newContentX - mouseX;
+            wrapper.scrollTop = newContentY - mouseY;
+        });
     },
 
     updateCanvasZoom() {
@@ -2465,9 +2805,11 @@ const app = {
 
     updateUI() {
         const sliceCount = this.slices.filter(s => s.type === 'slice').length;
-        document.getElementById('sliceCount').textContent = sliceCount;
-        document.getElementById('selectedSlice').textContent = 
-    this.selectedSlice ? this.selectedSlice.label : 'None';
+        const sliceCountEl = document.getElementById('sliceCount');
+        if (sliceCountEl) {
+            sliceCountEl.textContent = sliceCount;
+        }
+        // selectedSlice element removed in ArtNet canvas info redesign
 
         this.updateScreenButtons();
 
@@ -3172,6 +3514,18 @@ const app = {
     toggle.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
         } else {
     toggle.textContent = panel.classList.contains('collapsed') ? '◀' : '▶';
+        }
+        
+        // Update zoom controls position based on right panel state
+        this.updateZoomControlsPosition();
+    },
+
+    updateZoomControlsPosition() {
+        const rightPanel = document.getElementById('rightPanel');
+        const zoomControls = document.querySelector('.zoom-controls');
+        if (zoomControls) {
+    const isCollapsed = rightPanel.classList.contains('collapsed');
+    zoomControls.style.right = isCollapsed ? '70px' : '370px';
         }
     },
 
@@ -4154,6 +4508,1741 @@ async function loadSlicesFromBackend() {
         app.showToast('❌ Backend load failed', 'error');
     }
 }
+
+// ========================================
+// ARTNET MODE FUNCTIONS
+// ========================================
+
+/**
+ * Switch between Video and ArtNet output modes
+ */
+app.setMode = function(mode, silent = false) {
+    this.currentMode = mode;
+    
+    // Save to localStorage for persistence
+    localStorage.setItem('outputSettings_mode', mode);
+    
+    // Update mode buttons
+    document.getElementById('modeVideoBtn').classList.toggle('active', mode === 'video');
+    document.getElementById('modeArtNetBtn').classList.toggle('active', mode === 'artnet');
+    
+    if (mode === 'video') {
+        // Show video mode sections
+        document.getElementById('canvasSection').style.display = '';
+        document.getElementById('toolsSection').style.display = '';
+        document.getElementById('outputsSection').style.display = '';
+        document.getElementById('videoModeSections').style.display = '';
+        
+        // Hide ArtNet sections
+        document.getElementById('artnetOutputsSection').style.display = 'none';
+        document.getElementById('artnetModeSections').style.display = 'none';
+        document.getElementById('artnetToolbar').style.display = 'none';
+        
+        // Update context menu
+        document.querySelector('.video-context-items').style.display = '';
+        document.querySelector('.artnet-context-items').style.display = 'none';
+        
+        // Switch to video preview stream
+        if (this.videoStreamImg) {
+            this.videoStreamImg.src = '/api/preview/stream?t=' + Date.now();
+            this.videoStreamImg.style.display = 'block';
+        }
+        
+        // Hide videoCanvas in video mode
+        if (this.videoCanvas) {
+            this.videoCanvas.style.display = 'none';
+        }
+        
+        // Stop ArtNet render loop
+        if (this.artnetRenderInterval) {
+            clearInterval(this.artnetRenderInterval);
+            this.artnetRenderInterval = null;
+        }
+        
+    } else if (mode === 'artnet') {
+        // Hide video mode sections
+        document.getElementById('toolsSection').style.display = 'none';
+        document.getElementById('outputsSection').style.display = 'none';
+        document.getElementById('videoModeSections').style.display = 'none';
+        
+        // Show ArtNet sections
+        document.getElementById('artnetOutputsSection').style.display = '';
+        document.getElementById('artnetModeSections').style.display = '';
+        document.getElementById('artnetToolbar').style.display = 'flex';
+        
+        // Update context menu
+        document.querySelector('.video-context-items').style.display = 'none';
+        document.querySelector('.artnet-context-items').style.display = '';
+        
+        // Switch to ArtNet video stream
+        if (this.videoStreamImg) {
+            const streamUrl = '/api/preview/artnet/stream?t=' + Date.now();
+            console.log('🎬 Switching to ArtNet stream:', streamUrl);
+            this.videoStreamImg.src = streamUrl;
+            this.videoStreamImg.style.display = 'block'; // Show video stream directly
+            
+            // Debug: Log when stream loads or fails
+            this.videoStreamImg.onload = () => {
+                console.log('✅ ArtNet stream loaded successfully');
+                console.log('📐 Stream dimensions:', this.videoStreamImg.naturalWidth, 'x', this.videoStreamImg.naturalHeight);
+                console.log('📐 Canvas dimensions:', this.canvasWidth, 'x', this.canvasHeight);
+                console.log('📐 Aspect ratio - Stream:', (this.videoStreamImg.naturalWidth / this.videoStreamImg.naturalHeight).toFixed(3), 
+                           'Canvas:', (this.canvasWidth / this.canvasHeight).toFixed(3));
+            };
+            this.videoStreamImg.onerror = (e) => {
+                console.error('❌ ArtNet stream failed to load:', e);
+                console.error('Stream URL:', streamUrl);
+                this.showToast('⚠️ ArtNet stream failed to load. Is the ArtNet player running with a video?', 'warning');
+            };
+        }
+        
+        // Hide videoCanvas - use img stream directly
+        if (this.videoCanvas) {
+            this.videoCanvas.style.display = 'none';
+        }
+        
+        // Start continuous render loop for LED dots overlay
+        if (!this.artnetRenderInterval) {
+            this.artnetRenderInterval = setInterval(() => this.render(), 40); // 25 fps
+        }
+        
+        // Load ArtNet data
+        this.loadArtNetState();
+    }
+    
+    this.render();
+    
+    // Show toast only if not silent (e.g., on user action, not init)
+    if (!silent) {
+        this.showToast(`Switched to ${mode === 'video' ? 'Video' : 'ArtNet'} mode`, 'success');
+    }
+};
+
+/**
+ * Sync ArtNet objects from editor shapes
+ */
+app.syncArtNetObjects = async function() {
+    try {
+        const response = await fetch('/api/artnet/routing/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ removeOrphaned: true })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            this.showToast('❌ Sync failed: ' + data.error, 'error');
+            return;
+        }
+        
+        // Backend returns created/removed (existing objects are skipped)
+        const createdCount = data.created.length;
+        const removedCount = data.removed.length;
+        
+        let message = '✅ Synced: ';
+        if (createdCount > 0) message += `${createdCount} created`;
+        if (createdCount > 0 && removedCount > 0) message += ', ';
+        if (removedCount > 0) message += `${removedCount} removed`;
+        if (createdCount === 0 && removedCount === 0) message += 'No changes (existing objects preserved)';
+        
+        this.showToast(message, 'success');
+        
+        // Reload ArtNet objects
+        await this.loadArtNetState();
+        
+        // Check if objects need assignment after sync
+        this.checkForUnassignedObjects();
+        
+    } catch (error) {
+        console.error('Sync failed:', error);
+        this.showToast('❌ Sync failed', 'error');
+    }
+};
+
+/**
+ * Load ArtNet state (objects + outputs)
+ */
+app.loadArtNetState = async function() {
+    try {
+        const response = await fetch('/api/artnet/routing/state');
+        const data = await response.json();
+        
+        if (!data.success) {
+            this.showToast('❌ Failed to load ArtNet state', 'error');
+            return;
+        }
+        
+        // Backend returns objects/outputs as dictionaries, convert to arrays
+        this.artnetObjects = Object.values(data.state.objects || {});
+        this.artnetOutputs = Object.values(data.state.outputs || {});
+        
+        this.updateArtNetObjectsList();
+        this.updateArtNetOutputsList();
+        this.updateSelectedObjectDisplay();
+        this.render();
+        
+        // Check if any objects exist but have no assignments
+        this.checkForUnassignedObjects();
+        
+    } catch (error) {
+        console.error('Failed to load ArtNet state:', error);
+        this.showToast('❌ Failed to load ArtNet state', 'error');
+    }
+};
+
+/**
+ * Update selected object display in canvas info
+ */
+app.updateSelectedObjectDisplay = function() {
+    const display = document.getElementById('selectedObjectName');
+    if (!display) return;
+    
+    if (this.artnetCanvasObjects.size > 0) {
+        if (this.artnetCanvasObjects.size === 1) {
+            const obj = Array.from(this.artnetCanvasObjects)[0];
+            display.textContent = obj.name || obj.id;
+        } else {
+            display.textContent = `${this.artnetCanvasObjects.size} objects`;
+        }
+    } else if (this.selectedArtNetObject) {
+        display.textContent = this.selectedArtNetObject.name || this.selectedArtNetObject.id;
+    } else {
+        display.textContent = 'None';
+    }
+};
+
+/**
+ * Update ArtNet objects list UI
+ */
+app.updateArtNetObjectsList = function() {
+    const container = document.getElementById('artnetObjectsList');
+    
+    if (!Array.isArray(this.artnetObjects)) {
+        console.error('artnetObjects is not an array:', this.artnetObjects);
+        this.artnetObjects = [];
+    }
+    
+    document.getElementById('artnetObjectCount').textContent = this.artnetObjects.length;
+    
+    if (this.artnetObjects.length === 0) {
+        container.innerHTML = '<div style="padding: 12px; text-align: center; color: #888; font-size: 12px;">No objects. Click "Sync from Editor" to generate objects from canvas shapes.</div>';
+        return;
+    }
+    
+    container.innerHTML = this.artnetObjects.map(obj => {
+        const isSelected = this.selectedArtNetObject && this.selectedArtNetObject.id === obj.id;
+        const isAssigned = obj.outputIds && obj.outputIds.length > 0;
+        const assignmentIndicator = isAssigned ? `<span style="color: #4CAF50;">✓ ${obj.outputIds.length} output(s)</span>` : '<span style="color: #ff9800;">⚠ Not assigned</span>';
+        const isVisible = obj.visible !== false; // Default to true if not set
+        const eyeIcon = isVisible ? '👁️' : '🚫';
+        return `
+            <div class="artnet-object-item ${isSelected ? 'selected' : ''}" 
+                 style="padding: 8px; margin-bottom: 4px; background: ${isSelected ? '#0d47a1' : '#1e1e1e'}; border: 1px solid ${isSelected ? '#1976d2' : '#3a3a3a'}; border-radius: 3px; display: flex; align-items: center; gap: 8px;">
+                <button onclick="event.stopPropagation(); app.toggleArtNetObjectVisibility('${obj.id}', ${!isVisible});"
+                        style="background: none; border: none; cursor: pointer; font-size: 18px; padding: 0; opacity: ${isVisible ? '1' : '0.4'};" 
+                        title="${isVisible ? 'Hide' : 'Show'} object">
+                    ${eyeIcon}
+                </button>
+                <div onclick="app.selectArtNetObject('${obj.id}')" style="flex: 1; cursor: pointer;">
+                    <div style="font-weight: 500; font-size: 13px; margin-bottom: 4px; opacity: ${isVisible ? '1' : '0.5'};">${obj.name || obj.id}</div>
+                    <div style="font-size: 11px; color: #888;">
+                        Shape: ${obj.type} | LEDs: ${obj.points.length} | Type: ${obj.ledType}
+                    </div>
+                    <div style="font-size: 10px; margin-top: 4px;">
+                        ${assignmentIndicator}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+/**
+ * Select ArtNet object
+ */
+app.selectArtNetObject = async function(objectId) {
+    try {
+        const response = await fetch(`/api/artnet/routing/objects/${objectId}`);
+        const data = await response.json();
+        
+        if (!data.success) {
+            this.showToast('❌ Failed to load object', 'error');
+            return;
+        }
+        
+        this.selectedArtNetObject = data.object;
+        this.updateArtNetObjectsList();
+        this.updateArtNetPropertiesPanel();
+        this.updateSelectedObjectDisplay();
+        this.render();
+        
+    } catch (error) {
+        console.error('Failed to load object:', error);
+        this.showToast('❌ Failed to load object', 'error');
+    }
+};
+
+/**
+ * Toggle ArtNet object visibility on canvas
+ */
+app.toggleArtNetObjectVisibility = async function(objectId, visible) {
+    try {
+        const response = await fetch(`/api/artnet/routing/objects/${objectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ visible })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            this.showToast('❌ Failed to update visibility', 'error');
+            return;
+        }
+        
+        // Update local object
+        const obj = this.artnetObjects.find(o => o.id === objectId);
+        if (obj) {
+            obj.visible = visible;
+        }
+        
+        // Update selected object if it's the one being toggled
+        if (this.selectedArtNetObject && this.selectedArtNetObject.id === objectId) {
+            this.selectedArtNetObject.visible = visible;
+        }
+        
+        this.updateArtNetObjectsList();
+        this.render();
+        
+    } catch (error) {
+        console.error('Failed to toggle visibility:', error);
+        this.showToast('❌ Failed to toggle visibility', 'error');
+    }
+};
+
+/**
+ * Update ArtNet properties panel
+ */
+app.updateArtNetPropertiesPanel = function() {
+    const placeholder = document.getElementById('artnetPropertiesPlaceholder');
+    const form = document.getElementById('artnetPropertiesForm');
+    
+    if (!this.selectedArtNetObject) {
+        placeholder.style.display = '';
+        form.style.display = 'none';
+        return;
+    }
+    
+    placeholder.style.display = 'none';
+    form.style.display = '';
+    
+    const obj = this.selectedArtNetObject;
+    
+    // Debug: Log the object to see what we're working with
+    console.log('Selected ArtNet Object:', obj);
+    
+    // Populate form (match backend property names)
+    document.getElementById('artnetObjName').value = obj.name || obj.id;
+    
+    // Calculate and populate transform values
+    if (Array.isArray(obj.points) && obj.points.length > 0) {
+        const bounds = this.calculatePointsBounds(obj.points);
+        const centerX = Math.round((bounds.minX + bounds.maxX) / 2);
+        const centerY = Math.round((bounds.minY + bounds.maxY) / 2);
+        
+        // Initialize transform properties if missing
+        if (obj.rotation === undefined) obj.rotation = 0;
+        if (obj.scaleX === undefined) obj.scaleX = 1;
+        if (obj.scaleY === undefined) obj.scaleY = 1;
+        
+        document.getElementById('artnetTransformX').value = centerX;
+        document.getElementById('artnetTransformY').value = centerY;
+        document.getElementById('artnetTransformRotation').value = obj.rotation;
+        document.getElementById('artnetTransformScaleX').value = obj.scaleX;
+        document.getElementById('artnetTransformScaleY').value = obj.scaleY;
+        
+        console.log('Transform values:', { centerX, centerY, rotation: obj.rotation, scaleX: obj.scaleX, scaleY: obj.scaleY });
+    }
+    
+    document.getElementById('artnetLedType').value = obj.ledType || 'RGB';
+    document.getElementById('artnetChannelOrder').value = obj.channelOrder || 'RGB';
+    document.getElementById('artnetWhiteDetection').checked = obj.whiteDetection || false;
+    
+    // Backend brightness is -255 to 255, convert to 0-100 range for UI
+    const brightnessPercent = Math.round((obj.brightness || 0) / 255 * 100 + 100) / 2;
+    document.getElementById('artnetBrightness').value = brightnessPercent;
+    document.getElementById('artnetBrightnessValue').textContent = brightnessPercent.toFixed(0) + '%';
+    
+    // Backend contrast is -255 to 255, convert to 0-100 range for UI
+    const contrastPercent = Math.round((obj.contrast || 0) / 255 * 100 + 100) / 2;
+    document.getElementById('artnetContrast').value = contrastPercent;
+    document.getElementById('artnetContrastValue').textContent = contrastPercent.toFixed(0) + '%';
+    
+    // Delay
+    document.getElementById('artnetDelay').value = obj.delay || 0;
+    
+    // Backend has red/green/blue as -255 to 255, convert to 0-200 range for UI
+    const redPercent = Math.round((obj.red || 0) / 255 * 100 + 100);
+    const greenPercent = Math.round((obj.green || 0) / 255 * 100 + 100);
+    const bluePercent = Math.round((obj.blue || 0) / 255 * 100 + 100);
+    
+    document.getElementById('artnetColorR').value = redPercent;
+    document.getElementById('artnetColorG').value = greenPercent;
+    document.getElementById('artnetColorB').value = bluePercent;
+    document.getElementById('artnetColorRValue').textContent = redPercent.toFixed(0) + '%';
+    document.getElementById('artnetColorGValue').textContent = greenPercent.toFixed(0) + '%';
+    document.getElementById('artnetColorBValue').textContent = bluePercent.toFixed(0) + '%';
+    
+    // Show/hide white detection based on LED type
+    const whiteRow = document.getElementById('whiteDetectionRow');
+    whiteRow.style.display = (obj.ledType === 'RGBW' || obj.ledType === 'RGBAW') ? '' : 'none';
+    
+    // Populate output assignment dropdown
+    const outputSelect = document.getElementById('artnetOutputAssignment');
+    
+    // Temporarily disable onchange to prevent triggering during population
+    this.isUpdatingAssignment = true;
+    
+    outputSelect.innerHTML = '<option value="">None</option>' + 
+        this.artnetOutputs.map(out => `<option value="${out.id}">${out.name || out.targetIP}:${out.startUniverse}</option>`).join('');
+    
+    // Find which output this object is assigned to and select it
+    const assignedOutput = this.artnetOutputs.find(out => 
+        Array.isArray(out.assignedObjects) && out.assignedObjects.includes(obj.id)
+    );
+    
+    if (assignedOutput) {
+        outputSelect.value = assignedOutput.id;
+    } else {
+        outputSelect.value = '';
+    }
+    
+    // Re-enable onchange after a short delay
+    setTimeout(() => {
+        this.isUpdatingAssignment = false;
+    }, 100);
+    
+    // Slave mode checkbox and master dropdown
+    const isSlave = !!obj.masterId;
+    document.getElementById('artnetIsSlave').checked = isSlave;
+    
+    // Populate master object dropdown with objects of same type AND same number of dots
+    const masterSelect = document.getElementById('artnetMasterObject');
+    const objPointCount = Array.isArray(obj.points) ? obj.points.length : 0;
+    const similarObjects = this.artnetObjects.filter(o => 
+        o.id !== obj.id && 
+        o.type === obj.type &&
+        Array.isArray(o.points) &&
+        o.points.length === objPointCount
+    );
+    
+    masterSelect.innerHTML = '<option value="">Select Master...</option>' +
+        similarObjects.map(o => {
+            const pointCount = Array.isArray(o.points) ? o.points.length : 0;
+            return `<option value="${o.id}">${o.name || o.id} (${pointCount} LEDs)</option>`;
+        }).join('');
+    
+    if (obj.masterId) {
+        masterSelect.value = obj.masterId;
+    }
+    
+    // Show/hide master dropdown based on slave checkbox
+    document.getElementById('artnetMasterRow').style.display = isSlave ? '' : 'none';
+};
+
+/**
+ * Update slider display values only (no API call)
+ */
+app.updateSliderDisplay = function(property) {
+    if (property === 'brightness') {
+        const percent = parseInt(document.getElementById('artnetBrightness').value);
+        document.getElementById('artnetBrightnessValue').textContent = percent.toFixed(0) + '%';
+    } else if (property === 'contrast') {
+        const percent = parseInt(document.getElementById('artnetContrast').value);
+        document.getElementById('artnetContrastValue').textContent = percent.toFixed(0) + '%';
+    } else if (property === 'color_correction') {
+        const redPercent = parseInt(document.getElementById('artnetColorR').value);
+        const greenPercent = parseInt(document.getElementById('artnetColorG').value);
+        const bluePercent = parseInt(document.getElementById('artnetColorB').value);
+        
+        document.getElementById('artnetColorRValue').textContent = redPercent.toFixed(0) + '%';
+        document.getElementById('artnetColorGValue').textContent = greenPercent.toFixed(0) + '%';
+        document.getElementById('artnetColorBValue').textContent = bluePercent.toFixed(0) + '%';
+    }
+};
+
+/**
+ * Update ArtNet property (saves to backend)
+ */
+app.updateArtNetProperty = async function(property) {
+    if (!this.selectedArtNetObject) return;
+    
+    const obj = this.selectedArtNetObject;
+    const updates = {};
+    
+    if (property === 'led_type') {
+        updates.ledType = document.getElementById('artnetLedType').value;
+    } else if (property === 'channel_order') {
+        updates.channelOrder = document.getElementById('artnetChannelOrder').value;
+    } else if (property === 'white_detection_enabled') {
+        updates.whiteDetection = document.getElementById('artnetWhiteDetection').checked;
+    } else if (property === 'delay') {
+        updates.delay = parseInt(document.getElementById('artnetDelay').value) || 0;
+    } else if (property === 'brightness') {
+        // Convert UI 0-100 to backend -255 to 255
+        const percent = parseInt(document.getElementById('artnetBrightness').value);
+        updates.brightness = Math.round((percent * 2 - 100) * 255 / 100);
+    } else if (property === 'contrast') {
+        // Convert UI 0-100 to backend -255 to 255
+        const percent = parseInt(document.getElementById('artnetContrast').value);
+        updates.contrast = Math.round((percent * 2 - 100) * 255 / 100);
+    } else if (property === 'color_correction') {
+        // Convert UI 0-200 to backend -255 to 255
+        const redPercent = parseInt(document.getElementById('artnetColorR').value);
+        const greenPercent = parseInt(document.getElementById('artnetColorG').value);
+        const bluePercent = parseInt(document.getElementById('artnetColorB').value);
+        
+        updates.red = Math.round((redPercent - 100) * 255 / 100);
+        updates.green = Math.round((greenPercent - 100) * 255 / 100);
+        updates.blue = Math.round((bluePercent - 100) * 255 / 100);
+    } else if (property === 'master_id') {
+        const masterId = document.getElementById('artnetMasterObject').value;
+        updates.masterId = masterId || null;
+    }
+    
+    try {
+        const response = await fetch(`/api/artnet/routing/objects/${obj.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            this.showToast('❌ Update failed', 'error');
+            return;
+        }
+        
+        // Update local object
+        Object.assign(this.selectedArtNetObject, updates);
+        this.updateArtNetPropertiesPanel();
+        
+    } catch (error) {
+        console.error('Update failed:', error);
+        this.showToast('❌ Update failed', 'error');
+    }
+};
+
+/**
+ * Update ArtNet object transform (position, rotation, scale)
+ */
+app.updateArtNetTransform = async function(type) {
+    console.log('updateArtNetTransform called with type:', type);
+    
+    if (!this.selectedArtNetObject) {
+        console.warn('No selected object');
+        return;
+    }
+    
+    const obj = this.selectedArtNetObject;
+    if (!Array.isArray(obj.points) || obj.points.length === 0) {
+        console.warn('Object has no points');
+        return;
+    }
+    
+    // Get current center
+    const bounds = this.calculatePointsBounds(obj.points);
+    const currentCenterX = (bounds.minX + bounds.maxX) / 2;
+    const currentCenterY = (bounds.minY + bounds.maxY) / 2;
+    
+    console.log('Current center:', { currentCenterX, currentCenterY });
+    
+    if (type === 'x' || type === 'y') {
+        // Position change - move all points
+        const targetX = parseFloat(document.getElementById('artnetTransformX').value) || 0;
+        const targetY = parseFloat(document.getElementById('artnetTransformY').value) || 0;
+        
+        console.log('Target position:', { targetX, targetY });
+        
+        const dx = targetX - currentCenterX;
+        const dy = targetY - currentCenterY;
+        
+        console.log('Delta:', { dx, dy });
+        
+        obj.points.forEach(point => {
+            point.x = point.x + dx;
+            point.y = point.y + dy;
+        });
+        
+    } else if (type === 'rotation') {
+        // Rotation - rotate around center
+        const targetRotation = parseFloat(document.getElementById('artnetTransformRotation').value) || 0;
+        const currentRotation = obj.rotation || 0;
+        const deltaAngle = (targetRotation - currentRotation) * Math.PI / 180;
+        
+        console.log('Rotation:', { targetRotation, currentRotation, deltaAngle });
+        
+        obj.points.forEach(point => {
+            const relX = point.x - currentCenterX;
+            const relY = point.y - currentCenterY;
+            const cos = Math.cos(deltaAngle);
+            const sin = Math.sin(deltaAngle);
+            point.x = currentCenterX + (relX * cos - relY * sin);
+            point.y = currentCenterY + (relX * sin + relY * cos);
+        });
+        
+        obj.rotation = targetRotation;
+        
+    } else if (type === 'scaleX' || type === 'scaleY') {
+        // Scale - scale around center
+        const targetScaleX = parseFloat(document.getElementById('artnetTransformScaleX').value) || 1;
+        const targetScaleY = parseFloat(document.getElementById('artnetTransformScaleY').value) || 1;
+        const currentScaleX = obj.scaleX || 1;
+        const currentScaleY = obj.scaleY || 1;
+        
+        console.log('Scale:', { targetScaleX, targetScaleY, currentScaleX, currentScaleY });
+        
+        const scaleFactorX = targetScaleX / currentScaleX;
+        const scaleFactorY = targetScaleY / currentScaleY;
+        
+        obj.points.forEach(point => {
+            const relX = point.x - currentCenterX;
+            const relY = point.y - currentCenterY;
+            point.x = currentCenterX + relX * scaleFactorX;
+            point.y = currentCenterY + relY * scaleFactorY;
+        });
+        
+        obj.scaleX = targetScaleX;
+        obj.scaleY = targetScaleY;
+    }
+    
+    console.log('Saving transformed object...');
+    
+    // Save the modified points to backend
+    await this.saveArtNetObjectPoints(obj);
+    this.render();
+    
+    console.log('Transform complete');
+};
+
+/**
+ * Toggle slave mode - show/hide master object dropdown
+ */
+app.toggleSlaveMode = function() {
+    const isSlave = document.getElementById('artnetIsSlave').checked;
+    const masterRow = document.getElementById('artnetMasterRow');
+    
+    masterRow.style.display = isSlave ? '' : 'none';
+    
+    // If unchecking, clear the master assignment
+    if (!isSlave && this.selectedArtNetObject) {
+        this.updateArtNetProperty('master_id');
+    }
+};
+
+/**
+ * Assign ArtNet object to output (auto-triggered on dropdown change)
+ */
+app.assignArtNetObjectToOutput = async function() {
+    if (!this.selectedArtNetObject) return;
+    
+    // Skip if this is being triggered during programmatic update
+    if (this.isUpdatingAssignment) return;
+    
+    const outputId = document.getElementById('artnetOutputAssignment').value;
+    
+    try {
+        // First, unassign from any current output
+        const currentOutput = this.artnetOutputs.find(out => 
+            Array.isArray(out.assignedObjects) && out.assignedObjects.includes(this.selectedArtNetObject.id)
+        );
+        
+        if (currentOutput) {
+            await fetch('/api/artnet/routing/unassign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    objectId: this.selectedArtNetObject.id,
+                    outputId: currentOutput.id
+                })
+            });
+        }
+        
+        // Then assign to new output (if one was selected)
+        if (outputId) {
+            const response = await fetch('/api/artnet/routing/assign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    objectId: this.selectedArtNetObject.id,
+                    outputId: outputId
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!data.success) {
+                this.showToast('❌ Assignment failed', 'error');
+                return;
+            }
+            
+            this.showToast('✅ Object assigned to output', 'success');
+        } else {
+            this.showToast('✅ Object unassigned', 'success');
+        }
+        
+        await this.loadArtNetState();
+        
+    } catch (error) {
+        console.error('Assignment failed:', error);
+        this.showToast('❌ Assignment failed', 'error');
+    }
+};
+
+/**
+ * Delete ArtNet object
+ */
+app.deleteArtNetObject = async function() {
+    if (!this.selectedArtNetObject) return;
+    
+    if (!confirm(`Delete object "${this.selectedArtNetObject.name || this.selectedArtNetObject.id}"?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/artnet/routing/objects/${this.selectedArtNetObject.id}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            this.showToast('❌ Delete failed', 'error');
+            return;
+        }
+        
+        this.showToast('✅ Object deleted', 'success');
+        this.selectedArtNetObject = null;
+        await this.loadArtNetState();
+        this.updateArtNetPropertiesPanel();
+        
+    } catch (error) {
+        console.error('Delete failed:', error);
+        this.showToast('❌ Delete failed', 'error');
+    }
+};
+
+/**
+ * Clear all ArtNet objects
+ */
+app.clearArtNetObjects = async function() {
+    if (!confirm('Delete all ArtNet objects?')) return;
+    
+    try {
+        for (const obj of this.artnetObjects) {
+            await fetch(`/api/artnet/routing/objects/${obj.id}`, { method: 'DELETE' });
+        }
+        
+        this.showToast('✅ All objects deleted', 'success');
+        this.selectedArtNetObject = null;
+        await this.loadArtNetState();
+        this.updateArtNetPropertiesPanel();
+        
+    } catch (error) {
+        console.error('Clear failed:', error);
+        this.showToast('❌ Clear failed', 'error');
+    }
+};
+
+/**
+ * Update ArtNet outputs list
+ */
+app.updateArtNetOutputsList = function() {
+    const container = document.getElementById('artnetOutputsContainer');
+    
+    if (!Array.isArray(this.artnetOutputs)) {
+        console.error('artnetOutputs is not an array:', this.artnetOutputs);
+        this.artnetOutputs = [];
+    }
+    
+    if (this.artnetOutputs.length === 0) {
+        container.innerHTML = '<div style="padding: 12px; text-align: center; color: #888; font-size: 12px;">No outputs configured</div>';
+        return;
+    }
+    
+    container.innerHTML = this.artnetOutputs.map(out => {
+        // Get assigned objects for this output
+        const assignedObjects = Array.isArray(out.assignedObjects) ? out.assignedObjects : [];
+        
+        // Build list of assigned objects with channel ranges
+        let objectsHtml = '';
+        if (assignedObjects.length > 0) {
+            let currentChannel = 1;
+            const objectItems = assignedObjects.map(objId => {
+                const obj = this.artnetObjects.find(o => o.id === objId);
+                if (!obj) return '';
+                
+                const ledCount = Array.isArray(obj.points) ? obj.points.length : 0;
+                const channelsPerPixel = obj.channelsPerPixel || 3;
+                const totalChannels = ledCount * channelsPerPixel;
+                const startCh = currentChannel;
+                const endCh = currentChannel + totalChannels - 1;
+                
+                currentChannel += totalChannels;
+                
+                return `<div style="font-size: 10px; color: #666; padding: 2px 0; display: flex; justify-content: space-between;">
+                    <span style="color: #aaa;">${obj.name || obj.id}</span>
+                    <span>Ch ${startCh}-${endCh}</span>
+                </div>`;
+            }).filter(html => html).join('');
+            
+            objectsHtml = `
+                <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2a2a;">
+                    <div style="font-size: 10px; color: #666; font-weight: 500; margin-bottom: 4px;">Assigned Objects:</div>
+                    ${objectItems}
+                </div>
+            `;
+        }
+        
+        return `
+            <div class="artnet-output-item" 
+                 data-output-id="${out.id}"
+                 ondblclick="app.editArtNetOutput('${out.id}')"
+                 oncontextmenu="app.showOutputContextMenu(event, '${out.id}')"
+                 style="padding: 10px; background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 3px; cursor: pointer;"
+                 title="Double-click to edit, right-click for options">
+                <div style="font-weight: 500; font-size: 13px; margin-bottom: 4px;">${out.name || 'Output'}</div>
+                <div style="font-size: 11px; color: #888;">
+                    ${out.targetIP}:${out.startUniverse} | ${out.fps} FPS
+                </div>
+                ${objectsHtml}
+            </div>
+        `;
+    }).join('');
+};
+
+/**
+ * Add ArtNet output - open modal for new output
+ */
+app.addArtNetOutput = function() {
+    // Clear edit ID (this is a new output)
+    document.getElementById('editOutputId').value = '';
+    
+    // Update modal UI for create mode
+    document.getElementById('outputModalTitle').textContent = '➕ Add ArtNet Output';
+    document.getElementById('outputModalSaveBtn').textContent = 'Create Output';
+    
+    // Reset form to defaults
+    document.getElementById('newOutputName').value = `Output ${this.artnetOutputs.length + 1}`;
+    document.getElementById('newOutputIP').value = '127.0.0.1';
+    document.getElementById('newOutputSubnet').value = '255.255.255.0';
+    document.getElementById('newOutputUniverse').value = '0';
+    document.getElementById('newOutputFPS').value = '40';
+    document.getElementById('newOutputDelay').value = '0';
+    
+    // Show modal
+    document.getElementById('addOutputModal').style.display = 'flex';
+};
+
+/**
+ * Edit ArtNet output - open modal with existing output data
+ */
+app.editArtNetOutput = function(outputId) {
+    const output = this.artnetOutputs.find(out => out.id === outputId);
+    if (!output) {
+        this.showToast('❌ Output not found', 'error');
+        return;
+    }
+    
+    // Set edit ID
+    document.getElementById('editOutputId').value = outputId;
+    
+    // Update modal UI for edit mode
+    document.getElementById('outputModalTitle').textContent = '✏️ Edit ArtNet Output';
+    document.getElementById('outputModalSaveBtn').textContent = 'Update Output';
+    
+    // Populate form with existing data
+    document.getElementById('newOutputName').value = output.name || '';
+    document.getElementById('newOutputIP').value = output.targetIP || '127.0.0.1';
+    document.getElementById('newOutputSubnet').value = output.subnet || '255.255.255.0';
+    document.getElementById('newOutputUniverse').value = output.startUniverse || 0;
+    document.getElementById('newOutputFPS').value = output.fps || 40;
+    document.getElementById('newOutputDelay').value = output.delay || 0;
+    
+    // Show modal
+    document.getElementById('addOutputModal').style.display = 'flex';
+};
+
+/**
+ * Close add output modal
+ */
+app.closeAddOutputModal = function() {
+    document.getElementById('addOutputModal').style.display = 'none';
+};
+
+/**
+ * Save ArtNet output from modal (create or update)
+ */
+app.saveNewArtNetOutput = async function() {
+    const editId = document.getElementById('editOutputId').value;
+    const isEdit = !!editId;
+    
+    const name = document.getElementById('newOutputName').value.trim();
+    const ip = document.getElementById('newOutputIP').value.trim();
+    const subnet = document.getElementById('newOutputSubnet').value.trim();
+    const universe = parseInt(document.getElementById('newOutputUniverse').value);
+    const fps = parseInt(document.getElementById('newOutputFPS').value);
+    const delay = parseInt(document.getElementById('newOutputDelay').value);
+    
+    // Validate inputs
+    if (!name) {
+        this.showToast('❌ Please enter an output name', 'error');
+        return;
+    }
+    
+    if (!ip || !ip.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        this.showToast('❌ Please enter a valid IP address', 'error');
+        return;
+    }
+    
+    if (isNaN(universe) || universe < 0 || universe > 32767) {
+        this.showToast('❌ Universe must be between 0 and 32767', 'error');
+        return;
+    }
+    
+    if (isNaN(fps) || fps < 1 || fps > 120) {
+        this.showToast('❌ FPS must be between 1 and 120', 'error');
+        return;
+    }
+    
+    try {
+        const outputData = {
+            id: isEdit ? editId : `out-${Date.now()}`,
+            name: name,
+            targetIP: ip,
+            subnet: subnet,
+            startUniverse: universe,
+            fps: fps,
+            delay: delay
+        };
+        
+        const url = isEdit ? `/api/artnet/routing/outputs/${editId}` : '/api/artnet/routing/outputs';
+        const method = isEdit ? 'PUT' : 'POST';
+        
+        const response = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(outputData)
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            this.showToast(`❌ Failed to ${isEdit ? 'update' : 'create'} output`, 'error');
+            return;
+        }
+        
+        this.showToast(`✅ Output ${isEdit ? 'updated' : 'created'}`, 'success');
+        this.closeAddOutputModal();
+        await this.loadArtNetState();
+        
+    } catch (error) {
+        console.error(`Failed to ${isEdit ? 'update' : 'create'} output:`, error);
+        this.showToast(`❌ Failed to ${isEdit ? 'update' : 'create'} output`, 'error');
+    }
+};
+
+/**
+ * Delete ArtNet output
+ */
+app.deleteArtNetOutput = async function(outputId) {
+    if (!confirm('Delete this ArtNet output?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/artnet/routing/outputs/${outputId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            this.showToast('❌ Failed to delete output', 'error');
+            return;
+        }
+        
+        this.showToast('✅ Output deleted', 'success');
+        await this.loadArtNetState();
+        
+    } catch (error) {
+        console.error('Failed to delete output:', error);
+        this.showToast('❌ Failed to delete output', 'error');
+    }
+};
+
+/**
+ * Get color at point from background (video canvas)
+ */
+app.getColorAtPoint = function(x, y) {
+    if (!this.videoCanvas) {
+        return { r: 200, g: 200, b: 200 }; // Default gray
+    }
+    
+    try {
+        // Get pixel data from video canvas
+        const imageData = this.videoCtx.getImageData(
+            Math.floor(x),
+            Math.floor(y),
+            1,
+            1
+        ).data;
+        
+        return {
+            r: imageData[0],
+            g: imageData[1],
+            b: imageData[2]
+        };
+    } catch (e) {
+        return { r: 200, g: 200, b: 200 };
+    }
+};
+
+/**
+ * Move ArtNet object points
+ */
+app.moveArtNetObject = function(obj, dx, dy) {
+    obj.points.forEach(point => {
+        point.x = point.x + dx;
+        point.y = point.y + dy;
+    });
+};
+
+/**
+ * Calculate bounds of points
+ */
+app.calculatePointsBounds = function(points) {
+    if (!points || points.length === 0) {
+        return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    }
+    return {
+        minX: Math.min(...points.map(p => p.x)),
+        maxX: Math.max(...points.map(p => p.x)),
+        minY: Math.min(...points.map(p => p.y)),
+        maxY: Math.max(...points.map(p => p.y))
+    };
+};
+
+/**
+ * Scale ArtNet object points
+ */
+app.scaleArtNetObject = function(obj, dx, dy, handle) {
+    const bounds = this.calculatePointsBounds(obj.points);
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+    
+    let scaleX = 1, scaleY = 1;
+    
+    const currentWidth = bounds.maxX - bounds.minX;
+    const currentHeight = bounds.maxY - bounds.minY;
+    
+    if (handle === 'se' || handle === 'ne') {
+        scaleX = 1 + dx / (currentWidth || 1);
+    }
+    if (handle === 'se' || handle === 'sw') {
+        scaleY = 1 + dy / (currentHeight || 1);
+    }
+    if (handle === 'nw' || handle === 'sw') {
+        scaleX = 1 - dx / (currentWidth || 1);
+    }
+    if (handle === 'nw' || handle === 'ne') {
+        scaleY = 1 - dy / (currentHeight || 1);
+    }
+    
+    // Apply scale
+    obj.points.forEach(point => {
+        const relX = point.x - centerX;
+        const relY = point.y - centerY;
+        point.x = centerX + relX * scaleX;
+        point.y = centerY + relY * scaleY;
+    });
+    
+    // Update cumulative scale values
+    obj.scaleX = (obj.scaleX || 1) * scaleX;
+    obj.scaleY = (obj.scaleY || 1) * scaleY;
+};
+
+/**
+ * Rotate ArtNet object points
+ */
+app.rotateArtNetObject = function(obj, mouseX, mouseY) {
+    const bounds = this.calculatePointsBounds(obj.points);
+    const centerX = ( bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+    
+    let angle = Math.atan2(mouseY - centerY, mouseX - centerX);
+    
+    // Snap to 15-degree increments (0, 30, 45, 60, 75, 90, etc.)
+    const snapIncrement = 15 * Math.PI / 180; // 15 degrees in radians
+    angle = Math.round(angle / snapIncrement) * snapIncrement;
+    
+    if (!this.artnetLastRotationAngle) {
+        this.artnetLastRotationAngle = angle;
+        return;
+    }
+    
+    const deltaAngle = angle - this.artnetLastRotationAngle;
+    this.artnetLastRotationAngle = angle;
+    
+    // Rotate all points
+    obj.points.forEach(point => {
+        const relX = point.x - centerX;
+        const relY = point.y - centerY;
+        const cos = Math.cos(deltaAngle);
+        const sin = Math.sin(deltaAngle);
+        point.x = centerX + (relX * cos - relY * sin);
+        point.y = centerY + (relX * sin + relY * cos);
+    });
+    
+    // Update cumulative rotation
+    obj.rotation = ((obj.rotation || 0) + deltaAngle * 180 / Math.PI) % 360;
+};
+
+/**
+ * Get transform handle at point
+ */
+app.getArtNetHandleAtPoint = function(x, y, bounds) {
+    const handleSize = 8;
+    const handles = {
+        'nw': { x: bounds.minX, y: bounds.minY },
+        'ne': { x: bounds.maxX, y: bounds.minY },
+        'sw': { x: bounds.minX, y: bounds.maxY },
+        'se': { x: bounds.maxX, y: bounds.maxY },
+        'rotate': { x: (bounds.minX + bounds.maxX) / 2, y: bounds.minY - 30 }
+    };
+    
+    for (const [name, pos] of Object.entries(handles)) {
+        if (Math.abs(x - pos.x) < handleSize && Math.abs(y - pos.y) < handleSize) {
+            return name;
+        }
+    }
+    return null;
+};
+
+/**
+ * Check if point is inside object bounds
+ */
+app.isPointInArtNetObject = function(x, y, obj) {
+    const bounds = this.calculatePointsBounds(obj.points);
+    return x >= bounds.minX - 5 && x <= bounds.maxX + 5 &&
+           y >= bounds.minY - 5 && y <= bounds.maxY + 5;
+};
+
+/**
+ * Save ArtNet object points after manipulation
+ */
+app.saveArtNetObjectPoints = async function(obj) {
+    try {
+        // Round all points to integers before saving
+        const roundedPoints = obj.points.map(p => ({
+            id: p.id,
+            x: Math.round(p.x),
+            y: Math.round(p.y)
+        }));
+        
+        const payload = {
+            points: roundedPoints
+        };
+        
+        // Include transform properties if they exist
+        if (obj.rotation !== undefined) payload.rotation = obj.rotation;
+        if (obj.scaleX !== undefined) payload.scaleX = obj.scaleX;
+        if (obj.scaleY !== undefined) payload.scaleY = obj.scaleY;
+        
+        const response = await fetch(`/api/artnet/routing/objects/${obj.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        if (!data.success) {
+            console.error('Failed to save object points');
+        }
+    } catch (error) {
+        console.error('Failed to save object points:', error);
+    }
+};
+
+/**
+ * Show context menu for ArtNet output
+ */
+app.showOutputContextMenu = function(e, outputId) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Find the output
+    const output = this.artnetOutputs.find(out => out.id === outputId);
+    if (!output) return;
+    
+    this.outputContextMenuTarget = output;
+    
+    const menu = document.getElementById('outputContextMenu');
+    
+    // Position menu initially to measure size
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+    menu.classList.add('active');
+    
+    // Adjust position if menu would overflow viewport
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    // Adjust horizontal position
+    let left = e.clientX;
+    if (left + menuRect.width > viewportWidth) {
+        left = viewportWidth - menuRect.width - 10;
+    }
+    
+    // Adjust vertical position
+    let top = e.clientY;
+    if (top + menuRect.height > viewportHeight) {
+        top = viewportHeight - menuRect.height - 10;
+    }
+    
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+};
+
+/**
+ * Close output context menu
+ */
+app.closeOutputContextMenu = function() {
+    const menu = document.getElementById('outputContextMenu');
+    menu.classList.remove('active');
+    this.outputContextMenuTarget = null;
+};
+
+/**
+ * Handle output context menu actions
+ */
+app.outputContextMenuAction = function(action, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    
+    const output = this.outputContextMenuTarget;
+    this.closeOutputContextMenu();
+    
+    if (!output) return;
+    
+    switch (action) {
+        case 'preview':
+            this.openDmxMonitor(output);
+            break;
+        case 'edit':
+            this.editArtNetOutput(output.id);
+            break;
+        case 'delete':
+            this.deleteArtNetOutput(output.id);
+            break;
+    }
+};
+
+/**
+ * Open DMX monitor modal
+ */
+app.openDmxMonitor = function(output) {
+    const modal = document.getElementById('dmxMonitorModal');
+    modal.style.display = 'flex';
+    
+    // Populate universe selector
+    const select = document.getElementById('dmxUniverseSelect');
+    const universes = [...new Set(this.artnetOutputs.map(out => out.startUniverse))].sort((a, b) => a - b);
+    select.innerHTML = universes.map(u => `<option value="${u}"${output && output.startUniverse === u ? ' selected' : ''}>Universe ${u}</option>`).join('');
+    
+    // Update modal title with output name if provided
+    const modalTitle = modal.querySelector('h3');
+    if (output) {
+        modalTitle.textContent = `DMX Monitor - ${output.name || 'Output'} (Universe ${output.startUniverse})`;
+    } else {
+        modalTitle.textContent = 'DMX Monitor - Output Preview';
+    }
+    
+    // Initialize DMX grid (512 channels)
+    const grid = document.getElementById('dmxChannelGrid');
+    grid.innerHTML = '';
+    for (let i = 0; i < 512; i++) {
+        const channel = document.createElement('div');
+        channel.className = 'dmx-channel';
+        channel.id = `dmx-ch-${i + 1}`;
+        channel.dataset.channel = `Ch ${i + 1}`;
+        channel.textContent = '0';
+        channel.title = `Channel ${i + 1}`;
+        channel.style.background = '#000';
+        channel.style.color = '#666';
+        grid.appendChild(channel);
+    }
+    
+    // Start polling DMX values (simulated - would need backend endpoint)
+    this.dmxMonitorInterval = setInterval(() => this.updateDmxMonitor(), 100);
+};
+
+/**
+ * Close DMX monitor
+ */
+app.closeDmxMonitor = function() {
+    document.getElementById('dmxMonitorModal').style.display = 'none';
+    if (this.dmxMonitorInterval) {
+        clearInterval(this.dmxMonitorInterval);
+        this.dmxMonitorInterval = null;
+    }
+};
+
+/**
+ * Update DMX monitor values
+ */
+app.updateDmxMonitor = async function() {
+    try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+        
+        if (!data.dmx_preview || data.dmx_preview.length === 0) {
+            document.getElementById('dmxStats').textContent = `No DMX data available - Start playback to see output`;
+            return;
+        }
+        
+        const selectedUniverse = parseInt(document.getElementById('dmxUniverseSelect').value);
+        
+        // dmx_preview is a flat array of RGB values [r1,g1,b1,r2,g2,b2,...]
+        // Convert to universe channels (510 channels per universe max)
+        const channelsPerUniverse = 510;
+        const universeStartChannel = (selectedUniverse - 1) * channelsPerUniverse;
+        const universeEndChannel = universeStartChannel + 512; // Full 512 channel display
+        
+        // Extract channels for this universe
+        const universeData = data.dmx_preview.slice(universeStartChannel, universeEndChannel);
+        
+        if (universeData.length === 0) {
+            document.getElementById('dmxStats').textContent = `Universe ${selectedUniverse}: No data (out of range)`;
+            return;
+        }
+        
+        // Update stats
+        const activeChannels = universeData.filter(v => v > 0).length;
+        document.getElementById('dmxStats').textContent = `Universe ${selectedUniverse} | ${activeChannels}/512 active channels | ${universeData.length} channels in use`;
+        
+        // Update channel display
+        for (let i = 0; i < 512; i++) {
+            const channel = document.getElementById(`dmx-ch-${i + 1}`);
+            if (!channel) continue;
+            
+            const value = universeData[i] || 0;
+            channel.textContent = value;
+            
+            // Color-code based on value (0-255)
+            if (value === 0) {
+                channel.style.background = '#000';
+                channel.style.color = '#666';
+            } else {
+                const intensity = Math.floor((value / 255) * 100);
+                const hue = Math.floor((value / 255) * 120); // 0 (red) to 120 (green)
+                channel.style.background = `hsl(${hue}, 80%, ${intensity}%)`;
+                channel.style.color = intensity > 50 ? '#000' : '#fff';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to update DMX monitor:', error);
+        document.getElementById('dmxStats').textContent = `Error fetching DMX data`;
+    }
+};
+
+/**
+ * Change DMX universe
+ */
+app.changeDmxUniverse = function() {
+    // Immediately update to show new universe data
+    this.updateDmxMonitor();
+};
+
+/**
+ * Toggle color preview display
+ */
+app.toggleColorPreview = function() {
+    this.showColorPreview = !this.showColorPreview;
+    const btn = document.getElementById('toggleColorPreviewBtn');
+    if (btn) {
+        btn.style.background = this.showColorPreview ? '#0d47a1' : '';
+        btn.style.color = this.showColorPreview ? '#fff' : '';
+    }
+    this.render();
+};
+
+/**
+ * Toggle color preview display
+ */
+app.toggleColorPreview = function() {
+    this.showColorPreview = !this.showColorPreview;
+    const btn = document.getElementById('toggleColorPreviewBtn');
+    if (btn) {
+        btn.style.background = this.showColorPreview ? '#0d47a1' : '';
+        btn.style.color = this.showColorPreview ? '#fff' : '';
+    }
+    this.render();
+};
+
+/**
+ * Toggle grid display
+ */
+app.toggleGrid = function() {
+    this.showGrid = !this.showGrid;
+    const btn = document.getElementById('toggleGridBtn');
+    if (btn) {
+        btn.style.background = this.showGrid ? '#0d47a1' : '';
+        btn.style.color = this.showGrid ? '#fff' : '';
+    }
+    this.render();
+};
+
+/**
+ * Toggle point IDs display
+ */
+app.togglePointIds = function() {
+    this.showPointIds = !this.showPointIds;
+    const btn = document.getElementById('togglePointIdsBtn');
+    if (btn) {
+        btn.style.background = this.showPointIds ? '#0d47a1' : '';
+        btn.style.color = this.showPointIds ? '#fff' : '';
+    }
+    this.render();
+};
+
+/**
+ * Toggle universe bounds display
+ */
+app.toggleUniverseBounds = function() {
+    this.showUniverseBounds = !this.showUniverseBounds;
+    const btn = document.getElementById('toggleUniverseBoundsBtn');
+    if (btn) {
+        btn.style.background = this.showUniverseBounds ? '#0d47a1' : '';
+        btn.style.color = this.showUniverseBounds ? '#fff' : '';
+    }
+    this.render();
+};
+
+/**
+ * Toggle colored outlines display
+ */
+app.toggleColoredOutlines = function() {
+    this.showColoredOutlines = !this.showColoredOutlines;
+    const btn = document.getElementById('toggleColoredOutlinesBtn');
+    if (btn) {
+        btn.style.background = this.showColoredOutlines ? '#0d47a1' : '';
+        btn.style.color = this.showColoredOutlines ? '#fff' : '';
+    }
+    this.render();
+};
+
+/**
+ * Toggle object names display
+ */
+app.toggleObjectNames = function() {
+    this.showObjectNames = !this.showObjectNames;
+    const btn = document.getElementById('toggleObjectNamesBtn');
+    if (btn) {
+        btn.style.background = this.showObjectNames ? '#0d47a1' : '';
+        btn.style.color = this.showObjectNames ? '#fff' : '';
+    }
+    this.render();
+};
+
+/**
+ * Toggle bounding box display
+ */
+app.toggleBoundingBox = function() {
+    this.showBoundingBox = !this.showBoundingBox;
+    const btn = document.getElementById('toggleBoundingBoxBtn');
+    if (btn) {
+        btn.style.background = this.showBoundingBox ? '#0d47a1' : '';
+        btn.style.color = this.showBoundingBox ? '#fff' : '';
+    }
+    this.render();
+};
+
+/**
+ * Update all toggle button states
+ */
+app.updateToggleButtonStates = function() {
+    const buttons = [
+        { id: 'toggleColorPreviewBtn', state: this.showColorPreview },
+        { id: 'toggleGridBtn', state: this.showGrid },
+        { id: 'togglePointIdsBtn', state: this.showPointIds },
+        { id: 'toggleUniverseBoundsBtn', state: this.showUniverseBounds },
+        { id: 'toggleColoredOutlinesBtn', state: this.showColoredOutlines },
+        { id: 'toggleObjectNamesBtn', state: this.showObjectNames },
+        { id: 'toggleBoundingBoxBtn', state: this.showBoundingBox }
+    ];
+    
+    buttons.forEach(({ id, state }) => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.style.background = state ? '#0d47a1' : '';
+            btn.style.color = state ? '#fff' : '';
+        }
+    });
+};
+
+/**
+ * Check for objects that exist but aren't assigned to any output
+ */
+app.checkForUnassignedObjects = function() {
+    if (this.artnetObjects.length === 0) return;
+    
+    const unassignedObjects = this.artnetObjects.filter(obj => {
+        return !obj.outputIds || obj.outputIds.length === 0;
+    });
+    
+    if (unassignedObjects.length > 0 && this.outputMode === 'artnet') {
+        const objectNames = unassignedObjects.slice(0, 3).map(o => o.name || o.id).join(', ');
+        const more = unassignedObjects.length > 3 ? ` +${unassignedObjects.length - 3} more` : '';
+        this.showToast(`⚠️ ${unassignedObjects.length} object(s) not assigned to outputs: ${objectNames}${more}`, 'warning', 5000);
+    }
+};
+
+/**
+ * Send test pattern to ArtNet
+ */
+app.sendTestPattern = async function() {
+    this.showToast('⚠️ Test pattern not implemented yet', 'warning');
+};
+
+/**
+ * Render ArtNet mode canvas (LED coordinates)
+ */
+app.renderArtNetMode = function() {
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    
+    // Draw video stream to hidden videoCanvas for color sampling
+    if (this.videoStreamImg && this.videoStreamImg.naturalWidth > 0) {
+        try {
+            // Make sure videoCanvas has the correct dimensions
+            if (this.videoCanvas.width !== this.canvasWidth || this.videoCanvas.height !== this.canvasHeight) {
+                this.videoCanvas.width = this.canvasWidth;
+                this.videoCanvas.height = this.canvasHeight;
+            }
+            
+            // Calculate aspect ratios to handle letterboxing
+            const imgAspect = this.videoStreamImg.naturalWidth / this.videoStreamImg.naturalHeight;
+            const canvasAspect = this.canvasWidth / this.canvasHeight;
+            
+            let drawWidth, drawHeight, offsetX, offsetY;
+            
+            if (imgAspect > canvasAspect) {
+                // Video is wider - fit to width
+                drawWidth = this.canvasWidth;
+                drawHeight = this.canvasWidth / imgAspect;
+                offsetX = 0;
+                offsetY = (this.canvasHeight - drawHeight) / 2;
+            } else {
+                // Video is taller - fit to height
+                drawHeight = this.canvasHeight;
+                drawWidth = this.canvasHeight * imgAspect;
+                offsetX = (this.canvasWidth - drawWidth) / 2;
+                offsetY = 0;
+            }
+            
+            // Clear canvas first (for letterboxing)
+            this.videoCtx.fillStyle = '#000';
+            this.videoCtx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
+            
+            // Draw video with proper aspect ratio
+            this.videoCtx.drawImage(this.videoStreamImg, offsetX, offsetY, drawWidth, drawHeight);
+            
+            // DEBUG: Draw border around video area
+            if (false) { // Set to true to enable debug visualization
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(offsetX, offsetY, drawWidth, drawHeight);
+            }
+        } catch (e) {
+            // Silently fail - stream may not be loaded yet
+        }
+    }
+    
+    // Ensure artnetObjects is an array
+    if (!Array.isArray(this.artnetObjects)) {
+        this.artnetObjects = [];
+    }
+    
+    // Draw grid background if enabled
+    if (this.showGrid) {
+        ctx.save();
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 1;
+        
+        const gridSize = 50;
+        for (let x = 0; x <= this.canvasWidth; x += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, this.canvasHeight);
+            ctx.stroke();
+        }
+        for (let y = 0; y <= this.canvasHeight; y += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(this.canvasWidth, y);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+    
+    // Draw video overlay on main canvas (semi-transparent)
+    if (this.videoCanvas && this.videoCanvas.width > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.3; // Semi-transparent so grid shows through
+        ctx.drawImage(this.videoCanvas, 0, 0);
+        ctx.restore();
+    }
+    
+    // Draw LED coordinate grid for each object
+    this.artnetObjects.forEach(obj => {
+        // Skip hidden objects
+        if (obj.visible === false) return;
+        
+        const isSelected = this.selectedArtNetObject && this.selectedArtNetObject.id === obj.id;
+        const isCanvasSelected = this.artnetCanvasObjects.has(obj);
+        
+        // Draw LED points
+        ctx.save();
+        
+        obj.points.forEach((point, pointIdx) => {
+            let pointColor;
+            
+            // Sample color from background (video canvas) if color preview is enabled
+            if (this.showColorPreview && this.videoCanvas && this.videoCanvas.width > 0) {
+                try {
+                    const sampledColor = this.getColorAtPoint(point.x, point.y);
+                    pointColor = `rgb(${sampledColor.r}, ${sampledColor.g}, ${sampledColor.b})`;
+                } catch (e) {
+                    pointColor = isSelected || isCanvasSelected ? '#1976d2' : '#4CAF50';
+                }
+            } else {
+                pointColor = isSelected || isCanvasSelected ? '#1976d2' : '#4CAF50';
+            }
+            
+            ctx.fillStyle = pointColor;
+            ctx.beginPath();
+            const pointSize = isSelected || isCanvasSelected ? 5 : 3;
+            ctx.arc(point.x, point.y, pointSize, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Add colored outline for first/last dots (if enabled)
+            if (this.showColoredOutlines) {
+                // First dot = cyan, last dot = magenta, others = blue
+                if (pointIdx === 0) {
+                    ctx.strokeStyle = '#00ffff'; // Cyan for first
+                } else if (pointIdx === obj.points.length - 1) {
+                    ctx.strokeStyle = '#ff00ff'; // Magenta for last
+                } else {
+                    ctx.strokeStyle = '#1976d2'; // Blue for middle points
+                }
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            
+            // Draw point IDs if enabled
+            if (this.showPointIds && (isSelected || isCanvasSelected)) {
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '10px monospace';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 3;
+                ctx.strokeText(point.id, point.x + 6, point.y + 3);
+                ctx.fillText(point.id, point.x + 6, point.y + 3);
+            }
+        });
+        
+        // Draw universe bounds if enabled
+        if (this.showUniverseBounds && obj.points.length > 0) {
+            const bounds = this.calculatePointsBounds(obj.points);
+            ctx.strokeStyle = '#007acc80';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.strokeRect(bounds.minX - 10, bounds.minY - 10, bounds.maxX - bounds.minX + 20, bounds.maxY - bounds.minY + 20);
+            
+            // Draw universe label (right-aligned to avoid overlap with object name)
+            ctx.fillStyle = '#007acc';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(`U${obj.universe_start}-${obj.universe_end}`, bounds.maxX + 5, bounds.minY - 15);
+            ctx.textAlign = 'left'; // Reset to default
+            ctx.setLineDash([]);
+        }
+        
+        // Draw bounding box and handles if canvas selected
+        if (isCanvasSelected && obj.points.length > 0) {
+            const bounds = this.calculatePointsBounds(obj.points);
+            
+            // Draw dashed bounding box if enabled
+            if (this.showBoundingBox) {
+                ctx.strokeStyle = '#1976d2';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(bounds.minX - 5, bounds.minY - 5, bounds.maxX - bounds.minX + 10, bounds.maxY - bounds.minY + 10);
+                ctx.setLineDash([]);
+            }
+            
+            // Draw corner handles
+            const handleSize = 8;
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#1976d2';
+            ctx.lineWidth = 2;
+            
+            // NW, NE, SW, SE handles
+            [[bounds.minX, bounds.minY], [bounds.maxX, bounds.minY], 
+             [bounds.minX, bounds.maxY], [bounds.maxX, bounds.maxY]].forEach(([hx, hy]) => {
+                ctx.fillRect(hx - handleSize/2, hy - handleSize/2, handleSize, handleSize);
+                ctx.strokeRect(hx - handleSize/2, hy - handleSize/2, handleSize, handleSize);
+            });
+            
+            // Rotate handle
+            const rotateX = (bounds.minX + bounds.maxX) / 2;
+            const rotateY = bounds.minY - 30;
+            ctx.beginPath();
+            ctx.moveTo((bounds.minX + bounds.maxX) / 2, bounds.minY - 5);
+            ctx.lineTo(rotateX, rotateY);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(rotateX, rotateY, handleSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Draw label if enabled
+            if (this.showObjectNames) {
+                ctx.fillStyle = '#1976d2';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 3;
+                ctx.strokeText(obj.name || obj.id, bounds.minX, bounds.minY - 10);
+                ctx.fillText(obj.name || obj.id, bounds.minX, bounds.minY - 10);
+            }
+        } else if (isSelected && obj.points.length > 0) {
+            // Draw simple label for property-selected objects if enabled
+            if (this.showObjectNames) {
+                const bounds = this.calculatePointsBounds(obj.points);
+                ctx.fillStyle = '#1976d2';
+                ctx.font = '12px sans-serif';
+                ctx.fillText(obj.name || obj.id, bounds.minX, bounds.minY - 10);
+            }
+        }
+        
+        ctx.restore();
+    });
+};
 
 // Initialize on page load
 window.addEventListener('load', () => {

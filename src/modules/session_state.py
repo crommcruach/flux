@@ -259,6 +259,10 @@ class SessionStateManager:
         if 'editor' in self._state:
             state['editor'] = self._state['editor'].copy()
         
+        # ArtNet routing state (updated via set_artnet_routing_state())
+        if 'artnet_routing' in self._state:
+            state['artnet_routing'] = self._state['artnet_routing'].copy()
+        
         # Sequences (if stored at root level - legacy)
         if 'sequences' in self._state:
             state['sequences'] = self._state['sequences'].copy()
@@ -540,6 +544,30 @@ class SessionStateManager:
         """
         return self._state.get('video_player_settings', {}).copy()
     
+    def set_artnet_player_settings(self, settings: dict):
+        """
+        Save art-net player settings (resolution, autosize, etc.)
+        
+        Args:
+            settings: Dictionary with art-net player settings
+        """
+        if 'artnet_player_settings' not in self._state:
+            self._state['artnet_player_settings'] = {}
+        self._state['artnet_player_settings'] = settings.copy()
+        # Trigger async save
+        self._pending_save = True
+        self._pending_save_data = self._state.copy()
+        logger.debug(f"🎨 Art-Net player settings updated: {settings}")
+    
+    def get_artnet_player_settings(self) -> dict:
+        """
+        Get art-net player settings.
+        
+        Returns:
+            Dictionary with art-net player settings
+        """
+        return self._state.get('artnet_player_settings', {}).copy()
+    
     def set_editor_state(self, editor_data: dict):
         """
         Save editor state (canvas, shapes, settings, etc.)
@@ -563,6 +591,30 @@ class SessionStateManager:
             Dictionary with editor state
         """
         return self._state.get('editor', {}).copy()
+    
+    def set_artnet_routing_state(self, routing_data: dict):
+        """
+        Save ArtNet routing state (objects, outputs, assignments).
+        
+        Args:
+            routing_data: Dictionary with routing state from routing_manager.get_state()
+        """
+        if 'artnet_routing' not in self._state:
+            self._state['artnet_routing'] = {}
+        self._state['artnet_routing'] = routing_data.copy()
+        # Trigger async save
+        self._pending_save = True
+        self._pending_save_data = self._state.copy()
+        logger.debug(f"🎛️  ArtNet routing state updated")
+    
+    def get_artnet_routing_state(self) -> dict:
+        """
+        Get ArtNet routing state.
+        
+        Returns:
+            Dictionary with artnet routing state (objects + outputs)
+        """
+        return self._state.get('artnet_routing', {}).copy()
     
     def get_state_file_path(self) -> str:
         """

@@ -2362,6 +2362,91 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             }), 500
     
     # ========================================
+    # ART-NET PLAYER SETTINGS
+    # ========================================
+    
+    @app.route('/api/player/artnet/settings', methods=['GET'])
+    def get_artnet_player_settings():
+        """Get art-net player resolution and autosize settings"""
+        try:
+            session_state = get_session_state()
+            settings = session_state._state.get('artnet_player_settings', {}) if session_state else {}
+            
+            # Apply defaults if not set
+            if not settings:
+                settings = {
+                    'preset': '1080p',
+                    'custom_width': 1920,
+                    'custom_height': 1080,
+                    'autosize': 'off'
+                }
+            
+            return jsonify({
+                'success': True,
+                'settings': settings
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting art-net player settings: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/player/artnet/settings', methods=['POST'])
+    def save_artnet_player_settings():
+        """Save art-net player resolution and autosize settings"""
+        try:
+            data = request.get_json()
+            
+            settings = {
+                'preset': data.get('preset', '1080p'),
+                'autosize': data.get('autosize', 'off')
+            }
+            
+            if data.get('preset') == 'custom':
+                settings['custom_width'] = data.get('custom_width', 1920)
+                settings['custom_height'] = data.get('custom_height', 1080)
+            
+            # Save to session state using proper API
+            session_state = get_session_state()
+            if session_state:
+                session_state.set_artnet_player_settings(settings)
+            
+            # Apply resolution change immediately to artnet player
+            artnet_player = player_manager.get_player('artnet')
+            if artnet_player:
+                # Calculate new resolution
+                if settings.get('preset') == 'custom':
+                    new_width = settings.get('custom_width', 1920)
+                    new_height = settings.get('custom_height', 1080)
+                else:
+                    preset_resolutions = {
+                        '720p': (1280, 720),
+                        '1080p': (1920, 1080),
+                        '1440p': (2560, 1440),
+                        '2160p': (3840, 2160)
+                    }
+                    new_width, new_height = preset_resolutions.get(settings.get('preset', '1080p'), (1920, 1080))
+                
+                # Update player resolution with autosize mode
+                artnet_player.update_resolution(new_width, new_height, settings.get('autosize', 'off'))
+            
+            logger.info(f"Art-Net player settings saved and applied: {settings}")
+            
+            return jsonify({
+                'success': True,
+                'settings': settings
+            })
+            
+        except Exception as e:
+            logger.error(f"Error saving art-net player settings: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    # ========================================
     # ART-NET RESOLUTION SETTINGS
     # ========================================
     

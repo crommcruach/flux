@@ -276,6 +276,39 @@
   <script src="libs/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="js/stroke-font.js"></script>
   <script type="module" src="js/editor.js"></script>
+  
+  <!-- Emergency UI Unblock Script -->
+  <script>
+    // Safety measure: Ensure UI is always interactive after page load
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        document.body.style.pointerEvents = 'auto';
+        document.body.style.userSelect = 'auto';
+        
+        // Only clean up modals on initial load, not during interaction
+        if (!window._modalCleanupDone) {
+          window._modalCleanupDone = true;
+          
+          // Remove blocking Bootstrap modals that weren't properly hidden
+          const modals = document.querySelectorAll('.modal');
+          modals.forEach(modal => {
+            // Only fix if modal is NOT actively shown
+            const style = getComputedStyle(modal);
+            if (style.display !== 'none' && !modal.classList.contains('show')) {
+              // Modal is in DOM but not shown - ensure it's hidden
+              modal.style.display = 'none';
+              modal.setAttribute('aria-hidden', 'true');
+            }
+          });
+          
+          // Remove any orphaned modal backdrops
+          document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+          
+          console.log('✅ UI interaction safety check complete');
+        }
+      }, 1000); // Increased delay to ensure page is fully loaded
+    });
+  </script>
 </body>
 
 </html>

@@ -6,33 +6,20 @@
     <title>Player - Flux</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     
-    <!-- Resource Hints for faster loading -->
-    <link rel="dns-prefetch" href="/api">
-    <link rel="preconnect" href="/api">
-    
-    <!-- Preload critical resources -->
-    <link rel="preload" href="libs/bootstrap/css/bootstrap.min.css" as="style">
-    <link rel="preload" href="css/styles.css" as="style">
-    <link rel="preload" href="css/player.css" as="style">
-    <link rel="preload" href="libs/bootstrap/js/bootstrap.bundle.min.js" as="script">
-    <link rel="preload" href="libs/jquery-3.6.0.min.js" as="script">
-    
-    <!-- Critical CSS (inline or prioritized) -->
+    <!-- Critical CSS -->
     <link href="libs/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link href="css/styles.css" rel="stylesheet">
     <link href="css/player.css" rel="stylesheet">
-    
-    <!-- Non-critical CSS (deferred) -->
-    <link rel="stylesheet" href="libs/ion-rangeslider/css/ion.rangeSlider.min.css" media="print" onload="this.media='all'">
-    <link href="css/triple-slider.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link href="css/parameter-grid.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link href="css/tab-components.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link href="css/thumbnails.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link href="css/color-picker.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link href="css/sequences.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link href="css/bpm-widget.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link href="css/circular-slider.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link href="css/playlist-tabs.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="libs/ion-rangeslider/css/ion.rangeSlider.min.css">
+    <link href="css/triple-slider.css" rel="stylesheet">
+    <link href="css/parameter-grid.css" rel="stylesheet">
+    <link href="css/tab-components.css" rel="stylesheet">
+    <link href="css/thumbnails.css" rel="stylesheet">
+    <link href="css/color-picker.css" rel="stylesheet">
+    <link href="css/sequences.css" rel="stylesheet">
+    <link href="css/bpm-widget.css" rel="stylesheet">
+    <link href="css/circular-slider.css" rel="stylesheet">
+    <link href="css/playlist-tabs.css" rel="stylesheet">
     
     <style>
         /* Inline critical CSS for preview placeholder */
@@ -42,105 +29,9 @@
         #videoPreviewImg[src=""] {
             content: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%23000000" width="800" height="600"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="%23667eea"%3E🎬 Loading Preview...%3C/text%3E%3C/svg%3E');
         }
-        
-        /* Preload Overlay */
-        #preloadOverlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 99999;
-            transition: opacity 0.5s ease-out;
-        }
-        #preloadOverlay.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
-        .preload-content {
-            text-align: center;
-            color: #fff;
-        }
-        .preload-logo {
-            font-size: 64px;
-            margin-bottom: 20px;
-            animation: pulse 2s ease-in-out infinite;
-        }
-        .preload-title {
-            font-size: 32px;
-            font-weight: 600;
-            margin-bottom: 10px;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .preload-subtitle {
-            font-size: 14px;
-            color: #aaa;
-            margin-bottom: 40px;
-        }
-        .progress-container {
-            width: 400px;
-            max-width: 80vw;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            overflow: hidden;
-            position: relative;
-        }
-        .progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            border-radius: 10px;
-            transition: width 0.3s ease;
-            box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
-        }
-        .progress-text {
-            margin-top: 15px;
-            font-size: 14px;
-            color: #667eea;
-            font-weight: 500;
-        }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.05); opacity: 0.8; }
-        }
     </style>
 </head>
 <body>
-    <!-- Preload Overlay -->
-    <div id="preloadOverlay">
-        <div class="preload-content">
-            <div class="preload-logo">🎬</div>
-            <div class="preload-title">Flux</div>
-            <div class="preload-subtitle">Loading Player...</div>
-            <div class="progress-container">
-                <div class="progress-bar" id="preloadProgress" style="width: 0%"></div>
-            </div>
-            <div class="progress-text" id="preloadText">Initializing...</div>
-        </div>
-    </div>
-    
-    <script src="js/menu-loader.js"></script>
-    <script src="js/transition-menu-loader.js" defer></script>
-    
-    <!-- Modal Component (must load before session-manager) -->
-    <script src="js/modal-loader.js"></script>
-    
-    <!-- Session Management (depends on modal) -->
-    <script src="js/session-manager.js"></script>
-    
-    <!-- Session State Manager -->
-    <script src="js/session-state-manager.js" defer></script>
-    
-    <script src="js/search-filter-loader.js" defer></script>
-    
     <div class="app-layout">
         <!-- 
         ⚠️ DEPRECATED: OLD PLAYLIST MANAGEMENT BAR - HIDDEN
@@ -553,6 +444,62 @@
         </div>
     </div>
     
+    <!-- Art-Net Player Settings Modal -->
+    <div class="modal fade" id="artnetPlayerSettingsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Art-Net Player Settings</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Resolution Setting -->
+                    <div class="mb-3">
+                        <label class="form-label">Resolution</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="artnetResolutionPreset">
+                            <option value="720p">1280x720 (720p)</option>
+                            <option value="1080p" selected>1920x1080 (1080p)</option>
+                            <option value="1440p">2560x1440 (1440p)</option>
+                            <option value="2160p">3840x2160 (4K)</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Custom Resolution (hidden by default) -->
+                    <div class="mb-3" id="artnetCustomResolutionGroup" style="display: none;">
+                        <label class="form-label">Custom Resolution</label>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <input type="number" class="form-control bg-dark text-light border-secondary" 
+                                       id="artnetCustomWidth" placeholder="Width" min="640" max="7680">
+                            </div>
+                            <div class="col-6">
+                                <input type="number" class="form-control bg-dark text-light border-secondary" 
+                                       id="artnetCustomHeight" placeholder="Height" min="480" max="4320">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Autosize Setting -->
+                    <div class="mb-3">
+                        <label class="form-label">Autosize Mode</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="artnetAutosizeMode">
+                            <option value="off" selected>Off (Letterbox)</option>
+                            <option value="stretch">Stretch (Distort to fit)</option>
+                            <option value="fill">Fill (Crop to fit)</option>
+                            <option value="fit">Fit (Scale to fit)</option>
+                        </select>
+                        <small class="text-muted">How to handle content that doesn't match the resolution</small>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveArtnetPlayerSettings()">Apply</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <!-- Audio File Browser Modal -->
     <div class="modal fade" id="sequencerFileBrowserModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
@@ -588,99 +535,78 @@
         </div>
     </div>
 
-    <!-- Load Scripts After DOM Structure (optimized order) -->
-    <!-- Toast Component -->
-    <script src="js/toast-loader.js" defer></script>
+    <!-- Load Scripts After DOM Structure -->
+    <!-- Critical Libraries MUST load first -->
+    <script src="libs/jquery-3.6.0.min.js"></script>
+    <script src="libs/bootstrap/js/bootstrap.bundle.min.js"></script>
 
-    <!-- Critical Libraries (load early but don't block parsing) -->
-    <script src="libs/jquery-3.6.0.min.js" defer></script>
-    <script src="libs/bootstrap/js/bootstrap.bundle.min.js" defer></script>
+    <!-- UI Component Loaders (depend on jQuery/Bootstrap) -->
+    <script src="js/toast-loader.js"></script>
+    <script src="js/menu-loader.js"></script>
+    <script src="js/transition-menu-loader.js"></script>
+    <script src="js/modal-loader.js"></script>
+    <script src="js/session-manager.js"></script>
+    <script src="js/session-state-manager.js"></script>
+    <script src="js/search-filter-loader.js"></script>
     
-    <!-- Non-critical libraries (fully async) -->
-    <script src="libs/ion-rangeslider/js/ion.rangeSlider.min.js" defer></script>
-    <script src="libs/socket.io.min.js" defer></script>
-    <script src="js/triple-slider.js" defer></script>
+    <!-- Non-critical libraries -->
+    <script src="libs/ion-rangeslider/js/ion.rangeSlider.min.js"></script>
+    <script src="libs/socket.io.min.js"></script>
+    <script src="js/triple-slider.js"></script>
 
-    <!-- Component Scripts (deferred for faster initial load) -->
-    <script src="js/components/color-picker.js" defer></script>
-    <script src="js/circular-slider.js" defer></script>
-    <script src="js/sequences.js" defer></script>
-    <script src="js/bpm-widget.js" defer></script>
-    <script src="js/components/playlist-tabs.js" defer></script>
+    <!-- Component Scripts -->
+    <script src="js/components/color-picker.js"></script>
+    <script src="js/circular-slider.js"></script>
+    <script src="js/sequences.js"></script>
+    <script src="js/bpm-widget.js"></script>
+    <script src="js/components/playlist-tabs.js"></script>
     <script src="js/player.js" type="module"></script>
     <script type="module" src="js/waveform-analyzer.js"></script>
 
     <script>
-        // Preload Progress Tracker (Optimized)
+        // Page load timing (for debugging)
         (function() {
-            const progressBar = document.getElementById('preloadProgress');
-            const progressText = document.getElementById('preloadText');
-            const overlay = document.getElementById('preloadOverlay');
-            
-            let loadedResources = 0;
-            const scripts = document.querySelectorAll('script[src]');
-            const stylesheets = document.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]');
-            const totalResources = scripts.length + stylesheets.length + 2; // +2 for DOM and final load
-            
             const startTime = performance.now();
             
-            function updateProgress(message) {
-                loadedResources++;
-                const percent = Math.min((loadedResources / totalResources) * 100, 100);
-                progressBar.style.width = percent + '%';
-                
-                if (message) {
-                    progressText.textContent = message;
-                } else {
-                    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
-                    progressText.textContent = `Loading... ${Math.round(percent)}% (${elapsed}s)`;
-                }
-                
-                if (loadedResources >= totalResources) {
-                    const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
-                    progressText.textContent = `Ready! (${totalTime}s)`;
-                    console.log(`⚡ Page loaded in ${totalTime}s`);
-                    
-                    setTimeout(() => {
-                        overlay.classList.add('hidden');
-                        setTimeout(() => overlay.remove(), 500);
-                    }, 300);
-                }
-            }
-            
-            // Track resource loading with performance API
-            scripts.forEach(script => {
-                script.addEventListener('load', () => updateProgress());
-                script.addEventListener('error', (e) => {
-                    console.warn('Failed to load:', script.src);
-                    updateProgress('Error loading resource');
-                });
+            window.addEventListener('load', () => {
+                const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+                console.log(`⚡ Page loaded in ${totalTime}s`);
             });
-            
-            stylesheets.forEach(style => {
-                style.addEventListener('load', () => updateProgress());
-                style.addEventListener('error', () => updateProgress('Error loading style'));
-            });
-            
-            // Track DOM ready
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', () => updateProgress('DOM Ready'));
-            } else {
-                updateProgress('DOM Ready');
-            }
-            
-            // Track final window load
-            window.addEventListener('load', () => updateProgress('Complete'));
-            
-            // Fallback: hide after 10 seconds if something goes wrong
-            setTimeout(() => {
-                if (!overlay.classList.contains('hidden')) {
-                    console.warn('Preload timeout - forcing hide');
-                    overlay.classList.add('hidden');
-                    setTimeout(() => overlay.remove(), 500);
-                }
-            }, 10000);
         })();
+    </script>
+    
+    <!-- Emergency UI Unblock Script -->
+    <script>
+        // Safety measure: Ensure UI is always interactive after page load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                document.body.style.pointerEvents = 'auto';
+                document.body.style.userSelect = 'auto';
+                
+                // Only clean up modals on initial load, not during interaction
+                if (!window._modalCleanupDone) {
+                    window._modalCleanupDone = true;
+                    
+                    // Remove blocking Bootstrap modals that weren't properly hidden
+                    const modals = document.querySelectorAll('.modal');
+                    modals.forEach(modal => {
+                        // Only fix if modal is NOT actively shown
+                        const style = getComputedStyle(modal);
+                        if (style.display !== 'none' && !modal.classList.contains('show')) {
+                            // Modal is in DOM but not shown - ensure it's hidden
+                            modal.style.display = 'none';
+                            modal.setAttribute('aria-hidden', 'true');
+                        }
+                    });
+                    
+                    // Remove any orphaned modal backdrops
+                    document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+                    
+                    console.log('✅ UI interaction safety check complete');
+                }
+            }, 1000); // Increased delay to ensure page is fully loaded
+        });
+    </script>
     </script>
     
     <script>

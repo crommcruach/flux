@@ -1,14 +1,69 @@
 # 🎯 ArtNet Output Routing - Backend Implementation Plan
 
 **Date:** February 4, 2026  
-**Status:** Planning Phase  
-**Frontend Prototype:** `snippets/artnet-output/artnet-output-prototype.html`
+**Last Updated:** February 12, 2026  
+**Status:** ⚠️ **PARTIAL IMPLEMENTATION** - Configuration Layer Complete, Rendering Pipeline Missing  
+
+---
+
+## 🚨 Current Implementation Status (February 12, 2026)
+
+### ✅ COMPLETED: Configuration Layer (Phase 1)
+- **Frontend UI**: Canvas editor, object management, output configuration, properties panel
+- **Backend Data Models**: `artnet_object.py`, `artnet_output.py`, `point_generator.py`
+- **Routing Manager**: `artnet_routing_manager.py` - CRUD operations for objects/outputs
+- **REST API**: Endpoints for object/output management
+- **Session State**: Objects and outputs persisted in `session_state.json`
+
+### ❌ MISSING: Execution/Rendering Pipeline (Phase 2)
+**CRITICAL:** The routing system **does not send ArtNet packets**. It only stores configuration.
+
+**Missing Components:**
+1. **output_manager.py** - Frame rendering engine that:
+   - Samples video pixels at each object's point coordinates
+   - Applies per-object color correction (brightness, contrast, RGB)
+   - Applies per-output color correction
+   - Creates DMX buffers for each configured output
+   - Routes to stupidArtnet senders per output
+
+2. **color_correction.py** - Brightness/contrast/RGB adjustment algorithms
+
+3. **pixel_sampler.py** - Sample colors from video frame at point coordinates
+
+4. **rgb_format_mapper.py** - Handle LED channel orders (RGB, GRB, RGBW, etc.)
+
+5. **Player Integration** - Hook rendering pipeline into player's frame loop
+
+### 🔍 Why DMX Monitor Shows "No Data Available"
+
+**Old System (WORKING):**
+- `artnet_manager.py` (deprecated) receives RGB data via `send()` method
+- Stores `last_frame` for monitoring
+- stupidArtnet sends packets to network
+- `/api/status` returns `last_frame` 
+- DMX Monitor displays the data
+
+**New Routing System (NOT WORKING):**
+- Objects and outputs are **configured** but **never processed**
+- No code samples video at object point coordinates
+- No code creates DMX buffers from sampled colors
+- No code sends packets to configured output IPs
+- No `last_frame` tracking for routing outputs
+- **Result:** DMX Monitor has no data to display
+
+### 📝 Next Steps
+
+1. **Implement output_manager.py** (2-3 hours)
+2. **Create color correction/sampling modules** (1-2 hours)
+3. **Integrate with player frame loop** (1 hour)
+4. **Add last_frame tracking per output** (30 min)
+5. **Test with physical ArtNet fixtures** (1 hour)
 
 ---
 
 ## 📋 Executive Summary
 
-This document outlines the complete backend implementation required to support the ArtNet output routing system. The frontend prototype is complete with all UI features. This plan focuses on the Python backend architecture to handle:
+This document outlines the complete backend implementation required to support the ArtNet output routing system. The frontend UI is complete with all features. This plan focuses on the Python backend architecture to handle:
 
 - **ArtNet objects** (LED fixtures with spatial positioning and color correction)
 - **ArtNet outputs** (network targets with universe/subnet configuration)
@@ -276,23 +331,52 @@ cool_white = white_value × temp_normalized
                    │ processed_frame (numpy array)
                    ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              ArtNet Output Manager (NEW)                     │
-│  - Object registry                                           │
-│  - Output registry                                           │
-│  - Color correction processor                                │
-│  - Master-slave resolver                                     │
-│  - Pixel sampling & mapping                                  │
+│         ⚠️  ArtNet Output Manager (NOT YET IMPLEMENTED) ⚠️   │
+│  - Object registry                            [✅ EXISTS]    │
+│  - Output registry                            [✅ EXISTS]    │
+│  - Color correction processor                 [❌ MISSING]   │
+│  - Master-slave resolver                      [❌ MISSING]   │
+│  - Pixel sampling & mapping                   [❌ MISSING]   │
+│  - Frame rendering pipeline                   [❌ MISSING]   │
 └──────────────────┬──────────────────────────────────────────┘
-                   │ DMX data per output
+                   │ DMX data per output [❌ NOT GENERATED]
                    ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              ArtNet Sender (Enhanced)                        │
-│  - UDP socket per output                                     │
-│  - Universe packetization (512 channels/universe)            │
-│  - Subnet handling                                           │
-│  - FPS throttling                                            │
-│  - Delay buffer                                              │
+│              ArtNet Sender (NOT CONNECTED)                   │
+│  - stupidArtnet integration                   [❌ MISSING]   │
+│  - UDP socket per output                      [❌ MISSING]   │
+│  - Universe packetization (512 channels)      [❌ MISSING]   │
+│  - FPS throttling per output                  [❌ MISSING]   │
+│  - Delay buffer per output                    [❌ MISSING]   │
 └─────────────────────────────────────────────────────────────┘
+                   │ UDP packets [❌ NEVER SENT]
+                   ▼
+         Network (ArtNet Protocol)
+```
+
+### Current vs Target Implementation
+
+| Component | Status | Location | Notes |
+|-----------|--------|----------|-------|
+| **Data Models** | ✅ Complete | `artnet_object.py`, `artnet_output.py` | Object/output configuration |
+| **Routing Manager** | ✅ Complete | `artnet_routing_manager.py` | CRUD operations only |
+| **Point Generator** | ✅ Complete | `point_generator.py` | Shape generation |
+| **REST API** | ✅ Complete | `rest_api.py` | Object/output endpoints |
+| **Frontend UI** | ✅ Complete | `player.html` | Canvas editor, properties |
+| **Session State** | ✅ Complete | `session_state.json` | Config persistence |
+| **Output Manager** | ❌ Missing | `output_manager.py` | **CRITICAL: Frame rendering** |
+| **Color Correction** | ❌ Missing | `color_correction.py` | Brightness/contrast/RGB |
+| **Pixel Sampler** | ❌ Missing | `pixel_sampler.py` | Video sampling at points |
+| **RGB Mapper** | ❌ Missing | `rgb_format_mapper.py` | Channel order mapping |
+| **Player Integration** | ❌ Missing | `player_core.py` | Hook into frame loop |
+| **stupidArtnet** | ❌ Missing | Per-output senders | Packet transmission |
+| **last_frame Tracking** | ❌ Missing | Per output | For DMX monitor |
+
+---
+
+## 🏗️ Backend Architecture Overview (ORIGINAL PLAN)
+
+### System Components (As Originally Designed)
                    │ UDP packets
                    ▼
          Network (ArtNet Protocol)
@@ -302,7 +386,56 @@ cool_white = white_value × temp_normalized
 
 ## 📦 Module Structure
 
-### New Modules to Create
+### ✅ Existing Modules (Configuration Layer)
+
+```
+src/modules/artnet_routing/
+├── __init__.py                      [✅ EXISTS]
+├── artnet_object.py                 [✅ EXISTS] - Object data model
+├── artnet_output.py                 [✅ EXISTS] - Output data model
+├── artnet_routing_manager.py        [✅ EXISTS] - CRUD operations only
+├── point_generator.py               [✅ EXISTS] - Shape generation
+├── output_manager.py                [❌ MISSING] - Frame rendering pipeline
+├── color_correction.py              [❌ MISSING] - Color adjustments
+├── pixel_sampler.py                 [❌ MISSING] - Video sampling
+├── master_slave_resolver.py         [❌ MISSING] - Link resolver
+├── rgb_format_mapper.py             [❌ MISSING] - Channel mapping
+└── artnet_sender.py                 [❌ MISSING] - UDP transmission
+```
+
+### ✅ Integration Points Status
+
+```
+src/modules/
+├── player_core.py            [❌ NOT INTEGRATED] - Needs output_manager hook
+├── session_state.py          [✅ PARTIAL] - Objects/outputs saved, no rendering state
+├── rest_api.py               [✅ COMPLETE] - CRUD endpoints exist
+└── config_schema.py          [✅ COMPLETE] - ArtNet routing schema exists
+```
+
+### Priority Implementation Order
+
+**Phase 2A: Core Rendering (CRITICAL)**
+1. `output_manager.py` - Main rendering pipeline
+2. `pixel_sampler.py` - Sample video at point coordinates
+3. `color_correction.py` - Apply brightness/contrast/RGB
+4. `rgb_format_mapper.py` - Handle LED channel orders
+
+**Phase 2B: Network Output**
+5. `artnet_sender.py` - stupidArtnet integration per output
+6. Player integration - Hook into frame loop
+7. last_frame tracking - For DMX monitor
+
+**Phase 2C: Advanced Features**
+8. `master_slave_resolver.py` - Object linking
+9. Delta encoding per output
+10. Multi-universe support
+
+---
+
+## 📦 Module Structure (ORIGINAL PLAN)
+
+### New Modules to Create (AS ORIGINALLY DESIGNED)
 
 ```
 src/modules/artnet_routing/

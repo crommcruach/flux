@@ -259,13 +259,13 @@ class Player:
         self.canvas_width = new_width
         self.canvas_height = new_height
         
-        # Update autosize mode in config if provided
+        # Update autosize mode in config if provided (use player_name for correct config section)
         if autosize_mode is not None:
-            if 'video' not in self.config:
-                self.config['video'] = {}
-            if 'player_resolution' not in self.config['video']:
-                self.config['video']['player_resolution'] = {}
-            self.config['video']['player_resolution']['autosize'] = autosize_mode
+            if self.player_name not in self.config:
+                self.config[self.player_name] = {}
+            if 'player_resolution' not in self.config[self.player_name]:
+                self.config[self.player_name]['player_resolution'] = {}
+            self.config[self.player_name]['player_resolution']['autosize'] = autosize_mode
         
         # Update layer manager resolution
         if hasattr(self, 'layer_manager') and self.layer_manager:
@@ -289,7 +289,8 @@ class Player:
                                 canvas_width=new_width,
                                 canvas_height=new_height,
                                 config=self.config,
-                                clip_id=clip_id
+                                clip_id=clip_id,
+                                player_name=self.player_name
                             )
                             logger.info(f"[{self.player_name}] Layer {layer_idx} video source updated to {new_width}x{new_height}")
                     elif isinstance(old_source, GeneratorSource):
@@ -322,7 +323,8 @@ class Player:
                         canvas_width=new_width,
                         canvas_height=new_height,
                         config=self.config,
-                        clip_id=clip_id
+                        clip_id=clip_id,
+                        player_name=self.player_name
                     )
             elif isinstance(self.source, GeneratorSource):
                 # Recreate generator source with new dimensions
@@ -679,7 +681,7 @@ class Player:
                 new_source = GeneratorSource(generator_id, parameters, self.canvas_width, self.canvas_height, self.config)
             else:
                 # Video file - clip_id already retrieved from playlist_manager
-                new_source = VideoSource(clip_item, self.canvas_width, self.canvas_height, self.config, clip_id=clip_id)
+                new_source = VideoSource(clip_item, self.canvas_width, self.canvas_height, self.config, clip_id=clip_id, player_name=self.player_name)
             
             # Initialize new source
             if not new_source.initialize():
@@ -1202,7 +1204,7 @@ class Player:
                             debug_playback(logger, f"🌟 [{self.player_name}] Loading generator: {generator_id}")
                         else:
                             # Video file - clip_id already from playlist_manager
-                            new_source = VideoSource(next_item_path, self.canvas_width, self.canvas_height, self.config, clip_id=next_clip_id)
+                            new_source = VideoSource(next_item_path, self.canvas_width, self.canvas_height, self.config, clip_id=next_clip_id, player_name=self.player_name)
                             debug_playback(logger, f"🎬 [{self.player_name}] Loading video: {next_item_path} (clip_id={next_clip_id})")
                         
                         # Initialisiere neue Source
@@ -1752,7 +1754,7 @@ class Player:
             is_video_source = isinstance(self.source, VideoSource)
             
             if is_video_source:
-                self.source = VideoSource(source_path, self.canvas_width, self.canvas_height, self.config)
+                self.source = VideoSource(source_path, self.canvas_width, self.canvas_height, self.config, player_name=self.player_name)
             else:
                 # ScriptSource oder andere - passe Canvas-Größe an
                 self.source.canvas_width = self.canvas_width

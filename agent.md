@@ -8,6 +8,7 @@ This document provides best practices and guidelines for developing and maintain
 - The **backend is a CLI application** that runs in a terminal
 - Authentication, encryption, and security measures are NOT required
 - **Performance and low latency are the top priorities** - optimize for speed and responsiveness
+- **Always ask before adding features**: Before implementing extra features, buttons, settings, or UI elements that weren't explicitly requested, ALWAYS ask the user if they want it
 
 **Data Persistence Strategy**:
 - **session_state.json**: ALL session + live data (save everything here!)

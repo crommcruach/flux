@@ -514,6 +514,11 @@ def main():
     session_state.set_sequence_manager(sequence_manager)
     logger.debug("SequenceManager connected to SessionState")
     
+    # Initialize ArtNet Routing Manager
+    from modules.artnet_routing.artnet_routing_manager import ArtNetRoutingManager
+    artnet_routing_manager = ArtNetRoutingManager(session_state)
+    logger.debug("ArtNet Routing Manager initialized")
+    
     # Initialize Multi-Playlist System
     from modules.playlist_manager import MultiPlaylistSystem
     from modules.api_playlists import register_playlist_routes, set_playlist_system
@@ -635,6 +640,11 @@ def main():
     # Register Multi-Playlist API routes
     register_playlist_routes(rest_api.app, player_manager, config, rest_api.socketio)
     logger.debug("Multi-Playlist API routes registered")
+    
+    # Register ArtNet Routing API routes
+    from modules.api.api_artnet_routing import register_artnet_routing_routes
+    register_artnet_routing_routes(rest_api.app, artnet_routing_manager)
+    logger.debug("ArtNet Routing API routes registered")
     
     # Background Images routes registered in rest_api.py
     

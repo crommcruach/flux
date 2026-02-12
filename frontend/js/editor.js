@@ -414,8 +414,20 @@ document.getElementById('arcControls').addEventListener('input', e => {
 });
 
 function addShape(type) {
+    const shapeId = `shape-${shapeCounter++}`;
+    const typeNames = {
+        rect: 'Rechteck',
+        circle: 'Kreis',
+        triangle: 'Dreieck',
+        polygon: 'Polygon',
+        line: 'Linie',
+        arc: 'Bogen',
+        matrix: 'Matrix',
+        star: 'Stern'
+    };
     const base = {
-        id: `shape-${shapeCounter++}`,
+        id: shapeId,
+        name: typeNames[type] || type,
         type,
         x: 300, y: 200,
         size: 120,
@@ -1220,8 +1232,8 @@ async function saveEditorStateToSession() {
             alias: s.alias,
             type: s.type,
             name: s.name,
-            x: s.x,
-            y: s.y,
+            x: Math.round(s.x),
+            y: Math.round(s.y),
             size: s.size,
             rotation: s.rotation,
             scaleX: s.scaleX,
@@ -1284,6 +1296,13 @@ function updateAutoSaveStatus(status) {
  */
 async function loadEditorStateFromSession() {
     try {
+        // Ensure sessionStateManager exists
+        if (!window.sessionStateManager) {
+            console.error('SessionStateManager not available - cannot restore state');
+            return;
+        }
+        
+        // Wait for session state to be fully loaded
         await window.sessionStateManager.load();
         
         const state = window.sessionStateManager.get('editor');
@@ -1345,6 +1364,23 @@ async function loadEditorStateFromSession() {
         // Restore shapes
         if (state.shapes) {
             shapes = state.shapes;
+            // Migrate shapes without names
+            shapes.forEach(s => {
+                if (!s.name) {
+                    const typeNames = {
+                        rect: 'Rechteck',
+                        circle: 'Kreis',
+                        triangle: 'Dreieck',
+                        polygon: 'Polygon',
+                        line: 'Linie',
+                        arc: 'Bogen',
+                        matrix: 'Matrix',
+                        star: 'Stern',
+                        freehand: 'Freihand'
+                    };
+                    s.name = typeNames[s.type] || s.id;
+                }
+            });
             shapeCounter = Math.max(...shapes.map(s => parseInt(s.id.split('-')[1]) || 0), 0) + 1;
         }
         
@@ -1940,8 +1976,8 @@ function constrainToBounds(shape) {
     const halfW = (shape.size * Math.abs(shape.scaleX)) / 2;
     const halfH = (shape.size * Math.abs(shape.scaleY)) / 2;
     
-    shape.x = Math.max(halfW, Math.min(actualCanvasWidth - halfW, shape.x));
-    shape.y = Math.max(halfH, Math.min(actualCanvasHeight - halfH, shape.y));
+    shape.x = Math.round(Math.max(halfW, Math.min(actualCanvasWidth - halfW, shape.x)));
+    shape.y = Math.round(Math.max(halfH, Math.min(actualCanvasHeight - halfH, shape.y)));
 }
 
 // ========================================
@@ -2805,8 +2841,8 @@ canvas.addEventListener('mousemove', e => {
         const shapesToMove = selectedShapes.length > 0 ? selectedShapes : [selectedShape];
         
         shapesToMove.forEach(shape => {
-            shape.x += dx;
-            shape.y += dy;
+            shape.x = Math.round(shape.x + dx);
+            shape.y = Math.round(shape.y + dy);
             
             // Apply bounds constraints
             constrainToBounds(shape);
@@ -3151,7 +3187,49 @@ function updateObjectList() {
         
         const title = document.createElement('div');
         title.className = 'shape-item-title';
-        title.textContent = `${s.id} - U${universeNum}, C${channelStart}-${channelEnd}`;
+        title.style.display = 'flex';
+        title.style.flexDirection = 'column';
+        title.style.gap = '0.2rem';
+        title.style.flex = '1';
+        title.style.minWidth = '0';
+        
+        // Editable name field
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = s.name || s.id;
+        nameInput.className = 'shape-name-input';
+        nameInput.style.background = 'transparent';
+        nameInput.style.border = 'none';
+        nameInput.style.color = 'inherit';
+        nameInput.style.fontSize = 'inherit';
+        nameInput.style.fontWeight = '600';
+        nameInput.style.padding = '0';
+        nameInput.style.outline = 'none';
+        nameInput.style.pointerEvents = 'auto';
+        nameInput.style.cursor = 'text';
+        nameInput.style.width = '100%';
+        nameInput.addEventListener('click', (e) => e.stopPropagation());
+        nameInput.addEventListener('input', (e) => {
+            s.name = e.target.value;
+            saveEditorStateToSession();
+        });
+        nameInput.addEventListener('focus', (e) => {
+            e.stopPropagation();
+            e.target.style.borderBottom = '1px solid var(--primary-color)';
+        });
+        nameInput.addEventListener('blur', (e) => {
+            e.target.style.borderBottom = 'none';
+        });
+        
+        // Channel info
+        const channelInfo = document.createElement('div');
+        channelInfo.style.fontSize = '0.7rem';
+        channelInfo.style.color = '#adb5bd';
+        channelInfo.style.fontWeight = '400';
+        channelInfo.textContent = `${s.id} - U${universeNum}, C${channelStart}-${channelEnd}`;
+        
+        title.appendChild(nameInput);
+        title.appendChild(channelInfo);
 
         const toggleBtn = document.createElement('button');
         toggleBtn.textContent = s.collapsed ? '▼' : '▲';
@@ -3247,6 +3325,33 @@ function updateObjectList() {
                 sliderContainer.appendChild(valueDisplay);
                 wrapper.appendChild(labelEl);
                 wrapper.appendChild(sliderContainer);
+            } else if (type === 'integer') {
+                // Integer input (for pixel coordinates)
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.value = value;
+                input.step = '1';
+                input.style.padding = '0.2rem 0.3rem';
+                input.style.fontSize = '0.65rem';
+                input.style.border = '1px solid #dee2e6';
+                input.style.borderRadius = '0.2rem';
+                input.style.height = '1.5rem';
+                input.style.width = '4rem'; // Width for 5 digits
+                input.style.boxSizing = 'border-box';
+                input.addEventListener('input', (e) => {
+                    onChange(Math.round(parseFloat(e.target.value) || 0));
+                    markForRedraw();
+                    saveEditorStateToSession();
+                });
+                input.addEventListener('focus', (e) => {
+                    e.stopPropagation();
+                });
+                input.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+
+                wrapper.appendChild(labelEl);
+                wrapper.appendChild(input);
             } else {
                 // Standard number input
                 const input = document.createElement('input');
@@ -3278,8 +3383,8 @@ function updateObjectList() {
             return wrapper;
         };
 
-        fieldsContainer.appendChild(createEditField('X', s.x.toFixed(1), (val) => { s.x = val; }, 'number'));
-        fieldsContainer.appendChild(createEditField('Y', s.y.toFixed(1), (val) => { s.y = val; }, 'number'));
+        fieldsContainer.appendChild(createEditField('X', Math.round(s.x), (val) => { s.x = Math.round(val); }, 'integer'));
+        fieldsContainer.appendChild(createEditField('Y', Math.round(s.y), (val) => { s.y = Math.round(val); }, 'integer'));
         fieldsContainer.appendChild(createEditField('Size', s.size, (val) => { s.size = Math.max(20, val); }, 'number'));
         fieldsContainer.appendChild(createEditField('ScaleX', s.scaleX.toFixed(2), (val) => { s.scaleX = Math.max(MIN_SCALE, Math.min(MAX_SCALE, val)); }, 'number'));
         fieldsContainer.appendChild(createEditField('ScaleY', s.scaleY.toFixed(2), (val) => { s.scaleY = Math.max(MIN_SCALE, Math.min(MAX_SCALE, val)); }, 'number'));

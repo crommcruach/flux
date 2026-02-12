@@ -6740,12 +6740,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (videoPreview) {
         videoPreview.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            e.stopPropagation();
+            // Don't stopPropagation - allow other handlers
             showVideoPlayerSettingsModal();
         });
     }
     
-    // Handle resolution preset change
+    // Handle resolution preset change (Video)
     const presetSelect = document.getElementById('videoResolutionPreset');
     if (presetSelect) {
         presetSelect.addEventListener('change', () => {
@@ -6758,8 +6758,34 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Load saved settings
-    loadVideoPlayerSettings();
+    // Handle resolution preset change (Art-Net)
+    const artnetPresetSelect = document.getElementById('artnetResolutionPreset');
+    if (artnetPresetSelect) {
+        artnetPresetSelect.addEventListener('change', () => {
+            const customGroup = document.getElementById('artnetCustomResolutionGroup');
+            if (artnetPresetSelect.value === 'custom') {
+                customGroup.style.display = 'block';
+            } else {
+                customGroup.style.display = 'none';
+            }
+        });
+    }
+    
+    // Art-Net preview context menu for settings
+    const artnetPreview = document.getElementById('artnetPreview');
+    if (artnetPreview) {
+        artnetPreview.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            // Don't stopPropagation - allow other handlers
+            showArtnetPlayerSettingsModal();
+        });
+    }
+    
+    // Load saved settings (non-blocking, don't wait)
+    setTimeout(() => {
+        loadVideoPlayerSettings().catch(err => console.warn('Video settings not available:', err));
+        loadArtnetPlayerSettings().catch(err => console.warn('Artnet settings not available:', err));
+    }, 100);
 });
 
 async function showVideoPlayerSettingsModal() {
@@ -6864,6 +6890,113 @@ async function saveVideoPlayerSettings() {
 // Make functions globally accessible
 window.showVideoPlayerSettingsModal = showVideoPlayerSettingsModal;
 window.saveVideoPlayerSettings = saveVideoPlayerSettings;
+
+// ========================================
+// ART-NET PLAYER SETTINGS
+// ========================================
+
+async function showArtnetPlayerSettingsModal() {
+    const modal = new bootstrap.Modal(document.getElementById('artnetPlayerSettingsModal'));
+    modal.show();
+}
+
+async function loadArtnetPlayerSettings() {
+    try {
+        console.log('📂 Loading art-net player settings...');
+        const response = await fetch('/api/player/artnet/settings');
+        console.log('📥 Load response status:', response.status);
+        const data = await response.json();
+        console.log('📥 Load response data:', data);
+        
+        if (data.success && data.settings) {
+            const settings = data.settings;
+            
+            // Set resolution preset
+            const presetSelect = document.getElementById('artnetResolutionPreset');
+            if (presetSelect) {
+                presetSelect.value = settings.preset || '1080p';
+                console.log('✅ Set preset to:', presetSelect.value);
+                
+                // Trigger change event to show/hide custom fields
+                if (settings.preset === 'custom') {
+                    document.getElementById('artnetCustomResolutionGroup').style.display = 'block';
+                    document.getElementById('artnetCustomWidth').value = settings.custom_width || 1920;
+                    document.getElementById('artnetCustomHeight').value = settings.custom_height || 1080;
+                    console.log('✅ Set custom resolution:', settings.custom_width, 'x', settings.custom_height);
+                }
+            }
+            
+            // Set autosize mode
+            const autosizeSelect = document.getElementById('artnetAutosizeMode');
+            if (autosizeSelect) {
+                autosizeSelect.value = settings.autosize || 'off';
+                console.log('✅ Set autosize to:', autosizeSelect.value);
+            }
+            
+            debug.log('✅ Art-net player settings loaded:', settings);
+        }
+    } catch (error) {
+        console.error('❌ Failed to load art-net player settings:', error);
+    }
+}
+
+async function saveArtnetPlayerSettings() {
+    try {
+        const presetSelect = document.getElementById('artnetResolutionPreset');
+        const autosizeSelect = document.getElementById('artnetAutosizeMode');
+        const customWidth = document.getElementById('artnetCustomWidth');
+        const customHeight = document.getElementById('artnetCustomHeight');
+        
+        console.log('🔧 Saving art-net player settings...');
+        console.log('  Preset:', presetSelect?.value);
+        console.log('  Autosize:', autosizeSelect?.value);
+        
+        const settings = {
+            preset: presetSelect.value,
+            autosize: autosizeSelect.value
+        };
+        
+        // Add custom resolution if selected
+        if (presetSelect.value === 'custom') {
+            settings.custom_width = parseInt(customWidth.value) || 1920;
+            settings.custom_height = parseInt(customHeight.value) || 1080;
+            console.log('  Custom resolution:', settings.custom_width, 'x', settings.custom_height);
+        }
+        
+        console.log('📤 Sending settings to API:', settings);
+        
+        const response = await fetch('/api/player/artnet/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(settings)
+        });
+        
+        console.log('📥 API response status:', response.status);
+        const data = await response.json();
+        console.log('📥 API response data:', data);
+        
+        if (data.success) {
+            showToast('✅ Art-Net player resolution updated', 'success');
+            
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('artnetPlayerSettingsModal'));
+            if (modal) {
+                modal.hide();
+            }
+            
+            debug.log('✅ Art-Net player settings saved:', settings);
+        } else {
+            showToast('❌ Failed to save settings: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        console.error('❌ Failed to save art-net player settings:', error);
+        showToast('❌ Failed to save settings', 'error');
+    }
+}
+
+// Make functions globally accessible
+window.showArtnetPlayerSettingsModal = showArtnetPlayerSettingsModal;
+window.saveArtnetPlayerSettings = saveArtnetPlayerSettings;
 
 // ========================================
 // TAKEOVER PREVIEW MODE

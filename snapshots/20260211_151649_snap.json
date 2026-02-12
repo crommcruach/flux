@@ -1,0 +1,1230 @@
+{
+  "last_updated": "2026-02-11T15:16:49.712759",
+  "players": {
+    "video": {
+      "playlist": [],
+      "current_index": -1,
+      "autoplay": true,
+      "loop": true,
+      "global_effects": [],
+      "transition_config": {
+        "enabled": false,
+        "effect": "fade",
+        "duration": 1.0,
+        "easing": "ease_in_out"
+      }
+    },
+    "artnet": {
+      "playlist": [],
+      "current_index": -1,
+      "autoplay": true,
+      "loop": true,
+      "global_effects": [],
+      "transition_config": {
+        "enabled": false,
+        "effect": "fade",
+        "duration": 1.0,
+        "easing": "ease_in_out"
+      }
+    }
+  },
+  "sequencer": {
+    "mode_active": false,
+    "audio_file": null,
+    "timeline": {
+      "duration": 0.0,
+      "splits": [],
+      "clip_mapping": {}
+    },
+    "last_position": 0.0
+  },
+  "audio_analyzer": {
+    "device": null,
+    "running": false,
+    "bpm": {
+      "enabled": true,
+      "bpm": 0.0,
+      "mode": "auto",
+      "manual_bpm": null
+    }
+  },
+  "api": {
+    "console_log_maxlen": 500,
+    "host": "0.0.0.0",
+    "port": 5000,
+    "secret_key": "py_artnet_secret_key_2025",
+    "status_broadcast_interval": 2
+  },
+  "app": {
+    "default_player": "video",
+    "console_log_level": "INFO",
+    "file_log_level": "INFO",
+    "_log_level_comment": "Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL",
+    "max_log_files": 10,
+    "_max_log_files_comment": "Maximum number of log files to keep (0 = infinite, keep all logs)"
+  },
+  "artnet": {
+    "broadcast": true,
+    "dmx_control_universe": 100,
+    "dmx_listen_ip": "0.0.0.0",
+    "dmx_listen_port": 6454,
+    "even_packet": true,
+    "fps": 30,
+    "start_universe": 0,
+    "target_ip": "127.0.0.1",
+    "bit_depth": 8,
+    "_bit_depth_comment": "LED Bit-Tiefe: 8 (Standard, 3 Bytes/LED) oder 16 (High-End, 6 Bytes/LED)",
+    "delta_encoding": {
+      "enabled": true,
+      "threshold": 8,
+      "threshold_16bit": 2048,
+      "full_frame_interval": 30,
+      "_comment": "Delta-Encoding: Sende nur geänderte Pixel. Threshold 8-bit: 0-20 (~3%), 16-bit: 1280-2560 (~2-4%)"
+    },
+    "universe_configs": {
+      "0": "GRB",
+      "_comment": "Pro Universum Kanal-Reihenfolge festlegen. Mögliche Werte: RGB, GRB, BGR, RBG, GBR, BRG",
+      "default": "RGB"
+    }
+  },
+  "cache": {
+    "compression": "msgpack",
+    "enabled": true,
+    "max_size_mb": 1024
+  },
+  "channels": {
+    "channels_per_point": 3,
+    "max_per_universe": 510
+  },
+  "effects": {
+    "transport_position_update_interval": 10,
+    "_transport_position_update_interval_comment": "Send transport position WebSocket updates every N frames (lower = more updates, higher = less network traffic)",
+    "video": [
+      {
+        "plugin_id": "transform",
+        "params": {
+          "position_x": 0.0,
+          "position_y": 0.0,
+          "scale_xy": 100.0,
+          "rotation": 0.0
+        }
+      }
+    ],
+    "artnet": [
+      {
+        "plugin_id": "transform",
+        "params": {
+          "position_x": 0.0,
+          "position_y": 0.0,
+          "scale_xy": 100.0,
+          "rotation": 0.0
+        }
+      }
+    ],
+    "clips": [
+      {
+        "plugin_id": "transport",
+        "params": {
+          "transport_position": {
+            "_value": 1,
+            "_rangeMin": 0,
+            "_rangeMax": 10
+          },
+          "speed": 1.0,
+          "reverse": false,
+          "playback_mode": "repeat"
+        }
+      },
+      {
+        "plugin_id": "transform",
+        "params": {
+          "position_x": 0.0,
+          "position_y": 0.0,
+          "scale_xy": 100.0,
+          "rotation": 0.0
+        }
+      }
+    ],
+    "_comment": "Default effect chains. video/artnet: arrays of effect configs. clips: array of effects applied to ALL clips"
+  },
+  "frontend": {
+    "polling_interval": 3000,
+    "theme": "dark",
+    "default_page": "editor",
+    "debug_logging": false,
+    "_debug_logging_comment": "Enable/disable console.log debug output in browser console (true/false). Use window.toggleDebug() to enable at runtime.",
+    "verbose_logging": false,
+    "_verbose_logging_comment": "Extra verbose logging for development (even noisier than debug_logging)"
+  },
+  "websocket": {
+    "commands": {
+      "enabled": true,
+      "_enabled_comment": "Enable WebSocket command channels for low-latency control (play/pause/effects/layers)",
+      "debounce_ms": 50,
+      "_debounce_ms_comment": "Debounce delay for parameter updates in milliseconds (lower = more responsive, higher = less network traffic)",
+      "timeout_ms": 1000,
+      "_timeout_ms_comment": "WebSocket command timeout before falling back to REST API (milliseconds)",
+      "reconnect_attempts": 5,
+      "_reconnect_attempts_comment": "Number of reconnection attempts if WebSocket connection drops",
+      "reconnect_delay_ms": 1000,
+      "_reconnect_delay_ms_comment": "Delay between reconnection attempts (milliseconds)"
+    },
+    "_comment": "WebSocket command channels for low-latency control. Video preview uses MJPEG."
+  },
+  "performance": {
+    "enable_loop_cache": false,
+    "enable_rgb_cache": false,
+    "loop_cache_max_duration": 10.0,
+    "_comment": "Frame caching optimization. enable_loop_cache: cache decoded frames for short loops. enable_rgb_cache: cache pre-computed RGB frames. Disable for debugging."
+  },
+  "paths": {
+    "cache_dir": "caches",
+    "data_dir": "data",
+    "default_points_json": null,
+    "points_json": "punkte_export.json",
+    "projects_dir": "PROJECTS",
+    "scripts_dir": "scripts",
+    "video_dir": "video",
+    "video_sources": [],
+    "sequencer_audio_dir": "audio"
+  },
+  "video": {
+    "default_brightness": 100,
+    "default_fps": null,
+    "default_speed": 1,
+    "player_resolution": {
+      "preset": "1080p",
+      "custom_width": 1920,
+      "custom_height": 1080,
+      "autosize": "off",
+      "_preset_comment": "Options: 720p, 1080p, 1440p, 2160p (4K), custom",
+      "_autosize_comment": "Options: off, stretch, fill, fit. How to handle videos that don't match resolution"
+    },
+    "preview_stream": {
+      "video": {
+        "fps": 25,
+        "max_width": 640,
+        "jpeg_quality": 85,
+        "_comment": "Video player preview stream settings"
+      },
+      "artnet": {
+        "fps": 25,
+        "max_width": 320,
+        "jpeg_quality": 85,
+        "_comment": "Art-Net player preview stream settings"
+      },
+      "fullscreen": {
+        "fps": 30,
+        "max_width": 0,
+        "jpeg_quality": 85,
+        "_comment": "Fullscreen stream settings. max_width=0 means no scaling (original size)"
+      },
+      "_comment": "MJPEG stream settings. fps: 25-60 recommended. max_width: 0 for original size. jpeg_quality: 1-100"
+    },
+    "extensions": [
+      ".mp4",
+      ".avi",
+      ".mov",
+      ".mkv",
+      ".wmv",
+      ".gif",
+      ".mov"
+    ],
+    "frame_wait_delay": 0.1,
+    "gif_respect_frame_timing": true,
+    "gif_transparency_bg": [
+      0,
+      0,
+      0
+    ],
+    "max_per_channel": 255,
+    "recording_stop_delay": 0.3,
+    "shutdown_delay": 0.5
+  },
+  "outputs": {
+    "_comment": "Output definitions - hardware/infrastructure configuration",
+    "_info": "These are the available outputs. Actual routing is in session_state.json",
+    "definitions": [
+      {
+        "id": "main_display",
+        "type": "display",
+        "enabled": true,
+        "_implementation": "Multiprocessing-based display with isolated process for OpenCV window",
+        "monitor_index": 0,
+        "fullscreen": true,
+        "resolution": [
+          1920,
+          1080
+        ],
+        "fps": 60,
+        "enable_capture": true,
+        "description": "Main display output (production-ready multiprocessing implementation)"
+      },
+      {
+        "id": "preview_virtual",
+        "type": "virtual",
+        "enabled": true,
+        "resolution": [
+          640,
+          360
+        ],
+        "fps": 30,
+        "enable_capture": true,
+        "description": "Virtual output for web preview streaming"
+      }
+    ],
+    "default_routing": {
+      "_comment": "Default routing used on startup",
+      "video": [
+        "main_display",
+        "preview_virtual"
+      ],
+      "artnet": []
+    }
+  },
+  "playlists": {
+    "active_playlist_id": "e9b06d59-a308-45f7-90ef-fc8bb031245a",
+    "viewed_playlist_id": "e9b06d59-a308-45f7-90ef-fc8bb031245a",
+    "items": {
+      "e9b06d59-a308-45f7-90ef-fc8bb031245a": {
+        "id": "e9b06d59-a308-45f7-90ef-fc8bb031245a",
+        "name": "Default",
+        "type": "standard",
+        "created_at": "2026-02-11T15:15:38.531839",
+        "master_player": null,
+        "video": {
+          "clips": [
+            "video\\converted/test1_converted.mov"
+          ],
+          "clip_ids": [
+            "b628ecb3-e20b-47bf-b0fd-9854b9eb991e"
+          ],
+          "clip_params": {},
+          "index": 0,
+          "autoplay": true,
+          "loop": true,
+          "is_playing": true,
+          "global_effects": [
+            {
+              "index": 0,
+              "plugin_id": "transform",
+              "name": "Transform",
+              "version": "1.0.0",
+              "enabled": true,
+              "parameters": {
+                "position_x": 0.0,
+                "position_y": 0.0,
+                "scale_xy": 100.0,
+                "scale_x": 100.0,
+                "scale_y": 100.0,
+                "rotation_x": 0.0,
+                "rotation_y": 0.0,
+                "rotation_z": 0.0,
+                "anchor_x": 50.0,
+                "anchor_y": 50.0,
+                "anchor_z": 50.0
+              },
+              "metadata": {
+                "id": "transform",
+                "name": "Transform",
+                "description": "2D Transformationen: Position, Skalierung und Rotation",
+                "author": "Flux Team",
+                "version": "1.0.0",
+                "type": "effect",
+                "category": "Transformation",
+                "parameters": [
+                  {
+                    "name": "position_x",
+                    "label": "Position X",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": -2000.0,
+                    "max": 2000.0,
+                    "step": 1.0,
+                    "description": "Horizontale Position (Pixel, negativ = links, positiv = rechts)"
+                  },
+                  {
+                    "name": "position_y",
+                    "label": "Position Y",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": -2000.0,
+                    "max": 2000.0,
+                    "step": 1.0,
+                    "description": "Vertikale Position (Pixel, negativ = oben, positiv = unten)"
+                  },
+                  {
+                    "name": "scale_xy",
+                    "label": "Scale XY (Symmetric)",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Symmetrische Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "scale_x",
+                    "label": "Scale X",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Horizontale Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "scale_y",
+                    "label": "Scale Y",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Vertikale Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "rotation_x",
+                    "label": "Rotation X",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um X-Achse in Grad (3D-Perspektive)"
+                  },
+                  {
+                    "name": "rotation_y",
+                    "label": "Rotation Y",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um Y-Achse in Grad (3D-Perspektive)"
+                  },
+                  {
+                    "name": "rotation_z",
+                    "label": "Rotation Z",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um Z-Achse in Grad (2D-Rotation im Uhrzeigersinn)"
+                  },
+                  {
+                    "name": "anchor_x",
+                    "label": "Anchor X",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt X in Prozent (50% = Mitte, 0% = links, 100% = rechts)"
+                  },
+                  {
+                    "name": "anchor_y",
+                    "label": "Anchor Y",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt Y in Prozent (50% = Mitte, 0% = oben, 100% = unten)"
+                  },
+                  {
+                    "name": "anchor_z",
+                    "label": "Anchor Z",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt Z in Prozent (50% = Mitte, beeinflusst 3D-Perspektive)"
+                  }
+                ]
+              }
+            }
+          ],
+          "transition_config": {
+            "enabled": false,
+            "effect": "fade",
+            "duration": 1.0,
+            "easing": "ease_in_out"
+          }
+        },
+        "artnet": {
+          "clips": [
+            "video\\converted/test2_converted.mov"
+          ],
+          "clip_ids": [
+            "51c86432-8829-4087-931e-f939f47ef919"
+          ],
+          "clip_params": {
+            "51c86432-8829-4087-931e-f939f47ef919": {
+              "effects": [
+                {
+                  "plugin_id": "transport",
+                  "parameters": {
+                    "transport_position": {
+                      "_value": 4,
+                      "_rangeMin": 0,
+                      "_rangeMax": 23,
+                      "_fps": 25.0,
+                      "_totalFrames": 24,
+                      "_displayFormat": "time"
+                    },
+                    "speed": 1.0,
+                    "reverse": false,
+                    "playback_mode": "repeat",
+                    "loop_count": 1,
+                    "_loop_iteration": 5,
+                    "_random_frames_played": 0
+                  },
+                  "metadata": {
+                    "id": "transport",
+                    "name": "Transport",
+                    "description": "Erweiterte Playback-Kontrolle: Trimming, Speed, Reverse, Loop-Modi",
+                    "author": "Flux Art-Net System",
+                    "version": "1.0.0",
+                    "type": "effect",
+                    "category": "Playback",
+                    "system_plugin": true,
+                    "hidden": false,
+                    "parameters": [
+                      {
+                        "name": "transport_position",
+                        "type": "INT",
+                        "default": 1,
+                        "min": 0,
+                        "max": 10000,
+                        "description": "Transport: |--S--P--E--| (Start-Position-End)",
+                        "label": "Transport Timeline",
+                        "display_format": "time",
+                        "fps": 30
+                      },
+                      {
+                        "name": "speed",
+                        "type": "FLOAT",
+                        "default": 1.0,
+                        "min": 0.1,
+                        "max": 10.0,
+                        "step": 0.1,
+                        "description": "Playback Speed (1.0 = normal)"
+                      },
+                      {
+                        "name": "reverse",
+                        "type": "BOOL",
+                        "default": false,
+                        "description": "Rückwärts abspielen"
+                      },
+                      {
+                        "name": "playback_mode",
+                        "type": "SELECT",
+                        "default": "repeat",
+                        "options": [
+                          "repeat",
+                          "play_once",
+                          "bounce",
+                          "random"
+                        ],
+                        "description": "Playback Mode"
+                      },
+                      {
+                        "name": "loop_count",
+                        "type": "INT",
+                        "default": 1,
+                        "min": 0,
+                        "max": 999,
+                        "control_type": "input",
+                        "description": "Loop Count (0 = infinite, 1+ = play N times then advance)"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "plugin_id": "transform",
+                  "parameters": {
+                    "position_x": 0.0,
+                    "position_y": 0.0,
+                    "scale_xy": 100.0,
+                    "scale_x": 100.0,
+                    "scale_y": 100.0,
+                    "rotation_x": 0.0,
+                    "rotation_y": 0.0,
+                    "rotation_z": 0.0,
+                    "anchor_x": 50.0,
+                    "anchor_y": 50.0,
+                    "anchor_z": 50.0
+                  },
+                  "metadata": {
+                    "id": "transform",
+                    "name": "Transform",
+                    "description": "2D Transformationen: Position, Skalierung und Rotation",
+                    "author": "Flux Team",
+                    "version": "1.0.0",
+                    "type": "effect",
+                    "category": "Transformation",
+                    "parameters": [
+                      {
+                        "name": "position_x",
+                        "label": "Position X",
+                        "type": "FLOAT",
+                        "default": 0.0,
+                        "min": -2000.0,
+                        "max": 2000.0,
+                        "step": 1.0,
+                        "description": "Horizontale Position (Pixel, negativ = links, positiv = rechts)"
+                      },
+                      {
+                        "name": "position_y",
+                        "label": "Position Y",
+                        "type": "FLOAT",
+                        "default": 0.0,
+                        "min": -2000.0,
+                        "max": 2000.0,
+                        "step": 1.0,
+                        "description": "Vertikale Position (Pixel, negativ = oben, positiv = unten)"
+                      },
+                      {
+                        "name": "scale_xy",
+                        "label": "Scale XY (Symmetric)",
+                        "type": "FLOAT",
+                        "default": 100.0,
+                        "min": 0.0,
+                        "max": 500.0,
+                        "step": 1.0,
+                        "description": "Symmetrische Skalierung in Prozent (100% = Original)"
+                      },
+                      {
+                        "name": "scale_x",
+                        "label": "Scale X",
+                        "type": "FLOAT",
+                        "default": 100.0,
+                        "min": 0.0,
+                        "max": 500.0,
+                        "step": 1.0,
+                        "description": "Horizontale Skalierung in Prozent (100% = Original)"
+                      },
+                      {
+                        "name": "scale_y",
+                        "label": "Scale Y",
+                        "type": "FLOAT",
+                        "default": 100.0,
+                        "min": 0.0,
+                        "max": 500.0,
+                        "step": 1.0,
+                        "description": "Vertikale Skalierung in Prozent (100% = Original)"
+                      },
+                      {
+                        "name": "rotation_x",
+                        "label": "Rotation X",
+                        "type": "FLOAT",
+                        "default": 0.0,
+                        "min": 0.0,
+                        "max": 360.0,
+                        "step": 1.0,
+                        "description": "Rotation um X-Achse in Grad (3D-Perspektive)"
+                      },
+                      {
+                        "name": "rotation_y",
+                        "label": "Rotation Y",
+                        "type": "FLOAT",
+                        "default": 0.0,
+                        "min": 0.0,
+                        "max": 360.0,
+                        "step": 1.0,
+                        "description": "Rotation um Y-Achse in Grad (3D-Perspektive)"
+                      },
+                      {
+                        "name": "rotation_z",
+                        "label": "Rotation Z",
+                        "type": "FLOAT",
+                        "default": 0.0,
+                        "min": 0.0,
+                        "max": 360.0,
+                        "step": 1.0,
+                        "description": "Rotation um Z-Achse in Grad (2D-Rotation im Uhrzeigersinn)"
+                      },
+                      {
+                        "name": "anchor_x",
+                        "label": "Anchor X",
+                        "type": "FLOAT",
+                        "default": 50.0,
+                        "min": 0.0,
+                        "max": 100.0,
+                        "step": 1.0,
+                        "description": "Ankerpunkt X in Prozent (50% = Mitte, 0% = links, 100% = rechts)"
+                      },
+                      {
+                        "name": "anchor_y",
+                        "label": "Anchor Y",
+                        "type": "FLOAT",
+                        "default": 50.0,
+                        "min": 0.0,
+                        "max": 100.0,
+                        "step": 1.0,
+                        "description": "Ankerpunkt Y in Prozent (50% = Mitte, 0% = oben, 100% = unten)"
+                      },
+                      {
+                        "name": "anchor_z",
+                        "label": "Anchor Z",
+                        "type": "FLOAT",
+                        "default": 50.0,
+                        "min": 0.0,
+                        "max": 100.0,
+                        "step": 1.0,
+                        "description": "Ankerpunkt Z in Prozent (50% = Mitte, beeinflusst 3D-Perspektive)"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "index": 0,
+          "autoplay": true,
+          "loop": true,
+          "is_playing": true,
+          "global_effects": [
+            {
+              "index": 0,
+              "plugin_id": "transform",
+              "name": "Transform",
+              "version": "1.0.0",
+              "enabled": true,
+              "parameters": {
+                "position_x": 0.0,
+                "position_y": 0.0,
+                "scale_xy": 100.0,
+                "scale_x": 100.0,
+                "scale_y": 100.0,
+                "rotation_x": 0.0,
+                "rotation_y": 0.0,
+                "rotation_z": 0.0,
+                "anchor_x": 50.0,
+                "anchor_y": 50.0,
+                "anchor_z": 50.0
+              },
+              "metadata": {
+                "id": "transform",
+                "name": "Transform",
+                "description": "2D Transformationen: Position, Skalierung und Rotation",
+                "author": "Flux Team",
+                "version": "1.0.0",
+                "type": "effect",
+                "category": "Transformation",
+                "parameters": [
+                  {
+                    "name": "position_x",
+                    "label": "Position X",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": -2000.0,
+                    "max": 2000.0,
+                    "step": 1.0,
+                    "description": "Horizontale Position (Pixel, negativ = links, positiv = rechts)"
+                  },
+                  {
+                    "name": "position_y",
+                    "label": "Position Y",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": -2000.0,
+                    "max": 2000.0,
+                    "step": 1.0,
+                    "description": "Vertikale Position (Pixel, negativ = oben, positiv = unten)"
+                  },
+                  {
+                    "name": "scale_xy",
+                    "label": "Scale XY (Symmetric)",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Symmetrische Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "scale_x",
+                    "label": "Scale X",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Horizontale Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "scale_y",
+                    "label": "Scale Y",
+                    "type": "float",
+                    "default": 100.0,
+                    "min": 0.0,
+                    "max": 500.0,
+                    "step": 1.0,
+                    "description": "Vertikale Skalierung in Prozent (100% = Original)"
+                  },
+                  {
+                    "name": "rotation_x",
+                    "label": "Rotation X",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um X-Achse in Grad (3D-Perspektive)"
+                  },
+                  {
+                    "name": "rotation_y",
+                    "label": "Rotation Y",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um Y-Achse in Grad (3D-Perspektive)"
+                  },
+                  {
+                    "name": "rotation_z",
+                    "label": "Rotation Z",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "description": "Rotation um Z-Achse in Grad (2D-Rotation im Uhrzeigersinn)"
+                  },
+                  {
+                    "name": "anchor_x",
+                    "label": "Anchor X",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt X in Prozent (50% = Mitte, 0% = links, 100% = rechts)"
+                  },
+                  {
+                    "name": "anchor_y",
+                    "label": "Anchor Y",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt Y in Prozent (50% = Mitte, 0% = oben, 100% = unten)"
+                  },
+                  {
+                    "name": "anchor_z",
+                    "label": "Anchor Z",
+                    "type": "float",
+                    "default": 50.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 1.0,
+                    "description": "Ankerpunkt Z in Prozent (50% = Mitte, beeinflusst 3D-Perspektive)"
+                  }
+                ]
+              }
+            }
+          ],
+          "transition_config": {
+            "enabled": false,
+            "effect": "fade",
+            "duration": 1.0,
+            "easing": "ease_in_out"
+          }
+        },
+        "sequencer": {
+          "mode_active": false,
+          "timeline": {
+            "audio_file": null,
+            "duration": 0.0,
+            "splits": [],
+            "clip_mapping": {},
+            "slots": []
+          }
+        }
+      }
+    }
+  },
+  "clip_registry": {
+    "clips": {
+      "b628ecb3-e20b-47bf-b0fd-9854b9eb991e": {
+        "clip_id": "b628ecb3-e20b-47bf-b0fd-9854b9eb991e",
+        "player_id": "video",
+        "absolute_path": "video\\converted/test1_converted.mov",
+        "relative_path": "converted/test1_converted.mov",
+        "filename": "test1_converted.mov",
+        "metadata": {},
+        "created_at": "2026-02-11T15:16:41.961733",
+        "effects": [],
+        "total_frames": 16
+      },
+      "51c86432-8829-4087-931e-f939f47ef919": {
+        "clip_id": "51c86432-8829-4087-931e-f939f47ef919",
+        "player_id": "artnet",
+        "absolute_path": "video\\converted/test2_converted.mov",
+        "relative_path": "converted\\test2_converted.mov",
+        "filename": "test2_converted.mov",
+        "metadata": {},
+        "created_at": "2026-02-11T15:16:43.106747",
+        "effects": [
+          {
+            "plugin_id": "transport",
+            "metadata": {
+              "id": "transport",
+              "name": "Transport",
+              "description": "Erweiterte Playback-Kontrolle: Trimming, Speed, Reverse, Loop-Modi",
+              "author": "Flux Art-Net System",
+              "version": "1.0.0",
+              "type": "effect",
+              "category": "Playback",
+              "system_plugin": true,
+              "hidden": false,
+              "parameters": [
+                {
+                  "name": "transport_position",
+                  "type": "INT",
+                  "default": 1,
+                  "min": 0,
+                  "max": 10000,
+                  "description": "Transport: |--S--P--E--| (Start-Position-End)",
+                  "label": "Transport Timeline",
+                  "display_format": "time",
+                  "fps": 30
+                },
+                {
+                  "name": "speed",
+                  "type": "FLOAT",
+                  "default": 1.0,
+                  "min": 0.1,
+                  "max": 10.0,
+                  "step": 0.1,
+                  "description": "Playback Speed (1.0 = normal)"
+                },
+                {
+                  "name": "reverse",
+                  "type": "BOOL",
+                  "default": false,
+                  "description": "Rückwärts abspielen"
+                },
+                {
+                  "name": "playback_mode",
+                  "type": "SELECT",
+                  "default": "repeat",
+                  "options": [
+                    "repeat",
+                    "play_once",
+                    "bounce",
+                    "random"
+                  ],
+                  "description": "Playback Mode"
+                },
+                {
+                  "name": "loop_count",
+                  "type": "INT",
+                  "default": 1,
+                  "min": 0,
+                  "max": 999,
+                  "control_type": "input",
+                  "description": "Loop Count (0 = infinite, 1+ = play N times then advance)"
+                }
+              ]
+            },
+            "parameters": {
+              "speed": {
+                "_value": 1,
+                "_rangeMin": 0.1,
+                "_rangeMax": 10,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_0_speed"
+              },
+              "reverse": {
+                "_value": false,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_0_reverse"
+              },
+              "playback_mode": {
+                "_value": "repeat",
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_0_playback_mode"
+              },
+              "loop_count": {
+                "_value": 1,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_0_loop_count"
+              },
+              "transport_position": {
+                "_value": 13,
+                "_rangeMin": 0,
+                "_rangeMax": 23,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_0_transport_position"
+              }
+            }
+          },
+          {
+            "plugin_id": "transform",
+            "metadata": {
+              "id": "transform",
+              "name": "Transform",
+              "description": "2D Transformationen: Position, Skalierung und Rotation",
+              "author": "Flux Team",
+              "version": "1.0.0",
+              "type": "effect",
+              "category": "Transformation",
+              "parameters": [
+                {
+                  "name": "position_x",
+                  "label": "Position X",
+                  "type": "FLOAT",
+                  "default": 0.0,
+                  "min": -2000.0,
+                  "max": 2000.0,
+                  "step": 1.0,
+                  "description": "Horizontale Position (Pixel, negativ = links, positiv = rechts)"
+                },
+                {
+                  "name": "position_y",
+                  "label": "Position Y",
+                  "type": "FLOAT",
+                  "default": 0.0,
+                  "min": -2000.0,
+                  "max": 2000.0,
+                  "step": 1.0,
+                  "description": "Vertikale Position (Pixel, negativ = oben, positiv = unten)"
+                },
+                {
+                  "name": "scale_xy",
+                  "label": "Scale XY (Symmetric)",
+                  "type": "FLOAT",
+                  "default": 100.0,
+                  "min": 0.0,
+                  "max": 500.0,
+                  "step": 1.0,
+                  "description": "Symmetrische Skalierung in Prozent (100% = Original)"
+                },
+                {
+                  "name": "scale_x",
+                  "label": "Scale X",
+                  "type": "FLOAT",
+                  "default": 100.0,
+                  "min": 0.0,
+                  "max": 500.0,
+                  "step": 1.0,
+                  "description": "Horizontale Skalierung in Prozent (100% = Original)"
+                },
+                {
+                  "name": "scale_y",
+                  "label": "Scale Y",
+                  "type": "FLOAT",
+                  "default": 100.0,
+                  "min": 0.0,
+                  "max": 500.0,
+                  "step": 1.0,
+                  "description": "Vertikale Skalierung in Prozent (100% = Original)"
+                },
+                {
+                  "name": "rotation_x",
+                  "label": "Rotation X",
+                  "type": "FLOAT",
+                  "default": 0.0,
+                  "min": 0.0,
+                  "max": 360.0,
+                  "step": 1.0,
+                  "description": "Rotation um X-Achse in Grad (3D-Perspektive)"
+                },
+                {
+                  "name": "rotation_y",
+                  "label": "Rotation Y",
+                  "type": "FLOAT",
+                  "default": 0.0,
+                  "min": 0.0,
+                  "max": 360.0,
+                  "step": 1.0,
+                  "description": "Rotation um Y-Achse in Grad (3D-Perspektive)"
+                },
+                {
+                  "name": "rotation_z",
+                  "label": "Rotation Z",
+                  "type": "FLOAT",
+                  "default": 0.0,
+                  "min": 0.0,
+                  "max": 360.0,
+                  "step": 1.0,
+                  "description": "Rotation um Z-Achse in Grad (2D-Rotation im Uhrzeigersinn)"
+                },
+                {
+                  "name": "anchor_x",
+                  "label": "Anchor X",
+                  "type": "FLOAT",
+                  "default": 50.0,
+                  "min": 0.0,
+                  "max": 100.0,
+                  "step": 1.0,
+                  "description": "Ankerpunkt X in Prozent (50% = Mitte, 0% = links, 100% = rechts)"
+                },
+                {
+                  "name": "anchor_y",
+                  "label": "Anchor Y",
+                  "type": "FLOAT",
+                  "default": 50.0,
+                  "min": 0.0,
+                  "max": 100.0,
+                  "step": 1.0,
+                  "description": "Ankerpunkt Y in Prozent (50% = Mitte, 0% = oben, 100% = unten)"
+                },
+                {
+                  "name": "anchor_z",
+                  "label": "Anchor Z",
+                  "type": "FLOAT",
+                  "default": 50.0,
+                  "min": 0.0,
+                  "max": 100.0,
+                  "step": 1.0,
+                  "description": "Ankerpunkt Z in Prozent (50% = Mitte, beeinflusst 3D-Perspektive)"
+                }
+              ]
+            },
+            "parameters": {
+              "position_x": {
+                "_value": 0,
+                "_rangeMin": -2000,
+                "_rangeMax": 2000,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_position_x"
+              },
+              "position_y": {
+                "_value": 0,
+                "_rangeMin": -2000,
+                "_rangeMax": 2000,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_position_y"
+              },
+              "scale_xy": {
+                "_value": 100,
+                "_rangeMin": 0,
+                "_rangeMax": 500,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_scale_xy"
+              },
+              "rotation": 0.0,
+              "scale_x": {
+                "_value": 100,
+                "_rangeMin": 0,
+                "_rangeMax": 500,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_scale_x"
+              },
+              "scale_y": {
+                "_value": 100,
+                "_rangeMin": 0,
+                "_rangeMax": 500,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_scale_y"
+              },
+              "rotation_x": {
+                "_value": 0,
+                "_rangeMin": 0,
+                "_rangeMax": 360,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_rotation_x"
+              },
+              "rotation_y": {
+                "_value": 0,
+                "_rangeMin": 0,
+                "_rangeMax": 360,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_rotation_y"
+              },
+              "rotation_z": {
+                "_value": 0,
+                "_rangeMin": 0,
+                "_rangeMax": 360,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_rotation_z"
+              },
+              "anchor_x": {
+                "_value": 50,
+                "_rangeMin": 0,
+                "_rangeMax": 100,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_anchor_x"
+              },
+              "anchor_y": {
+                "_value": 50,
+                "_rangeMin": 0,
+                "_rangeMax": 100,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_anchor_y"
+              },
+              "anchor_z": {
+                "_value": 50,
+                "_rangeMin": 0,
+                "_rangeMax": 100,
+                "_uid": "param_clip_51c86432-8829-4087-931e-f939f47ef919_effect_1_anchor_z"
+              }
+            }
+          }
+        ],
+        "layers": [],
+        "sequences": {},
+        "in_point": null,
+        "out_point": null,
+        "reverse": false,
+        "total_frames": 24
+      }
+    },
+    "effects_versions": {
+      "a8aeeb9b-4b86-4b9e-80a4-01ed6e2e6337": 2,
+      "51c86432-8829-4087-931e-f939f47ef919": 16
+    }
+  },
+  "editor": {
+    "version": "2.0",
+    "canvas": {
+      "width": 1024,
+      "height": 768
+    },
+    "backgroundImagePath": null,
+    "settings": {
+      "snapToGrid": true,
+      "snapToObjects": true,
+      "allowOutOfBounds": false,
+      "gridSize": 10,
+      "showGrid": true,
+      "showConnectionLines": true
+    },
+    "shapes": [
+      {
+        "id": "shape-1",
+        "type": "line",
+        "x": 300,
+        "y": 200,
+        "size": 120,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "color": "cyan",
+        "pointCount": 60
+      },
+      {
+        "id": "shape-2",
+        "type": "line",
+        "x": 660,
+        "y": 200,
+        "size": 120,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "color": "cyan",
+        "pointCount": 60
+      },
+      {
+        "id": "shape-3",
+        "type": "matrix",
+        "x": 480,
+        "y": 320,
+        "size": 120,
+        "rotation": 0,
+        "scaleX": 4.045914396887159,
+        "scaleY": 1,
+        "color": "cyan",
+        "pointCount": 60,
+        "rows": 16,
+        "cols": 16,
+        "pattern": "zigzag-left"
+      }
+    ],
+    "groups": [],
+    "savedAt": "2026-02-11T14:16:30.638Z"
+  }
+}

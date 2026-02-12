@@ -110,7 +110,8 @@ class LayerManager:
         
         # Detect source type from path
         if abs_path.endswith(video_extensions):
-            base_source = VideoSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height, config=self.config, clip_id=clip_id)
+            player_name = self.player.player_name if self.player and hasattr(self.player, 'player_name') else 'video'
+            base_source = VideoSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height, config=self.config, clip_id=clip_id, player_name=player_name)
         elif abs_path.startswith('generator:'):
             gen_id = abs_path.replace('generator:', '')
             # Get generator parameters from clip metadata if available
@@ -147,7 +148,8 @@ class LayerManager:
                     video_path = source_path
                     if video_dir and not os.path.isabs(video_path):
                         video_path = os.path.join(video_dir, video_path)
-                    source = VideoSource(video_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height, config=self.config)
+                    player_name = self.player.player_name if self.player and hasattr(self.player, 'player_name') else 'video'
+                    source = VideoSource(video_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height, config=self.config, player_name=player_name)
                 elif source_type == 'generator':
                     gen_params = layer_def.get('parameters', {})
                     source = GeneratorSource(source_path, gen_params, canvas_width=self.canvas_width, canvas_height=self.canvas_height)

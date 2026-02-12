@@ -66,7 +66,7 @@ class FrameSource(ABC):
 class VideoSource(FrameSource):
     """Video-Datei als Frame-Quelle (mit Cache-Support)."""
     
-    def __init__(self, video_path, canvas_width, canvas_height, config=None, clip_id=None):
+    def __init__(self, video_path, canvas_width, canvas_height, config=None, clip_id=None, player_name='video'):
         super().__init__(canvas_width, canvas_height, config)
         self.video_path = video_path
         self.source_path = video_path  # Generischer Pfad für load_points()
@@ -74,6 +74,7 @@ class VideoSource(FrameSource):
         self.cap = None
         self._lock = threading.Lock()  # Thread-Safety für FFmpeg
         self.clip_id = clip_id
+        self.player_name = player_name  # Store player name for config access
         
         # GIF Support
         self.is_gif = self._is_gif_file(video_path)
@@ -81,8 +82,15 @@ class VideoSource(FrameSource):
         self.gif_transparency_bg = tuple(config.get('video', {}).get('gif_transparency_bg', [0, 0, 0]) if config else [0, 0, 0])
         self.gif_respect_timing = config.get('video', {}).get('gif_respect_frame_timing', True) if config else True
         
-        # Autosize mode (stretch, fill, fit, off)
-        self.autosize_mode = config.get('video', {}).get('player_resolution', {}).get('autosize', 'off') if config else 'off'
+        # Autosize mode (stretch, fill, fit, off) - read from player-specific config
+        if config:
+            # Try player-specific config first, fall back to video config for backward compatibility
+            player_config = config.get(player_name, {})
+            video_config = config.get('video', {})
+            self.autosize_mode = player_config.get('player_resolution', {}).get('autosize') or \
+                                 video_config.get('player_resolution', {}).get('autosize', 'off')
+        else:
+            self.autosize_mode = 'off'
         
         # OPTIMIZATION: Loop frame caching (keep decoded frames for short loops)
         self.enable_loop_cache = config.get('performance', {}).get('enable_loop_cache', True) if config else True
