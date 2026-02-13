@@ -7,7 +7,7 @@ import time
 import json
 from ..core.constants import VIDEO_EXTENSIONS, AFFIRMATIVE_RESPONSES
 from ..core.logger import get_logger
-from .command_executor import CommandExecutor
+from .commands import CommandExecutor
 
 logger = get_logger(__name__)
 
@@ -112,7 +112,7 @@ class CLIHandler:
     
     def _handle_video_load(self, command):
         """Lädt und startet ein Video."""
-        from .frame_source import VideoSource
+        from ..player.sources import VideoSource
         
         # Extrahiere Video-Namen
         video_name = command.split(':', 1)[1].strip()
@@ -317,7 +317,7 @@ class CLIHandler:
     
     def _handle_points_validate(self, args):
         """Validiert eine Punkte-Liste."""
-        from .validator import validate_points_file
+        from ..core.validator import validate_points_file
         
         parts = args.split(maxsplit=1)
         if len(parts) > 1:
@@ -778,7 +778,7 @@ class CLIHandler:
         
         logger.info(f"\nStarte Cache-Fill für {len(all_videos)} Videos...")
         
-        from .frame_source import VideoSource
+        from ..player.sources import VideoSource
         from .player import Player
         
         for idx, video_path in enumerate(all_videos, 1):
@@ -878,7 +878,7 @@ class CLIHandler:
     
     def _handle_plugin(self, args):
         """Verwaltet Plugins (list, reload)."""
-        from .plugin_manager import get_plugin_manager
+        from ..plugins.manager import get_plugin_manager
         
         if not args:
             logger.info("Verwendung: plugin list | plugin reload")

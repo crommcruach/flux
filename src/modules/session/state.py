@@ -17,8 +17,8 @@ import threading
 from datetime import datetime
 from typing import Dict, Any, Optional
 from ..core.logger import get_logger
-from .uid_registry import get_uid_registry
-from .session import SessionPersistence
+from ..player.clips.uid_registry import get_uid_registry
+from .session_persistence import SessionPersistence
 
 logger = get_logger(__name__)
 

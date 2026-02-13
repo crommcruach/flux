@@ -11,7 +11,7 @@ Nutze stattdessen immer den Logger für Debug-Ausgaben:
 from flask import jsonify, request
 import json
 import os
-from .config_schema import ConfigValidator
+from ...core.config import ConfigValidator
 from ...core.logger import get_logger
 
 logger = get_logger(__name__)

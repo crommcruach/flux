@@ -12,7 +12,7 @@ import json
 import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
-from ..logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

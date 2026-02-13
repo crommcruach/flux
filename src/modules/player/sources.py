@@ -263,7 +263,7 @@ class VideoSource(FrameSource):
         if self.cap and self.cap.isOpened():
             # Already initialized - but ensure ClipRegistry has total_frames
             if self.clip_id and self.total_frames > 0:
-                from .clip_registry import get_clip_registry
+                from .clips.registry import get_clip_registry
                 clip_registry = get_clip_registry()
                 clip = clip_registry.get_clip(self.clip_id)
                 if clip and clip.get('total_frames') is None:
@@ -297,7 +297,7 @@ class VideoSource(FrameSource):
         
         # Update ClipRegistry with total_frames if clip_id is set
         if self.clip_id:
-            from .clip_registry import get_clip_registry
+            from .clips.registry import get_clip_registry
             clip_registry = get_clip_registry()
             clip = clip_registry.get_clip(self.clip_id)
             if clip:
@@ -401,7 +401,7 @@ class GeneratorSource(FrameSource):
         
     def initialize(self):
         """Initialisiert Generator-Plugin."""
-        from .plugin_manager import get_plugin_manager
+        from ..plugins.manager import get_plugin_manager
         
         pm = get_plugin_manager()
         

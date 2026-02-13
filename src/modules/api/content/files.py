@@ -220,7 +220,7 @@ def register_files_api(app, video_dir, config=None):
             if file_path.startswith('generator:'):
                 generator_id = file_path.replace('generator:', '')
                 try:
-                    from .frame_source import GeneratorSource
+                    from ...player.sources import GeneratorSource
                     import cv2
                     import io
                     

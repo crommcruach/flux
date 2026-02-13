@@ -9,7 +9,7 @@ Provides:
 
 from flask import request, jsonify
 from ...core.logger import get_logger
-from .plugin_manager import get_plugin_manager
+from ...plugins.manager import get_plugin_manager
 from plugins.plugin_base import PluginType
 
 logger = get_logger(__name__)

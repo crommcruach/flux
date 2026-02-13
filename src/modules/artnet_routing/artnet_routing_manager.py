@@ -11,7 +11,7 @@ import uuid
 from .artnet_object import ArtNetObject
 from .artnet_output import ArtNetOutput
 from .point_generator import PointGenerator
-from ..logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

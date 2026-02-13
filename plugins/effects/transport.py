@@ -11,7 +11,7 @@ from plugins import PluginBase, PluginType, ParameterType
 import numpy as np
 import logging
 import random
-from modules.logger import debug_transport, info_log_conditional, DebugCategories
+from modules.core.logger import debug_transport, info_log_conditional, DebugCategories
 
 logger = logging.getLogger(__name__)
 

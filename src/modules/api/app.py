@@ -161,7 +161,7 @@ class RestAPI:
         from .api_clip_layers import register_clip_layer_routes
         from .api_outputs import register_output_routes
         from .api_converter import converter_bp
-        from .clip_registry import get_clip_registry
+        from ...player.clips.registry import get_clip_registry
         
         # Registriere alle Routen
         register_playback_routes(self.app, self.player_manager)
@@ -207,7 +207,7 @@ class RestAPI:
         
         # Register Session Snapshot API
         from .api_session import register_session_routes
-        from .session_state import get_session_state
+        from ...session.state import get_session_state
         session_state = get_session_state()
         register_session_routes(self.app, session_state)
         
@@ -436,7 +436,7 @@ class RestAPI:
                     raise ValueError(f"Player {player_id} not found")
                 
                 # Get clip from registry
-                from .clip_registry import get_clip_registry
+                from ...player.clips.registry import get_clip_registry
                 registry = get_clip_registry()
                 clip = registry.get_clip(clip_id)
                 
@@ -868,7 +868,7 @@ class RestAPI:
                 try:
                     video_path = os.path.join(self.video_dir, target.strip())
                     if os.path.exists(video_path):
-                        from .frame_source import VideoSource
+                        from ...player.sources import VideoSource
                         
                         # Erstelle VideoSource
                         video_source = VideoSource(
@@ -893,7 +893,7 @@ class RestAPI:
             elif prefix == 'script':
                 # Lade Script
                 try:
-                    from .frame_source import ScriptSource
+                    from ...player.sources import ScriptSource
                     
                     script_name = target.strip()
                     if not script_name.endswith('.py'):

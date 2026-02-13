@@ -11,8 +11,8 @@ Ermöglicht Layer-basiertes Compositing mit:
 import os
 from flask import request, jsonify
 from ...core.logger import get_logger
-from .clip_registry import get_clip_registry
-from .frame_source import VideoSource, GeneratorSource
+from ...player.clips.registry import get_clip_registry
+from ...player.sources import VideoSource, GeneratorSource
 
 logger = get_logger(__name__)
 

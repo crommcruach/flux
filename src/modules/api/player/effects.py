@@ -3,8 +3,8 @@ REST API Endpoints für Effect Chain Management
 """
 from flask import request, jsonify
 from ...core.logger import get_logger
-from .session_state import get_session_state
-from .clip_registry import get_clip_registry
+from ...session.state import get_session_state
+from ...player.clips.registry import get_clip_registry
 
 logger = get_logger(__name__)
 

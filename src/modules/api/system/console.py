@@ -96,7 +96,7 @@ def register_console_routes(app, rest_api_instance):
         """Gibt CLI-Hilfe zurück (dynamisch aus utils.print_help)."""
         import io
         import sys
-        from .utils import print_help
+        from ...core.utils import print_help
         
         # Capture print_help() output
         old_stdout = sys.stdout

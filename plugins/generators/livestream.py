@@ -4,7 +4,7 @@ LiveStream Generator Plugin - Live video from HTTP/RTSP/HLS streams
 import numpy as np
 import cv2
 from plugins import PluginBase, PluginType, ParameterType
-from modules.logger import get_logger
+from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 

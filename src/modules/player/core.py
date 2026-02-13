@@ -213,7 +213,7 @@ class Player:
                     logger.warning("No output definitions found in config.json")
                 
                 # Restore output state from session (routing, slices, etc.)
-                from .session_state import get_session_state
+                from ..session.state import get_session_state
                 session_state = get_session_state()
                 if not session_state:
                     logger.error("Session state not available")
@@ -272,7 +272,7 @@ class Player:
             self.layer_manager.canvas_height = new_height
             
             # Update all layer sources with new resolution
-            from .frame_source import VideoSource, GeneratorSource
+            from .sources import VideoSource, GeneratorSource
             for layer_idx, layer in enumerate(self.layer_manager.layers):
                 if hasattr(layer, 'source') and layer.source:
                     old_source = layer.source
@@ -448,7 +448,7 @@ class Player:
             dict: Clip data or None
         """
         # Effects are stored in clip_registry, not in playlist data
-        from .clip_registry import get_clip_registry
+        from .clips.registry import get_clip_registry
         registry = get_clip_registry()
         return registry.get_clip(clip_id)
     
@@ -652,7 +652,7 @@ class Player:
             logger.debug(f"🎬 [{self.player_name}] Clip data not found for ID {clip_id}, using default transitions")
         
         try:
-            from .frame_source import VideoSource, GeneratorSource
+            from .sources import VideoSource, GeneratorSource
             
             # Check if it's a generator (string format: 'generator:generator_id')
             if clip_item.startswith('generator:'):
@@ -1172,7 +1172,7 @@ class Player:
                         break
                     
                     try:
-                        from .frame_source import VideoSource, GeneratorSource
+                        from .sources import VideoSource, GeneratorSource
                         
                         # Check if it's a generator
                         if next_item_path.startswith('generator:'):

@@ -539,7 +539,7 @@ def register_session_routes(app, session_state_manager):
             
             # CRITICAL: Restore clip_registry BEFORE playlists!
             # Playlists load will register clips, and we need the saved clip data (effects/layers) to exist first
-            from .clip_registry import get_clip_registry
+            from ...player.clips.registry import get_clip_registry
             clip_registry = get_clip_registry()
             clip_registry_data = session_data.get('clip_registry')
             if clip_registry_data:

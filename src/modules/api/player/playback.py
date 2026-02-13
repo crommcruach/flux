@@ -11,9 +11,9 @@ import os
 import time
 from flask import request, jsonify
 from ...core.logger import get_logger, debug_api, debug_playback, DebugCategories
-from .clip_registry import get_clip_registry
-from .frame_source import VideoSource
-from .session_state import get_session_state
+from ...player.clips.registry import get_clip_registry
+from ...player.sources import VideoSource
+from ...session.state import get_session_state
 
 logger = get_logger(__name__)
 
@@ -59,7 +59,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     return jsonify({"success": False, "error": "No generator_id provided"}), 400
                 
                 # Import here to avoid circular dependency
-                from .frame_source import GeneratorSource
+                from ...player.sources import GeneratorSource
                 
                 # Create generator source
                 logger.info(f"Loading generator '{generator_id}' with parameters: {parameters}")
@@ -1241,7 +1241,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
             # Prüfe ob echtes Video geladen ist (nicht DummySource)
-            from .frame_source import DummySource
+            from ...player.sources import DummySource
             if not player.source or isinstance(player.source, DummySource):
                 logger.info(f"⚠️ [{player_id}] Kein Video geladen - Play abgebrochen")
                 return jsonify({"success": False, "error": "Kein Video geladen"}), 400
@@ -1415,7 +1415,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 generator_id = next_video_path.split(':', 1)[1]
                 
                 # Get default parameters from plugin registry
-                from .plugin_manager import get_plugin_manager
+                from ...plugins.manager import get_plugin_manager
                 pm = get_plugin_manager()
                 
                 params_dict = {}
@@ -1426,7 +1426,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                             params_dict[param['name']] = param['default']
                 
                 # Create generator source
-                from .frame_source import GeneratorSource
+                from ...player.sources import GeneratorSource
                 generator_source = GeneratorSource(
                     generator_id=generator_id,
                     parameters=params_dict,
@@ -1531,7 +1531,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 generator_id = prev_video_path.split(':', 1)[1]
                 
                 # Get default parameters from plugin registry
-                from .plugin_manager import get_plugin_manager
+                from ...plugins.manager import get_plugin_manager
                 pm = get_plugin_manager()
                 
                 params_dict = {}
@@ -1542,7 +1542,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                             params_dict[param['name']] = param['default']
                 
                 # Create generator source
-                from .frame_source import GeneratorSource
+                from ...player.sources import GeneratorSource
                 generator_source = GeneratorSource(
                     generator_id=generator_id,
                     parameters=params_dict,
@@ -1637,7 +1637,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 return jsonify({"success": False, "error": "No active source"}), 400
             
             # Check if it's a generator source
-            from .frame_source import GeneratorSource
+            from ...player.sources import GeneratorSource
             if not isinstance(player.source, GeneratorSource):
                 return jsonify({"success": False, "error": "Current source is not a generator"}), 400
             
@@ -1828,7 +1828,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         player.source.cleanup()
                     
                     # Lade DummySource (schwarzes Frame)
-                    from .frame_source import DummySource
+                    from ...player.sources import DummySource
                     player.source = DummySource(player.canvas_width, player.canvas_height)
                     player.source.initialize()
                     player.playlist_index = -1
@@ -1853,10 +1853,10 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     if first_item.startswith('generator:'):
                         generator_id = first_item.replace('generator:', '')
                         parameters = player.playlist_params.get(generator_id, {})
-                        from .frame_source import GeneratorSource
+                        from ...player.sources import GeneratorSource
                         new_source = GeneratorSource(generator_id, parameters, canvas_width=player.canvas_width, canvas_height=player.canvas_height)
                     else:
-                        from .frame_source import VideoSource
+                        from ...player.sources import VideoSource
                         # Look up clip_id from playlist_ids list (index 0)
                         first_clip_id = playlist_ids[0] if len(playlist_ids) > 0 else None
                         logger.debug(f"   Looking up clip_id for index 0: {first_clip_id}")
@@ -2200,8 +2200,8 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     logger.error(f"❌ Error emitting master_slave_changed WebSocket event: {e}")
             
             # Save to session state
-            from .session_state import get_session_state
-            from .clip_registry import get_clip_registry
+            from ...session.state import get_session_state
+            from ...player.clips.registry import get_clip_registry
             session_state = get_session_state()
             clip_registry = get_clip_registry()
             session_state.save_without_capture(player_manager, clip_registry)

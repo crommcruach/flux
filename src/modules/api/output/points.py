@@ -60,7 +60,7 @@ def register_points_routes(app, player_manager, data_dir):
                 return jsonify({"status": "error", "message": f"Datei nicht gefunden: {filename}"}), 404
             
             # Validiere JSON vor dem Wechsel
-            from .validator import validate_points_file
+            from ...core.validator import validate_points_file
             is_valid, message, errors, _ = validate_points_file(filepath)
             
             if not is_valid:
@@ -98,7 +98,7 @@ def register_points_routes(app, player_manager, data_dir):
             current_path = player.points_json_path
             
             # Validiere vor Reload
-            from .validator import validate_points_file
+            from ...core.validator import validate_points_file
             is_valid, message, errors, _ = validate_points_file(current_path)
             
             if not is_valid:
@@ -141,7 +141,7 @@ def register_points_routes(app, player_manager, data_dir):
             if not os.path.exists(filepath):
                 return jsonify({"status": "error", "message": f"Datei nicht gefunden: {filename}"}), 404
             
-            from .validator import validate_points_file
+            from ...core.validator import validate_points_file
             is_valid, message, errors, data = validate_points_file(filepath)
             
             result = {
@@ -193,7 +193,7 @@ def register_points_routes(app, player_manager, data_dir):
                 return jsonify({"status": "error", "message": f"Datei nicht gefunden: {filename}"}), 404
             
             # Lade Points-Daten
-            from .points_loader import PointsLoader
+            from ...content.points import PointsLoader
             points_data = PointsLoader.load_points(filepath, validate_bounds=False)
             
             canvas_width = points_data['canvas_width']

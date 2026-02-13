@@ -348,7 +348,7 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
         If the specified playlist is also active, changes are applied to live player.
         """
         try:
-            from .clip_registry import get_clip_registry
+            from ...player.clips.registry import get_clip_registry
             clip_registry = get_clip_registry()
             
             data = request.get_json()
@@ -476,7 +476,7 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
             
             # Save to session state WITHOUT capturing active playlist
             # (we just explicitly updated the playlist state above)
-            from .session_state import get_session_state
+            from ...session.state import get_session_state
             session_state = get_session_state()
             session_state.save_without_capture(player_manager, clip_registry)
             

@@ -1234,7 +1234,7 @@ def register_console_command_routes(app, player, dmx_controller, rest_api, video
             
             # Spezielle Behandlung für help
             if command == "help":
-                from .utils import print_help
+                from ...core.utils import print_help
                 
                 # Capture print output
                 old_stdout = sys.stdout
