@@ -16,7 +16,7 @@ import queue
 import threading
 from datetime import datetime
 from typing import Dict, Any, Optional
-from .logger import get_logger
+from ..core.logger import get_logger
 from .uid_registry import get_uid_registry
 from .session import SessionPersistence
 

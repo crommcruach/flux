@@ -8,17 +8,17 @@ import numpy as np
 import cv2
 import os
 from collections import deque
-from .logger import get_logger, debug_transport, debug_layers, debug_playback, debug_effects
-from .points_loader import PointsLoader
-from .frame_source import VideoSource
-from .plugin_manager import get_plugin_manager
-from .layer import Layer
-from .player.recording_manager import RecordingManager
-from .player.transition_manager import TransitionManager
-from .player.effect_processor import EffectProcessor
-from .player.playlist_manager import PlaylistManager
-from .player.layer_manager import LayerManager
-from .constants import (
+from ..core.logger import get_logger, debug_transport, debug_layers, debug_playback, debug_effects
+from ..content.points import PointsLoader
+from .sources import VideoSource
+from ..plugins.manager import get_plugin_manager
+from .layers.layer import Layer
+from .recording.manager import RecordingManager
+from .transitions.manager import TransitionManager
+from .effects.processor import EffectProcessor
+from .playlists.manager import PlaylistManager
+from .layers.manager import LayerManager
+from ..core.constants import (
     DEFAULT_SPEED,
     UNLIMITED_LOOPS,
     DEFAULT_FPS
@@ -27,7 +27,7 @@ from .constants import (
 logger = get_logger(__name__)
 
 # GLOBALE LOCK: Shared Lock für Player-Synchronisation
-from . import player_lock
+from .lock import player_lock
 
 
 class Player:
@@ -308,7 +308,7 @@ class Player:
         
         # If a video source is currently loaded, recreate it with new dimensions
         if hasattr(self, 'source') and self.source:
-            from .frame_source import VideoSource, GeneratorSource, DummySource
+            from .sources import VideoSource, GeneratorSource, DummySource
             
             if isinstance(self.source, VideoSource):
                 # Recreate video source with new dimensions and updated config
@@ -739,7 +739,7 @@ class Player:
                 if self.enable_artnet:
                     with player_lock._global_player_lock:
                         player_lock._active_player = self
-                        from .logger import debug_log, DebugCategories
+                        from ..core.logger import debug_log, DebugCategories
                         debug_log(logger, DebugCategories.ARTNET, f"[{self.player_name}] Registered as active Art-Net player")
                 
                 # Reaktiviere ArtNet (handled by routing_bridge)

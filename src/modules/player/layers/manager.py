@@ -2,8 +2,8 @@
 Layer Manager - Manages multi-layer compositing and layer effects
 """
 import os
-from ..logger import get_logger, debug_layers, debug_transport
-from ..layer import Layer
+from ...core.logger import get_logger, debug_layers, debug_transport
+from .layer import Layer
 
 logger = get_logger(__name__)
 

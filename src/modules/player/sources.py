@@ -8,8 +8,8 @@ import cv2
 import numpy as np
 import threading
 from abc import ABC, abstractmethod
-from .logger import get_logger
-from .constants import DEFAULT_FPS
+from ..core.logger import get_logger
+from ..core.constants import DEFAULT_FPS
 
 logger = get_logger(__name__)
 

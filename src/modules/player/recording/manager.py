@@ -5,7 +5,7 @@ import os
 import json
 from datetime import datetime
 from collections import deque
-from ..logger import get_logger
+from ...core.logger import get_logger
 
 logger = get_logger(__name__)
 

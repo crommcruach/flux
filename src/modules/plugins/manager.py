@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Type
 from plugins import PluginBase, PluginType
 from plugins.plugin_base import ParameterType
-from .logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -5,8 +5,8 @@ import os
 import sys
 import time
 import json
-from .constants import VIDEO_EXTENSIONS, AFFIRMATIVE_RESPONSES
-from .logger import get_logger
+from ..core.constants import VIDEO_EXTENSIONS, AFFIRMATIVE_RESPONSES
+from ..core.logger import get_logger
 from .command_executor import CommandExecutor
 
 logger = get_logger(__name__)
@@ -107,7 +107,7 @@ class CLIHandler:
     
     def _handle_videos_list(self):
         """Listet alle Videos auf."""
-        from .utils import list_videos
+        from ..core.utils import list_videos
         list_videos(self.video_dir)
     
     def _handle_video_load(self, command):
@@ -294,8 +294,8 @@ class CLIHandler:
     
     def _handle_points(self, args):
         """Verwaltet Punkte-Listen."""
-        from .utils import list_points_files
-        from .validator import validate_points_file
+        from ..core.utils import list_points_files
+        from ..core.validator import validate_points_file
         
         if args == "list":
             list_points_files(self.data_dir)
@@ -822,7 +822,7 @@ class CLIHandler:
     
     def _handle_help(self):
         """Zeigt Hilfe."""
-        from .utils import print_help
+        from ..core.utils import print_help
         print_help()
     
     # === Scripts ===

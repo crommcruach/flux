@@ -1,8 +1,8 @@
 """
 Effect Processor - Manages effect chains and applies effects to frames
 """
-from ..logger import get_logger, debug_effects
-from ..plugin_manager import get_plugin_manager
+from ...core.logger import get_logger, debug_effects
+from ...plugins.manager import get_plugin_manager
 from plugins import PluginType, ParameterType
 
 logger = get_logger(__name__)

@@ -2,7 +2,7 @@
 Player Manager - Central player container (Single Source of Truth)
 """
 import time
-from .logger import get_logger, debug_playback
+from ..core.logger import get_logger, debug_playback
 
 logger = get_logger(__name__)
 
@@ -197,7 +197,7 @@ class PlayerManager:
         
         try:
             from .player_core import Player
-            from .frame_source import VideoSource
+            from .sources import VideoSource
             
             # Create video preview player (clone video player config)
             if self.video_player:

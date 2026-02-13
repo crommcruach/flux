@@ -1,7 +1,7 @@
 """
 Playlist Manager - Handles playlist navigation and autoplay
 """
-from ..logger import get_logger, debug_playback, debug_layers
+from ...core.logger import get_logger, debug_playback, debug_layers
 
 logger = get_logger(__name__)
 

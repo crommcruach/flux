@@ -4,7 +4,7 @@ Handles automatic loading and application of default effect chains from config.j
 """
 from typing import Dict, List, Any, Optional
 from copy import deepcopy
-from .logger import get_logger
+from ...core.logger import get_logger
 
 logger = get_logger(__name__)
 

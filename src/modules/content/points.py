@@ -3,8 +3,8 @@ Points Loader - Lädt und verarbeitet Punkte-Konfigurationen
 """
 import json
 import numpy as np
-from .logger import get_logger
-from .constants import (
+from ..core.logger import get_logger
+from ..core.constants import (
     DMX_CHANNELS_PER_UNIVERSE,
     DMX_CHANNELS_PER_POINT,
     DMX_MAX_CHANNELS_8_UNIVERSES,

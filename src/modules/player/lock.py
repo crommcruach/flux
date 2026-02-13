@@ -5,6 +5,6 @@ Shared zwischen allen Player-Instanzen
 import threading
 
 # GLOBALE LOCK: Verhindert dass mehrere Art-Net Player gleichzeitig senden
-_global_player_lock = threading.Lock()
+player_lock = threading.Lock()
 _active_player = None
 

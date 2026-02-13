@@ -7,7 +7,7 @@ seinen spezifischen Effekten und Compositing-Einstellungen.
 
 import numpy as np
 from typing import Optional, List, Dict, Any
-from .logger import get_logger, debug_layers
+from ...core.logger import get_logger, debug_layers
 
 logger = get_logger(__name__)
 

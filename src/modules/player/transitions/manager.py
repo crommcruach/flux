@@ -3,7 +3,7 @@ Transition Manager - Handles smooth transitions between clips
 """
 import time
 import numpy as np
-from ..logger import get_logger, debug_playback
+from ...core.logger import get_logger, debug_playback
 
 logger = get_logger(__name__)
 
