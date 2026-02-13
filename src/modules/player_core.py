@@ -9,7 +9,6 @@ import cv2
 import os
 from collections import deque
 from .logger import get_logger, debug_transport, debug_layers, debug_playback, debug_effects
-from .artnet_manager import ArtNetManager
 from .points_loader import PointsLoader
 from .frame_source import VideoSource
 from .plugin_manager import get_plugin_manager
@@ -127,7 +126,6 @@ class Player:
         self.pause_event = threading.Event()  # Event-basierte Pause (low-latency)
         self.pause_event.set()  # Nicht pausiert = Event ist gesetzt
         self.thread = None
-        self.artnet_manager = None
         
         # Erweiterte Steuerung
         self.brightness = 1.0  # 0.0 - 1.0
@@ -180,8 +178,9 @@ class Player:
         debug_playback(logger, f"  Universen: {self.required_universes}")
         debug_playback(logger, f"  Art-Net: {'Enabled' if enable_artnet else 'Disabled'} ({target_ip}, Start-Universe: {start_universe})")
         
-        # Art-Net Manager wird extern gesetzt
-        self.artnet_manager = None
+        # ArtNet Routing Bridge (NEW - for routing system output)
+        self.routing_bridge = None
+
         
         # Output Manager (NEW - video player only, optional feature)
         self.output_manager = None
@@ -743,10 +742,7 @@ class Player:
                         from .logger import debug_log, DebugCategories
                         debug_log(logger, DebugCategories.ARTNET, f"[{self.player_name}] Registered as active Art-Net player")
                 
-                # Reaktiviere ArtNet (wurde bei stop() deaktiviert)
-                if self.artnet_manager:
-                    self.artnet_manager.is_active = True
-                    self.artnet_manager.resume_video_mode()
+                # Reaktiviere ArtNet (handled by routing_bridge)
                 
                 self.is_playing = True
                 self.is_running = True
@@ -812,10 +808,13 @@ class Player:
             logger.error(f"Fehler beim Re-Initialisieren der Source: {self.source.get_source_name()}")
             return
         
-        # Reaktiviere ArtNet (wurde bei stop() deaktiviert)
-        if self.artnet_manager:
-            self.artnet_manager.is_active = True
-            self.artnet_manager.resume_video_mode()
+        # Start ArtNet Routing Bridge (if available and on Art-Net Player)
+        if self.routing_bridge and self.enable_artnet:
+            try:
+                self.routing_bridge.start()
+                logger.debug("ArtNet Routing Bridge started")
+            except Exception as e:
+                logger.error(f"Failed to start routing bridge: {e}")
         
         self.is_playing = True
         self.is_running = True
@@ -838,8 +837,14 @@ class Player:
         self.is_paused = False
         
         # ArtNet deaktivieren
-        if self.artnet_manager:
-            self.artnet_manager.is_active = False
+        
+        # Stop ArtNet Routing Bridge (if available)
+        if self.routing_bridge:
+            try:
+                self.routing_bridge.stop()
+                logger.debug("ArtNet Routing Bridge stopped")
+            except Exception as e:
+                logger.error(f"Failed to stop routing bridge: {e}")
         
         # Warte auf Thread-Ende
         if self.thread and self.thread.is_alive():
@@ -880,9 +885,6 @@ class Player:
         self.is_paused = False
         self.pause_event.set()  # Event set = fortsetzen (immediate response)
         debug_playback(logger, "Wiedergabe fortgesetzt")
-        
-        if self.artnet_manager:
-            self.artnet_manager.resume_video_mode()
     
     def restart(self):
         """Startet Wiedergabe neu vom ersten Frame (egal in welchem Status)."""
@@ -939,10 +941,6 @@ class Player:
         self.start_time = time.time()
         self.frames_processed = 0
         self.current_loop = 0
-        
-        # Deaktiviere Testmuster
-        if self.artnet_manager:
-            self.artnet_manager.resume_video_mode()
         
         # FPS für Timing
         # Multi-Layer: Master-Layer (0) bestimmt FPS
@@ -1444,7 +1442,8 @@ class Player:
             
             # DMX extraction - only if needed (Art-Net enabled OR recording active)
             # This saves ~2-3ms per frame when Art-Net is disabled
-            needs_dmx = (self.enable_artnet and self.artnet_manager) or self.recording_manager.is_recording
+            needs_dmx = (self.enable_artnet and self.routing_bridge) or self.recording_manager.is_recording
+
             
             if needs_dmx:
                 # NumPy-optimierte Pixel-Extraktion (verwende Art-Net Frame!)
@@ -1480,15 +1479,15 @@ class Player:
                     'dmx_data': dmx_buffer.copy()
                 })
             
-            # Sende über Art-Net (nur wenn aktiviert und wir aktiver Art-Net Player sind)
-            if self.enable_artnet and self.artnet_manager and self.is_running and dmx_buffer:
-                # Prüfe ob wir noch der aktive Art-Net Player sind
-                if player_lock._active_player is self:
-                    self.artnet_manager.send_frame(dmx_buffer, source='video')
-                else:
-                    # Ein anderer Player hat Art-Net übernommen - stoppen
-                    logger.info(f"{self.player_name}: Art-Net von anderem Player übernommen, stoppe")
-                    break
+            # ArtNet Routing System (NEW - processes video frame for routing outputs)
+            #  Only run on Art-Net player (not Video player) for ArtNet output routing
+            if self.routing_bridge and self.enable_artnet and self.is_running:
+                try:
+                    # Use the OUTPUT frame (after effects but before DMX extraction)
+                    # This ensures routing system gets same frame as old ArtNet system
+                    self.routing_bridge.process_frame(frame_for_artnet)
+                except Exception as e:
+                    logger.error(f"Routing bridge error: {e}", exc_info=True)
             
             # Beende wenn gestoppt
             if not self.is_running:
@@ -1561,37 +1560,11 @@ class Player:
         """Blackout (alle LEDs aus)."""
         if self.is_playing and not self.is_paused:
             self.pause()
-        
-        if self.artnet_manager:
-            self.artnet_manager.blackout()
+        pass  # Blackout functionality moved to routing_bridge
     
     def test_pattern(self, color='red'):
         """Testmuster senden."""
-        if self.is_playing and not self.is_paused:
-            self.pause()
-        
-        if self.artnet_manager:
-            self.artnet_manager.test_pattern(color)
-    
-    def set_artnet_manager(self, artnet_manager):
-        """Setzt den Art-Net Manager von außen."""
-        self.artnet_manager = artnet_manager
-    
-    def reload_artnet(self):
-        """Lädt Art-Net Manager neu (falls bereits gesetzt)."""
-        if not self.artnet_manager:
-            logger.warning("Kein Art-Net Manager gesetzt")
-            return False
-        
-        try:
-            self.artnet_manager.stop()
-            artnet_config = self.config.get('artnet', {})
-            self.artnet_manager.start(artnet_config)
-            logger.info(f"✅ Art-Net neu geladen mit IP: {self.target_ip}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Neuladen von Art-Net: {e}")
-            return False
+        pass  # Test pattern functionality moved to routing_bridge
     
     # Einstellungen
     def set_brightness(self, value):
@@ -1763,24 +1736,6 @@ class Player:
             # Neu initialisieren
             if not self.source.initialize():
                 raise ValueError(f"Source konnte nicht neu initialisiert werden")
-        
-        # Art-Net Manager aktualisieren
-        if self.artnet_manager:
-            # Stoppe alten Manager
-            self.artnet_manager.stop()
-            
-            # Erstelle neuen Manager mit neuen Dimensionen
-            from .artnet_manager import ArtNetManager
-            artnet_config = self.config.get('artnet', {})
-            self.artnet_manager = ArtNetManager(
-                self.target_ip,
-                self.start_universe,
-                self.total_points,
-                self.channels_per_universe
-            )
-            self.artnet_manager.start(artnet_config)
-            
-            logger.info(f"Art-Net Manager aktualisiert: {self.required_universes} Universen")
         
         logger.info(f"✅ Points gewechselt:")
         logger.info(f"   Punkte: {old_points} → {self.total_points}")

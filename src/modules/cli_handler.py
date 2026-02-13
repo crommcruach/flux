@@ -18,7 +18,7 @@ class CLIHandler:
     def __init__(self, player_manager, dmx_controller, rest_api, video_dir, data_dir, config):
         # Nutze player_manager für zentralen Player-Zugriff
         self.player_manager = player_manager
-        self.dmx_controller = dmx_controller
+        self.dmx_controller = dmx_controller  # Deprecated - DMX input removed
         self.rest_api = rest_api
         self.video_dir = video_dir
         self.data_dir = data_dir
@@ -28,7 +28,7 @@ class CLIHandler:
         # Initialize unified command executor
         self.command_executor = CommandExecutor(
             player_provider=lambda: self.player_manager.player,
-            dmx_controller=dmx_controller,
+            dmx_controller=None,  # DMX input removed
             video_dir=video_dir,
             data_dir=data_dir,
             config=config

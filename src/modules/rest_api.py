@@ -24,7 +24,7 @@ class RestAPI:
     
     def __init__(self, player_manager, dmx_controller, data_dir, video_dir, config=None, replay_manager=None):
         self.player_manager = player_manager
-        self.dmx_controller = dmx_controller
+        self.dmx_controller = dmx_controller  # Deprecated - DMX input removed
         self.data_dir = data_dir
         self.video_dir = video_dir
         self.config = config or {}
@@ -42,7 +42,7 @@ class RestAPI:
         # Initialize unified command executor
         self.command_executor = CommandExecutor(
             player_provider=lambda: self.player_manager.player,
-            dmx_controller=dmx_controller,
+            dmx_controller=None,  # DMX input removed
             video_dir=video_dir,
             data_dir=data_dir,
             config=config or {}
@@ -700,26 +700,35 @@ class RestAPI:
         else:
             artnet_source = self.player
         
-        # Art-Net Manager ist die zentrale Quelle - zeigt was wirklich gesendet wird
-        if hasattr(artnet_source, 'artnet_manager') and artnet_source.artnet_manager:
-            artnet_mgr = artnet_source.artnet_manager
-            if hasattr(artnet_mgr, 'last_frame') and artnet_mgr.last_frame:
-                dmx_preview = artnet_mgr.last_frame
-                total_universes = (len(artnet_mgr.last_frame) + 511) // 512
-            elif hasattr(artnet_mgr, 'required_universes'):
-                total_universes = artnet_mgr.required_universes
-        elif hasattr(artnet_source, 'required_universes'):
+        # Art-Net Routing is the source now (routing_bridge)
+        # OLD artnet_manager system removed
+        if hasattr(artnet_source, 'required_universes'):
             total_universes = artnet_source.required_universes
+        
+        # ArtNet Routing Output Data (NEW - for routing system on ARTNET PLAYER)
+        routing_outputs = {}
+        if hasattr(artnet_source, 'routing_bridge') and artnet_source.routing_bridge:
+            try:
+                last_frames = artnet_source.routing_bridge.get_last_frames()
+                logger.debug(f"Routing outputs available: {list(last_frames.keys())}, lengths: {[len(d) for d in last_frames.values()]}")
+                for output_id, dmx_data in last_frames.items():
+                    if dmx_data and len(dmx_data) > 0:
+                        # Convert bytes to list for JSON serialization
+                        routing_outputs[output_id] = list(dmx_data)
+                logger.debug(f"Sending routing_outputs: {list(routing_outputs.keys())}")
+            except Exception as e:
+                logger.error(f"Error collecting routing outputs: {e}", exc_info=True)
+                pass  # Silently fail if routing bridge not available
+        else:
+            logger.debug("No routing_bridge available on Art-Net Player")
         
         # Replay Status
         is_replaying = False
         if self.replay_manager:
             is_replaying = self.replay_manager.is_playing
         
-        # Aktiver Modus (Test/Replay/Video)
+        # Aktiver Modus - always "Video" now (routing_bridge handles output)
         active_mode = "Video"
-        if hasattr(self.player, 'artnet_manager') and self.player.artnet_manager:
-            active_mode = self.player.artnet_manager.get_active_mode()
         
         return {
             "status": self.player.status(),
@@ -736,7 +745,8 @@ class RestAPI:
             "dmx_preview": dmx_preview,
             "total_universes": total_universes,
             "is_replaying": is_replaying,
-            "active_mode": active_mode
+            "active_mode": active_mode,
+            "routing_outputs": routing_outputs  # NEW: Routing system output data
         }
     
     def _status_broadcast_loop(self):

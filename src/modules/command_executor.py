@@ -47,13 +47,13 @@ class CommandExecutor:
         
         Args:
             player_provider: Callable that returns current player instance
-            dmx_controller: DMX controller instance
+            dmx_controller: DMX controller instance (deprecated - now None)
             video_dir: Path to video directory
             data_dir: Path to data directory
             config: Configuration dictionary
         """
         self.player_provider = player_provider
-        self.dmx_controller = dmx_controller
+        self.dmx_controller = dmx_controller  # Deprecated - DMX input removed
         self.video_dir = video_dir
         self.data_dir = data_dir
         self.config = config
@@ -272,8 +272,7 @@ class CommandExecutor:
             return CommandResult(False, "Ungültige IP-Adresse", error=f"'{args}' ist keine gültige IP")
         
         self.player.target_ip = args
-        self.player.reload_artnet()
-        return CommandResult(True, f"Art-Net Ziel-IP auf {args} gesetzt", {"ip": args})
+        return CommandResult(True, f"Art-Net Ziel-IP auf {args} gesetzt (restart required)", {"ip": args})
     
     def _handle_universe(self, args):
         """Set Art-Net start universe."""
@@ -286,93 +285,13 @@ class CommandExecutor:
                 return CommandResult(False, "Universum muss zwischen 0 und 32767 liegen")
             
             self.player.start_universe = value
-            self.player.reload_artnet()
-            return CommandResult(True, f"Start-Universum auf {value} gesetzt", {"universe": value})
+            return CommandResult(True, f"Start-Universum auf {value} gesetzt (restart required)", {"universe": value})
         except ValueError:
             return CommandResult(False, "Ungültiger Universum-Wert", error=f"'{args}' ist keine Zahl")
     
     def _handle_delta(self, args):
-        """Control Art-Net delta-encoding optimization."""
-        if not hasattr(self.player, 'artnet_manager') or not self.player.artnet_manager:
-            return CommandResult(False, "Art-Net Manager nicht verfügbar")
-        
-        artnet = self.player.artnet_manager
-        
-        if not args:
-            # Show current status
-            lines = ["Delta-Encoding Status:"]
-            lines.append(f"  Enabled: {artnet.delta_encoding_enabled}")
-            lines.append(f"  Threshold: {artnet.delta_encoding_threshold}")
-            lines.append(f"  Bit Depth: {artnet.bit_depth}-bit")
-            lines.append(f"  Full-Frame Interval: {artnet.full_frame_interval}")
-            lines.append(f"  Frame Counter: {artnet.frame_counter}")
-            
-            return CommandResult(True, "\n".join(lines), {
-                "enabled": artnet.delta_encoding_enabled,
-                "threshold": artnet.delta_encoding_threshold,
-                "bit_depth": artnet.bit_depth,
-                "full_frame_interval": artnet.full_frame_interval,
-                "frame_counter": artnet.frame_counter
-            })
-        
-        # Parse subcommand
-        parts = args.split(maxsplit=1)
-        subcommand = parts[0].lower()
-        subargs = parts[1] if len(parts) > 1 else None
-        
-        if subcommand in ['on', 'enable', 'true', '1']:
-            artnet.delta_encoding_enabled = True
-            artnet.frame_counter = 0
-            artnet.last_sent_frame = None
-            logger.info("Delta-Encoding via CLI aktiviert")
-            return CommandResult(True, "Delta-Encoding aktiviert", {"enabled": True})
-        
-        elif subcommand in ['off', 'disable', 'false', '0']:
-            artnet.delta_encoding_enabled = False
-            artnet.frame_counter = 0
-            artnet.last_sent_frame = None
-            logger.info("Delta-Encoding via CLI deaktiviert")
-            return CommandResult(True, "Delta-Encoding deaktiviert", {"enabled": False})
-        
-        elif subcommand == 'threshold':
-            if not subargs:
-                return CommandResult(False, "Threshold-Wert fehlt", error="Verwendung: delta threshold <wert>")
-            
-            try:
-                value = int(subargs)
-                if value < 0:
-                    return CommandResult(False, "Threshold muss >= 0 sein")
-                
-                artnet.delta_encoding_threshold = value
-                artnet.frame_counter = 0
-                artnet.last_sent_frame = None
-                logger.info(f"Delta-Encoding Threshold via CLI auf {value} gesetzt")
-                return CommandResult(True, f"Delta-Encoding Threshold auf {value} gesetzt", {"threshold": value})
-            except ValueError:
-                return CommandResult(False, "Ungültiger Threshold-Wert", error=f"'{subargs}' ist keine Zahl")
-        
-        elif subcommand == 'interval':
-            if not subargs:
-                return CommandResult(False, "Interval-Wert fehlt", error="Verwendung: delta interval <frames>")
-            
-            try:
-                value = int(subargs)
-                if value < 1:
-                    return CommandResult(False, "Interval muss >= 1 sein")
-                
-                artnet.full_frame_interval = value
-                logger.info(f"Delta-Encoding Full-Frame Interval via CLI auf {value} gesetzt")
-                return CommandResult(True, f"Full-Frame Interval auf {value} Frames gesetzt", {"interval": value})
-            except ValueError:
-                return CommandResult(False, "Ungültiger Interval-Wert", error=f"'{subargs}' ist keine Zahl")
-        
-        elif subcommand in ['status', 'info']:
-            # Same as no args
-            return self._handle_delta(None)
-        
-        else:
-            return CommandResult(False, f"Unbekannter Delta-Subbefehl: {subcommand}", 
-                              error="Verwendung: delta [on|off|threshold <wert>|interval <frames>|status]")
+        """Control Art-Net delta-encoding optimization (OLD SYSTEM - REMOVED)."""
+        return CommandResult(False, "Delta-Encoding command removed - old Art-Net system deprecated. Use routing system instead.")
     
     def _handle_debug(self, args):
         """Toggle CLI debug mode (console log level)."""

@@ -361,7 +361,26 @@ function initDMXMonitor() {
     });
     
     socket.on('status', (data) => {
-        if (data.dmx_preview) {
+        // Debug: Log what we receive
+        if (data.routing_outputs) {
+            console.log('DMX Monitor: routing_outputs received:', Object.keys(data.routing_outputs), 
+                       'first output length:', Object.keys(data.routing_outputs).length > 0 ? 
+                       data.routing_outputs[Object.keys(data.routing_outputs)[0]]?.length : 0);
+        } else {
+            console.log('DMX Monitor: No routing_outputs in status data');
+        }
+        
+        // Check for routing outputs first (new system)
+        if (data.routing_outputs && Object.keys(data.routing_outputs).length > 0) {
+            // Get first output's data (or use stored selection in future)
+            const outputIds = Object.keys(data.routing_outputs);
+            const firstOutput = data.routing_outputs[outputIds[0]];
+            dmxData = firstOutput;
+            updateDMXDisplay();
+            debug.log(`DMX Monitor: Using routing output ${outputIds[0]}`);
+        }
+        // Fallback to old dmx_preview system
+        else if (data.dmx_preview) {
             dmxData = data.dmx_preview;
             updateDMXDisplay();
         }

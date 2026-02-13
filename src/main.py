@@ -93,7 +93,7 @@ if project_root not in sys.path:
 # This prevents HAP codec threading assertion errors
 os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'threads;1'
 
-from modules import DMXController, RestAPI, PlayerManager
+from modules import RestAPI, PlayerManager
 from modules.player import Player
 from modules.frame_source import VideoSource
 from modules.cli_handler import CLIHandler
@@ -106,10 +106,32 @@ logger = get_logger(__name__)
 # Global shutdown flag and cleanup resources
 _shutdown_requested = False
 _cleanup_resources = {}
+_shutdown_confirmation_enabled = False  # Set to True in production
 
 def register_cleanup_resource(name, cleanup_func):
     """Register a resource for cleanup on shutdown"""
     _cleanup_resources[name] = cleanup_func
+
+def confirm_shutdown():
+    """Ask user for confirmation before shutdown (production mode).
+    
+    Returns:
+        bool: True if user confirms shutdown, False if cancelled
+    """
+    try:
+        print("\n" + "="*80)
+        print("⚠️  Shutdown requested - All Art-Net output will stop!")
+        print("="*80)
+        response = input("Are you sure you want to exit? (yes/no): ").strip().lower()
+        
+        if response in ['yes', 'y']:
+            return True
+        else:
+            print("✅ Shutdown cancelled - continuing operation")
+            return False
+    except (EOFError, KeyboardInterrupt):
+        # If user presses Ctrl+C again or input fails, proceed with shutdown
+        return True
 
 def graceful_shutdown(signum=None, frame=None):
     """Gracefully shutdown all components"""
@@ -118,6 +140,11 @@ def graceful_shutdown(signum=None, frame=None):
     if _shutdown_requested:
         print("\n⚠️  Shutdown already in progress...")
         return
+    
+    # Ask for confirmation if enabled (production mode)
+    if _shutdown_confirmation_enabled:
+        if not confirm_shutdown():
+            return  # User cancelled shutdown
     
     _shutdown_requested = True
     print("\n\n" + "="*80)
@@ -128,6 +155,7 @@ def graceful_shutdown(signum=None, frame=None):
     cleanup_order = [
         'outputs',      # Close display windows first
         'players',      # Stop playback
+        'artnet',       # Send blackout to all ArtNet channels
         'rest_api',     # Stop web server
         'dmx',          # Stop DMX controller
         'session',      # Save session state
@@ -445,18 +473,6 @@ def main():
     logger.info(f"Video player resolution: {video_canvas_width}x{video_canvas_height} (preset: {video_settings.get('preset', '1080p')}, autosize: {video_settings.get('autosize', 'off')})")
     logger.info(f"Art-Net player resolution: {artnet_canvas_width}x{artnet_canvas_height} (from points file)")
     
-    # Art-Net Manager global initialisieren (unabhängig vom Player)
-    from modules.artnet_manager import ArtNetManager
-    artnet_manager = ArtNetManager(
-        target_ip, 
-        start_universe, 
-        points_data['total_points'], 
-        points_data['channels_per_universe']
-    )
-    artnet_config = config.get('artnet', {})
-    artnet_manager.start(artnet_config)
-    logger.debug(f"Art-Net gestartet: {target_ip}, Universen: {points_data['required_universes']}")
-    
     # ClipRegistry initialisieren (ERST, bevor Player erstellt werden)
     from modules.clip_registry import get_clip_registry
     clip_registry = get_clip_registry()
@@ -471,9 +487,11 @@ def main():
     logger.debug(f"Video Player initialisiert (Preview only, kein Video geladen)")
     
     # Replay Manager global initialisieren (mit Player-Referenz)
+    # Note: artnet_manager removed - replay functionality will be reimplemented with routing_bridge
     from modules.replay_manager import ReplayManager
-    replay_manager = ReplayManager(artnet_manager, config, player)
-    logger.debug("Replay Manager initialisiert")
+    replay_manager = ReplayManager(None, config, player)
+    logger.debug("Replay Manager initialisiert (ohne Art-Net Manager)")
+
     
     # Speichere data_dir für spätere Verwendung
     player.data_dir = data_dir
@@ -487,8 +505,8 @@ def main():
     artnet_video_source = DummySource(artnet_canvas_width, artnet_canvas_height)
     artnet_player = Player(artnet_video_source, points_json_path, target_ip, start_universe, fps_limit, config,
                           enable_artnet=True, player_name="Art-Net Player", clip_registry=clip_registry)
-    artnet_player.set_artnet_manager(artnet_manager)
     logger.debug(f"Art-Net Player initialisiert (kein Video geladen)")
+
     
     # PlayerManager initialisieren (Single Source of Truth)
     player_manager = PlayerManager(player, artnet_player)
@@ -518,6 +536,19 @@ def main():
     from modules.artnet_routing.artnet_routing_manager import ArtNetRoutingManager
     artnet_routing_manager = ArtNetRoutingManager(session_state)
     logger.debug("ArtNet Routing Manager initialized")
+    
+    # Initialize Routing Bridge (connects OutputManager + ArtNetSender)
+    from modules.artnet_routing.routing_bridge import RoutingBridge
+    routing_bridge = RoutingBridge(
+        routing_manager=artnet_routing_manager,
+        canvas_width=video_canvas_width,
+        canvas_height=video_canvas_height
+    )
+    logger.debug("ArtNet Routing Bridge initialized")
+    
+    # Connect routing bridge to Art-Net Player (NEW ArtNet output routing system)
+    artnet_player.routing_bridge = routing_bridge
+    logger.debug("Routing bridge connected to Art-Net Player")
     
     # Initialize Multi-Playlist System
     from modules.playlist_manager import MultiPlaylistSystem
@@ -606,23 +637,11 @@ def main():
     # except Exception as e:
     #     logger.warning(f"⚠️ Fehler beim Laden von Session State: {e}")
     
-    # DMX-Controller initialisieren (nur für DMX-Input zuständig)
-    dmx_controller = DMXController(
-        player_manager, 
-        listen_ip=config['artnet']['dmx_listen_ip'],
-        listen_port=config['artnet']['dmx_listen_port'],
-        control_universe=config['artnet']['dmx_control_universe'],
-        video_base_dir=video_dir,
-        scripts_dir=scripts_dir,
-        config=config
-    )
-    dmx_controller.start()
-    
-    # Register cleanup for DMX
-    register_cleanup_resource('dmx', lambda: dmx_controller.stop())
+    # DMX Input Controller removed - will be reimplemented later
+    # See snippets/old-dmx-input/ for archived implementation
     
     # REST API initialisieren und automatisch starten
-    rest_api = RestAPI(player_manager, dmx_controller, data_dir, video_dir, config, replay_manager=replay_manager)
+    rest_api = RestAPI(player_manager, None, data_dir, video_dir, config, replay_manager=replay_manager)
     
     # Register unified player routes now that both rest_api and playlist_system exist
     rest_api.register_unified_player_routes(playlist_system)
@@ -674,7 +693,7 @@ def main():
     # sys.stdout = console_capture
     
     # CLI Handler initialisieren
-    cli_handler = CLIHandler(player_manager, dmx_controller, rest_api, video_dir, data_dir, config)
+    cli_handler = CLIHandler(player_manager, None, rest_api, video_dir, data_dir, config)
     
     print("\n" + "=" * 80)
     print("Flux - Video Art-Net Controller")

@@ -5788,8 +5788,13 @@ app.openDmxMonitor = function(output) {
         grid.appendChild(channel);
     }
     
-    // Start polling DMX values (simulated - would need backend endpoint)
-    this.dmxMonitorInterval = setInterval(() => this.updateDmxMonitor(), 100);
+    // Connect to Socket.IO for real-time DMX updates (better than polling)
+    if (!this.dmxSocket) {
+        this.dmxSocket = io('http://localhost:5000');
+        this.dmxSocket.on('status', (data) => {
+            this.updateDmxMonitorFromData(data);
+        });
+    }
 };
 
 /**
@@ -5797,35 +5802,48 @@ app.openDmxMonitor = function(output) {
  */
 app.closeDmxMonitor = function() {
     document.getElementById('dmxMonitorModal').style.display = 'none';
-    if (this.dmxMonitorInterval) {
-        clearInterval(this.dmxMonitorInterval);
-        this.dmxMonitorInterval = null;
+    // Disconnect Socket.IO when closing monitor
+    if (this.dmxSocket) {
+        this.dmxSocket.disconnect();
+        this.dmxSocket = null;
+        console.log('🔌 DMX Monitor: Socket.IO disconnected');
     }
 };
 
 /**
- * Update DMX monitor values
+ * Update DMX monitor from Socket.IO data
  */
-app.updateDmxMonitor = async function() {
+app.updateDmxMonitorFromData = function(data) {
     try {
-        const response = await fetch('/api/status');
-        const data = await response.json();
+        // Cache data for universe switching
+        this.lastDmxData = data;
         
-        if (!data.dmx_preview || data.dmx_preview.length === 0) {
+        // Try routing_outputs first (new system), fallback to dmx_preview (old system)
+        let dmxData = null;
+        
+        if (data.routing_outputs && Object.keys(data.routing_outputs).length > 0) {
+            // New routing system: Get first output's data
+            const outputIds = Object.keys(data.routing_outputs);
+            dmxData = data.routing_outputs[outputIds[0]];
+        } else if (data.dmx_preview && data.dmx_preview.length > 0) {
+            // Old ArtNet system
+            dmxData = data.dmx_preview;
+        }
+        
+        if (!dmxData || dmxData.length === 0) {
             document.getElementById('dmxStats').textContent = `No DMX data available - Start playback to see output`;
             return;
         }
         
         const selectedUniverse = parseInt(document.getElementById('dmxUniverseSelect').value);
         
-        // dmx_preview is a flat array of RGB values [r1,g1,b1,r2,g2,b2,...]
-        // Convert to universe channels (510 channels per universe max)
-        const channelsPerUniverse = 510;
-        const universeStartChannel = (selectedUniverse - 1) * channelsPerUniverse;
-        const universeEndChannel = universeStartChannel + 512; // Full 512 channel display
+        // DMX universes: Universe 0 = channels 0-511, Universe 1 = channels 512-1023, etc.
+        const channelsPerUniverse = 512;
+        const universeStartChannel = selectedUniverse * channelsPerUniverse;
+        const universeEndChannel = universeStartChannel + channelsPerUniverse;
         
         // Extract channels for this universe
-        const universeData = data.dmx_preview.slice(universeStartChannel, universeEndChannel);
+        const universeData = dmxData.slice(universeStartChannel, universeEndChannel);
         
         if (universeData.length === 0) {
             document.getElementById('dmxStats').textContent = `Universe ${selectedUniverse}: No data (out of range)`;
@@ -5865,8 +5883,12 @@ app.updateDmxMonitor = async function() {
  * Change DMX universe
  */
 app.changeDmxUniverse = function() {
-    // Immediately update to show new universe data
-    this.updateDmxMonitor();
+    // Universe change just triggers redisplay with current cached data
+    // Next Socket.IO update will refresh with new universe selection
+    // Store last received data for on-demand universe switching
+    if (this.lastDmxData) {
+        this.updateDmxMonitorFromData(this.lastDmxData);
+    }
 };
 
 /**

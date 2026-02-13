@@ -307,14 +307,14 @@ class ArtNetRoutingManager:
         """
         return self.objects.get(obj_id)
     
-    def get_all_objects(self) -> List[ArtNetObject]:
+    def get_all_objects(self) -> Dict[str, ArtNetObject]:
         """
         Get all ArtNet objects
         
         Returns:
-            List of all ArtNetObject instances
+            Dictionary of object_id → ArtNetObject
         """
-        return list(self.objects.values())
+        return self.objects.copy()
     
     def update_object(self, obj_id: str, updates: dict):
         """
@@ -418,14 +418,14 @@ class ArtNetRoutingManager:
         """
         return self.outputs.get(out_id)
     
-    def get_all_outputs(self) -> List[ArtNetOutput]:
+    def get_all_outputs(self) -> Dict[str, ArtNetOutput]:
         """
         Get all ArtNet outputs
         
         Returns:
-            List of all ArtNetOutput instances
+            Dictionary of output_id → ArtNetOutput
         """
-        return list(self.outputs.values())
+        return self.outputs.copy()
     
     def update_output(self, out_id: str, updates: dict):
         """

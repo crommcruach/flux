@@ -105,8 +105,9 @@ class ReplayManager:
             logger.debug("Video gestoppt für Replay")
         
         # Aktiviere Replay-Modus (blockiert Video-Ausgabe)
+        # Note: artnet_manager removed - replay needs reimplementation with routing_bridge
         if self.artnet_manager:
-            self.artnet_manager.replay_mode = True
+            logger.warning("Replay: artnet_manager deprecated, output disabled")
         
         self.is_playing = True
         self.replay_thread = threading.Thread(target=self._replay_loop, daemon=True)
@@ -124,8 +125,7 @@ class ReplayManager:
             self.replay_thread.join(timeout=2)
         
         # Deaktiviere Replay-Modus (erlaubt Video-Ausgabe)
-        if self.artnet_manager:
-            self.artnet_manager.replay_mode = False
+        # Note: artnet_manager removed
         
         logger.info("⏹️ Replay gestoppt")
         return True
@@ -163,9 +163,10 @@ class ReplayManager:
                     # Wende Helligkeit auf alle Kanäle an
                     dmx_data = [int(val * self.brightness) for val in dmx_data]
                 
-                # Sende über Art-Net mit Replay-Priorität (speichert automatisch in last_frame)
-                if self.artnet_manager and self.artnet_manager.is_active:
-                    self.artnet_manager.send_frame(dmx_data, source='replay')
+                # Sende über Art-Net mit Replay-Priorität
+                # Note: artnet_manager removed - replay needs reimplementation with routing_bridge
+                if self.artnet_manager:
+                    logger.warning("Replay: Cannot send frame - artnet_manager deprecated")
             
             # Loop beenden wenn nicht aktiviert
             if not self.loop_enabled:

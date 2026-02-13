@@ -687,9 +687,12 @@ class PlayerManager:
             import numpy as np
             black_frame_rgb = np.zeros((slave_player.canvas_height, slave_player.canvas_width, 3), dtype=np.uint8)
             
-            # Clear Art-Net output if enabled (expects RGB)
-            if hasattr(slave_player, 'artnet_manager') and slave_player.artnet_manager and slave_player.enable_artnet:
-                slave_player.artnet_manager.send_frame(black_frame_rgb.flatten().tolist())
+            # Clear Art-Net output via routing_bridge (if enabled)
+            if hasattr(slave_player, 'routing_bridge') and slave_player.routing_bridge and slave_player.enable_artnet:
+                try:
+                    slave_player.routing_bridge.process_frame(black_frame_rgb)
+                except Exception as e:
+                    logger.error(f"Failed to send black frame via routing_bridge: {e}")
             
             # Clear preview frame (expects BGR for MJPEG stream)
             import cv2
@@ -855,9 +858,12 @@ class PlayerManager:
                     import numpy as np
                     black_frame_rgb = np.zeros((player.canvas_height, player.canvas_width, 3), dtype=np.uint8)
                     
-                    # Clear Art-Net output if enabled
-                    if hasattr(player, 'artnet_manager') and player.artnet_manager and player.enable_artnet:
-                        player.artnet_manager.send_frame(black_frame_rgb.flatten().tolist())
+                    # Clear Art-Net output via routing_bridge (if enabled)
+                    if hasattr(player, 'routing_bridge') and player.routing_bridge and player.enable_artnet:
+                        try:
+                            player.routing_bridge.process_frame(black_frame_rgb)
+                        except Exception as e:
+                            logger.error(f"Failed to send black frame via routing_bridge: {e}")
                     
                     # Clear preview frame
                     import cv2

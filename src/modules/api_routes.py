@@ -130,14 +130,8 @@ def register_settings_routes(app, player_manager):
     
     @app.route('/api/fps', methods=['POST'])
     def set_fps():
-        """Setzt Art-Net FPS."""
-        player = player_manager.player
-        data = request.get_json()
-        value = data.get('value')
-        if player and player.artnet_manager:
-            player.artnet_manager.set_fps(value)
-            return jsonify({"status": "success", "fps": value})
-        return jsonify({"status": "error", "message": "Kein Art-Net aktiv"}), 400
+        """Setzt Art-Net FPS (DEPRECATED - old system removed)."""
+        return jsonify({"status": "error", "message": "Old Art-Net system removed. Use routing system instead."}), 410
     
     @app.route('/api/loop', methods=['POST'])
     def set_loop():
@@ -154,23 +148,15 @@ def register_artnet_routes(app, player_manager):
     
     @app.route('/api/blackout', methods=['POST'])
     def blackout():
-        """Aktiviert Blackout."""
-        player = player_manager.player
-        if not player:
-            return jsonify({"status": "error", "message": "Kein Player geladen"}), 400
-        player.blackout()
-        return jsonify({"status": "success", "message": "Blackout aktiviert"})
+        """Aktiviert Blackout (DEPRECATED - old system removed)."""
+        # TODO: Reimplement with routing_bridge
+        return jsonify({"status": "error", "message": "Blackout feature needs reimplementation with routing system"}), 501
     
     @app.route('/api/test', methods=['POST'])
     def test_pattern():
-        """Sendet Testmuster."""
-        player = player_manager.player
-        if not player:
-            return jsonify({"status": "error", "message": "Kein Player geladen"}), 400
-        data = request.get_json() or {}
-        color = data.get('color', 'red')
-        player.test_pattern(color)
-        return jsonify({"status": "success", "message": f"Testmuster '{color}' gesendet"})
+        """Sendet Testmuster (DEPRECATED - old system removed)."""
+        # TODO: Reimplement with routing_bridge
+        return jsonify({"status": "error", "message": "Test pattern feature needs reimplementation with routing system"}), 501
     
     @app.route('/api/ip', methods=['POST'])
     def set_ip():
@@ -220,79 +206,30 @@ def register_artnet_routes(app, player_manager):
     
     @app.route('/api/artnet/info', methods=['GET'])
     def artnet_info():
-        """Gibt Art-Net Informationen und Statistiken zurück."""
+        """Gibt Art-Net Informationen und Statistiken zurück (DEPRECATED)."""
+        # Old Art-Net system removed - return minimal info
         try:
             player = player_manager.player
-            artnet_manager = player.artnet_manager
-            
-            network_stats = artnet_manager.get_network_stats()
-            
-            # Get brightness from player
             brightness = int(player.brightness * 100) if hasattr(player, 'brightness') else 100
             
             return jsonify({
                 "status": "success",
+                "message": "Old Art-Net system removed. Use routing API instead.",
                 "artnet_brightness": brightness,
-                "artnet_fps": artnet_manager.get_fps(),
-                "total_universes": artnet_manager.required_universes,
-                "packets_sent": network_stats['packets_sent'],
-                "packets_per_sec": network_stats['packets_per_sec'],
-                "mbps": network_stats['mbps'],
-                "network_load": network_stats['network_load_percent'],
-                "active_mode": artnet_manager.get_active_mode(),
-                "delta_encoding": {
-                    "enabled": artnet_manager.delta_encoding_enabled,
-                    "threshold": artnet_manager.delta_threshold,
-                    "bit_depth": artnet_manager.bit_depth,
-                    "full_frame_interval": artnet_manager.full_frame_interval,
-                    "frame_counter": artnet_manager.frame_counter
-                }
+                "active_mode": "Video"
             })
         except Exception as e:
             logger.error(f"Fehler in /api/artnet/info: {str(e)}")
-            import traceback
-            traceback.print_exc()
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
     
     @app.route('/api/artnet/delta-encoding', methods=['POST'])
     def set_delta_encoding():
-        """Aktiviert/Deaktiviert Delta-Encoding zur Laufzeit."""
-        try:
-            from flask import request
-            data = request.get_json()
-            
-            player = player_manager.player
-            artnet_manager = player.artnet_manager
-            
-            if 'enabled' in data:
-                enabled = bool(data['enabled'])
-                artnet_manager.delta_encoding_enabled = enabled
-                
-                # Reset Frame-Counter und last_sent_frame bei Änderung
-                artnet_manager.frame_counter = 0
-                artnet_manager.last_sent_frame = None
-                
-                logger.info(f"Delta-Encoding {'aktiviert' if enabled else 'deaktiviert'}")
-            
-            if 'threshold' in data:
-                artnet_manager.delta_threshold = int(data['threshold'])
-                logger.info(f"Delta-Threshold auf {artnet_manager.delta_threshold} gesetzt")
-            
-            if 'full_frame_interval' in data:
-                artnet_manager.full_frame_interval = int(data['full_frame_interval'])
-                logger.info(f"Full-Frame-Interval auf {artnet_manager.full_frame_interval} gesetzt")
-            
-            return jsonify({
-                "status": "success",
-                "delta_encoding": {
-                    "enabled": artnet_manager.delta_encoding_enabled,
-                    "threshold": artnet_manager.delta_threshold,
-                    "full_frame_interval": artnet_manager.full_frame_interval
-                }
-            })
-        except Exception as e:
-            logger.error(f"Fehler in /api/artnet/delta-encoding: {str(e)}")
-            return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
+        """Aktiviert/Deaktiviert Delta-Encoding (DEPRECATED - old system removed)."""
+        # Delta encoding needs to be reimplemented in new routing system
+        return jsonify({
+            "status": "error",
+            "message": "Delta-Encoding removed with old Art-Net system. Needs reimplementation in routing system."
+        }), 410
 
 
 def register_info_routes(app, player_manager, api=None, config=None):
@@ -302,11 +239,26 @@ def register_info_routes(app, player_manager, api=None, config=None):
     def status():
         """Gibt aktuellen Status zurück."""
         player = player_manager.player
+        
+        # Collect routing outputs (NEW - for routing system DMX monitor)
+        routing_outputs = {}
+        artnet_source = player_manager.artnet_player if hasattr(player_manager, 'artnet_player') and player_manager.artnet_player else player
+        if hasattr(artnet_source, 'routing_bridge') and artnet_source.routing_bridge:
+            try:
+                last_frames = artnet_source.routing_bridge.get_last_frames()
+                for output_id, dmx_data in last_frames.items():
+                    if dmx_data and len(dmx_data) > 0:
+                        # Convert bytes to list for JSON serialization
+                        routing_outputs[output_id] = list(dmx_data)
+            except Exception:
+                pass  # Silently fail if routing bridge not available
+        
         return jsonify({
             "status": player.status(),
             "is_playing": player.is_playing,
             "is_paused": player.is_paused,
-            "current_loop": player.current_loop
+            "current_loop": player.current_loop,
+            "routing_outputs": routing_outputs
         })
     
     @app.route('/api/info', methods=['GET'])
@@ -1250,6 +1202,7 @@ def register_script_routes(app, player_manager, config):
 
 def register_console_command_routes(app, player, dmx_controller, rest_api, video_dir, data_dir, config):
     """Registriert Console Command Endpunkte."""
+    # Note: dmx_controller parameter deprecated - DMX input removed
     
     @app.route('/api/console', methods=['POST'])
     def execute_console_command():
@@ -1313,7 +1266,7 @@ def register_console_command_routes(app, player, dmx_controller, rest_api, video
                     sys.stdout = io.StringIO()
                     sys.stderr = io.StringIO()
                     
-                    cli_handler = CLIHandler(player, dmx_controller, rest_api, video_dir, data_dir, config)
+                    cli_handler = CLIHandler(player, None, rest_api, video_dir, data_dir, config)
                     continue_loop, new_player = cli_handler.execute_command(command, args)
                     result_container['continue_loop'] = continue_loop
                     result_container['new_player'] = new_player
@@ -1332,9 +1285,8 @@ def register_console_command_routes(app, player, dmx_controller, rest_api, video
             cmd_thread.start()
             cmd_thread.join(timeout=10.0)  # Warte max 10 Sekunden
             
-            # Update player reference wenn ersetzt (über dmx_controller)
-            if result_container['new_player']:
-                dmx_controller.player = result_container['new_player']
+            # Update player reference wenn ersetzt
+            # Note: dmx_controller removed - player update handled by PlayerManager
             
             return jsonify({
                 "status": "success",
