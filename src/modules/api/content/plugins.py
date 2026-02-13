@@ -2,7 +2,7 @@
 REST API Endpoints für Plugin-System
 """
 from flask import Blueprint, jsonify, request
-from modules.plugin_manager import get_plugin_manager
+from modules.plugins.manager import get_plugin_manager
 from .logger import get_logger, debug_api
 
 logger = get_logger(__name__)

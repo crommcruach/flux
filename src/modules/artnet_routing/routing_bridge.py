@@ -10,7 +10,7 @@ from typing import Optional, Dict
 from .output_manager import OutputManager
 from .artnet_sender import ArtNetSender
 from .artnet_routing_manager import ArtNetRoutingManager
-from ..logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

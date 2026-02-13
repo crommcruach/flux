@@ -94,12 +94,12 @@ if project_root not in sys.path:
 os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'threads;1'
 
 from modules import RestAPI, PlayerManager
-from modules.player import Player
-from modules.frame_source import VideoSource
-from modules.cli_handler import CLIHandler
-from modules.logger import FluxLogger, get_logger
-from modules.default_effects import get_default_effects_manager
-from modules.api_bpm import bpm_bp, set_audio_analyzer, set_sequence_manager
+from modules.player.core import Player
+from modules.player.sources import VideoSource
+from modules.cli.handler import CLIHandler
+from modules.core.logger import FluxLogger, get_logger
+from modules.player.effects.defaults import get_default_effects_manager
+from modules.api.audio.bpm import bpm_bp, set_audio_analyzer, set_sequence_manager
 
 logger = get_logger(__name__)
 
@@ -321,7 +321,7 @@ class ConsoleCapture:
 
 def load_config():
     """Lädt und validiert Konfiguration aus config.json."""
-    from modules.config_schema import validate_config_file, ConfigValidator
+    from modules.core.config import validate_config_file, ConfigValidator
     
     config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
     
@@ -418,7 +418,7 @@ def main():
     scripts_dir = os.path.join(base_path, config['paths']['scripts_dir'])
     
     # Lade Points-Daten um Canvas-Dimensionen zu erhalten
-    from modules.points_loader import PointsLoader
+    from modules.content.points import PointsLoader
     points_data = PointsLoader.load_points(points_json_path, validate_bounds=True)
     
     # Art-Net player uses resolution from points file (LED matrix dimensions)
@@ -426,7 +426,7 @@ def main():
     artnet_canvas_height = points_data['canvas_height']
     
     # Initialize session state early (needed for video player settings)
-    from modules.session_state import init_session_state, get_session_state
+    from modules.session.state import init_session_state, get_session_state
     session_state_path = os.path.join(base_path, 'session_state.json')
     
     # Lösche alte Session-Daten beim Neustart
@@ -474,13 +474,13 @@ def main():
     logger.info(f"Art-Net player resolution: {artnet_canvas_width}x{artnet_canvas_height} (from points file)")
     
     # ClipRegistry initialisieren (ERST, bevor Player erstellt werden)
-    from modules.clip_registry import get_clip_registry
+    from modules.player.clips.registry import get_clip_registry
     clip_registry = get_clip_registry()
     logger.debug("ClipRegistry initialisiert")
     
     # Video Player initialisieren (nur für Preview, KEIN Art-Net Output!)
     # Starte mit leerer DummySource - User muss Video explizit laden
-    from modules.frame_source import DummySource
+    from modules.player.sources import DummySource
     video_source = DummySource(video_canvas_width, video_canvas_height)
     player = Player(video_source, points_json_path, target_ip, start_universe, fps_limit, config, 
                    enable_artnet=False, player_name="Video Player (Preview)", clip_registry=clip_registry)
@@ -488,7 +488,7 @@ def main():
     
     # Replay Manager global initialisieren (mit Player-Referenz)
     # Note: artnet_manager removed - replay functionality will be reimplemented with routing_bridge
-    from modules.replay_manager import ReplayManager
+    from modules.player.recording.replay import ReplayManager
     replay_manager = ReplayManager(None, config, player)
     logger.debug("Replay Manager initialisiert (ohne Art-Net Manager)")
 
@@ -521,7 +521,7 @@ def main():
     logger.debug("Audio Sequencer initialisiert")
     
     # Initialize Dynamic Parameter Sequences
-    from modules.sequences import SequenceManager, AudioAnalyzer
+    from modules.audio.sequences import SequenceManager, AudioAnalyzer
     sequence_manager = SequenceManager(clip_registry=clip_registry)
     audio_analyzer = AudioAnalyzer(config=config)
     player_manager.sequence_manager = sequence_manager
@@ -551,8 +551,8 @@ def main():
     logger.debug("Routing bridge connected to Art-Net Player")
     
     # Initialize Multi-Playlist System
-    from modules.playlist_manager import MultiPlaylistSystem
-    from modules.api_playlists import register_playlist_routes, set_playlist_system
+    from modules.player.playlists.playlist_manager import MultiPlaylistSystem
+    from modules.api.player.playlists import register_playlist_routes, set_playlist_system
     
     playlist_system = MultiPlaylistSystem(player_manager, session_state, None, config)
     set_playlist_system(playlist_system)

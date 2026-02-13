@@ -2454,7 +2454,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     def get_artnet_resolution():
         """Get current Art-Net canvas resolution from points file"""
         try:
-            from modules.points_loader import PointsLoader
+            from modules.content.points import PointsLoader
             import os
             
             base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

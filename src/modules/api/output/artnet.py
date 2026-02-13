@@ -54,7 +54,7 @@ def register_playback_routes(app, player_manager):
         import sys
         import threading
         import subprocess
-        from modules.logger import get_logger
+        from modules.core.logger import get_logger
         
         logger = get_logger(__name__)
         

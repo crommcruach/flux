@@ -1,7 +1,7 @@
 """
 Command Executor - Unified command handling for CLI and Web Console
 """
-from .logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -296,7 +296,7 @@ class CommandExecutor:
     def _handle_debug(self, args):
         """Toggle CLI debug mode (console log level)."""
         import logging
-        from .logger import set_console_log_level, get_console_log_level
+        from ..core.logger import set_console_log_level, get_console_log_level
         
         if not args:
             # Show current status
@@ -383,7 +383,7 @@ class CommandExecutor:
     def _handle_videos(self, args):
         """List all videos."""
         import os
-        from .constants import VIDEO_EXTENSIONS
+        from ..core.constants import VIDEO_EXTENSIONS
         
         videos = []
         for root, dirs, files in os.walk(self.video_dir):
@@ -422,8 +422,8 @@ class CommandExecutor:
     def _handle_video_load(self, video_name):
         """Load a video."""
         import os
-        from .frame_source import VideoSource
-        from .constants import VIDEO_EXTENSIONS
+        from ..player.sources import VideoSource
+        from ..core.constants import VIDEO_EXTENSIONS
         
         # Find video
         videos = []

@@ -9,7 +9,7 @@ import time
 from typing import Dict, Optional
 from stupidArtnet import StupidArtnet
 from .artnet_output import ArtNetOutput
-from ..logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

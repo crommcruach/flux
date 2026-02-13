@@ -8,45 +8,45 @@ __all__ = ['Player', 'VideoSource', 'GeneratorSource', 'RestAPI', 'ScriptGenerat
 
 def __getattr__(name):
     if name == 'Player':
-        from .player import Player
+        from .player.core import Player
         return Player
     elif name == 'VideoSource':
-        from .frame_source import VideoSource
+        from .player.sources import VideoSource
         return VideoSource
     elif name == 'GeneratorSource':
-        from .frame_source import GeneratorSource
+        from .player.sources import GeneratorSource
         return GeneratorSource
     elif name == 'ClipRegistry':
-        from .clip_registry import ClipRegistry, get_clip_registry
+        from .player.clips.registry import ClipRegistry, get_clip_registry
         return ClipRegistry
     elif name == 'RestAPI':
-        from .rest_api import RestAPI
+        from .api.app import RestAPI
         return RestAPI
     elif name == 'ScriptGenerator':
         # from .script_generator import ScriptGenerator  # Deprecated - using plugin system now
         return ScriptGenerator
     elif name == 'PointsLoader':
-        from .points_loader import PointsLoader
+        from .content.points import PointsLoader
         return PointsLoader
     elif name == 'ConfigValidator':
-        from .config_schema import ConfigValidator
+        from .core.config import ConfigValidator
         return ConfigValidator
     elif name == 'PlayerManager':
-        from .player_manager import PlayerManager
+        from .player.manager import PlayerManager
         return PlayerManager
     elif name == 'list_videos':
-        from .utils import list_videos
+        from .core.utils import list_videos
         return list_videos
     elif name == 'print_help':
-        from .utils import print_help
+        from .core.utils import print_help
         return print_help
     elif name == 'list_points_files':
-        from .utils import list_points_files
+        from .core.utils import list_points_files
         return list_points_files
     elif name == 'validate_points_file':
-        from .validator import validate_points_file
+        from .core.validator import validate_points_file
         return validate_points_file
     elif name == 'validate_points_json':
-        from .validator import validate_points_json
+        from .core.validator import validate_points_json
         return validate_points_json
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
