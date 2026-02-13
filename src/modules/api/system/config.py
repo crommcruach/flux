@@ -4,7 +4,7 @@ API Config Routes - Configuration Management Endpoints
 WICHTIG: Verwende NIEMALS print() Statements in API-Funktionen!
 Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
 Nutze stattdessen immer den Logger für Debug-Ausgaben:
-    from .logger import get_logger
+    from ...core.logger import get_logger
     logger = get_logger(__name__)
     logger.info("Message")
 """
@@ -12,7 +12,7 @@ from flask import jsonify, request
 import json
 import os
 from .config_schema import ConfigValidator
-from .logger import get_logger
+from ...core.logger import get_logger
 
 logger = get_logger(__name__)
 

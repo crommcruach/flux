@@ -3,7 +3,7 @@ API Benchmark - Latenz-Messung für API-Calls
 """
 from flask import jsonify, request
 import time
-from .logger import get_logger
+from ...core.logger import get_logger
 
 logger = get_logger(__name__)
 

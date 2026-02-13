@@ -2,7 +2,7 @@
 API Art-Net Effects - Separate Effect Chain für Art-Net Ausgabe
 """
 from flask import jsonify, request
-from .logger import get_logger
+from ...core.logger import get_logger
 from .session_state import get_session_state
 from .clip_registry import get_clip_registry
 

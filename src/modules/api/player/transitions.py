@@ -8,7 +8,7 @@ Provides:
 """
 
 from flask import request, jsonify
-from .logger import get_logger
+from ...core.logger import get_logger
 from .plugin_manager import get_plugin_manager
 from plugins.plugin_base import PluginType
 

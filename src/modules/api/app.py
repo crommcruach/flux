@@ -7,12 +7,12 @@ from flask_socketio import SocketIO, emit
 import os
 import threading
 from collections import deque
-from .logger import get_logger, debug_api, debug_log, DebugCategories
-from .command_executor import CommandExecutor
-from .clip_registry import get_clip_registry
+from ..core.logger import get_logger, debug_api, debug_log, DebugCategories
+from ..cli.commands import CommandExecutor
+from ..player.clips.registry import get_clip_registry
 
 logger = get_logger(__name__)
-from .constants import (
+from ..core.constants import (
     CONSOLE_LOG_MAX_LENGTH,
     DEFAULT_API_PORT,
     VIDEO_EXTENSIONS

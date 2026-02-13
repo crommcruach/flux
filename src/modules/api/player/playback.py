@@ -10,7 +10,7 @@ Ersetzt separate Video- und Art-Net-APIs durch ein einheitliches Interface:
 import os
 import time
 from flask import request, jsonify
-from .logger import get_logger, debug_api, debug_playback, DebugCategories
+from ...core.logger import get_logger, debug_api, debug_playback, DebugCategories
 from .clip_registry import get_clip_registry
 from .frame_source import VideoSource
 from .session_state import get_session_state

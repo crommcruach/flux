@@ -8,7 +8,7 @@ import json
 import shutil
 from datetime import datetime
 from flask import Blueprint, jsonify, request
-from .logger import get_logger
+from ...core.logger import get_logger
 from .api_playlists import get_playlist_system
 
 logger = get_logger(__name__)

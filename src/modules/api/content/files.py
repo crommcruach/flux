@@ -7,8 +7,8 @@ from flask import jsonify, send_file, request
 import os
 import urllib.parse
 import cv2
-from .constants import VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
-from .logger import get_logger
+from ...core.constants import VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
+from ...core.logger import get_logger
 from .thumbnail_generator import ThumbnailGenerator
 
 logger = get_logger(__name__)

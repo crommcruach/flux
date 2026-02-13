@@ -2,7 +2,7 @@
 API Routes - Playback, Settings, Art-Net Endpoints
 """
 from flask import jsonify, request
-from .logger import get_logger
+from ...core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -1178,7 +1178,7 @@ def register_script_routes(app, player_manager, config):
     @app.route('/api/load_generator', methods=['POST'])
     def load_generator():
         """Lädt und startet einen Generator."""
-        from ..logger import get_logger
+        from ...core.logger import get_logger
         
         logger = get_logger(__name__)
         
@@ -1272,7 +1272,7 @@ def register_console_command_routes(app, player, dmx_controller, rest_api, video
                     result_container['new_player'] = new_player
                 except Exception as e:
                     import traceback
-                    from ..logger import get_logger
+                    from ...core.logger import get_logger
                     logger = get_logger(__name__)
                     logger.error(traceback.format_exc())
                 finally:
@@ -1304,7 +1304,7 @@ def register_console_command_routes(app, player, dmx_controller, rest_api, video
             
             # Log Fehler
             try:
-                from .logger import get_logger
+                from ...core.logger import get_logger
                 logger = get_logger(__name__)
                 logger.error(f"Console command error: {e}\n{error_trace}")
             except:

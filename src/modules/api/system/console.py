@@ -4,7 +4,7 @@ API Console - Console & Command Execution Endpoints
 WICHTIG: Verwende NIEMALS print() Statements in API-Funktionen!
 Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
 Nutze stattdessen immer den Logger:
-    from .logger import get_logger
+    from ...core.logger import get_logger
     logger = get_logger(__name__)
     logger.info("Message")
 """

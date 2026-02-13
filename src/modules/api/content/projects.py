@@ -6,7 +6,7 @@ import json
 from flask import request, jsonify, send_file
 from pathlib import Path
 from datetime import datetime
-from .logger import debug_api
+from ...core.logger import debug_api
 
 
 def register_project_routes(app, logger):

@@ -18,7 +18,7 @@ from flask import jsonify, request
 from ..artnet_routing.artnet_routing_manager import ArtNetRoutingManager
 from ..artnet_routing.artnet_object import ArtNetObject
 from ..artnet_routing.artnet_output import ArtNetOutput
-from ..logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

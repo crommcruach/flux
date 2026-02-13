@@ -2,7 +2,7 @@
 Debug API - Laufzeit-Kontrolle über Debug-Kategorien und Logging
 """
 from flask import Blueprint, jsonify, request
-from .logger import DebugCategories, get_logger
+from ...core.logger import DebugCategories, get_logger
 
 logger = get_logger(__name__)
 

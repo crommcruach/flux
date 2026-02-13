@@ -7,7 +7,7 @@ REST API endpoints for Dynamic Parameter Sequences.
 from flask import jsonify, request
 import logging
 import threading
-from .logger import get_logger
+from ...core.logger import get_logger
 from .session_state import get_session_state
 from .clip_registry import get_clip_registry
 
