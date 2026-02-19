@@ -27,53 +27,15 @@ CONFIG_SCHEMA = {
                     "maximum": 32767,
                     "description": "Start-Universum für Art-Net Ausgabe"
                 },
-                "dmx_control_universe": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 32767,
-                    "description": "DMX Control Universum für Input"
-                },
-                "dmx_listen_ip": {
-                    "type": "string",
-                    "description": "IP-Adresse für DMX Listening"
-                },
-                "dmx_listen_port": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 65535,
-                    "description": "Port für DMX Listening"
-                },
                 "fps": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 120,
                     "description": "Art-Net FPS"
                 },
-                "even_packet": {
-                    "type": "boolean",
-                    "description": "Art-Net Even Packet Mode"
-                },
                 "broadcast": {
                     "type": "boolean",
                     "description": "Art-Net Broadcast Mode"
-                },
-                "universe_configs": {
-                    "type": "object",
-                    "properties": {
-                        "default": {
-                            "type": "string",
-                            "enum": ["RGB", "GRB", "BGR", "RBG", "GBR", "BRG"],
-                            "description": "Standard RGB-Kanal-Reihenfolge"
-                        }
-                    },
-                    "patternProperties": {
-                        "^\\d+$": {
-                            "type": "string",
-                            "enum": ["RGB", "GRB", "BGR", "RBG", "GBR", "BRG"],
-                            "description": "RGB-Kanal-Reihenfolge für spezifisches Universum"
-                        }
-                    },
-                    "description": "RGB-Kanal-Mapping pro Universum"
                 }
             }
         },
@@ -84,12 +46,6 @@ CONFIG_SCHEMA = {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Unterstützte Video-Dateiformate"
-                },
-                "max_per_channel": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 255,
-                    "description": "Max Videos pro Kanal"
                 },
                 "default_fps": {
                     "type": ["integer", "null"],
@@ -109,23 +65,11 @@ CONFIG_SCHEMA = {
                     "maximum": 10.0,
                     "description": "Standard Geschwindigkeitsfaktor"
                 },
-                "shutdown_delay": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 10,
-                    "description": "Verzögerung beim Shutdown in Sekunden"
-                },
                 "frame_wait_delay": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
                     "description": "Wartezeit zwischen Frames in Sekunden"
-                },
-                "recording_stop_delay": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 5,
-                    "description": "Verzögerung beim Stoppen der Aufzeichnung in Sekunden"
                 },
                 "gif_transparency_bg": {
                     "type": "array",
@@ -226,34 +170,47 @@ CONFIG_SCHEMA = {
                 }
             }
         },
-        "channels": {
+        "outputs": {
             "type": "object",
             "properties": {
-                "max_per_universe": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 512,
-                    "description": "Maximale Kanäle pro Universum"
+                "definitions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "type"],
+                        "properties": {
+                            "id": {"type": "string"},
+                            "type": {"type": "string", "enum": ["display", "virtual", "ndi"]},
+                            "enabled": {"type": "boolean"},
+                            "monitor_index": {"type": "integer"},
+                            "fullscreen": {"type": "boolean"},
+                            "resolution": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "minItems": 2,
+                                "maxItems": 2
+                            },
+                            "fps": {"type": "integer", "minimum": 1, "maximum": 120},
+                            "enable_capture": {"type": "boolean"},
+                            "description": {"type": "string"}
+                        }
+                    },
+                    "description": "Available output devices/targets"
                 },
-                "channels_per_point": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 4,
-                    "description": "Kanäle pro Punkt (RGB=3, RGBW=4)"
-                }
-            }
-        },
-        "cache": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean",
-                    "description": "RGB-Cache aktivieren"
-                },
-                "max_size_mb": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "Maximale Cache-Größe in MB (0=unbegrenzt)"
+                "default_routing": {
+                    "type": "object",
+                    "properties": {
+                        "video": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Default video player output routing"
+                        },
+                        "artnet": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Default artnet player output routing"
+                        }
+                    }
                 }
             }
         },
@@ -402,30 +359,7 @@ class ConfigValidator:
             if "data_dir" in paths and not paths["data_dir"]:
                 errors.append("paths.data_dir: Darf nicht leer sein")
         
-        # Validiere Channel-Konfiguration
-        if "channels" in config:
-            channels = config["channels"]
-            max_per_universe = channels.get("max_per_universe", 510)
-            channels_per_point = channels.get("channels_per_point", 3)
-            
-            if max_per_universe % channels_per_point != 0:
-                logger.warning(
-                    f"channels.max_per_universe ({max_per_universe}) ist nicht "
-                    f"durch channels_per_point ({channels_per_point}) teilbar"
-                )
-        
-        # Validiere RGB-Ordnung in universe_configs
-        if "artnet" in config and "universe_configs" in config["artnet"]:
-            valid_orders = ["RGB", "GRB", "BGR", "RBG", "GBR", "BRG"]
-            for key, value in config["artnet"]["universe_configs"].items():
-                # Ignoriere Kommentar-Felder
-                if key.startswith("_"):
-                    continue
-                if value not in valid_orders:
-                    errors.append(
-                        f"artnet.universe_configs.{key}: Ungültige RGB-Reihenfolge '{value}'. "
-                        f"Muss einer von {valid_orders} sein"
-                    )
+        # Historical note: Channel config and universe RGB order now managed per-object in session_state.json
         
         return errors
     
@@ -472,25 +406,15 @@ class ConfigValidator:
             "artnet": {
                 "target_ip": "127.0.0.1",
                 "start_universe": 0,
-                "dmx_control_universe": 100,
-                "dmx_listen_ip": "0.0.0.0",
-                "dmx_listen_port": 6454,
                 "fps": 60,
-                "even_packet": True,
-                "broadcast": True,
-                "universe_configs": {
-                    "default": "RGB"
-                }
+                "broadcast": True
             },
             "video": {
                 "extensions": [".mp4", ".avi", ".mov", ".mkv", ".wmv", ".gif"],
-                "max_per_channel": 255,
                 "default_fps": None,
                 "default_brightness": 100,
                 "default_speed": 1.0,
-                "shutdown_delay": 0.5,
                 "frame_wait_delay": 0.1,
-                "recording_stop_delay": 0.3,
                 "gif_transparency_bg": [0, 0, 0],
                 "gif_respect_frame_timing": True
             },
@@ -500,21 +424,13 @@ class ConfigValidator:
                 "points_json": "punkte_export.json",
                 "scripts_dir": "scripts",
                 "cache_dir": "cache",
-                "projects_dir": "PROJECTS",
+                "projects_dir": "projects",
                 "video_sources": []
-            },
-            "channels": {
-                "max_per_universe": 510,
-                "channels_per_point": 3
             },
             "effects": {
                 "video": [],
                 "artnet": [],
                 "clips": []
-            },
-            "cache": {
-                "enabled": True,
-                "max_size_mb": 0
             },
             "api": {
                 "port": 5000,

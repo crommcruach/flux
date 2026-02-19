@@ -618,6 +618,11 @@
             const waveformSection = document.querySelector('.waveform-analyzer-section');
             const btn = document.getElementById('sequencerModeBtn');
             
+            // Note: Button might not exist if using new UI, but function should still work
+            if (!btn) {
+                console.warn('Sequencer mode button not found (using new UI?), but continuing...');
+            }
+            
             try {
                 // Call backend API to enable/disable master mode
                 const response = await fetch('/api/sequencer/mode', {
@@ -630,16 +635,22 @@
                 
                 if (result.success) {
                     if (window.sequencerModeActive) {
-                        waveformSection.style.display = 'grid';
-                        btn.classList.remove('btn-outline-secondary');
-                        btn.classList.add('btn-success');
-                        btn.textContent = '🎵 Sequencer: MASTER';
+                        if (waveformSection) waveformSection.style.display = 'grid';
+                        // Only update button if it exists (old UI)
+                        if (btn) {
+                            btn.classList.remove('btn-outline-secondary');
+                            btn.classList.add('btn-success');
+                            btn.textContent = '🎵 Sequencer: MASTER';
+                        }
                         console.log('✅ Sequencer mode ENABLED (MASTER)');
                     } else {
-                        waveformSection.style.display = 'none';
-                        btn.classList.remove('btn-success');
-                        btn.classList.add('btn-outline-secondary');
-                        btn.textContent = '🎵 Sequencer Mode';
+                        if (waveformSection) waveformSection.style.display = 'none';
+                        // Only update button if it exists (old UI)
+                        if (btn) {
+                            btn.classList.remove('btn-success');
+                            btn.classList.add('btn-outline-secondary');
+                            btn.textContent = '🎵 Sequencer Mode';
+                        }
                         console.log('✅ Sequencer mode DISABLED');
                     }
                 } else {

@@ -8,7 +8,7 @@ Duration = beat_division / (BPM / 60) seconds
 import time
 import logging
 from typing import Dict, Any, Optional
-from .base_sequence import BaseSequence
+from .base import BaseSequence
 
 logger = logging.getLogger(__name__)
 

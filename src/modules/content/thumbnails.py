@@ -36,8 +36,8 @@ class ThumbnailGenerator:
         
         # Mache den Pfad absolut wenn er relativ ist
         if not self.cache_dir.is_absolute():
-            # Gehe von src/modules aus zum Projektroot
-            project_root = Path(__file__).parent.parent.parent
+            # Gehe von src/modules/content aus zum Projektroot
+            project_root = Path(__file__).parent.parent.parent.parent
             self.cache_dir = project_root / self.cache_dir
         
         self.cache_dir.mkdir(parents=True, exist_ok=True)

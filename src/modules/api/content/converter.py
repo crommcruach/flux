@@ -3,7 +3,7 @@ REST API für Video Converter
 """
 
 from flask import Blueprint, request, jsonify
-from .video_converter import (
+from ...content.converter import (
     get_converter, 
     OutputFormat, 
     ResizeMode, 
@@ -187,6 +187,18 @@ def convert_video():
     # Convert (synchronous for now, could be async)
     try:
         converter = get_converter()
+    except RuntimeError as e:
+        # FFmpeg not available or initialization failed
+        return jsonify({
+            "error": f"Video converter initialization failed: {str(e)}",
+            "hint": "Please install FFmpeg: https://ffmpeg.org/download.html"
+        }), 500
+    except Exception as e:
+        return jsonify({
+            "error": f"Converter error: {str(e)}"
+        }), 500
+    
+    try:
         result = converter.convert(job)
         
         if result.success:

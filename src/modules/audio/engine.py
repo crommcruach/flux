@@ -18,7 +18,7 @@ import queue
 from pathlib import Path
 from typing import Optional, Dict
 import numpy as np
-from .logger import get_logger
+from ..core.logger import get_logger
 
 # Try importing audio dependencies
 try:

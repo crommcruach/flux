@@ -185,7 +185,7 @@ class PlaylistManager:
         
         # 3. Reuse current generator parameters if same generator
         if current_source:
-            from ..frame_source import GeneratorSource
+            from ..sources import GeneratorSource
             if isinstance(current_source, GeneratorSource) and current_source.generator_id == generator_id:
                 parameters = current_source.parameters.copy()
                 # Store for future use

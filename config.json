@@ -16,36 +16,9 @@
   },
   "artnet": {
     "broadcast": true,
-    "dmx_control_universe": 100,
-    "dmx_listen_ip": "0.0.0.0",
-    "dmx_listen_port": 6454,
-    "even_packet": true,
     "fps": 30,
     "start_universe": 0,
-    "target_ip": "127.0.0.1",
-    "bit_depth": 8,
-    "_bit_depth_comment": "LED Bit-Tiefe: 8 (Standard, 3 Bytes/LED) oder 16 (High-End, 6 Bytes/LED)",
-    "delta_encoding": {
-      "enabled": true,
-      "threshold": 8,
-      "threshold_16bit": 2048,
-      "full_frame_interval": 30,
-      "_comment": "Delta-Encoding: Sende nur geänderte Pixel. Threshold 8-bit: 0-20 (~3%), 16-bit: 1280-2560 (~2-4%)"
-    },
-    "universe_configs": {
-      "0": "GRB",
-      "_comment": "Pro Universum Kanal-Reihenfolge festlegen. Mögliche Werte: RGB, GRB, BGR, RBG, GBR, BRG",
-      "default": "RGB"
-    }
-  },
-  "cache": {
-    "compression": "msgpack",
-    "enabled": true,
-    "max_size_mb": 1024
-  },
-  "channels": {
-    "channels_per_point": 3,
-    "max_per_universe": 510
+    "target_ip": "127.0.0.1"
   },
   "effects": {
     "transport_position_update_interval": 10,
@@ -128,12 +101,43 @@
     "loop_cache_max_duration": 10.0,
     "_comment": "Frame caching optimization. enable_loop_cache: cache decoded frames for short loops. enable_rgb_cache: cache pre-computed RGB frames. Disable for debugging."
   },
+  "outputs": {
+    "_comment": "Output definitions - hardware/infrastructure configuration",
+    "_info": "These are the available outputs. Actual routing is in session_state.json",
+    "definitions": [
+      {
+        "id": "main_display",
+        "type": "display",
+        "enabled": true,
+        "monitor_index": 0,
+        "fullscreen": true,
+        "resolution": [1920, 1080],
+        "fps": 60,
+        "enable_capture": true,
+        "description": "Main display output"
+      },
+      {
+        "id": "preview_virtual",
+        "type": "virtual",
+        "enabled": true,
+        "resolution": [640, 360],
+        "fps": 30,
+        "enable_capture": true,
+        "description": "Virtual output for web preview streaming"
+      }
+    ],
+    "default_routing": {
+      "_comment": "Default routing used on startup",
+      "video": ["main_display", "preview_virtual"],
+      "artnet": []
+    }
+  },
   "paths": {
     "cache_dir": "caches",
     "data_dir": "data",
     "default_points_json": null,
     "points_json": "punkte_export.json",
-    "projects_dir": "PROJECTS",
+    "projects_dir": "projects",
     "scripts_dir": "scripts",
     "video_dir": "video",
     "video_sources": [],
@@ -187,41 +191,6 @@
       0,
       0,
       0
-    ],
-    "max_per_channel": 255,
-    "recording_stop_delay": 0.3,
-    "shutdown_delay": 0.5
-  },
-  "outputs": {
-    "_comment": "Output definitions - hardware/infrastructure configuration",
-    "_info": "These are the available outputs. Actual routing is in session_state.json",
-    "definitions": [
-      {
-        "id": "main_display",
-        "type": "display",
-        "enabled": true,
-        "_implementation": "Multiprocessing-based display with isolated process for OpenCV window",
-        "monitor_index": 0,
-        "fullscreen": true,
-        "resolution": [1920, 1080],
-        "fps": 60,
-        "enable_capture": true,
-        "description": "Main display output (production-ready multiprocessing implementation)"
-      },
-      {
-        "id": "preview_virtual",
-        "type": "virtual",
-        "enabled": true,
-        "resolution": [640, 360],
-        "fps": 30,
-        "enable_capture": true,
-        "description": "Virtual output for web preview streaming"
-      }
-    ],
-    "default_routing": {
-      "_comment": "Default routing used on startup",
-      "video": ["main_display", "preview_virtual"],
-      "artnet": []
-    }
+    ]
   }
 }

@@ -25,7 +25,7 @@ def _save_timeline_to_playlist(player_manager):
     Called after timeline modifications (upload, load, split add/remove, clip mapping).
     """
     try:
-        from .api_playlists import get_playlist_system
+        from ..player.playlists import get_playlist_system
         playlist_system = get_playlist_system()
         if playlist_system:
             viewed = playlist_system.get_viewed_playlist()
@@ -78,7 +78,7 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
             
             # Save sequencer mode to VIEWED playlist
             try:
-                from .api_playlists import get_playlist_system
+                from ..player.playlists import get_playlist_system
                 playlist_system = get_playlist_system()
                 if playlist_system:
                     viewed = playlist_system.get_viewed_playlist()
@@ -159,7 +159,7 @@ def register_sequencer_routes(app, player_manager, config, session_state=None):
             # Get sequencer mode from VIEWED playlist (not physical player!)
             mode_active = player_manager.sequencer_mode_active  # Default
             try:
-                from .api_playlists import get_playlist_system
+                from ..player.playlists import get_playlist_system
                 playlist_system = get_playlist_system()
                 if playlist_system:
                     viewed = playlist_system.get_viewed_playlist()

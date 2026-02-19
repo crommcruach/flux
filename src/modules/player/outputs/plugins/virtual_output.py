@@ -8,7 +8,7 @@ import numpy as np
 import threading
 from typing import Optional
 
-from ..output_base import OutputBase
+from ..base import OutputBase
 
 logger = logging.getLogger(__name__)
 

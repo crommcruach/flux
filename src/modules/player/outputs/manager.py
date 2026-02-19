@@ -8,8 +8,8 @@ import numpy as np
 from typing import Dict, Optional, Any
 import threading
 
-from .slice_manager import SliceManager
-from .output_base import OutputBase
+from .slices import SliceManager
+from .base import OutputBase
 
 logger = logging.getLogger(__name__)
 

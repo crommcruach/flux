@@ -12,7 +12,8 @@ from ...core.logger import debug_api
 def register_project_routes(app, logger):
     """Register all project-related API routes"""
     
-    PROJECTS_DIR = Path(__file__).resolve().parent.parent.parent / 'PROJECTS'
+    # Point to root/projects folder (4 levels up from src/modules/api/content/)
+    PROJECTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / 'projects'
     PROJECTS_DIR.mkdir(exist_ok=True)
     
     @app.route('/api/projects', methods=['GET'])

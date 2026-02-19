@@ -12,8 +12,8 @@ class NoiseEffect(PluginBase):
     """
     
     METADATA = {
-        'id': 'noise',
-        'name': 'Noise',
+        'id': 'noise_effect',
+        'name': 'Noise Effect',
         'description': 'Fügt zufälliges Rauschen zum Bild hinzu (Gaussian oder Salt & Pepper)',
         'author': 'Flux Team',
         'version': '1.0.0',

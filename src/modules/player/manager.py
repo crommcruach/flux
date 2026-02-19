@@ -196,31 +196,15 @@ class PlayerManager:
             return True
         
         try:
-            from .player_core import Player
+            from .core import Player
             from .sources import VideoSource
             
             # Create video preview player (clone video player config)
             if self.video_player:
                 logger.info("Creating video preview player...")
                 
-                # Clone config but disable display output for preview
+                # Clone config for preview player
                 preview_config = self.video_player.config.copy() if self.video_player.config else {}
-                if 'outputs' in preview_config and 'definitions' in preview_config['outputs']:
-                    # Filter out display outputs from definitions
-                    preview_config['outputs'] = preview_config['outputs'].copy()
-                    preview_config['outputs']['definitions'] = [
-                        output for output in preview_config['outputs']['definitions']
-                        if output.get('type') != 'display'
-                    ]
-                    # Also update routing to exclude display outputs
-                    if 'default_routing' in preview_config['outputs']:
-                        preview_config['outputs']['default_routing'] = {
-                            k: [v for v in route_list if not any(
-                                d.get('id') == v and d.get('type') == 'display'
-                                for d in preview_config.get('outputs', {}).get('definitions', [])
-                            )]
-                            for k, route_list in preview_config['outputs']['default_routing'].items()
-                        }
                 
                 self.video_preview_player = Player(
                     frame_source=VideoSource(
@@ -245,24 +229,8 @@ class PlayerManager:
             if self.artnet_player:
                 logger.info("Creating Art-Net preview player...")
                 
-                # Clone config but disable display output for preview
+                # Clone config for preview player
                 preview_config = self.artnet_player.config.copy() if self.artnet_player.config else {}
-                if 'outputs' in preview_config and 'definitions' in preview_config['outputs']:
-                    # Filter out display outputs from definitions
-                    preview_config['outputs'] = preview_config['outputs'].copy()
-                    preview_config['outputs']['definitions'] = [
-                        output for output in preview_config['outputs']['definitions']
-                        if output.get('type') != 'display'
-                    ]
-                    # Also update routing to exclude display outputs
-                    if 'default_routing' in preview_config['outputs']:
-                        preview_config['outputs']['default_routing'] = {
-                            k: [v for v in route_list if not any(
-                                d.get('id') == v and d.get('type') == 'display'
-                                for d in preview_config.get('outputs', {}).get('definitions', [])
-                            )]
-                            for k, route_list in preview_config['outputs']['default_routing'].items()
-                        }
                 
                 self.artnet_preview_player = Player(
                     frame_source=VideoSource(
@@ -776,7 +744,7 @@ class PlayerManager:
     def init_sequencer(self):
         """Initialize audio sequencer (called during startup)"""
         try:
-            from .audio_sequencer import AudioSequencer
+            from ..audio.sequencer import AudioSequencer
             self.sequencer = AudioSequencer(player_manager=self)
             
             # Set up callbacks for UI updates

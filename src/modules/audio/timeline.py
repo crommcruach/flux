@@ -9,7 +9,7 @@ Slot duration determines when slave playlists advance.
 import json
 from typing import List, Dict, Optional
 from pathlib import Path
-from .logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

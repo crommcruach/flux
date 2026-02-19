@@ -12,7 +12,7 @@ import multiprocessing as mp
 from multiprocessing import Process, Queue, Event
 import time
 
-from ..output_base import OutputBase
+from ..base import OutputBase
 from ..monitor_utils import get_monitor_by_index, get_available_monitors
 
 logger = logging.getLogger(__name__)

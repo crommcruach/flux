@@ -7,7 +7,7 @@ Binds parameter to audio features (RMS, Peak, Bass, Mid, Treble, BPM).
 import logging
 import numpy as np
 from typing import Dict, Any
-from .base_sequence import BaseSequence
+from .base import BaseSequence
 
 logger = logging.getLogger(__name__)
 

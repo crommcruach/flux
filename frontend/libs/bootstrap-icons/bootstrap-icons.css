@@ -4,12 +4,14 @@
  * Licensed under MIT (https://github.com/twbs/icons/blob/main/LICENSE)
  */
 
+/* Font files not included - commented out to prevent 404 errors
 @font-face {
   font-display: block;
   font-family: "bootstrap-icons";
   src: url("./fonts/bootstrap-icons.woff2?2820a3852bdb9a5832199cc61cec4e65") format("woff2"),
 url("./fonts/bootstrap-icons.woff?2820a3852bdb9a5832199cc61cec4e65") format("woff");
 }
+*/
 
 .bi::before,
 [class^="bi-"]::before,

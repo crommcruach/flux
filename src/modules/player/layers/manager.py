@@ -99,7 +99,7 @@ class LayerManager:
         # Get layer definitions
         layer_defs = clip_data.get('layers', [])
         
-        from ..frame_source import VideoSource, GeneratorSource
+        from ..sources import VideoSource, GeneratorSource
         
         # ALWAYS create Layer 0 from the clip itself (base layer)
         abs_path = clip_data['absolute_path']

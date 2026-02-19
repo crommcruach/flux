@@ -57,8 +57,9 @@ class RestAPI:
         self._bpm_streaming_active = False
         
         # Flask App erstellen - static_folder muss absoluter Pfad sein
-        # Pfad: src/modules -> src -> root -> frontend
-        static_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'frontend')
+        # Pfad: src/modules/api -> src/modules -> src -> root, then add frontend
+        static_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'frontend')
+        # Empty static_url_path serves files at root level (e.g., /styles.css)
         self.app = Flask(__name__, static_folder=static_path, static_url_path='')
         secret_key = self.config.get('api', {}).get('secret_key', 'flux_secret_key_2025')
         self.app.config['SECRET_KEY'] = secret_key
@@ -120,17 +121,43 @@ class RestAPI:
         """Set player via PlayerManager."""
         self.player_manager.player = new_player
     
-    def register_unified_player_routes(self, playlist_system=None):
-        """Register unified player routes after playlist system is available."""
-        from .api_player_unified import register_unified_routes
+    def register_deferred_routes(self, playlist_system, artnet_routing_manager, audio_analyzer=None):
+        """Register routes that depend on objects created after RestAPI initialization.
+        
+        This centralizes all late route registration in one place.
+        
+        Args:
+            playlist_system: PlaylistSystem instance
+            artnet_routing_manager: ArtNetRoutingManager instance  
+            audio_analyzer: AudioAnalyzer instance (optional)
+        """
+        # Unified Player API routes
+        from .player.playback import register_unified_routes
         register_unified_routes(self.app, self.player_manager, self.config, self.socketio, playlist_system)
-        logger.info(f"Unified Player API routes registered (playlist_system={'available' if playlist_system else 'None'})")
-    
-    def register_transition_routes(self, playlist_system=None):
-        """Register transition routes after playlist system is available."""
-        from .api_transitions import register_transition_routes
+        logger.info("Unified Player API routes registered")
+        
+        # Transition API routes
+        from .player.transitions import register_transition_routes
         register_transition_routes(self.app, self.player_manager, playlist_system)
-        logger.info(f"Transition API routes registered (playlist_system={'available' if playlist_system else 'None'})")
+        logger.info("Transition API routes registered")
+        
+        # Multi-Playlist API routes
+        from .player.playlists import register_playlist_routes
+        register_playlist_routes(self.app, self.player_manager, self.config, self.socketio)
+        logger.info("Multi-Playlist API routes registered")
+        
+        # ArtNet Routing API routes
+        from .artnet import register_artnet_routing_routes
+        register_artnet_routing_routes(self.app, artnet_routing_manager)
+        logger.info("ArtNet Routing API routes registered")
+        
+        # Set audio analyzer for BPM blueprint (already registered during init)
+        if audio_analyzer:
+            from .audio.bpm import set_audio_analyzer, set_sequence_manager
+            set_audio_analyzer(audio_analyzer)
+            if hasattr(self.player_manager, 'sequence_manager'):
+                set_sequence_manager(self.player_manager.sequence_manager)
+            logger.info("BPM API configured with audio analyzer")
     
     def _register_routes(self):
         """Registriert alle API-Routen."""
@@ -140,7 +167,7 @@ class RestAPI:
         register_web_routes(self.app, self.config, self.player_manager)
         
         # Lade externe API Route-Module
-        from .api_routes import (
+        from .output.artnet import (
             register_playback_routes, 
             register_settings_routes,
             register_artnet_routes,
@@ -150,18 +177,18 @@ class RestAPI:
             register_script_routes,
             register_background_routes
         )
-        from .api_points import register_points_routes
-        from .api_console import register_console_routes
-        from .api_projects import register_project_routes
-        from .api_config import register_config_routes
-        from .api_logs import register_log_routes
-        from .api_plugins import register_plugins_api
-        from .api_benchmark import register_benchmark_routes
-        from .api_layers import register_layer_routes
-        from .api_clip_layers import register_clip_layer_routes
-        from .api_outputs import register_output_routes
-        from .api_converter import converter_bp
-        from ...player.clips.registry import get_clip_registry
+        from .output.points import register_points_routes
+        from .system.console import register_console_routes
+        from .content.projects import register_project_routes
+        from .system.config import register_config_routes
+        from .system.logs import register_log_routes
+        from .content.plugins import register_plugins_api
+        from .system.benchmark import register_benchmark_routes
+        from .player.layers import register_layer_routes
+        from .player.clips import register_clip_layer_routes
+        from .output.routing import register_output_routes
+        from .content.converter import converter_bp
+        from ..player.clips.registry import get_clip_registry
         
         # Registriere alle Routen
         register_playback_routes(self.app, self.player_manager)
@@ -187,7 +214,7 @@ class RestAPI:
         self.app.register_blueprint(converter_bp)
         
         # Register Files API
-        from .api_files import register_files_api
+        from .content.files import register_files_api
         register_files_api(self.app, self.video_dir, self.config)
         
         # NOTE: Unified Player API routes registered later in main.py after playlist_system is initialized
@@ -195,7 +222,7 @@ class RestAPI:
         # NOTE: Transition API routes will be registered later after playlist_system is available
         
         # Register Debug API
-        from .api_debug import register_debug_routes
+        from .system.debug import register_debug_routes
         register_debug_routes(self.app)
         
         # Store config in app for route access
@@ -206,20 +233,26 @@ class RestAPI:
         self.app.flux_clip_registry = self.clip_registry
         
         # Register Session Snapshot API
-        from .api_session import register_session_routes
-        from ...session.state import get_session_state
+        from .system.session import register_session_routes
+        from ..session.state import get_session_state
         session_state = get_session_state()
         register_session_routes(self.app, session_state)
         
-        # Register Sequencer API
-        from .api_sequencer import register_sequencer_routes
+        # Register Sequencer API routes
+        from .audio.sequencer import register_sequencer_routes
         register_sequencer_routes(self.app, self.player_manager, self.config, session_state)
+        logger.info("Sequencer API routes registered")
         
         # Register Dynamic Parameter Sequences API
         if hasattr(self.player_manager, 'sequence_manager') and hasattr(self.player_manager, 'audio_analyzer'):
-            from .api_sequences import register_sequence_routes
+            from .audio.sequences import register_sequence_routes
             register_sequence_routes(self.app, self.player_manager.sequence_manager, self.player_manager.audio_analyzer, self.player_manager, self.socketio)
             logger.info("Parameter Sequence API routes registered with audio streaming")
+        
+        # Register BPM API Blueprint
+        from .audio.bpm import bpm_bp
+        self.app.register_blueprint(bpm_bp)
+        logger.info("BPM API routes registered")
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
@@ -436,7 +469,7 @@ class RestAPI:
                     raise ValueError(f"Player {player_id} not found")
                 
                 # Get clip from registry
-                from ...player.clips.registry import get_clip_registry
+                from ..player.clips.registry import get_clip_registry
                 registry = get_clip_registry()
                 clip = registry.get_clip(clip_id)
                 
@@ -868,7 +901,7 @@ class RestAPI:
                 try:
                     video_path = os.path.join(self.video_dir, target.strip())
                     if os.path.exists(video_path):
-                        from ...player.sources import VideoSource
+                        from ..player.sources import VideoSource
                         
                         # Erstelle VideoSource
                         video_source = VideoSource(
@@ -893,7 +926,7 @@ class RestAPI:
             elif prefix == 'script':
                 # Lade Script
                 try:
-                    from ...player.sources import ScriptSource
+                    from ..player.sources import ScriptSource
                     
                     script_name = target.strip()
                     if not script_name.endswith('.py'):

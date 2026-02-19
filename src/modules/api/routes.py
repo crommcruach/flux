@@ -3,6 +3,9 @@ Web-Interface Routen für Flux
 Enthält alle HTML-Seiten und statische Datei-Routen
 """
 from flask import send_from_directory, jsonify
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def register_web_routes(app, config=None, player_manager=None):
@@ -34,7 +37,6 @@ def register_web_routes(app, config=None, player_manager=None):
             'editor': 'editor',
             'controls': 'controls',
             'cli': 'cli',
-            'artnet': 'artnet',
             'config': 'config_page'
         }
         
@@ -62,20 +64,10 @@ def register_web_routes(app, config=None, player_manager=None):
         """Serve the web CLI panel."""
         return send_from_directory(app.static_folder, 'cli.html')
     
-    @app.route('/artnet')
-    def artnet():
-        """Serve the Art-Net control panel."""
-        return send_from_directory(app.static_folder, 'artnet.html')
-    
     @app.route('/config')
     def config_page():
         """Serve the configuration panel."""
         return send_from_directory(app.static_folder, 'config.html')
-    
-    @app.route('/effects')
-    def effects():
-        """Serve the effects panel."""
-        return send_from_directory(app.static_folder, 'effects.html')
     
     @app.route('/fullscreen')
     def fullscreen():
@@ -135,3 +127,9 @@ def register_web_routes(app, config=None, player_manager=None):
                 "preview_fps": video_config.get('preview_fps', 25)
             }
         })
+    
+    # DEBUG: Log registered routes  
+    logger.info(f"✅ Web routes registered. Total routes: {len(list(app.url_map.iter_rules()))}")
+    for rule in app.url_map.iter_rules():
+        methods = ', '.join(sorted(rule.methods - {'HEAD', 'OPTIONS'}))
+        logger.debug(f"   Route: {rule.rule} [{methods}] -> {rule.endpoint}")

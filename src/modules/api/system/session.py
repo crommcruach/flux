@@ -9,7 +9,7 @@ import shutil
 from datetime import datetime
 from flask import Blueprint, jsonify, request
 from ...core.logger import get_logger
-from .api_playlists import get_playlist_system
+from ..player.playlists import get_playlist_system
 
 logger = get_logger(__name__)
 
@@ -20,8 +20,10 @@ session_api = Blueprint('session_api', __name__)
 def register_session_routes(app, session_state_manager):
     """Register session snapshot routes."""
     
-    SNAPSHOTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'snapshots')
-    DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'data')
+    # Point to root folders (4 levels up from src/modules/api/system/)
+    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    SNAPSHOTS_DIR = os.path.join(base_path, 'snapshots')
+    DATA_DIR = os.path.join(base_path, 'data')
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
     os.makedirs(DATA_DIR, exist_ok=True)
     

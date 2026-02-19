@@ -737,8 +737,9 @@ class Player:
                 
                 # Registriere als aktiver Player NUR wenn Art-Net enabled ist
                 if self.enable_artnet:
-                    with player_lock._global_player_lock:
-                        player_lock._active_player = self
+                    with player_lock:
+                        from .lock import _active_player
+                        globals()['_active_player'] = self
                         from ..core.logger import debug_log, DebugCategories
                         debug_log(logger, DebugCategories.ARTNET, f"[{self.player_name}] Registered as active Art-Net player")
                 
@@ -786,14 +787,15 @@ class Player:
         # Registriere als aktiver Player NUR wenn Art-Net enabled ist
         # Dies erlaubt mehrere Preview-Only Player gleichzeitig
         if self.enable_artnet:
-            with player_lock._global_player_lock:
+            with player_lock:
+                from . import lock as lock_module
                 # Stoppe alten Art-Net Player falls vorhanden
-                if player_lock._active_player and player_lock._active_player is not self:
-                    old_player = player_lock._active_player
+                if lock_module._active_player and lock_module._active_player is not self:
+                    old_player = lock_module._active_player
                     logger.info(f"Stoppe alten Art-Net Player: {old_player.player_name}")
                     old_player.stop()
                 
-                player_lock._active_player = self
+                lock_module._active_player = self
                 logger.info(f"Aktiver Art-Net Player: {self.player_name} ({self.source.get_source_name()})")
         else:
             logger.info(f"{self.player_name}: Starte Preview-Only (kein Art-Net)")
@@ -860,9 +862,10 @@ class Player:
         
         # Deregistriere Player (nur wenn Art-Net enabled)
         if self.enable_artnet:
-            with player_lock._global_player_lock:
-                if player_lock._active_player is self:
-                    player_lock._active_player = None
+            with player_lock:
+                from . import lock as lock_module
+                if lock_module._active_player is self:
+                    lock_module._active_player = None
         
         logger.info(f"{self.player_name}: Wiedergabe gestoppt")
     
@@ -1494,7 +1497,8 @@ class Player:
                 break
             
             # Für Preview-Only Player: Kein Lock-Check nötig
-            if self.enable_artnet and player_lock._active_player is not self:
+            from . import lock as lock_module
+            if self.enable_artnet and lock_module._active_player is not self:
                 # Art-Net Player wurde deaktiviert
                 break
             

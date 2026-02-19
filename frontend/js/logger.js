@@ -19,22 +19,13 @@ export const debug = {
 };
 
 /**
- * Load debug configuration from backend
+ * Load debug configuration from backend (DEPRECATED - now use browser console)
  * @param {string} apiBase - API base URL (default: '')
+ * @deprecated This feature has been removed. Use window.toggleDebug() from browser console instead.
  */
 export async function loadDebugConfig(apiBase = '') {
-    try {
-        const response = await fetch(`${apiBase}/api/config`);
-        const config = await response.json();
-        DEBUG_LOGGING = config.frontend?.debug_logging ?? false;
-        VERBOSE_LOGGING = config.frontend?.verbose_logging ?? false;
-        if (DEBUG_LOGGING) console.log(`🐛 Debug logging: ENABLED`);
-        if (VERBOSE_LOGGING) console.log(`🔬 Verbose logging: ENABLED`);
-    } catch (error) {
-        console.error('❌ Failed to load debug config, using default (disabled):', error);
-        DEBUG_LOGGING = false;
-        VERBOSE_LOGGING = false;
-    }
+    // No-op: Debug logging is now controlled via browser console only
+    // Use window.toggleDebug() or window.toggleVerbose() to enable logging
 }
 
 /**

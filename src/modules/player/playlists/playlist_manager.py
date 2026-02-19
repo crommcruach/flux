@@ -508,7 +508,7 @@ class MultiPlaylistSystem:
                             player_state.global_effects = []
                     
                     # Extract per-clip effects from clip_registry (has CURRENT values, not stale)
-                    from .clips.registry import get_clip_registry
+                    from ..clips.registry import get_clip_registry
                     clip_registry = get_clip_registry()
                     
                     if not clip_registry:
@@ -721,7 +721,7 @@ class MultiPlaylistSystem:
         if self.session_state:
             try:
                 # Import here to avoid circular dependency
-                from .clips.registry import get_clip_registry
+                from ..clips.registry import get_clip_registry
                 clip_registry = get_clip_registry()
                 
                 self.session_state.save_async(

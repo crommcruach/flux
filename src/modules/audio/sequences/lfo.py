@@ -8,7 +8,7 @@ import math
 import numpy as np
 import logging
 from typing import Dict, Any
-from .base_sequence import BaseSequence
+from .base import BaseSequence
 
 logger = logging.getLogger(__name__)
 

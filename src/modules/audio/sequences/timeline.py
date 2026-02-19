@@ -7,7 +7,7 @@ Simple time-based animation that interpolates from min to max over a duration.
 import random
 import logging
 from typing import Dict, Any
-from .base_sequence import BaseSequence
+from .base import BaseSequence
 
 logger = logging.getLogger(__name__)
 

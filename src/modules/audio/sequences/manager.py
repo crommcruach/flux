@@ -7,8 +7,8 @@ Manages lifecycle, applies modulation, and handles parameter resolution.
 
 import logging
 from typing import Dict, List, Optional, Any
-from .base_sequence import BaseSequence
-from ..uid_registry import get_uid_registry
+from .base import BaseSequence
+from ...player.clips.uid_registry import get_uid_registry
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ class SequenceManager:
             
             try:
                 if seq_type == 'timeline':
-                    from .timeline_sequence import TimelineSequence
+                    from .timeline import TimelineSequence
                     sequence = TimelineSequence(
                         sequence_id=sequence_id,
                         target_parameter=target_uid,
@@ -206,7 +206,7 @@ class SequenceManager:
                         max_value=seq_config.get('max_value', 100.0)
                     )
                 elif seq_type == 'audio':
-                    from .audio_sequence import AudioSequence
+                    from .audio import AudioSequence
                     sequence = AudioSequence(
                         sequence_id=sequence_id,
                         target_parameter=target_uid,
@@ -216,7 +216,7 @@ class SequenceManager:
                         smoothing=seq_config.get('smoothing', 0.1)
                     )
                 elif seq_type == 'lfo':
-                    from .lfo_sequence import LFOSequence
+                    from .lfo import LFOSequence
                     sequence = LFOSequence(
                         sequence_id=sequence_id,
                         target_parameter=target_uid,
@@ -227,7 +227,7 @@ class SequenceManager:
                         max_value=seq_config.get('max_value', 100.0)
                     )
                 elif seq_type == 'bpm':
-                    from .bpm_sequence import BPMSequence
+                    from .bpm import BPMSequence
                     sequence = BPMSequence(
                         sequence_id=sequence_id,
                         target_parameter=target_uid,

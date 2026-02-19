@@ -781,6 +781,46 @@ git commit -m "feat: Add new feature"
 # git push  # ❌ Never do this automatically!
 ```
 
+### Changelog and Version Management
+
+When the user requests "add a changelog entry", follow this workflow:
+
+1. **Update CHANGELOG.md**:
+   - Add entry under the appropriate category (Added/Changed/Fixed/Removed)
+   - Include clear description of what changed
+   - Follow Keep a Changelog format
+
+2. **Update version number** in relevant files:
+   - `setup.py` (version field)
+   - `config.json` (if version field exists)
+   - Package metadata files
+
+3. **Update HISTORY.md**:
+   - Document the change with context
+   - Include date and version
+   - Explain why the change was made (not just what)
+
+**Change Types**:
+- **Added**: New features or functionality
+- **Changed**: Modifications to existing functionality
+- **Fixed**: Bug fixes
+- **Removed**: Deprecated or removed features
+- **Security**: Vulnerability fixes
+- **Performance**: Optimization improvements
+
+**Version Numbering** (Semantic Versioning):
+- **MAJOR** (X.0.0): Breaking changes
+- **MINOR** (0.X.0): New features (backward compatible)
+- **PATCH** (0.0.X): Bug fixes (backward compatible)
+
+Example workflow:
+```bash
+# User: "add a changelog entry"
+# 1. Update CHANGELOG.md with the change
+# 2. Bump version: 1.2.3 → 1.2.4 (patch) or 1.3.0 (minor) or 2.0.0 (major)
+# 3. Update HISTORY.md with context about the change
+```
+
 ## Performance Optimization
 
 ### Profiling

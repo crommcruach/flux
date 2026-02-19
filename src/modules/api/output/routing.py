@@ -9,7 +9,7 @@ import base64
 import cv2
 import time
 
-from .outputs.monitor_utils import get_available_monitors, get_monitor_by_index
+from ...player.outputs.monitor_utils import get_available_monitors, get_monitor_by_index
 
 logger = logging.getLogger(__name__)
 

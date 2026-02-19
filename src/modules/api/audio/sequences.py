@@ -498,9 +498,19 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
     def get_audio_devices():
         """List available audio input devices"""
         try:
-            from .sequences import AudioAnalyzer
-            devices = AudioAnalyzer.list_devices()
-            return jsonify({'devices': devices})
+            import sounddevice as sd
+            devices = sd.query_devices()
+            # Filter for input devices and format response
+            input_devices = []
+            for idx, device in enumerate(devices):
+                if device['max_input_channels'] > 0:
+                    input_devices.append({
+                        'index': idx,
+                        'name': device['name'],
+                        'channels': device['max_input_channels'],
+                        'default_samplerate': device['default_samplerate']
+                    })
+            return jsonify({'devices': input_devices})
         except Exception as e:
             logger.error(f"Error listing audio devices: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500

@@ -73,7 +73,7 @@ class CLIHandler:
                 return (True, new_player)
             return (True, None)
         elif command == "cache":
-            self._handle_cache(args)
+            logger.info("Cache system deprecated. RGB caching is no longer used.")
             return (True, None)
         elif command == "record":
             self._handle_record(args)

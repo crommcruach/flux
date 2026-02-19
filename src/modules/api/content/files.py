@@ -9,7 +9,7 @@ import urllib.parse
 import cv2
 from ...core.constants import VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
 from ...core.logger import get_logger
-from .thumbnail_generator import ThumbnailGenerator
+from ...content.thumbnails import ThumbnailGenerator
 
 logger = get_logger(__name__)
 

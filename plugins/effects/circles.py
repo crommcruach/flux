@@ -11,8 +11,8 @@ class CirclesEffect(PluginBase):
     """Circles - Concentric circle mapping with zoom and rotation."""
     
     METADATA = {
-        'id': 'circles',
-        'name': 'Circles',
+        'id': 'circles_effect',
+        'name': 'Circles Effect',
         'description': 'Concentric circle mapping with zoom and rotation',
         'author': 'Py_artnet',
         'version': '1.0.0',

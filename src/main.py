@@ -99,7 +99,6 @@ from modules.player.sources import VideoSource
 from modules.cli.handler import CLIHandler
 from modules.core.logger import FluxLogger, get_logger
 from modules.player.effects.defaults import get_default_effects_manager
-from modules.api.audio.bpm import bpm_bp, set_audio_analyzer, set_sequence_manager
 
 logger = get_logger(__name__)
 
@@ -345,11 +344,6 @@ def load_config():
 
 def main():
     """Hauptfunktion der Anwendung mit erweiteter CLI."""
-    # Heartbeat Monitor disabled (not needed for now)
-    # from heartbeat_monitor import HeartbeatMonitor
-    # heartbeat = HeartbeatMonitor()
-    # heartbeat.start()
-    
     # Konfiguration laden (vor Logger, um console_log_level zu erhalten)
     config = load_config()
     
@@ -533,12 +527,12 @@ def main():
     logger.debug("SequenceManager connected to SessionState")
     
     # Initialize ArtNet Routing Manager
-    from modules.artnet_routing.artnet_routing_manager import ArtNetRoutingManager
+    from modules.artnet.routing_manager import ArtNetRoutingManager
     artnet_routing_manager = ArtNetRoutingManager(session_state)
     logger.debug("ArtNet Routing Manager initialized")
     
     # Initialize Routing Bridge (connects OutputManager + ArtNetSender)
-    from modules.artnet_routing.routing_bridge import RoutingBridge
+    from modules.artnet.routing_bridge import RoutingBridge
     routing_bridge = RoutingBridge(
         routing_manager=artnet_routing_manager,
         canvas_width=video_canvas_width,
@@ -552,7 +546,7 @@ def main():
     
     # Initialize Multi-Playlist System
     from modules.player.playlists.playlist_manager import MultiPlaylistSystem
-    from modules.api.player.playlists import register_playlist_routes, set_playlist_system
+    from modules.api.player.playlists import set_playlist_system
     
     playlist_system = MultiPlaylistSystem(player_manager, session_state, None, config)
     set_playlist_system(playlist_system)
@@ -643,26 +637,13 @@ def main():
     # REST API initialisieren und automatisch starten
     rest_api = RestAPI(player_manager, None, data_dir, video_dir, config, replay_manager=replay_manager)
     
-    # Register unified player routes now that both rest_api and playlist_system exist
-    rest_api.register_unified_player_routes(playlist_system)
-    
-    # Register transition routes with playlist_system
-    rest_api.register_transition_routes(playlist_system)
-    
-    # Register BPM API blueprint
-    rest_api.app.register_blueprint(bpm_bp)
-    set_audio_analyzer(audio_analyzer)
-    if hasattr(player_manager, 'sequence_manager'):
-        set_sequence_manager(player_manager.sequence_manager)
-    logger.debug("BPM API registered")
-    
-    # Register Multi-Playlist API routes
-    register_playlist_routes(rest_api.app, player_manager, config, rest_api.socketio)
-    logger.debug("Multi-Playlist API routes registered")
-    
-    # Register ArtNet Routing API routes
-    from modules.api.api_artnet_routing import register_artnet_routing_routes
-    register_artnet_routing_routes(rest_api.app, artnet_routing_manager)
+    # Register all routes that depend on objects created after RestAPI init
+    # (playlist_system, artnet_routing_manager, audio_analyzer)
+    rest_api.register_deferred_routes(
+        playlist_system=playlist_system,
+        artnet_routing_manager=artnet_routing_manager,
+        audio_analyzer=audio_analyzer
+    )
     logger.debug("ArtNet Routing API routes registered")
     
     # Background Images routes registered in rest_api.py
@@ -745,9 +726,4 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         print("=" * 80)
-        print("\nPress Enter to exit...")
-        try:
-            input()
-        except:
-            pass
         sys.exit(1)
