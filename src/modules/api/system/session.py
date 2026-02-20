@@ -250,6 +250,37 @@ def register_session_routes(app, session_state_manager):
             return jsonify({"success": False, "error": str(e)}), 500
     
     
+    @app.route('/api/session/mapper', methods=['GET', 'POST'])
+    def mapper_config():
+        """Get or update LED mapper configuration."""
+        try:
+            if request.method == 'GET':
+                # Get mapper config
+                config = session_state_manager.get_mapper_config()
+                return jsonify({
+                    "success": True,
+                    "config": config
+                })
+            else:
+                # POST - Update mapper config
+                data = request.get_json()
+                
+                if not data:
+                    return jsonify({"success": False, "error": "No data provided"}), 400
+                
+                # Use SessionStateManager method
+                session_state_manager.set_mapper_config(data)
+                
+                return jsonify({
+                    "success": True,
+                    "message": "Mapper config updated"
+                })
+            
+        except Exception as e:
+            logger.error(f"Error with mapper config: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    
     @app.route('/api/session/snapshot/delete', methods=['POST'])
     def delete_snapshot():
         """Delete a snapshot."""

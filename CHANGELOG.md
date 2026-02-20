@@ -8,12 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **2D Visual LED Mapper**: Webcam-based LED position detection system with calibration workflow
+  - Adaptive threshold detection (auto-adjusts for ambient lighting: dark/normal/bright)
+  - Temporal filtering (5-frame median smoothing for stability)
+  - ROI auto-refinement (dynamic search area optimization, 10-50x speedup)
+  - Geometric normalization with UI toggle (path smoothing + spacing equalization)
+  - Brightness-weighted centroid detection (center-of-mass physics)
+  - Window-based blob detection (fixed 20×20px scan for accuracy)
+- **ArtSync Support**: Configurable ArtSync packet transmission for multi-universe synchronization (enabled by default)
+- ArtSync checkbox in Art-Net output configuration UI
+- Geometry normalization checkbox in LED mapper configuration (enabled by default)
+- Debug logging mode for LED mapper (window.DEBUG flag)
 
 ### Changed
+- CLI menu icon changed from 💻 to >_ for clearer terminal representation
+- Menu items reordered for improved workflow: Editor → Player → Output Settings → Converter → Config → CLI
+- LED mapper extensive logging moved to debug mode (reduces console noise)
 
 ### Fixed
+- **Art-Net Source Port**: Fixed Art-Net transmission to external controllers by binding to source port 6454 (some controllers require packets FROM port 6454, not just TO port 6454)
+- Art-Net packets now work correctly on both localhost and external network devices
 
 ### Removed
+- Confirmed removal of unused index.html (editor.html is the actual startup page)
 
 ## [1.0.0] - 2026-02-19
 

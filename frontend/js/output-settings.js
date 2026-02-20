@@ -129,11 +129,8 @@ const app = {
         // Initialize compositions object
         this.compositions = this.compositions || {};
         
-        // Restore last selected mode from localStorage
-        const savedMode = localStorage.getItem('outputSettings_mode');
-        if (savedMode === 'artnet' || savedMode === 'video') {
-            this.currentMode = savedMode;
-        }
+        // Mode will be restored from session state in loadFromBackend()
+        // Don't use localStorage - it breaks session snapshots!
 
         this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
         this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
@@ -3380,7 +3377,15 @@ const app = {
                     height: this.canvasHeight
                 },
                 customScreens: this.customScreens,
-                compositions: this.compositions || {}
+                compositions: this.compositions || {},
+                ui_state: {
+                    mode: this.currentMode,
+                    tool: this.tool,
+                    shapeType: this.shapeType,
+                    zoom: this.canvasZoom,
+                    selectedSliceId: this.selectedSlice ? this.selectedSlice.id : null,
+                    selectedArtNetObjectId: this.selectedArtNetObject ? this.selectedArtNetObject.id : null
+                }
             };
             
             await window.sessionStateManager.saveSlices(slicesConfig, {
@@ -3416,6 +3421,43 @@ const app = {
             if (data.canvas) {
                 this.canvasWidth = data.canvas.width;
                 this.canvasHeight = data.canvas.height;
+            }
+            
+            // Restore UI state (mode, tool, zoom, selection)
+            if (data.ui_state) {
+                if (data.ui_state.mode) {
+                    this.currentMode = data.ui_state.mode;
+                    this.setMode(data.ui_state.mode, true); // silent = true
+                }
+                if (data.ui_state.tool) {
+                    this.tool = data.ui_state.tool;
+                }
+                if (data.ui_state.shapeType) {
+                    this.shapeType = data.ui_state.shapeType;
+                }
+                if (data.ui_state.zoom && data.ui_state.zoom !== 1.0) {
+                    this.canvasZoom = data.ui_state.zoom;
+                    this.updateCanvasZoom();
+                }
+                // Restore selection after slices are loaded (delayed)
+                if (data.ui_state.selectedSliceId) {
+                    setTimeout(() => {
+                        const slice = this.slices.find(s => s.id === data.ui_state.selectedSliceId);
+                        if (slice) {
+                            this.selectedSlice = slice;
+                            this.updatePropertiesPanel();
+                        }
+                    }, 100);
+                }
+                if (data.ui_state.selectedArtNetObjectId) {
+                    setTimeout(() => {
+                        const obj = this.artnetObjects.find(o => o.id === data.ui_state.selectedArtNetObjectId);
+                        if (obj) {
+                            this.selectedArtNetObject = obj;
+                            this.updateArtNetPropertiesPanel();
+                        }
+                    }, 100);
+                }
             }
             
             if (data.slices) {
@@ -4519,8 +4561,10 @@ async function loadSlicesFromBackend() {
 app.setMode = function(mode, silent = false) {
     this.currentMode = mode;
     
-    // Save to localStorage for persistence
-    localStorage.setItem('outputSettings_mode', mode);
+    // Auto-save to session state (replaces localStorage)
+    if (!silent) {
+        this.saveToBackend();
+    }
     
     // Update mode buttons
     document.getElementById('modeVideoBtn').classList.toggle('active', mode === 'video');
@@ -5341,6 +5385,7 @@ app.addArtNetOutput = function() {
     document.getElementById('newOutputUniverse').value = '0';
     document.getElementById('newOutputFPS').value = '40';
     document.getElementById('newOutputDelay').value = '0';
+    document.getElementById('newOutputArtSync').checked = true;
     
     // Show modal
     document.getElementById('addOutputModal').style.display = 'flex';
@@ -5370,6 +5415,7 @@ app.editArtNetOutput = function(outputId) {
     document.getElementById('newOutputUniverse').value = output.startUniverse || 0;
     document.getElementById('newOutputFPS').value = output.fps || 40;
     document.getElementById('newOutputDelay').value = output.delay || 0;
+    document.getElementById('newOutputArtSync').checked = output.artsync !== undefined ? output.artsync : true;
     
     // Show modal
     document.getElementById('addOutputModal').style.display = 'flex';
@@ -5395,6 +5441,7 @@ app.saveNewArtNetOutput = async function() {
     const universe = parseInt(document.getElementById('newOutputUniverse').value);
     const fps = parseInt(document.getElementById('newOutputFPS').value);
     const delay = parseInt(document.getElementById('newOutputDelay').value);
+    const artsync = document.getElementById('newOutputArtSync').checked;
     
     // Validate inputs
     if (!name) {
@@ -5425,7 +5472,8 @@ app.saveNewArtNetOutput = async function() {
             subnet: subnet,
             startUniverse: universe,
             fps: fps,
-            delay: delay
+            delay: delay,
+            artsync: artsync
         };
         
         const url = isEdit ? `/api/artnet/routing/outputs/${editId}` : '/api/artnet/routing/outputs';

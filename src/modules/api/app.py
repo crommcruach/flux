@@ -253,6 +253,11 @@ class RestAPI:
         from .audio.bpm import bpm_bp
         self.app.register_blueprint(bpm_bp)
         logger.info("BPM API routes registered")
+        
+        # Register LED Mapper API Blueprint
+        from .mapper import mapper_bp
+        self.app.register_blueprint(mapper_bp)
+        logger.info("LED Mapper API routes registered")
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""

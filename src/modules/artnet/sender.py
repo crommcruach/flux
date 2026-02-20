@@ -114,7 +114,9 @@ class ArtNetSender:
                 packet_size=510,  # Usable DMX channels
                 fps=config.fps,
                 even_packet_size=True,  # Even packet size for compatibility
-                broadcast=False  # Direct IP transmission
+                broadcast=False,  # Direct IP transmission
+                source_address=('0.0.0.0', 6454),  # Bind to source port 6454
+                artsync=config.artsync  # Enable ArtSync for timing synchronization
             )
             
             sender_info['universes'].append(universe)

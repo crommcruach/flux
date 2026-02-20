@@ -31,6 +31,7 @@ class ArtNetOutput:
     fps: int = 30              # Frames per second
     delay: int = 0             # Delay in milliseconds
     active: bool = True        # Enable/disable output
+    artsync: bool = True       # Enable ArtSync packets for timing synchronization
     
     # Color Correction (applied to ALL objects on this output)
     brightness: int = 0        # -255 to 255
@@ -58,6 +59,7 @@ class ArtNetOutput:
             'fps': self.fps,
             'delay': self.delay,
             'active': self.active,
+            'artsync': self.artsync,
             'brightness': self.brightness,
             'contrast': self.contrast,
             'red': self.red,
@@ -81,6 +83,7 @@ class ArtNetOutput:
             fps=data.get('fps', 30),
             delay=data.get('delay', 0),
             active=data.get('active', True),
+            artsync=data.get('artsync', True),
             brightness=data.get('brightness', 0),
             contrast=data.get('contrast', 0),
             red=data.get('red', 0),

@@ -592,6 +592,30 @@ class SessionStateManager:
         """
         return self._state.get('editor', {}).copy()
     
+    def set_mapper_config(self, mapper_data: dict):
+        """
+        Save LED mapper configuration.
+        
+        Args:
+            mapper_data: Dictionary with mapper config (artnetIP, universe, etc.)
+        """
+        if 'led_mapper' not in self._state:
+            self._state['led_mapper'] = {}
+        self._state['led_mapper'] = mapper_data.copy()
+        # Trigger async save
+        self._pending_save = True
+        self._pending_save_data = self._state.copy()
+        logger.debug(f"🎯 LED Mapper config updated")
+    
+    def get_mapper_config(self) -> dict:
+        """
+        Get LED mapper configuration.
+        
+        Returns:
+            Dictionary with mapper config
+        """
+        return self._state.get('led_mapper', {}).copy()
+    
     def set_artnet_routing_state(self, routing_data: dict):
         """
         Save ArtNet routing state (objects, outputs, assignments).

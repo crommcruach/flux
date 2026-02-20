@@ -417,9 +417,16 @@
                     </div>
                 </div>
                 
-                <div class="input-row" style="margin-bottom: 20px;">
+                <div class="input-row" style="margin-bottom: 12px;">
                     <label style="display: block; margin-bottom: 4px; font-size: 12px;">Delay (ms)</label>
                     <input type="number" id="newOutputDelay" value="0" min="0" max="1000" style="width: 100%; padding: 8px; background: #252525; border: 1px solid #3a3a3a; border-radius: 3px; color: #e0e0e0;">
+                </div>
+                
+                <div class="input-row" style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer;">
+                        <input type="checkbox" id="newOutputArtSync" checked style="cursor: pointer;">
+                        <span>Enable ArtSync (timing synchronization)</span>
+                    </label>
                 </div>
                 
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">

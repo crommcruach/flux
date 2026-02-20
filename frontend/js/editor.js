@@ -1,7 +1,7 @@
 // ========================================
 // IMPORTS
 // ========================================
-import { showToast, initErrorLogging } from './common.js';
+import { showToast, initErrorLogging, initWebSocket } from './common.js';
 import { debug, loadDebugConfig } from './logger.js';
 
 // ========================================
@@ -123,6 +123,11 @@ let flipIconImage = null; // Bootstrap icon for flip handle
 let rotateIconImage = null; // Bootstrap icon for rotate handle
 let scaleYIconImage = null; // Bootstrap icon for Y-axis scale handle
 let scaleXIconImage = null; // Bootstrap icon for X-axis scale handle
+
+// Expose to window for external modules (e.g., led-mapper.js)
+window.shapes = shapes;
+window.shapeCounter = shapeCounter;
+window.selectedShape = selectedShape;
 
 // Canvas zoom and pan
 let canvasZoom = 1.0;
@@ -415,6 +420,9 @@ document.getElementById('arcControls').addEventListener('input', e => {
 
 function addShape(type) {
     const shapeId = `shape-${shapeCounter++}`;
+    
+    // Update window reference
+    window.shapeCounter = shapeCounter;
     const typeNames = {
         rect: 'Rechteck',
         circle: 'Kreis',
@@ -1219,6 +1227,15 @@ async function saveEditorStateToSession() {
             height: actualCanvasHeight
         },
         backgroundImagePath: backgroundImagePath || null,
+        viewport: {
+            zoom: canvasZoom,
+            offsetX: canvasOffsetX,
+            offsetY: canvasOffsetY
+        },
+        selection: {
+            selectedShapeIds: selectedShapes.map(s => s.id),
+            primaryShapeId: selectedShape ? selectedShape.id : null
+        },
         settings: {
             snapToGrid: snapToGrid,
             snapToObjects: snapToObjects,
@@ -1364,6 +1381,8 @@ async function loadEditorStateFromSession() {
         // Restore shapes
         if (state.shapes) {
             shapes = state.shapes;
+            // Update window reference to new shapes array
+            window.shapes = shapes;
             // Migrate shapes without names
             shapes.forEach(s => {
                 if (!s.name) {
@@ -1382,12 +1401,38 @@ async function loadEditorStateFromSession() {
                 }
             });
             shapeCounter = Math.max(...shapes.map(s => parseInt(s.id.split('-')[1]) || 0), 0) + 1;
+            // Update window shapeCounter reference
+            window.shapeCounter = shapeCounter;
         }
         
         // Restore groups
         if (state.groups) {
             groups = state.groups;
             groupCounter = groups.length + 1;
+        }
+        
+        // Restore viewport (zoom and pan)
+        if (state.viewport) {
+            canvasZoom = state.viewport.zoom ?? 1.0;
+            canvasOffsetX = state.viewport.offsetX ?? 0;
+            canvasOffsetY = state.viewport.offsetY ?? 0;
+            updateCanvasSize();
+            updateZoomDisplay();
+        }
+        
+        // Restore selection state
+        if (state.selection) {
+            // Restore multi-selection
+            if (state.selection.selectedShapeIds && state.selection.selectedShapeIds.length > 0) {
+                selectedShapes = shapes.filter(s => state.selection.selectedShapeIds.includes(s.id));
+            }
+            // Restore primary selection
+            if (state.selection.primaryShapeId) {
+                const primaryShape = shapes.find(s => s.id === state.selection.primaryShapeId);
+                if (primaryShape) {
+                    selectedShape = primaryShape;
+                }
+            }
         }
         
         markForRedraw();
@@ -1441,6 +1486,9 @@ async function uploadBackground(file) {
 
 // Call on page load
 window.addEventListener('load', () => {
+    // Initialize WebSocket for LED Mapper and other features
+    initWebSocket({});
+    
     loadEditorStateFromSession();
 });
 
@@ -3861,6 +3909,11 @@ window.toggleTextTool = toggleTextTool;
 window.addTextToCanvas = addTextToCanvas;
 window.toggleFreehandDrawing = toggleFreehandDrawing;
 window.fitToCanvas = fitToCanvas;
+
+// Export for LED mapper integration
+window.markForRedraw = markForRedraw;
+window.updateObjectList = updateObjectList;
+window.saveEditorStateToSession = saveEditorStateToSession;
 
 // ========================================
 // CONTEXT MENU

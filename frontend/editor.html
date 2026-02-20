@@ -72,6 +72,14 @@
         </div>
       </div>
 
+      <!-- LED Mapper Section -->
+      <div class="toolbar-section">
+        <button class="btn btn-success btn-sm w-100" onclick="showLEDMapper()" title="LED Visual Mapper - Capture LED positions using webcam" style="padding: 0.5rem;">
+          📷 LED Mapper
+        </button>
+        <small class="text-muted d-block mt-1" style="font-size: 0.7rem;">Map LEDs via webcam</small>
+      </div>
+
       <div class="toolbar-section" id="textSection" style="display: none;">
         <label for="textInput" class="form-label">Text</label>
         <input id="textInput" type="text" class="form-control form-control-sm" placeholder="Dein Text..."
@@ -261,6 +269,24 @@
     </div>
   </div>
 
+  <!-- LED Mapper Modal -->
+  <div class="modal fade" id="ledMapperModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">📷 LED Visual Mapper</h5>
+          <span id="mapperStepIndicator" class="ms-3 badge bg-secondary">Step 1/4: Configuration</span>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        
+        <div class="modal-body">
+          <!-- Step markers will be managed by led-mapper.js -->
+          <div id="mapperStepsContainer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Component -->
   <script src="js/toast-loader.js"></script>
 
@@ -274,7 +300,12 @@
   <script src="js/session-state-manager.js" defer></script>
 
   <script src="libs/bootstrap/js/bootstrap.bundle.min.js"></script>
+  
+  <!-- Socket.IO Client (required by module scripts) -->
+  <script src="libs/socket.io.min.js"></script>
+  
   <script src="js/stroke-font.js"></script>
+  <script type="module" src="js/led-mapper.js"></script>
   <script type="module" src="js/editor.js"></script>
   
   <!-- Emergency UI Unblock Script -->
