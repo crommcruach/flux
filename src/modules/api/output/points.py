@@ -1,12 +1,19 @@
 """
 API Points - Points Management Endpoints
 
+DEPRECATED: Points files are only used for legacy DMX recording.
+Canvas size now comes from editor, not points files.
+These endpoints will be removed when DMX recording is reimplemented with routing system.
+
 WICHTIG: Verwende NIEMALS print() Statements in API-Funktionen!
 Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
 Nutze stattdessen immer den Logger.
 """
 from flask import jsonify, request
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def register_points_routes(app, player_manager, data_dir):
@@ -46,8 +53,9 @@ def register_points_routes(app, player_manager, data_dir):
     
     @app.route('/api/points/switch', methods=['POST'])
     def switch_points():
-        """Wechselt zu anderer Points-Datei."""
+        """DEPRECATED: Wechselt zu anderer Points-Datei (nur für legacy DMX recording)."""
         try:
+            logger.warning("DEPRECATED API called: /api/points/switch - Points files only used for legacy DMX recording")
             data = request.get_json()
             filename = data.get('filename')
             
@@ -85,15 +93,17 @@ def register_points_routes(app, player_manager, data_dir):
                 "status": "success",
                 "message": f"Points gewechselt zu: {filename}",
                 "filename": filename,
-                "was_playing": was_playing
+                "was_playing": was_playing,
+                "warning": "DEPRECATED: Points files only used for legacy DMX recording. Canvas size comes from editor."
             })
         except Exception as e:
             return jsonify({"status": "error", "message": str(e)}), 500
     
     @app.route('/api/points/reload', methods=['POST'])
     def reload_points():
-        """Lädt aktuelle Points-Datei neu."""
+        """DEPRECATED: Lädt aktuelle Points-Datei neu (nur für legacy DMX recording)."""
         try:
+            logger.warning("DEPRECATED API called: /api/points/reload - Points files only used for legacy DMX recording")
             player = player_manager.player
             current_path = player.points_json_path
             
@@ -121,7 +131,8 @@ def register_points_routes(app, player_manager, data_dir):
                 "status": "success",
                 "message": "Points neu geladen",
                 "filename": os.path.basename(current_path),
-                "was_playing": was_playing
+                "was_playing": was_playing,
+                "warning": "DEPRECATED: Points files only used for legacy DMX recording. Canvas size comes from editor."
             })
         except Exception as e:
             return jsonify({"status": "error", "message": str(e)}), 500

@@ -86,6 +86,15 @@ class BlendEffect(PluginBase):
                 return cv2.resize(overlay, (frame.shape[1], frame.shape[0]))
             return overlay  # Direct return, no processing needed (saves 3-5ms)
         
+        # OPTIMIZATION: Fast path for normal mode with opacity (skip float32 conversion)
+        if self.blend_mode == 'normal':
+            # Ensure same dimensions
+            if frame.shape != overlay.shape:
+                overlay = cv2.resize(overlay, (frame.shape[1], frame.shape[0]))
+            # Use cv2.addWeighted directly on uint8 (MUCH faster than float32 conversion)
+            opacity_factor = self.opacity / 100.0
+            return cv2.addWeighted(frame, 1.0 - opacity_factor, overlay, opacity_factor, 0)
+        
         # Stelle sicher, dass beide Frames gleiche Dimensionen haben
         if frame.shape != overlay.shape:
             overlay = cv2.resize(overlay, (frame.shape[1], frame.shape[0]))

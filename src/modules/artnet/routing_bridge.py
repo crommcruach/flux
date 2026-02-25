@@ -67,6 +67,13 @@ class RoutingBridge:
         if not self.enabled or not self.initialized:
             return
         
+        # Debug logging (throttled)
+        if not hasattr(self, '_frame_counter'):
+            self._frame_counter = 0
+        self._frame_counter += 1
+        if self._frame_counter % 120 == 1:
+            logger.info(f"🎬 [RoutingBridge] Received frame: shape={frame.shape}, mean={frame.mean():.1f}")
+        
         try:
             # Get current objects and outputs from routing manager
             objects = self.routing_manager.get_all_objects()

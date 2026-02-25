@@ -103,30 +103,20 @@
         const contextMenu = document.getElementById('contextMenu');
         const contextMenuItems = document.getElementById('contextMenuItems');
         
-        // Load available outputs
+        // Get player parameter from URL (video or artnet)
+        const urlParams = new URLSearchParams(window.location.search);
+        const playerType = urlParams.get('player') || 'video';
+        
+        // Update stream URL directly (no outputs, direct player stream)
+        function updateStream() {
+            const timestamp = Date.now();
+            streamImg.src = `/api/fullscreen/stream?player=${playerType}&t=${timestamp}`;
+        }
+        
+        // Load available outputs (kept for potential future use with context menu)
         async function loadOutputs() {
-            try {
-                const response = await fetch('/api/outputs/video');
-                const data = await response.json();
-                
-                if (data.success) {
-                    outputs = Object.entries(data.outputs).map(([id, config]) => ({
-                        id,
-                        description: config.description || id,
-                        type: config.type,
-                        enabled: data.enabled_outputs.includes(id)
-                    }));
-                    
-                    // Check URL for output parameter
-                    const urlParams = new URLSearchParams(window.location.search);
-                    currentOutput = urlParams.get('output') || outputs[0]?.id;
-                    
-                    updateContextMenu();
-                    updateStream();
-                }
-            } catch (error) {
-                console.error('Failed to load outputs:', error);
-            }
+            // Skip loading outputs - using direct player stream
+            updateStream();
         }
         
         // Update context menu items
@@ -166,7 +156,8 @@
         // Update stream URL
         function updateStream() {
             const timestamp = Date.now();
-            streamImg.src = `/api/outputs/video/stream/${currentOutput}?t=${timestamp}`;
+            // Use direct player stream (not outputs)
+            streamImg.src = `/api/fullscreen/stream?player=${playerType}&t=${timestamp}`;
         }
         
         // Show context menu
@@ -181,17 +172,10 @@
             contextMenu.style.display = 'none';
         }
         
-        // Right-click handler
+        // Right-click handler - disabled (using direct player stream, no output switching)
         streamImg.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            showContextMenu(e.clientX, e.clientY);
-        });
-        
-        // Click outside to close menu
-        document.addEventListener('click', (e) => {
-            if (!contextMenu.contains(e.target) && e.target !== streamImg) {
-                hideContextMenu();
-            }
+            // Context menu disabled - direct player streaming
         });
         
         // FPS Berechnung durch Überwachung des Stream-Updates

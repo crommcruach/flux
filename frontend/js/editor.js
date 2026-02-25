@@ -44,8 +44,8 @@ const ctx = canvas.getContext('2d');
 
 // Canvas overflow buffer (extra space around canvas for out-of-bounds objects)
 const CANVAS_OVERFLOW = 500; // pixels of extra space on each side
-let actualCanvasWidth = 1024; // The actual work area width
-let actualCanvasHeight = 768; // The actual work area height
+let actualCanvasWidth = 1920; // The actual work area width
+let actualCanvasHeight = 1080; // The actual work area height
 
 // Scale limits
 const MIN_SCALE = 0.3;
@@ -54,10 +54,12 @@ const MAX_SCALE = 10;
 // Handle configuration
 const HANDLE = {
     SIZE: 7,
+    SIZE_OUTER: 11,  // Outer ring for rotation
     DISTANCE: 26,
     DISTANCE_Y: 50,
     DISTANCE_SCALE_Y: 50,
     HIT_RADIUS: 12,
+    HIT_RADIUS_OUTER: 16,  // Outer ring hit detection
     CONTROL_RADIUS: 10,
     ICON_SIZE_MULTIPLIER: 3
 };
@@ -111,6 +113,7 @@ let offsetX = 0, offsetY = 0;
 let shapeCounter = 1;
 let needsRedraw = true;
 let hoveredPoint = null; // For tooltip: {shape, pointIndex, x, y}
+let hoveredHandle = null; // For handle hover feedback
 let scaleHandleIndex = null;
 let showConnectionLines = true; // Toggle for connection lines between objects
 let dragStartX = 0, dragStartY = 0;
@@ -1325,6 +1328,14 @@ async function loadEditorStateFromSession() {
         const state = window.sessionStateManager.get('editor');
         if (!state) {
             console.debug('No editor state found - using defaults');
+            // Set dropdown to match default canvas size
+            const sizeSelect = document.getElementById('canvasSize');
+            const defaultSize = `${actualCanvasWidth}x${actualCanvasHeight}`;
+            if ([...sizeSelect.options].some(opt => opt.value === defaultSize)) {
+                sizeSelect.value = defaultSize;
+            }
+            // Auto-fit and center canvas on fresh start
+            fitCanvasToViewport();
             return;
         }
 
@@ -1418,6 +1429,9 @@ async function loadEditorStateFromSession() {
             canvasOffsetY = state.viewport.offsetY ?? 0;
             updateCanvasSize();
             updateZoomDisplay();
+        } else {
+            // No saved viewport - auto-fit and center the canvas
+            fitCanvasToViewport();
         }
         
         // Restore selection state
@@ -2536,126 +2550,89 @@ function drawHandles(s) {
     }
 
     const corners = [[-halfW, -halfH], [halfW, -halfH], [halfW, halfH], [-halfW, halfH]];
-    for (const [x, y] of corners) {
+    const outerHandleSize = HANDLE.SIZE_OUTER * displayScale;
+    const innerSquareSize = baseHandleSize * 0.7; // 30% smaller
+    
+    for (let i = 0; i < corners.length; i++) {
+        const [x, y] = corners[i];
         // Draw corner handles with inverse scale to keep them constant size
         ctx.save();
         ctx.translate(x, y);
         ctx.scale(1 / s.scaleX, 1 / s.scaleY);
         
-        // Fill with 30% alpha cyan
-        ctx.fillStyle = COLORS.HANDLE_CORNER_FILL;
+        // Check if this corner is being hovered
+        const isRotateHovered = hoveredHandle === `rotate-${i}`;
+        const isScaleHovered = hoveredHandle === `scale-${i}`;
+        
+        // Outer ring for rotation (cyan, 30% opacity or full on hover)
+        ctx.fillStyle = isRotateHovered ? 'rgba(0, 255, 255, 1.0)' : 'rgba(0, 255, 255, 0.3)';
         ctx.beginPath();
-        ctx.arc(0, 0, baseHandleSize, 0, Math.PI * 2);
+        ctx.arc(0, 0, outerHandleSize, 0, Math.PI * 2);
         ctx.fill();
-
-        // Outline with 1pt cyan
-        ctx.strokeStyle = COLORS.HANDLE_CORNER_STROKE;
-        ctx.lineWidth = 1;
+        
+        // Outer ring border
+        ctx.strokeStyle = 'cyan';
+        ctx.lineWidth = 1.5;
         ctx.stroke();
+        
+        // Inner square for scaling (cyan, full opacity on hover)
+        ctx.fillStyle = isScaleHovered ? 'rgba(0, 255, 255, 1.0)' : COLORS.HANDLE_CORNER_FILL;
+        ctx.fillRect(-innerSquareSize, -innerSquareSize, innerSquareSize * 2, innerSquareSize * 2);
+
+        // Inner square outline
+        ctx.strokeStyle = isScaleHovered ? 'cyan' : COLORS.HANDLE_CORNER_STROKE;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-innerSquareSize, -innerSquareSize, innerSquareSize * 2, innerSquareSize * 2);
         ctx.restore();
     }
-    // Rotation handle (SVG icon) - top center
-    if (rotateIconImage) {
-        const iconX = 0;
-        const iconY = (s.type === 'line' || s.type === 'arc') ? -20 - HANDLE.DISTANCE / s.scaleY : -s.size / 2 - HANDLE.DISTANCE / s.scaleY;
-
-        // Draw icon with cyan tint, compensating for scale distortion
+    
+    // Edge scale handles - squares on all 4 sides
+    const squareSize = baseHandleSize * 1.2;
+    
+    // Right edge scale handle
+    ctx.save();
+    ctx.translate(halfW, 0);
+    ctx.scale(1 / s.scaleX, 1 / s.scaleY);
+    ctx.fillStyle = COLORS.HANDLE_CORNER_FILL;
+    ctx.fillRect(-squareSize / 2, -squareSize / 2, squareSize, squareSize);
+    ctx.strokeStyle = COLORS.HANDLE_CORNER_STROKE;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-squareSize / 2, -squareSize / 2, squareSize, squareSize);
+    ctx.restore();
+    
+    // Left edge scale handle
+    ctx.save();
+    ctx.translate(-halfW, 0);
+    ctx.scale(1 / s.scaleX, 1 / s.scaleY);
+    ctx.fillStyle = COLORS.HANDLE_CORNER_FILL;
+    ctx.fillRect(-squareSize / 2, -squareSize / 2, squareSize, squareSize);
+    ctx.strokeStyle = COLORS.HANDLE_CORNER_STROKE;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-squareSize / 2, -squareSize / 2, squareSize, squareSize);
+    ctx.restore();
+    
+    // Top and bottom edge scale handles (skip for lines - they're 1-dimensional)
+    if (s.type !== 'line') {
+        // Top edge scale handle
         ctx.save();
-        ctx.translate(iconX, iconY);
+        ctx.translate(0, -halfH);
         ctx.scale(1 / s.scaleX, 1 / s.scaleY);
+        ctx.fillStyle = COLORS.HANDLE_CORNER_FILL;
+        ctx.fillRect(-squareSize / 2, -squareSize / 2, squareSize, squareSize);
+        ctx.strokeStyle = COLORS.HANDLE_CORNER_STROKE;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(-squareSize / 2, -squareSize / 2, squareSize, squareSize);
+        ctx.restore();
         
-        // Use filter to colorize the icon to cyan
-        ctx.filter = 'brightness(0) saturate(100%) invert(70%) sepia(100%) saturate(2000%) hue-rotate(160deg)';
-               ctx.drawImage(rotateIconImage, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
-        ctx.restore();
-    } else {
-        // Fallback to orange circle if icon not loaded
-        const fallbackY = (s.type === 'line' || s.type === 'arc') ? -20 - HANDLE.DISTANCE / s.scaleY : -s.size / 2 - HANDLE.DISTANCE / s.scaleY;
+        // Bottom edge scale handle
         ctx.save();
-        ctx.translate(0, fallbackY);
+        ctx.translate(0, halfH);
         ctx.scale(1 / s.scaleX, 1 / s.scaleY);
-        ctx.fillStyle = 'orange';
-        ctx.beginPath();
-        ctx.arc(0, 0, baseHandleSize, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
-    // X-axis scale handle (cyan) - right middle
-    if (scaleXIconImage) {
-        const iconX = s.size / 2 + HANDLE.DISTANCE / s.scaleX;
-        const iconY = 0;
-
-        // Draw icon with cyan tint, compensating for scale distortion
-        ctx.save();
-        ctx.translate(iconX, iconY);
-        ctx.scale(1 / s.scaleX, 1 / s.scaleY);
-        
-        // Use filter to colorize the icon to cyan
-        ctx.filter = 'brightness(0) saturate(100%) invert(70%) sepia(100%) saturate(2000%) hue-rotate(160deg)';
-        ctx.drawImage(scaleXIconImage, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
-        ctx.restore();
-    } else {
-        // Fallback to cyan circle if icon not loaded
-        ctx.save();
-        ctx.translate(s.size / 2 + HANDLE.DISTANCE / s.scaleX, 0);
-        ctx.scale(1 / s.scaleX, 1 / s.scaleY);
-        ctx.fillStyle = COLORS.HANDLE_ICON_TINT;
-        ctx.beginPath();
-        ctx.arc(0, 0, baseHandleSize, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
-    // Y-axis scale handle (SVG icon) - top middle
-    if (scaleYIconImage) {
-        const iconX = 0;
-        const iconY = (s.type === 'line' || s.type === 'arc') ? -20 - HANDLE.DISTANCE_Y / s.scaleY : -s.size / 2 - HANDLE.DISTANCE_Y / s.scaleY;
-
-        // Draw icon with cyan tint, compensating for scale distortion
-        ctx.save();
-        ctx.translate(iconX, iconY);
-        ctx.scale(1 / s.scaleX, 1 / s.scaleY);
-        
-        // Use filter to colorize the icon to cyan
-        ctx.filter = 'brightness(0) saturate(100%) invert(70%) sepia(100%) saturate(2000%) hue-rotate(160deg)';
-        ctx.drawImage(scaleYIconImage, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
-        ctx.restore();
-    } else {
-        // Fallback to lime circle if icon not loaded
-        const fallbackY = (s.type === 'line' || s.type === 'arc') ? -20 - HANDLE.DISTANCE_Y / s.scaleY : -s.size / 2 - HANDLE.DISTANCE_Y / s.scaleY;
-        ctx.save();
-        ctx.translate(0, fallbackY);
-        ctx.scale(1 / s.scaleX, 1 / s.scaleY);
-        ctx.fillStyle = 'lime';
-        ctx.beginPath();
-        ctx.arc(0, 0, baseHandleSize, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
-    // Flip handle (SVG icon) - bottom left
-    if (flipIconImage) {
-        const iconX = -s.size / 2 - HANDLE.DISTANCE / s.scaleX;
-        const iconY = (s.type === 'line' || s.type === 'arc') ? 20 : s.size / 2;
-
-        // Draw icon with cyan tint, compensating for scale distortion
-        ctx.save();
-        ctx.translate(iconX, iconY);
-        ctx.scale(1 / s.scaleX, 1 / s.scaleY);
-        
-        // Use filter to colorize the icon to cyan
-        ctx.filter = 'brightness(0) saturate(100%) invert(70%) sepia(100%) saturate(2000%) hue-rotate(160deg)';
-        ctx.drawImage(flipIconImage, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
-        ctx.restore();
-    } else {
-        // Fallback to purple circle if icon not loaded
-        const fallbackX = -s.size / 2 - HANDLE.DISTANCE / s.scaleX;
-        const fallbackY = (s.type === 'line' || s.type === 'arc') ? 20 : s.size / 2;
-        ctx.save();
-        ctx.translate(fallbackX, fallbackY);
-        ctx.scale(1 / s.scaleX, 1 / s.scaleY);
-        ctx.fillStyle = COLORS.HANDLE_FLIP_FALLBACK;
-        ctx.beginPath();
-        ctx.arc(0, 0, baseHandleSize, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillStyle = COLORS.HANDLE_CORNER_FILL;
+        ctx.fillRect(-squareSize / 2, -squareSize / 2, squareSize, squareSize);
+        ctx.strokeStyle = COLORS.HANDLE_CORNER_STROKE;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(-squareSize / 2, -squareSize / 2, squareSize, squareSize);
         ctx.restore();
     }
 }
@@ -2738,23 +2715,23 @@ canvas.addEventListener('mousedown', e => {
             document.getElementById('matrixCols').value = selectedShape.cols;
         }
         const handle = hit.handle;
-        if (handle === 'rotate') {
+        if (handle === 'scaleRight' || handle === 'scaleLeft' || handle === 'scaleTop' || handle === 'scaleBottom') {
+            dragMode = handle;
+            dragStartScaleX = selectedShape.scaleX;
+            dragStartScaleY = selectedShape.scaleY;
+            dragStartX = selectedShape.x;
+            dragStartY = selectedShape.y;
+        } else if (handle && handle.startsWith('rotate-')) {
+            // Rotation from corner handle
             dragMode = 'rotate';
             dragStartRotation = selectedShape.rotation;
-        } else if (handle === 'flip') {
-            dragMode = 'flip';
-            dragStartX = mx; dragStartY = my;
-        } else if (handle === 'scaleX') {
-            dragMode = 'scaleX';
-            dragStartScaleX = selectedShape.scaleX;
-        } else if (handle === 'scaleY') {
-            dragMode = 'scaleY';
-            dragStartScaleY = selectedShape.scaleY;
         } else if (handle && handle.startsWith('scale')) {
             dragMode = 'scale';
             scaleHandleIndex = parseInt(handle.split('-')[1], 10);
             dragStartScaleX = selectedShape.scaleX;
             dragStartScaleY = selectedShape.scaleY;
+            dragStartX = selectedShape.x;
+            dragStartY = selectedShape.y;
         } else if (handle === 'control' || handle.startsWith('control-')) {
             dragMode = 'control';
             if (handle.startsWith('control-')) {
@@ -2827,20 +2804,25 @@ canvas.addEventListener('mousemove', e => {
 
     // Cursor-Feedback auch wenn nichts selected ist
     if (!selectedShape) {
+        hoveredHandle = null;
         canvas.style.cursor = 'crosshair';
         return;
     }
 
     const handle = findHandle(selectedShape, mx, my);
+    
+    // Update hovered handle and request redraw if changed
+    if (hoveredHandle !== handle) {
+        hoveredHandle = handle;
+        markForRedraw();
+    }
 
     // Cursor je nach Handle-Typ ändern
-    if (handle === 'rotate') {
+    if (handle && handle.startsWith('rotate-')) {
         canvas.style.cursor = 'grabbing';
-    } else if (handle === 'flip') {
-        canvas.style.cursor = 'pointer';
-    } else if (handle === 'scaleX') {
+    } else if (handle === 'scaleRight' || handle === 'scaleLeft') {
         canvas.style.cursor = 'ew-resize';
-    } else if (handle === 'scaleY') {
+    } else if (handle === 'scaleTop' || handle === 'scaleBottom') {
         canvas.style.cursor = 'ns-resize';
     } else if (handle && handle.startsWith('scale')) {
         canvas.style.cursor = 'nwse-resize';
@@ -2910,65 +2892,124 @@ canvas.addEventListener('mousemove', e => {
         
         markForRedraw();
     } else if (dragMode === 'scale') {
+        // Corner scaling - keep opposite corner fixed
         const half = selectedShape.size / 2;
-        const corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
-        const [cx, cy] = corners[scaleHandleIndex];
-
-        // Vector from center to mouse
-        const toMouseX = mx - selectedShape.x;
-        const toMouseY = my - selectedShape.y;
-
-        // Vector from center to corner (in local space, unscaled)
-        const toCornerX = cx;
-        const toCornerY = cy;
-
-        // Calculate scale factors
-        if (Math.abs(toCornerX) > 0.1 || Math.abs(toCornerY) > 0.1) {
-            // Get world direction to corner before scale
-            const cosA = Math.cos(selectedShape.rotation), sinA = Math.sin(selectedShape.rotation);
-            const worldCornerDirX = (toCornerX * cosA - toCornerY * sinA);
-            const worldCornerDirY = (toCornerX * sinA + toCornerY * cosA);
-
-            // Distance scaling factor
-            const originalDist = Math.hypot(worldCornerDirX, worldCornerDirY);
-            const newDist = Math.hypot(toMouseX, toMouseY);
-
-            if (originalDist > 0.1) {
-                const scaleFactor = newDist / originalDist;
-
-                if (selectedShape.type === 'matrix') {
-                    // Uniform scaling for matrix
-                    selectedShape.scaleX = selectedShape.scaleY = Math.max(MIN_SCALE, Math.min(MAX_SCALE, dragStartScaleX * scaleFactor));
-                } else {
-                    // Independent scaling for other shapes
-                    const newScaleX = Math.max(MIN_SCALE, Math.min(MAX_SCALE, dragStartScaleX * scaleFactor));
-                    const newScaleY = Math.max(MIN_SCALE, Math.min(MAX_SCALE, dragStartScaleY * scaleFactor));
-                    selectedShape.scaleX = newScaleX;
-                    selectedShape.scaleY = newScaleY;
-                }
-            }
-        }
-        markForRedraw();
-    } else if (dragMode === 'scaleX') {
-        // Scale only on X-axis
-        const toMouseX = mx - selectedShape.x;
-        const toMouseY = my - selectedShape.y;
+        const halfH = (selectedShape.type === 'line' || selectedShape.type === 'arc') ? 20 : half;
+        
+        // Define corners: 0=TL, 1=TR, 2=BR, 3=BL
+        const corners = [[-half, -halfH], [half, -halfH], [half, halfH], [-half, halfH]];
+        const oppositeIndex = (scaleHandleIndex + 2) % 4; // Opposite corner
+        const [oppX, oppY] = corners[oppositeIndex];
+        
+        // Calculate opposite corner position in world space at drag start
         const cosA = Math.cos(selectedShape.rotation);
         const sinA = Math.sin(selectedShape.rotation);
-        // Project mouse position onto rotated X-axis
+        const oppWorldStartX = dragStartX + (oppX * dragStartScaleX * cosA - oppY * dragStartScaleY * sinA);
+        const oppWorldStartY = dragStartY + (oppX * dragStartScaleX * sinA + oppY * dragStartScaleY * cosA);
+        
+        // Vector from opposite corner to mouse
+        const toMouseX = mx - oppWorldStartX;
+        const toMouseY = my - oppWorldStartY;
+        
+        // Calculate new scale based on distance from opposite corner
+        // Project mouse vector onto rotated axes
+        const localMouseX = (toMouseX * cosA + toMouseY * sinA);
+        const localMouseY = (-toMouseX * sinA + toMouseY * cosA);
+        
+        // Calculate scale for each axis
+        // The full distance from opposite corner to dragged corner is the shape size
+        let newScaleX = dragStartScaleX;
+        let newScaleY = dragStartScaleY;
+        
+        // Scale X: distance from opposite corner divided by full width
+        newScaleX = Math.abs(localMouseX / selectedShape.size);
+        newScaleX = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScaleX)) * Math.sign(dragStartScaleX);
+        
+        // Scale Y: distance from opposite corner divided by full height
+        const fullHeight = halfH * 2;
+        newScaleY = Math.abs(localMouseY / fullHeight);
+        newScaleY = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScaleY)) * Math.sign(dragStartScaleY);
+        
+        // For matrix, use uniform scaling
+        if (selectedShape.type === 'matrix') {
+            const avgScale = (newScaleX + newScaleY) / 2;
+            newScaleX = newScaleY = avgScale;
+        }
+        
+        // Calculate new center position to keep opposite corner fixed
+        const oppWorldNewX = dragStartX + (oppX * newScaleX * cosA - oppY * newScaleY * sinA);
+        const oppWorldNewY = dragStartY + (oppX * newScaleX * sinA + oppY * newScaleY * cosA);
+        
+        // Adjust position to maintain opposite corner position
+        selectedShape.x = dragStartX + (oppWorldStartX - oppWorldNewX);
+        selectedShape.y = dragStartY + (oppWorldStartY - oppWorldNewY);
+        selectedShape.scaleX = newScaleX;
+        selectedShape.scaleY = newScaleY;
+        markForRedraw();
+    } else if (dragMode === 'scaleRight') {
+        // Scale right edge, keeping left edge fixed
+        const toMouseX = mx - dragStartX;
+        const toMouseY = my - dragStartY;
+        const cosA = Math.cos(selectedShape.rotation);
+        const sinA = Math.sin(selectedShape.rotation);
         const projX = (toMouseX * cosA + toMouseY * sinA) / (selectedShape.size / 2);
-        const newScaleX = Math.max(MIN_SCALE, Math.min(MAX_SCALE, dragStartScaleX * Math.abs(projX)));
+        const newScaleX = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.abs(projX))) * Math.sign(dragStartScaleX);
+        
+        // Calculate center shift to keep left edge fixed
+        // Left edge is at local (-halfSize, 0), which in world is center + rotate(-halfSize * scaleX, 0)
+        const totalShift = (selectedShape.size / 2) * (newScaleX - dragStartScaleX);
+        selectedShape.x = dragStartX + totalShift * cosA;
+        selectedShape.y = dragStartY + totalShift * sinA;
         selectedShape.scaleX = newScaleX;
         markForRedraw();
-    } else if (dragMode === 'scaleY') {
-        // Scale only on Y-axis
-        const toMouseX = mx - selectedShape.x;
-        const toMouseY = my - selectedShape.y;
+    } else if (dragMode === 'scaleLeft') {
+        // Scale left edge, keeping right edge fixed
+        const toMouseX = mx - dragStartX;
+        const toMouseY = my - dragStartY;
         const cosA = Math.cos(selectedShape.rotation);
         const sinA = Math.sin(selectedShape.rotation);
-        // Project mouse position onto rotated Y-axis
-        const projY = (-toMouseX * sinA + toMouseY * cosA) / (selectedShape.size / 2);
-        const newScaleY = Math.max(MIN_SCALE, Math.min(MAX_SCALE, dragStartScaleY * Math.abs(projY)));
+        const projX = (toMouseX * cosA + toMouseY * sinA) / (selectedShape.size / 2);
+        const newScaleX = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.abs(projX))) * Math.sign(dragStartScaleX);
+        
+        // Calculate center shift to keep right edge fixed
+        // Right edge is at local (+halfSize, 0), which in world is center + rotate(+halfSize * scaleX, 0)
+        const totalShift = -(selectedShape.size / 2) * (newScaleX - dragStartScaleX);
+        selectedShape.x = dragStartX + totalShift * cosA;
+        selectedShape.y = dragStartY + totalShift * sinA;
+        selectedShape.scaleX = newScaleX;
+        markForRedraw();
+    } else if (dragMode === 'scaleTop') {
+        // Scale top edge, keeping bottom edge fixed
+        const toMouseX = mx - dragStartX;
+        const toMouseY = my - dragStartY;
+        const cosA = Math.cos(selectedShape.rotation);
+        const sinA = Math.sin(selectedShape.rotation);
+        const halfH = (selectedShape.type === 'line' || selectedShape.type === 'arc') ? 20 : selectedShape.size / 2;
+        const projY = (-toMouseX * sinA + toMouseY * cosA) / halfH;
+        const newScaleY = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.abs(projY))) * Math.sign(dragStartScaleY);
+        
+        // Calculate center shift to keep bottom edge fixed
+        // Bottom edge is at local (0, +halfH), rotation transforms Y to (-Y*sin, Y*cos)
+        const totalShift = -halfH * (newScaleY - dragStartScaleY);
+        selectedShape.x = dragStartX - totalShift * sinA;
+        selectedShape.y = dragStartY + totalShift * cosA;
+        selectedShape.scaleY = newScaleY;
+        markForRedraw();
+    } else if (dragMode === 'scaleBottom') {
+        // Scale bottom edge, keeping top edge fixed
+        const toMouseX = mx - dragStartX;
+        const toMouseY = my - dragStartY;
+        const cosA = Math.cos(selectedShape.rotation);
+        const sinA = Math.sin(selectedShape.rotation);
+        const halfH = (selectedShape.type === 'line' || selectedShape.type === 'arc') ? 20 : selectedShape.size / 2;
+        const projY = (-toMouseX * sinA + toMouseY * cosA) / halfH;
+        const newScaleY = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.abs(projY))) * Math.sign(dragStartScaleY);
+        
+        // Calculate center shift to keep top edge fixed
+        // Top edge is at local (0, -halfH), rotation transforms Y to (-Y*sin, Y*cos)
+        const totalShift = halfH * (newScaleY - dragStartScaleY);
+        selectedShape.x = dragStartX - totalShift * sinA;
+        selectedShape.y = dragStartY + totalShift * cosA;
         selectedShape.scaleY = newScaleY;
         markForRedraw();
     } else if (dragMode === 'control' && selectedShape.type === 'arc') {
@@ -3051,11 +3092,13 @@ canvas.addEventListener('mouseup', () => {
         markForRedraw();
     }
 
-    // Save state after any drag operation
+    // Save state after any drag operation that modified shapes
     const hadDragMode = dragMode !== null;
-    dragMode = null; scaleHandleIndex = null; updateObjectList();
+    dragMode = null;
+    scaleHandleIndex = null;
     
     if (hadDragMode) {
+        updateObjectList();
         saveEditorStateToSession();
     }
 });
@@ -3073,24 +3116,6 @@ function findHandle(s, mx, my) {
     // Use tighter bounding box for line and arc objects
     const halfSize = s.size / 2;
     const halfH = (s.type === 'line' || s.type === 'arc') ? 20 : halfSize;
-    
-    // Rotation handle - position in world space (top center above shape)
-    // Die Hitbox muss unabhängig von der Skalierung gleich groß bleiben:
-    const rotHandleLocalX = 0;
-    const rotHandleLocalY = (s.type === 'line' || s.type === 'arc') ? -20 - HANDLE.DISTANCE / s.scaleY : -s.size / 2 - HANDLE.DISTANCE / s.scaleY;
-    const [rotWorldX, rotWorldY] = handleToWorld(s, rotHandleLocalX, rotHandleLocalY);
-    // Korrigiere die Hitbox: Abstand im lokalen System berechnen und dann auf die Welt skalieren
-    // Die Hitbox soll auf dem Bildschirm immer gleich groß sein, unabhängig von s.scaleX/s.scaleY
-    // Daher: Maus in lokale Koordinaten transformieren
-    const [localMx, localMy] = worldToLocal(s, mx, my);
-    const distLocal = Math.hypot(localMx - rotHandleLocalX, localMy - rotHandleLocalY);
-    if (distLocal < HANDLE.HIT_RADIUS) return 'rotate';
-
-    // Flip handle - position in world space (bottom left)
-    const flipHandleLocalX = -(s.size / 2) * s.scaleX - HANDLE.DISTANCE;
-    const flipHandleLocalY = (s.type === 'line' || s.type === 'arc') ? 20 * s.scaleY : (s.size / 2) * s.scaleY;
-    const [flipWorldX, flipWorldY] = handleToWorld(s, flipHandleLocalX, flipHandleLocalY);
-    if (Math.hypot(mx - flipWorldX, my - flipWorldY) < HANDLE.HIT_RADIUS) return 'flip';
 
     // Control handles for arc (support multiple)
     if (s.type === 'arc') {
@@ -3106,21 +3131,37 @@ function findHandle(s, mx, my) {
         }
     }
 
-    // X-axis scale handle (cyan) - right middle
-    const [scaleXWorldX, scaleXWorldY] = handleToWorld(s, (s.size / 2) * s.scaleX + HANDLE.DISTANCE, 0);
-    if (Math.hypot(mx - scaleXWorldX, my - scaleXWorldY) < HANDLE.HIT_RADIUS) return 'scaleX';
+    // Edge scale handles - keep opposite edge fixed
+    const [scaleRightX, scaleRightY] = localToWorld(s, halfSize, 0);
+    if (Math.hypot(mx - scaleRightX, my - scaleRightY) < HANDLE.HIT_RADIUS) return 'scaleRight';
+    
+    const [scaleLeftX, scaleLeftY] = localToWorld(s, -halfSize, 0);
+    if (Math.hypot(mx - scaleLeftX, my - scaleLeftY) < HANDLE.HIT_RADIUS) return 'scaleLeft';
+    
+    // Top and bottom edge scale handles (skip for lines - they're 1-dimensional)
+    if (s.type !== 'line') {
+        const [scaleTopX, scaleTopY] = localToWorld(s, 0, -halfH);
+        if (Math.hypot(mx - scaleTopX, my - scaleTopY) < HANDLE.HIT_RADIUS) return 'scaleTop';
+        
+        const [scaleBottomX, scaleBottomY] = localToWorld(s, 0, halfH);
+        if (Math.hypot(mx - scaleBottomX, my - scaleBottomY) < HANDLE.HIT_RADIUS) return 'scaleBottom';
+    }
 
-    // Y-axis scale handle (lime) - top middle
-    const scaleYLocalY = -((s.type === 'line' || s.type === 'arc') ? 20 : s.size / 2) * s.scaleY - HANDLE.DISTANCE_Y;
-    const [scaleYWorldX, scaleYWorldY] = handleToWorld(s, 0, scaleYLocalY);
-    if (Math.hypot(mx - scaleYWorldX, my - scaleYWorldY) < HANDLE.HIT_RADIUS) return 'scaleY';
-
-    // Scale handles at corners - use UNSCALED local coordinates, let localToWorld apply scaling
+    // Corner handles - dual ring (outer = rotate, inner = scale)
     const corners = [[-halfSize, -halfH], [halfSize, -halfH], [halfSize, halfH], [-halfSize, halfH]];
     for (let i = 0; i < corners.length; i++) {
         const [cx, cy] = corners[i];
         const [worldX, worldY] = localToWorld(s, cx, cy);
-        if (Math.hypot(mx - worldX, my - worldY) < HANDLE.HIT_RADIUS) return `scale-${i}`;
+        const dist = Math.hypot(mx - worldX, my - worldY);
+        
+        // Outer ring = rotation
+        if (dist < HANDLE.HIT_RADIUS_OUTER && dist >= HANDLE.HIT_RADIUS) {
+            return `rotate-${i}`;
+        }
+        // Inner circle = scale
+        if (dist < HANDLE.HIT_RADIUS) {
+            return `scale-${i}`;
+        }
     }
     return null;
 }
@@ -3137,8 +3178,30 @@ function updateObjectList() {
         const isSelected = selectedShape === s || selectedShapes.includes(s);
         div.className = `shape-item ${isSelected ? 'selected' : ''}`;
         div.style.cursor = 'grab';
-        div.draggable = true;
+        div.draggable = false; // Start with draggable disabled
         div.dataset.shapeIndex = i;
+        
+        // Dynamically enable/disable dragging based on what element is under the mouse
+        div.addEventListener('mouseenter', (e) => {
+            const target = e.target;
+            if (target.tagName !== 'INPUT' && target.tagName !== 'BUTTON' && 
+                !target.closest('input') && !target.closest('button')) {
+                div.draggable = true;
+            }
+        });
+        
+        div.addEventListener('mouseover', (e) => {
+            const target = e.target;
+            if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || 
+                target.closest('input') || target.closest('button')) {
+                div.draggable = false;
+                div.style.cursor = 'default';
+            } else {
+                div.draggable = true;
+                div.style.cursor = 'grab';
+            }
+        });
+        
         div.onclick = (e) => {
             // Ignore clicks on input fields
             if (e.target.tagName === 'INPUT') {
@@ -3177,6 +3240,14 @@ function updateObjectList() {
 
         // Drag & Drop handlers
         div.addEventListener('dragstart', (e) => {
+            // Prevent drag if started from input field or interactive element
+            if (e.target.tagName === 'INPUT' || 
+                e.target.tagName === 'BUTTON' || 
+                e.target.closest('input') || 
+                e.target.closest('button')) {
+                e.preventDefault();
+                return false;
+            }
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', i);
             div.style.opacity = '0.4';
@@ -3220,14 +3291,12 @@ function updateObjectList() {
         for (let j = 0; j < i; j++) {
             const prevShape = shapes[j];
             const prevPts = (prevShape.type === 'line') ? getLinePoints(prevShape) : 
-                           (prevShape.type === 'polygon') ? getPolygonPoints(prevShape) : 
                            (prevShape.type === 'freehand') ? getFreehandPoints(prevShape) : 
                            getShapePoints(prevShape);
             channelStart += prevPts.length * 3;
         }
         
         const currentPts = (s.type === 'line') ? getLinePoints(s) : 
-                          (s.type === 'polygon') ? getPolygonPoints(s) : 
                           (s.type === 'freehand') ? getFreehandPoints(s) : 
                           getShapePoints(s);
         const channelEnd = channelStart + currentPts.length * 3 - 1;
@@ -3246,6 +3315,7 @@ function updateObjectList() {
         nameInput.type = 'text';
         nameInput.value = s.name || s.id;
         nameInput.className = 'shape-name-input';
+        nameInput.draggable = false; // Prevent drag on input
         nameInput.style.background = 'transparent';
         nameInput.style.border = 'none';
         nameInput.style.color = 'inherit';
@@ -3257,6 +3327,7 @@ function updateObjectList() {
         nameInput.style.cursor = 'text';
         nameInput.style.width = '100%';
         nameInput.addEventListener('click', (e) => e.stopPropagation());
+        nameInput.addEventListener('mousedown', (e) => e.stopPropagation());
         nameInput.addEventListener('input', (e) => {
             s.name = e.target.value;
             saveEditorStateToSession();
@@ -3281,6 +3352,7 @@ function updateObjectList() {
 
         const toggleBtn = document.createElement('button');
         toggleBtn.textContent = s.collapsed ? '▼' : '▲';
+        toggleBtn.draggable = false;
         toggleBtn.style.background = 'none';
         toggleBtn.style.border = 'none';
         toggleBtn.style.cursor = 'pointer';
@@ -3333,6 +3405,7 @@ function updateObjectList() {
                 const input = document.createElement('input');
                 input.type = 'range';
                 input.className = 'form-range';
+                input.draggable = false;
                 input.style.flex = '1';
                 input.style.height = '0.4rem';
 
@@ -3368,6 +3441,7 @@ function updateObjectList() {
                     markForRedraw();
                     saveEditorStateToSession();
                 });
+                input.addEventListener('mousedown', (e) => e.stopPropagation());
 
                 sliderContainer.appendChild(input);
                 sliderContainer.appendChild(valueDisplay);
@@ -3377,6 +3451,7 @@ function updateObjectList() {
                 // Integer input (for pixel coordinates)
                 const input = document.createElement('input');
                 input.type = 'number';
+                input.draggable = false;
                 input.value = value;
                 input.step = '1';
                 input.style.padding = '0.2rem 0.3rem';
@@ -3397,6 +3472,9 @@ function updateObjectList() {
                 input.addEventListener('click', (e) => {
                     e.stopPropagation();
                 });
+                input.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                });
 
                 wrapper.appendChild(labelEl);
                 wrapper.appendChild(input);
@@ -3404,6 +3482,7 @@ function updateObjectList() {
                 // Standard number input
                 const input = document.createElement('input');
                 input.type = 'number';
+                input.draggable = false;
                 input.value = value;
                 input.step = '0.1';
                 input.style.padding = '0.2rem 0.3rem';
@@ -3424,6 +3503,9 @@ function updateObjectList() {
                 input.addEventListener('click', (e) => {
                     e.stopPropagation();
                 });
+                input.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                });
 
                 wrapper.appendChild(labelEl);
                 wrapper.appendChild(input);
@@ -3434,8 +3516,73 @@ function updateObjectList() {
         fieldsContainer.appendChild(createEditField('X', Math.round(s.x), (val) => { s.x = Math.round(val); }, 'integer'));
         fieldsContainer.appendChild(createEditField('Y', Math.round(s.y), (val) => { s.y = Math.round(val); }, 'integer'));
         fieldsContainer.appendChild(createEditField('Size', s.size, (val) => { s.size = Math.max(20, val); }, 'number'));
-        fieldsContainer.appendChild(createEditField('ScaleX', s.scaleX.toFixed(2), (val) => { s.scaleX = Math.max(MIN_SCALE, Math.min(MAX_SCALE, val)); }, 'number'));
-        fieldsContainer.appendChild(createEditField('ScaleY', s.scaleY.toFixed(2), (val) => { s.scaleY = Math.max(MIN_SCALE, Math.min(MAX_SCALE, val)); }, 'number'));
+        
+        // Initialize scale linking (default to linked/symmetric)
+        if (s.scaleLinked === undefined) s.scaleLinked = true;
+        
+        // Create compact scale section: ScaleX - 🔗 - ScaleY all in one line
+        const scaleContainer = document.createElement('div');
+        scaleContainer.style.gridColumn = '1 / -1';
+        scaleContainer.style.display = 'flex';
+        scaleContainer.style.gap = '0.3rem';
+        scaleContainer.style.alignItems = 'flex-end';
+        scaleContainer.style.marginTop = '0.15rem';
+        scaleContainer.style.marginBottom = '0.15rem';
+        
+        // ScaleX field
+        const scaleXField = createEditField('ScaleX', s.scaleX.toFixed(2), (val) => { 
+            const newVal = Math.max(MIN_SCALE, Math.min(MAX_SCALE, val));
+            s.scaleX = newVal;
+            if (s.scaleLinked) {
+                s.scaleY = newVal;
+                updateObjectList();
+            }
+        }, 'number');
+        scaleXField.style.flex = '1';
+        scaleContainer.appendChild(scaleXField);
+        
+        // Lock/Unlock button (center)
+        const lockButton = document.createElement('button');
+        lockButton.draggable = false;
+        lockButton.textContent = s.scaleLinked ? '🔗' : '🔓';
+        lockButton.title = s.scaleLinked ? 'Linked (symmetric scaling)' : 'Unlinked (independent scaling)';
+        lockButton.style.fontSize = '1rem';
+        lockButton.style.padding = '0.2rem 0.35rem';
+        lockButton.style.border = '1px solid #dee2e6';
+        lockButton.style.borderRadius = '0.25rem';
+        lockButton.style.background = s.scaleLinked ? '#e3f2fd' : '#f5f5f5';
+        lockButton.style.cursor = 'pointer';
+        lockButton.style.lineHeight = '1';
+        lockButton.style.height = '1.5rem';
+        lockButton.style.minWidth = '1.8rem';
+        lockButton.style.flexShrink = '0';
+        lockButton.onclick = (e) => {
+            e.stopPropagation();
+            s.scaleLinked = !s.scaleLinked;
+            if (s.scaleLinked) {
+                s.scaleY = s.scaleX;
+            }
+            updateObjectList();
+            markForRedraw();
+            saveEditorStateToSession();
+        };
+        lockButton.addEventListener('mousedown', (e) => e.stopPropagation());
+        scaleContainer.appendChild(lockButton);
+        
+        // ScaleY field
+        const scaleYField = createEditField('ScaleY', s.scaleY.toFixed(2), (val) => { 
+            const newVal = Math.max(MIN_SCALE, Math.min(MAX_SCALE, val));
+            s.scaleY = newVal;
+            if (s.scaleLinked) {
+                s.scaleX = newVal;
+                updateObjectList();
+            }
+        }, 'number');
+        scaleYField.style.flex = '1';
+        scaleContainer.appendChild(scaleYField);
+        
+        fieldsContainer.appendChild(scaleContainer);
+        
         fieldsContainer.appendChild(createEditField('Rot(°)', (s.rotation * 180 / Math.PI).toFixed(1), (val) => { s.rotation = val * Math.PI / 180; }, 'number'));
 
         contentContainer.appendChild(fieldsContainer);
@@ -3497,7 +3644,6 @@ function updateProjectStats() {
     for (let i = 0; i < shapes.length; i++) {
         const s = shapes[i];
         const pts = (s.type === 'line') ? getLinePoints(s) : 
-                    (s.type === 'polygon') ? getPolygonPoints(s) : 
                     (s.type === 'freehand') ? getFreehandPoints(s) : 
                     getShapePoints(s);
         
@@ -3814,6 +3960,29 @@ function updateCanvasSize() {
     canvas.style.transformOrigin = 'top left';
 }
 
+function fitCanvasToViewport() {
+    const wrapper = document.getElementById('canvasWrapper');
+    const wrapperWidth = wrapper.clientWidth;
+    const wrapperHeight = wrapper.clientHeight;
+    
+    // Calculate zoom to fit canvas in viewport with some padding (90% of available space)
+    const padding = 0.9; // Use 90% of viewport to leave some margin
+    const zoomX = (wrapperWidth * padding) / canvas.width;
+    const zoomY = (wrapperHeight * padding) / canvas.height;
+    
+    // Use the smaller zoom to ensure canvas fits in both dimensions
+    canvasZoom = Math.min(zoomX, zoomY, MAX_SCALE);
+    canvasZoom = Math.max(canvasZoom, MIN_SCALE);
+    
+    // Center the canvas
+    canvasOffsetX = 0;
+    canvasOffsetY = 0;
+    
+    updateCanvasSize();
+    updateZoomDisplay();
+    console.debug(`Auto-fit canvas: zoom=${canvasZoom.toFixed(2)}`);
+}
+
 function zoomIn() {
     canvasZoom = Math.min(canvasZoom * 1.2, 5.0);
     updateCanvasSize();
@@ -3829,11 +3998,7 @@ function zoomOut() {
 }
 
 function resetZoom() {
-    canvasZoom = 1.0;
-    canvasOffsetX = 0;
-    canvasOffsetY = 0;
-    updateCanvasSize();
-    updateZoomDisplay();
+    fitCanvasToViewport();
     markForRedraw();
 }
 
@@ -3908,6 +4073,9 @@ window.clearBackgroundImage = clearBackgroundImage;
 window.toggleTextTool = toggleTextTool;
 window.addTextToCanvas = addTextToCanvas;
 window.toggleFreehandDrawing = toggleFreehandDrawing;
+window.zoomIn = zoomIn;
+window.zoomOut = zoomOut;
+window.resetZoom = resetZoom;
 window.fitToCanvas = fitToCanvas;
 
 // Export for LED mapper integration
@@ -3967,6 +4135,8 @@ function updateContextMenuItems() {
             case 'duplicate':
             case 'delete':
             case 'reset':
+            case 'flipHorizontal':
+            case 'flipVertical':
                 item.classList.toggle('disabled', !hasSelection);
                 break;
             case 'group':
@@ -4005,6 +4175,20 @@ function handleContextMenuAction(action) {
         case 'reset':
             resetSelectedShape();
             break;
+        case 'flipHorizontal':
+            if (selectedShape) {
+                selectedShape.scaleX = -selectedShape.scaleX;
+                markForRedraw();
+                saveSessionStateDebounced();
+            }
+            break;
+        case 'flipVertical':
+            if (selectedShape) {
+                selectedShape.scaleY = -selectedShape.scaleY;
+                markForRedraw();
+                saveSessionStateDebounced();
+            }
+            break;
     }
 }
 
@@ -4012,6 +4196,17 @@ function handleContextMenuAction(action) {
 canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     showContextMenu(e.clientX, e.clientY);
+});
+
+// Global context menu handler - prevent default except for UI elements
+document.addEventListener('contextmenu', (e) => {
+    // Allow default context menu for input elements, textareas, and main UI areas
+    const allowedElements = ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'];
+    const isInUI = e.target.closest('.menu-bar, .toolbar, .sidebar, .canvas-settings-bar, .modal, #objectList, #zoomControls');
+    
+    if (!allowedElements.includes(e.target.tagName) && !isInUI) {
+        e.preventDefault();
+    }
 });
 
 // Click outside to close

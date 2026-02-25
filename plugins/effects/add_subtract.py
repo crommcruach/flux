@@ -56,9 +56,10 @@ class AddSubtractEffect(PluginBase):
     
     def initialize(self, config):
         """Initialisiert Plugin mit RGB-Werten."""
-        self.red = config.get('red', 0.0)
-        self.green = config.get('green', 0.0)
-        self.blue = config.get('blue', 0.0)
+        # Use _get_param_value() from PluginBase to handle range metadata
+        self.red = self._get_param_value('red', 0.0)
+        self.green = self._get_param_value('green', 0.0)
+        self.blue = self._get_param_value('blue', 0.0)
     
     def process_frame(self, frame, **kwargs):
         """
@@ -71,18 +72,38 @@ class AddSubtractEffect(PluginBase):
         Returns:
             Modifiziertes Frame
         """
-        # BGR-Format: Blue, Green, Red
+        # Throttled logging every 120 frames
+        if not hasattr(self, '_process_counter'):
+            self._process_counter = 0
+        self._process_counter += 1
+        if self._process_counter % 120 == 1:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"🎨 [AddSubtract {id(self)}] R={self.red}, G={self.green}, B={self.blue}")
+            logger.info(f"🖼️  [AddSubtract] Input frame shape={frame.shape}, mean={frame.mean():.1f}")
+        
+        # RGB-Format: Red, Green, Blue
         result = frame.astype(np.float32)
-        result[:, :, 0] += self.blue  # Blue channel
+        result[:, :, 0] += self.red  # Red channel
         result[:, :, 1] += self.green  # Green channel
-        result[:, :, 2] += self.red  # Red channel
+        result[:, :, 2] += self.blue  # Blue channel
         
         # Clamp to valid range [0, 255]
         result = np.clip(result, 0, 255).astype(np.uint8)
+        
+        if self._process_counter % 120 == 1:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"✅ [AddSubtract] Output frame mean={result.mean():.1f}, changed={(frame.mean() - result.mean()):.1f}")
+        
         return result
     
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""
+        # Extract actual value if it's a range metadata dict
+        if isinstance(value, dict) and '_value' in value:
+            value = value['_value']
+        
         if name == 'red':
             self.red = float(value)
             return True

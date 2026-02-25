@@ -27,114 +27,129 @@ class TransformEffect(PluginBase):
     }
     
     PARAMETERS = [
+        # Position Group
         {
             'name': 'position_x',
-            'label': 'Position X',
+            'label': 'X',
             'type': ParameterType.FLOAT,
             'default': 0.0,
             'min': -2000.0,
             'max': 2000.0,
             'step': 1.0,
+            'group': 'Position',
             'description': 'Horizontale Position (Pixel, negativ = links, positiv = rechts)'
         },
         {
             'name': 'position_y',
-            'label': 'Position Y',
+            'label': 'Y',
             'type': ParameterType.FLOAT,
             'default': 0.0,
             'min': -2000.0,
             'max': 2000.0,
             'step': 1.0,
+            'group': 'Position',
             'description': 'Vertikale Position (Pixel, negativ = oben, positiv = unten)'
         },
+        # Scale Group
         {
             'name': 'scale_xy',
-            'label': 'Scale XY (Symmetric)',
+            'label': 'XY (Symmetric)',
             'type': ParameterType.FLOAT,
             'default': 100.0,
             'min': 0.0,
             'max': 500.0,
             'step': 1.0,
+            'group': 'Scale',
             'description': 'Symmetrische Skalierung in Prozent (100% = Original)'
         },
         {
             'name': 'scale_x',
-            'label': 'Scale X',
+            'label': 'X',
             'type': ParameterType.FLOAT,
             'default': 100.0,
             'min': 0.0,
             'max': 500.0,
             'step': 1.0,
+            'group': 'Scale',
             'description': 'Horizontale Skalierung in Prozent (100% = Original)'
         },
         {
             'name': 'scale_y',
-            'label': 'Scale Y',
+            'label': 'Y',
             'type': ParameterType.FLOAT,
             'default': 100.0,
             'min': 0.0,
             'max': 500.0,
             'step': 1.0,
+            'group': 'Scale',
             'description': 'Vertikale Skalierung in Prozent (100% = Original)'
         },
+        # Rotation Group
         {
             'name': 'rotation_x',
-            'label': 'Rotation X',
+            'label': 'X',
             'type': ParameterType.FLOAT,
             'default': 0.0,
             'min': 0.0,
             'max': 360.0,
             'step': 1.0,
+            'group': 'Rotation',
             'description': 'Rotation um X-Achse in Grad (3D-Perspektive)'
         },
         {
             'name': 'rotation_y',
-            'label': 'Rotation Y',
+            'label': 'Y',
             'type': ParameterType.FLOAT,
             'default': 0.0,
             'min': 0.0,
             'max': 360.0,
             'step': 1.0,
+            'group': 'Rotation',
             'description': 'Rotation um Y-Achse in Grad (3D-Perspektive)'
         },
         {
             'name': 'rotation_z',
-            'label': 'Rotation Z',
+            'label': 'Z',
             'type': ParameterType.FLOAT,
             'default': 0.0,
             'min': 0.0,
             'max': 360.0,
             'step': 1.0,
+            'group': 'Rotation',
             'description': 'Rotation um Z-Achse in Grad (2D-Rotation im Uhrzeigersinn)'
         },
+        # Anchor Group
         {
             'name': 'anchor_x',
-            'label': 'Anchor X',
+            'label': 'X',
             'type': ParameterType.FLOAT,
             'default': 50.0,
             'min': 0.0,
             'max': 100.0,
             'step': 1.0,
+            'group': 'Anchor',
             'description': 'Ankerpunkt X in Prozent (50% = Mitte, 0% = links, 100% = rechts)'
         },
         {
             'name': 'anchor_y',
-            'label': 'Anchor Y',
+            'label': 'Y',
             'type': ParameterType.FLOAT,
             'default': 50.0,
             'min': 0.0,
             'max': 100.0,
             'step': 1.0,
+            'group': 'Anchor',
             'description': 'Ankerpunkt Y in Prozent (50% = Mitte, 0% = oben, 100% = unten)'
         },
         {
             'name': 'anchor_z',
-            'label': 'Anchor Z',
+            'label': 'Z',
             'type': ParameterType.FLOAT,
             'default': 50.0,
             'min': 0.0,
             'max': 100.0,
             'step': 1.0,
+            'group': 'Anchor',
             'description': 'Ankerpunkt Z in Prozent (50% = Mitte, beeinflusst 3D-Perspektive)'
         }
     ]

@@ -179,6 +179,18 @@ class [Name]Effect(PluginBase):
             'step': 0.05,
             'description': 'Effekt-Stärke'
         }
+        # Optional: Add 'group': 'Group Name' to organize parameters in collapsible sections
+        # Example:
+        # {
+        #     'name': 'color_r',
+        #     'label': 'R',
+        #     'type': ParameterType.FLOAT,
+        #     'default': 1.0,
+        #     'min': 0.0,
+        #     'max': 1.0,
+        #     'group': 'Color',  # Groups parameters with same group name
+        #     'description': 'Red channel'
+        # }
     ]
     
     def initialize(self, config):
@@ -266,6 +278,111 @@ ParameterType.COLOR      # Color Picker (hex string '#RRGGBB')
 ParameterType.STRING     # Text Input
 ParameterType.RANGE      # Dual-Slider (min, max)
 ```
+
+---
+
+## Parameter Grouping (Optional)
+
+Parameters can be organized into collapsible groups for a cleaner UI by adding the optional `group` field.
+
+### Benefits:
+- **Cleaner Layout**: Related parameters grouped together
+- **Collapsible Sections**: Users can hide/show groups
+- **Better Organization**: Clear visual hierarchy
+- **Backward Compatible**: Plugins without groups work as before
+
+### Example: Transform Effect with Groups
+
+```python
+PARAMETERS = [
+    # Position Group
+    {
+        'name': 'position_x',
+        'label': 'X',
+        'type': ParameterType.FLOAT,
+        'default': 0.0,
+        'min': -2000.0,
+        'max': 2000.0,
+        'group': 'Position',  # ← Optional group field
+        'description': 'Horizontal position in pixels'
+    },
+    {
+        'name': 'position_y',
+        'label': 'Y',
+        'type': ParameterType.FLOAT,
+        'default': 0.0,
+        'min': -2000.0,
+        'max': 2000.0,
+        'group': 'Position',  # ← Same group name
+        'description': 'Vertical position in pixels'
+    },
+    # Scale Group
+    {
+        'name': 'scale_xy',
+        'label': 'XY (Symmetric)',
+        'type': ParameterType.FLOAT,
+        'default': 100.0,
+        'min': 0.0,
+        'max': 500.0,
+        'group': 'Scale',  # ← Different group
+        'description': 'Symmetric scaling in percent'
+    },
+    {
+        'name': 'scale_x',
+        'label': 'X',
+        'type': ParameterType.FLOAT,
+        'default': 100.0,
+        'min': 0.0,
+        'max': 500.0,
+        'group': 'Scale',
+        'description': 'Horizontal scaling in percent'
+    },
+    # Ungrouped Parameter (backward compatibility)
+    {
+        'name': 'opacity',
+        'label': 'Opacity',
+        'type': ParameterType.FLOAT,
+        'default': 100.0,
+        'min': 0.0,
+        'max': 100.0,
+        # No 'group' field - renders at top level
+        'description': 'Overall opacity'
+    }
+]
+```
+
+### UI Rendering:
+
+Parameters with the same `group` value are rendered together in a collapsible section:
+
+```
+📐 Transform Effect
+├─ Opacity: ████████████ 100%  (ungrouped - at top)
+├─ 📁 Position (collapsible)
+│  ├─ X: ████████ 0
+│  └─ Y: ████████ 0
+├─ 📁 Scale (collapsible)
+│  ├─ XY (Symmetric): ████████ 100%
+│  └─ X: ████████ 100%
+└─ 📁 Rotation (collapsible)
+   ├─ X: ████████ 0°
+   ├─ Y: ████████ 0°
+   └─ Z: ████████ 0°
+```
+
+### Guidelines:
+- **Group Names**: Use clear, short names (e.g., 'Position', 'Scale', 'Color')
+- **Label Simplification**: Within groups, labels can be shorter (e.g., 'X' instead of 'Position X')
+- **Optional Field**: The `group` field is completely optional - omit it for ungrouped parameters
+- **Backward Compatibility**: Existing plugins without groups continue to work unchanged
+
+### Common Group Names:
+- `Position` - X/Y/Z position parameters
+- `Scale` - Scaling parameters
+- `Rotation` - Rotation angles
+- `Color` - Color-related parameters
+- `Timing` - Duration, speed, delay
+- `Advanced` - Expert-level settings
 
 ---
 

@@ -2,6 +2,143 @@
 
 This file documents the evolution and architectural decisions of the project.
 
+## v1.0.2 - Canvas Editor UX Improvements (2026-02-23)
+
+### Shape Manipulation Handle System Overhaul
+
+**Problem**: The original shape manipulation system had several UX and technical issues:
+1. Edge and corner scaling calculations caused stuttering/jumping during drag
+2. Rotation and scale handles were too close together and hard to target accurately
+3. Line shapes had unnecessary vertical scaling (they're 1-dimensional)
+4. Flip handle was rarely used but took up valuable canvas space
+5. No visual feedback when hovering over handles
+
+**Solutions Implemented**:
+
+#### 1. Fixed Scaling Calculations
+**Edge Scaling Bug**: Edge scaling (top, bottom, left, right) was using the updated `selectedShape.x/y` from previous frames instead of `dragStartX/Y` as reference point. This created inconsistency between the projection calculation and position update, causing stutter.
+
+**Fix**: Changed all edge scaling modes to consistently use `dragStartX/Y`:
+```javascript
+// Before (stuttered)
+const toMouseX = mx - selectedShape.x;
+const toMouseY = my - selectedShape.y;
+
+// After (smooth)
+const toMouseX = mx - dragStartX;
+const toMouseY = my - dragStartY;
+```
+
+**Corner Scaling Bug**: Corner scaling divided by half-size position (±half) instead of full shape size, causing massive jump on first drag movement.
+
+**Fix**: Changed to divide by full shape dimensions:
+```javascript
+// Before (jumped)
+const targetLocalX = oppX * -1; // ±half
+newScaleX = Math.abs(localMouseX / targetLocalX);
+
+// After (smooth)
+newScaleX = Math.abs(localMouseX / selectedShape.size); // Full width
+```
+
+**Impact**: Scaling now feels professional and responsive from the first pixel of movement.
+
+#### 2. Dual-Ring Corner Handle System
+**Design**: Replaced single corner handles with dual-zone system:
+- **Outer cyan ring** (30% opacity, radius=11): Rotation handle
+- **Inner cyan square** (30% smaller, size=4.9): Scaling handle
+
+**Benefits**:
+- Clear visual separation between rotation and scaling modes
+- Larger hit zones reduce misclicks
+- Consistent cyan color theme
+- Hover feedback: highlights to full opacity (100%) when mouse is over the zone
+
+**Implementation Details**:
+```javascript
+HANDLE = {
+    SIZE: 7,           // Inner square base size
+    SIZE_OUTER: 11,    // Outer ring radius
+    HIT_RADIUS: 12,    // Inner square hit detection
+    HIT_RADIUS_OUTER: 16  // Outer ring hit detection
+};
+
+innerSquareSize = baseHandleSize * 0.7; // 30% smaller than before
+```
+
+#### 3. Edge Scale Handles
+Added cyan squares on all 4 edges (top, bottom, left, right) for axis-aligned scaling:
+- Each edge keeps its opposite edge fixed in world space
+- Example: Dragging right edge scales X-axis while left edge stays at fixed position
+- Line shapes exclude top/bottom handles (1-dimensional)
+
+#### 4. Hover Feedback System
+Added `hoveredHandle` state tracking with visual feedback:
+- Rotation ring: 30% opacity → 100% opacity on hover
+- Scale square: cyan fill → full cyan on hover
+- Updates on every mousemove with redraw
+- Cleared when no shape selected
+
+#### 5. Context Menu Integration
+**Flip Functionality**: Moved from canvas handle to context menu:
+- Added "Horizontal spiegeln" (↔️)
+- Added "Vertikal spiegeln" (↕️)
+- Both disabled when no shape selected
+- Saves session state after flip
+
+**Global Context Menu Management**: Prevents default browser context menu except in UI areas:
+- Allowed: menu bar, toolbar, sidebar, object list, canvas settings, modals, buttons
+- Prevented: canvas area (shows custom context menu)
+- Allows standard browser context menu in input fields for copy/paste
+
+#### 6. Line Shape Optimization
+Removed vertical scaling for line shapes (they're 1-dimensional):
+- No top/bottom edge handles rendered
+- No top/bottom handle hit detection
+- Only horizontal scaling available (left/right edges)
+- Cleaner handle layout for lines
+
+### Technical Architecture
+
+**Handle Drawing** (`drawHandles` function, lines 2532-2640):
+- Compensates for shape scale distortion: `ctx.scale(1 / s.scaleX, 1 / s.scaleY)`
+- Maintains constant screen-space handle size regardless of shape size
+- Uses display scale for DPI-aware rendering
+
+**Handle Detection** (`findHandle` function, lines 3110-3173):
+- Priority order: corners, edges, then inner area
+- Uses `localToWorld` for accurate position transformation
+- Returns handle identifiers: `rotate-{i}`, `scale-{i}`, `scaleTop/Bottom/Left/Right`
+
+**Drag Modes** (`mousemove` handler, lines 2905-3088):
+- `scale`: Corner scaling with opposite corner fixed
+- `scaleRight/Left/Top/Bottom`: Edge scaling with opposite edge fixed
+- `rotate`: Rotation from outer ring
+- All modes use `dragStartX/Y/ScaleX/ScaleY` for consistency
+
+**Session State Management**:
+- `AUTO_SAVE_DELAY = 1000ms` debouncing
+- Only saves after drag completes (mouseup), not during drag
+- Prevents performance issues from frequent writes
+
+### User Experience Impact
+
+**Before**:
+- Scaling stuttered and jumped
+- Rotation and scale handles overlapped
+- Accidental rotations when trying to scale
+- No visual feedback
+- Flip handle cluttered canvas
+
+**After**:
+- Smooth, professional-grade scaling from first movement
+- Clear zones for rotation (outer) vs scaling (inner)
+- Hover feedback guides user interaction
+- Cleaner canvas with flip in context menu
+- Line shapes have appropriate 1D controls
+
+**Performance**: No measurable impact. Handle detection runs only on mousemove, drawing only on redraw.
+
 ## v1.0.1 - Art-Net Improvements (2026-02-20)
 
 ### Critical Fix: Art-Net Source Port

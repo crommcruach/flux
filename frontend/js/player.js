@@ -1666,7 +1666,7 @@ function updatePreviewFPS() {
 }
 
 window.openVideoFullscreen = function() {
-    window.open('/fullscreen', 'Flux Fullscreen', 'width=1920,height=1080');
+    window.open('/fullscreen?player=video', 'Flux Video Fullscreen', 'width=1920,height=1080');
 };
 
 // ========================================
@@ -3427,7 +3427,7 @@ window.removeFromArtnetPlaylist = async function(index) {
 };
 
 window.openArtnetFullscreen = function() {
-    window.open('/fullscreen', 'Art-Net Fullscreen', 'width=1920,height=1080');
+    window.open('/fullscreen?player=artnet', 'Flux Art-Net Fullscreen', 'width=1920,height=1080');
 };
 
 // ========================================
@@ -3825,16 +3825,19 @@ function renderClipEffects() {
     if (isLayerSelected()) {
         // Layer selected - show Layer FX
         icon = '📐';
-        titleText = `Layer ${selectedLayerId} FX`;
+        const playerName = selectedClipPlayerType === 'video' ? 'Video' : 'Artnet';
+        titleText = `Layer ${selectedLayerId} FX - ${playerName}`;
     } else if (window.currentGeneratorId && window.currentGeneratorMeta) {
         // Generator clip
         icon = '🌟';
-        titleText = `${window.currentGeneratorMeta.name} FX`;
+        const playerName = selectedClipPlayerType === 'video' ? 'Video' : 'Artnet';
+        titleText = `${window.currentGeneratorMeta.name} FX - ${playerName}`;
     } else {
         // Normal clip
         icon = selectedClipPlayerType === 'video' ? '🎬' : '🎨';
         const clipName = selectedClipPath ? selectedClipPath.split('/').pop() : 'No Clip';
-        titleText = `${clipName} FX`;
+        const playerName = selectedClipPlayerType === 'video' ? 'Video' : 'Artnet';
+        titleText = `${clipName} FX - ${playerName}`;
     }
     
     title.innerHTML = `<span class="player-icon">${icon}</span> ${titleText}`;
@@ -3950,6 +3953,47 @@ window.clearClipEffects = async function() {
 // EFFECT RENDERING
 // ========================================
 
+/**
+ * Group parameters by their 'group' field
+ * Returns: { ungrouped: [...], groups: { 'GroupName': [...], ... } }
+ */
+function groupParameters(parameters) {
+    const ungrouped = [];
+    const groups = {};
+    
+    parameters.forEach(param => {
+        if (param.group) {
+            if (!groups[param.group]) {
+                groups[param.group] = [];
+            }
+            groups[param.group].push(param);
+        } else {
+            ungrouped.push(param);
+        }
+    });
+    
+    return { ungrouped, groups };
+}
+
+/**
+ * Render a parameter group as collapsible section
+ */
+function renderParameterGroup(groupName, params, effect, index, player, pluginId, clipId, isSystemPlugin) {
+    const groupId = `${player}-effect-${index}-group-${groupName.replace(/\s+/g, '-').toLowerCase()}`;
+    
+    return `
+        <div class="parameter-group">
+            <div class="parameter-group-header" onclick="toggleParameterGroup('${groupId}', event)">
+                <span class="parameter-group-toggle">▼</span>
+                <span class="parameter-group-name">${groupName}</span>
+            </div>
+            <div class="parameter-group-body" id="${groupId}">
+                ${params.map(param => renderParameterControl(param, effect.parameters[param.name], index, player, pluginId, clipId, isSystemPlugin)).join('')}
+            </div>
+        </div>
+    `;
+}
+
 function renderEffectItem(effect, index, player, clipId = null) {
     const metadata = effect.metadata || {};
     const parameters = metadata.parameters || [];
@@ -3966,11 +4010,15 @@ function renderEffectItem(effect, index, player, clipId = null) {
         debug.verbose(`🔍 Transform metadata.parameters (schema):`, parameters);
         debug.verbose(`🔍 Transform effect.parameters (values):`, effect.parameters);
         parameters.forEach(param => {
-            debug.verbose(`  - ${param.name}: type=${param.type}, min=${param.min}, max=${param.max}, value=${effect.parameters[param.name]}`);
+            debug.verbose(`  - ${param.name}: type=${param.type}, min=${param.min}, max=${param.max}, value=${effect.parameters[param.name]}, group=${param.group}`);
         });
     }
     
     const isEnabled = effect.enabled !== false; // Default: enabled if not specified
+    
+    // Group parameters
+    const { ungrouped, groups } = groupParameters(parameters);
+    const groupNames = Object.keys(groups);
     
     return `
         <div class="effect-item ${isSystemPlugin ? 'system-plugin' : ''} ${!isEnabled ? 'effect-disabled' : ''}" id="${player}-effect-${index}">
@@ -3992,7 +4040,8 @@ function renderEffectItem(effect, index, player, clipId = null) {
             <div class="effect-body">
                 ${parameters.length > 0 ? `
                     <div class="parameters-grid">
-                        ${parameters.map(param => renderParameterControl(param, effect.parameters[param.name], index, player, pluginId, clipId, isSystemPlugin)).join('')}
+                        ${ungrouped.map(param => renderParameterControl(param, effect.parameters[param.name], index, player, pluginId, clipId, isSystemPlugin)).join('')}
+                        ${groupNames.map(groupName => renderParameterGroup(groupName, groups[groupName], effect, index, player, pluginId, clipId, isSystemPlugin)).join('')}
                     </div>
                 ` : '<p class="text-muted">No configurable parameters</p>'}
             </div>
@@ -4007,6 +4056,20 @@ window.toggleEffect = function(player, index, event) {
     const element = document.getElementById(`${player}-effect-${index}`);
     if (element) {
         element.classList.toggle('expanded');
+    }
+};
+
+window.toggleParameterGroup = function(groupId, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    const groupBody = document.getElementById(groupId);
+    const header = event.currentTarget;
+    const toggle = header.querySelector('.parameter-group-toggle');
+    
+    if (groupBody && toggle) {
+        groupBody.classList.toggle('collapsed');
+        toggle.textContent = groupBody.classList.contains('collapsed') ? '▶' : '▼';
     }
 };
 
@@ -5080,9 +5143,37 @@ window.dragStart = function(event, effectId) {
 // PLAYLIST PERSISTENCE
 // ========================================
 
-window.savePlaylists = async function() {
-    const name = prompt('Playlist Name:', `playlist_${new Date().toISOString().slice(0, 10)}`);
-    if (!name) return;
+window.savePlaylists = function() {
+    // Show modal with default name
+    const defaultName = `playlist_${new Date().toISOString().slice(0, 10)}`;
+    const input = document.getElementById('playlistNameInput');
+    if (input) {
+        input.value = defaultName;
+    }
+    
+    // Show the modal
+    const modal = new bootstrap.Modal(document.getElementById('savePlaylistModal'));
+    modal.show();
+    
+    // Focus the input after modal is shown
+    document.getElementById('savePlaylistModal').addEventListener('shown.bs.modal', function() {
+        input.focus();
+        input.select();
+    }, { once: true });
+};
+
+window.confirmSavePlaylist = async function() {
+    const nameInput = document.getElementById('playlistNameInput');
+    const name = nameInput.value.trim();
+    
+    if (!name) {
+        showToast('Please enter a playlist name', 'warning');
+        return;
+    }
+    
+    // Hide modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('savePlaylistModal'));
+    modal.hide();
     
     try {
         const response = await fetch(`${API_BASE}/api/playlist/save`, {

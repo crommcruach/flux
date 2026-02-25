@@ -274,14 +274,30 @@ class EffectProcessor:
         """
         processed_frame = frame
         
+        # DEBUG: Log effect application details (throttled)
+        if not hasattr(self, '_apply_debug_counter'):
+            self._apply_debug_counter = 0
+        self._apply_debug_counter += 1
+        
+        if self._apply_debug_counter % 120 == 1:  # Log every 2 seconds at 60fps
+            logger.info(f"🎨 [{player_name}] apply_effects: chain={chain_type}, player_fx={len(self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain)}, clip_id={current_clip_id is not None}, has_player={player is not None}")
+        
         # 1. Apply player-level effects FIRST (base layer)
         effect_chain = self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain
         
         if effect_chain:
-            for effect in effect_chain:
+            if self._apply_debug_counter % 120 == 1:
+                logger.info(f"🔧 [{player_name}] Processing {len(effect_chain)} player-level effects...")
+            
+            for idx, effect in enumerate(effect_chain):
                 # Skip disabled effects
                 if not effect.get('enabled', True):
+                    if self._apply_debug_counter % 120 == 1:
+                        logger.info(f"  ⏭️  Effect {idx}: '{effect.get('id', 'unknown')}' (DISABLED)")
                     continue
+                
+                if self._apply_debug_counter % 120 == 1:
+                    logger.info(f"  ▶️  Effect {idx}: '{effect.get('id', 'unknown')}' (processing...)")
                 
                 try:
                     plugin_instance = effect['instance']
@@ -301,13 +317,19 @@ class EffectProcessor:
         # CRITICAL: Use layer.effects instances (which sequence manager updates)
         # instead of creating separate instances from registry
         if player and current_clip_id and hasattr(player, 'layers'):
+            # DEBUG: Log layer search details (throttled)
+            if self._apply_debug_counter % 120 == 1:
+                layer_info = [(i, getattr(layer, 'clip_id', None), len(getattr(layer, 'effects', []))) for i, layer in enumerate(player.layers)]
+                logger.info(f"🔍 [{player_name}] Searching for clip {current_clip_id} in {len(player.layers)} layers: {layer_info}")
+            
             # Find the layer with matching clip_id
             clip_effects = None
             for layer in player.layers:
                 if hasattr(layer, 'clip_id') and layer.clip_id == current_clip_id:
                     if hasattr(layer, 'effects') and layer.effects:
                         clip_effects = layer.effects
-                        logger.debug(f"✅ Using layer.effects for clip {current_clip_id} ({len(clip_effects)} effects)")
+                        if self._apply_debug_counter % 120 == 1:
+                            logger.info(f"✅ [{player_name}] Using layer.effects for clip {current_clip_id} ({len(clip_effects)} effects)")
                         break
             
             if clip_effects:
@@ -339,6 +361,8 @@ class EffectProcessor:
                         import traceback
                         logger.error(traceback.format_exc())
                         continue
+            elif current_clip_id and self._apply_debug_counter % 120 == 1:
+                logger.warning(f"⚠️ [{player_name}] No clip effects found for clip_id {current_clip_id}")
         
         return processed_frame
     

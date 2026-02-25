@@ -279,6 +279,7 @@ class CalibrationManager {
         this.referencePoints = [];
         this.cameraPoints = [];
         this.transformMatrix = null;
+        this.calibrationRect = null; // Also clear calibration rectangle
     }
 }
 
@@ -1247,16 +1248,16 @@ class MappingSession {
         const cameraPos = await this.detector.detectLED(this.videoElement, 1500);
         
         if (!cameraPos) {
-            console.warn(`Failed to detect LED #${ledIndex}`);
+            console.warn(`Failed to detect LED #${ledIndex + 1}`);
             this.failedLEDs.push(ledIndex);
             this._drawDetectionMarker(null, ledIndex, false);
             return;
         }
         
         if (window.DEBUG) {
-            console.log(`📍 LED #${ledIndex} FINAL camera position: (${cameraPos.x.toFixed(1)}, ${cameraPos.y.toFixed(1)}) confidence=${cameraPos.confidence.toFixed(2)}`);
+            console.log(`📍 LED #${ledIndex + 1} FINAL camera position: (${cameraPos.x.toFixed(1)}, ${cameraPos.y.toFixed(1)}) confidence=${cameraPos.confidence.toFixed(2)}`);
         } else {
-            console.log(`LED #${ledIndex}: Camera pos (${cameraPos.x.toFixed(1)}, ${cameraPos.y.toFixed(1)})`);
+            console.log(`LED #${ledIndex + 1}: Camera pos (${cameraPos.x.toFixed(1)}, ${cameraPos.y.toFixed(1)})`);
         }
         
         // Draw visual marker showing where LED was detected
@@ -1283,7 +1284,7 @@ class MappingSession {
             cameraPos.y
         );
         
-        console.log(`LED #${ledIndex}: Canvas pos (${canvasPos.x.toFixed(1)}, ${canvasPos.y.toFixed(1)})`);
+        console.log(`LED #${ledIndex + 1}: Canvas pos (${canvasPos.x.toFixed(1)}, ${canvasPos.y.toFixed(1)})`);
         
         // Store position
         this.mappedPositions.set(ledIndex, {
@@ -1327,19 +1328,26 @@ class MappingSession {
         if (!video || !overlay || !video.videoWidth) return;
         
         const rect = video.getBoundingClientRect();
-        overlay.width = rect.width;
-        overlay.height = rect.height;
+        const parent = video.parentElement.getBoundingClientRect();
+        
+        // Set overlay to match parent size
+        overlay.width = parent.width;
+        overlay.height = parent.height;
+        
+        // Calculate video offset within parent (when centered)
+        const videoOffsetX = rect.left - parent.left;
+        const videoOffsetY = rect.top - parent.top;
         
         const ctx = overlay.getContext('2d');
         
         let displayX, displayY;
         
         if (cameraPos) {
-            // Scale from camera pixels to display pixels
+            // Scale from camera pixels to display pixels and add offset
             const scaleX = rect.width / video.videoWidth;
             const scaleY = rect.height / video.videoHeight;
-            displayX = cameraPos.x * scaleX;
-            displayY = cameraPos.y * scaleY;
+            displayX = cameraPos.x * scaleX + videoOffsetX;
+            displayY = cameraPos.y * scaleY + videoOffsetY;
             
             if (window.DEBUG) {
                 console.log(`  📺 Drawing marker: camera(${cameraPos.x.toFixed(1)}, ${cameraPos.y.toFixed(1)}) → display(${displayX.toFixed(1)}, ${displayY.toFixed(1)})`);
@@ -1360,11 +1368,11 @@ class MappingSession {
             ctx.font = 'bold 12px Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(ledIndex.toString(), displayX, displayY);
+            ctx.fillText((ledIndex + 1).toString(), displayX, displayY);
         }
         
-        // Draw calibration rectangle outline for reference
-        if (this.calibration.calibrationRect) {
+        // Draw calibration rectangle outline for reference (only in DEBUG mode)
+        if (window.DEBUG && this.calibration.calibrationRect) {
             const r = this.calibration.calibrationRect;
             const scaleX = rect.width / video.videoWidth;
             const scaleY = rect.height / video.videoHeight;
@@ -1374,7 +1382,7 @@ class MappingSession {
             const rectW = r.width * scaleX;
             const rectH = r.height * scaleY;
             
-            if (window.DEBUG && cameraPos) {
+            if (cameraPos) {
                 console.log(`  📐 Calibration rect on display: x=${rectX.toFixed(1)}, y=${rectY.toFixed(1)}, w=${rectW.toFixed(1)}, h=${rectH.toFixed(1)}`);
                 console.log(`  🎯 Marker position relative to rect: dx=${(displayX - rectX).toFixed(1)}px (${((displayX - rectX) / rectW * 100).toFixed(1)}% from left edge)`);
             }
@@ -1386,42 +1394,40 @@ class MappingSession {
             ctx.setLineDash([]);
             
             // Draw crosshair at center of rectangle for reference
-            if (window.DEBUG) {
-                const centerX = rectX + rectW / 2;
-                const centerY = rectY + rectH / 2;
-                ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
-                ctx.lineWidth = 1;
+            const centerX = rectX + rectW / 2;
+            const centerY = rectY + rectH / 2;
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(centerX - 20, centerY);
+            ctx.lineTo(centerX + 20, centerY);
+            ctx.moveTo(centerX, centerY - 20);
+            ctx.lineTo(centerX, centerY + 20);
+            ctx.stroke();
+            
+            // Label rectangle corners
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
+            ctx.font = 'bold 14px Arial';
+            ctx.fillText('1:TL', rectX + 5, rectY + 15);
+            ctx.fillText('2:TR', rectX + rectW - 40, rectY + 15);
+            ctx.fillText('3:BR', rectX + rectW - 40, rectY + rectH - 5);
+            ctx.fillText('4:BL', rectX + 5, rectY + rectH - 5);
+            
+            // Draw vertical line showing LED X position
+            if (cameraPos) {
+                ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([3, 3]);
                 ctx.beginPath();
-                ctx.moveTo(centerX - 20, centerY);
-                ctx.lineTo(centerX + 20, centerY);
-                ctx.moveTo(centerX, centerY - 20);
-                ctx.lineTo(centerX, centerY + 20);
+                ctx.moveTo(displayX, rectY);
+                ctx.lineTo(displayX, rectY + rectH);
                 ctx.stroke();
-                
-                // Label rectangle corners
-                ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
-                ctx.font = 'bold 14px Arial';
-                ctx.fillText('1:TL', rectX + 5, rectY + 15);
-                ctx.fillText('2:TR', rectX + rectW - 40, rectY + 15);
-                ctx.fillText('3:BR', rectX + rectW - 40, rectY + rectH - 5);
-                ctx.fillText('4:BL', rectX + 5, rectY + rectH - 5);
-                
-                // Draw vertical line showing LED X position
-                if (cameraPos) {
-                    ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)';
-                    ctx.lineWidth = 2;
-                    ctx.setLineDash([3, 3]);
-                    ctx.beginPath();
-                    ctx.moveTo(displayX, rectY);
-                    ctx.lineTo(displayX, rectY + rectH);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                }
+                ctx.setLineDash([]);
             }
         }
         
-        // Draw refined ROI (dynamic search area) if active
-        if (this.detector.useAutoRefinement && this.detector.regionOfInterest && 
+        // Draw refined ROI (dynamic search area) if active (only in DEBUG mode)
+        if (window.DEBUG && this.detector.useAutoRefinement && this.detector.regionOfInterest && 
             this.detector.initialROI && this.detector.regionOfInterest !== this.detector.initialROI) {
             const roi = this.detector.regionOfInterest;
             const scaleX = rect.width / video.videoWidth;
@@ -1532,8 +1538,8 @@ function buildMapperUI() {
                     <select class="form-select" id="mapperColorType">
                         <option value="rgb">RGB (3 channels)</option>
                         <option value="rgbw">RGBW (4 channels)</option>
-                        <option value="rgbww">RGB+WW (5 channels)</option>
-                        <option value="rgbwwcw">RGB+WW+CW (6 channels)</option>
+                        <option value="rgbww">RGB+WW (4 channels)</option>
+                        <option value="rgbwwcw">RGB+WW+CW (5 channels)</option>
                     </select>
                 </div>
                 
@@ -1558,8 +1564,10 @@ function buildMapperUI() {
                 
                 <div class="mb-4">
                     <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="mapperNormalizeGeometry" checked>
-                        <label class="form-check-label" for="mapperNormalizeGeometry">
+                        <input class="form-check-input" type="checkbox" id="mapperNormalizeGeometry" checked 
+                            title="When checked: Smooths LED positions and equalizes spacing for uniform distribution. When unchecked: Uses raw detected positions without adjustment.">
+                        <label class="form-check-label" for="mapperNormalizeGeometry" 
+                            title="When checked: Smooths LED positions and equalizes spacing for uniform distribution. When unchecked: Uses raw detected positions without adjustment.">
                             Normalize Geometry
                         </label>
                         <div class="form-text">Smooth LED positions and equalize spacing (recommended for LED strips)</div>
@@ -2090,11 +2098,17 @@ function drawCalibrationOverlay() {
     const video = document.getElementById('calibrationVideo');
     const overlay = document.getElementById('calibrationOverlay');
     const rect = video.getBoundingClientRect();
+    const parent = video.parentElement.getBoundingClientRect();
     
     if (!video.videoWidth || !video.videoHeight) return;
     
-    overlay.width = rect.width;
-    overlay.height = rect.height;
+    // Set overlay to match parent size
+    overlay.width = parent.width;
+    overlay.height = parent.height;
+    
+    // Calculate video offset within parent (when centered)
+    const videoOffsetX = rect.left - parent.left;
+    const videoOffsetY = rect.top - parent.top;
     
     const ctx = overlay.getContext('2d');
     ctx.clearRect(0, 0, overlay.width, overlay.height);
@@ -2107,8 +2121,8 @@ function drawCalibrationOverlay() {
     const scaleX = rect.width / video.videoWidth;
     const scaleY = rect.height / video.videoHeight;
     
-    const displayX = r.x * scaleX;
-    const displayY = r.y * scaleY;
+    const displayX = r.x * scaleX + videoOffsetX;
+    const displayY = r.y * scaleY + videoOffsetY;
     const displayW = r.width * scaleX;
     const displayH = r.height * scaleY;
     
@@ -2385,10 +2399,31 @@ window.closeMapperModal = function() {
 };
 
 window.redetectFromCalibration = function() {
-    // Go back to calibration step for re-detection
-    currentMapperStep = 2;
-    showMapperStep(2);
-    showToast('Returned to calibration step', 'info');
+    // Go back to step 1 (configuration) for clean restart
+    currentMapperStep = 1;
+    
+    // Clear calibration rectangle
+    if (calibrationManager) {
+        calibrationManager.calibrationRect = null;
+        calibrationManager.reset(); // Clear reference and camera points
+    }
+    
+    // Clear mapping session if it exists
+    if (mappingSession) {
+        mappingSession.mappedPositions.clear();
+        mappingSession.failedLEDs = [];
+        mappingSession = null;
+    }
+    
+    // Clear overlay canvas
+    const overlay = document.getElementById('mappingOverlay');
+    if (overlay) {
+        const ctx = overlay.getContext('2d');
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+    
+    showMapperStep(1);
+    showToast('Returned to configuration - ready for clean restart', 'info');
 };
 
 // Network Diagnostics Test

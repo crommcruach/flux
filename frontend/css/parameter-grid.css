@@ -19,6 +19,8 @@
     background: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
     transition: background 0.2s;
+    position: relative;
+    z-index: 10; /* Above group headers */
 }
 
 .parameter-grid-row:hover {
@@ -56,6 +58,8 @@
 .param-slider {
     grid-area: slider;
     min-width: 0; /* Allow flex shrinking */
+    position: relative;
+    z-index: 20; /* Above param row */
 }
 
 .param-dynamic-settings {
@@ -131,6 +135,80 @@
 
 .effect-item.expanded .effect-toggle {
     transform: rotate(90deg);
+}
+
+/* Parameter Groups */
+.parameter-group {
+    margin: 8px 0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    overflow: visible; /* Allow sliders to overflow above header */
+    background: rgba(0, 0, 0, 0.15);
+    position: relative;
+    z-index: 1; /* Base stacking context */
+}
+
+.parameter-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    background: rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: background 0.2s;
+    user-select: none;
+    position: relative;
+    z-index: 1; /* Below parameter rows */
+}
+
+.parameter-group-header:hover {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.parameter-group-toggle {
+    font-size: 12px;
+    color: #999;
+    transition: transform 0.2s;
+    display: inline-block;
+    width: 14px;
+}
+
+.parameter-group-name {
+    font-weight: 600;
+    font-size: 12px;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.parameter-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px;
+    max-height: 1000px;
+    overflow: visible; /* Allow sliders to overflow */
+    transition: max-height 0.3s ease-out, padding 0.3s;
+    position: relative;
+    z-index: 10; /* Above header */
+}
+
+.parameter-group-body.collapsed {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+/* Nested parameter rows within groups */
+.parameter-group-body .parameter-grid-row {
+    background: rgba(0, 0, 0, 0.15);
+    position: relative;
+    z-index: 20; /* Above group header */
+}
+
+.parameter-group-body .parameter-grid-row:hover {
+    background: rgba(0, 0, 0, 0.25);
 }
 
 /* Responsive */

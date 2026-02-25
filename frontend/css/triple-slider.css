@@ -3,9 +3,16 @@
  * Matches the design from SliderNew.html
  */
 
+.triple-slider-container {
+    position: relative;
+    z-index: 100; /* Above group headers and other elements */
+}
+
 .triple-slider {
     width: 100%;
     padding: 20px 0;
+    position: relative;
+    z-index: inherit;
 }
 
 .slider-track {
@@ -36,12 +43,13 @@
     font-size: 16px;
     line-height: 1;
     transition: transform 0.1s ease;
-    z-index: 10;
+    z-index: 110; /* Above all parameter elements */
 }
 
 .triple-slider .handle:active {
     cursor: grabbing;
     transform: translate(-50%, -50%) scale(1.2);
+    z-index: 120; /* Even higher when dragging */
 }
 
 /* Min/Max handles: ▼ triangles */
@@ -56,7 +64,7 @@
     color: var(--bs-danger, #dc3545);
     font-weight: bold;
     font-size: 20px;
-    z-index: 11; /* Above range handles */
+    z-index: 111; /* Above range handles */
 }
 
 /* Hover effects */

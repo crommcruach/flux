@@ -29,6 +29,12 @@
         #videoPreviewImg[src=""] {
             content: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%23000000" width="800" height="600"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="%23667eea"%3E🎬 Loading Preview...%3C/text%3E%3C/svg%3E');
         }
+        #artnetPreviewImg {
+            background: #000;
+        }
+        #artnetPreviewImg[src=""] {
+            content: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%23000000" width="800" height="600"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="%23667eea"%3E📡 Loading Preview...%3C/text%3E%3C/svg%3E');
+        }
     </style>
 </head>
 <body>
@@ -173,9 +179,14 @@
         <div class="player-section">
             <!-- Preview -->
             <div class="preview-box">
-                <div class="preview-video" id="artnetPreview">
+                <div class="preview-video" id="artnetPreview" onclick="openArtnetFullscreen()" title="Click to open fullscreen">
                     <canvas id="artnetPreviewVideo" style="width: 100%; height: 100%; object-fit: contain; display: none;"></canvas>
-                    <img src="" alt="Art-Net Preview" id="artnetPreviewImg" style="width: 100%; height: 100%; object-fit: contain;" decoding="async" loading="lazy" fetchpriority="low">
+                    <img src="" alt="Art-Net Preview" id="artnetPreviewImg" 
+                         width="800" height="600"
+                         style="width: 100%; height: 100%; object-fit: contain;" 
+                         decoding="async" 
+                         loading="lazy"
+                         fetchpriority="low">
                 </div>
                 <div class="player-controls">
                     <button class="btn btn-secondary btn-sm" onclick="previous('artnet')" title="Previous Video">⏮️</button>
@@ -530,6 +541,85 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Playlist Modal -->
+    <div class="modal fade" id="savePlaylistModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Save Playlist</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="playlistNameInput" class="form-label">Playlist Name</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" 
+                               id="playlistNameInput" 
+                               placeholder="Enter playlist name..."
+                               onkeypress="if(event.key==='Enter') confirmSavePlaylist()">
+                        <small class="text-muted">A unique name for this playlist configuration</small>
+                    </div>
+                    <div class="alert alert-info border-secondary bg-dark">
+                        <strong>ℹ️ Info:</strong> This will save both Video and Art-Net playlists together.
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="confirmSavePlaylist()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Playlist Modal -->
+    <div class="modal fade" id="createPlaylistModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Create New Playlist</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="createPlaylistNameInput" class="form-label">Playlist Name</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" 
+                               id="createPlaylistNameInput" 
+                               placeholder="Enter playlist name...">
+                        <small class="text-muted">Enter a unique name for your new playlist</small>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmCreatePlaylistBtn">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Playlist Modal -->
+    <div class="modal fade" id="renamePlaylistModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Rename Playlist</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="renamePlaylistNameInput" class="form-label">Playlist Name</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" 
+                               id="renamePlaylistNameInput" 
+                               placeholder="Enter new playlist name...">
+                        <small class="text-muted">Enter a new name for this playlist</small>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmRenamePlaylistBtn">Rename</button>
                 </div>
             </div>
         </div>

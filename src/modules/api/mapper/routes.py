@@ -59,10 +59,64 @@ def get_channels_per_led(color_type):
     channel_map = {
         'rgb': 3,
         'rgbw': 4,
-        'rgbww': 5,
-        'rgbwwcw': 6
+        'rgbww': 4,  # R, G, B, WW
+        'rgbwwcw': 5  # R, G, B, WW, CW
     }
     return channel_map.get(color_type, 3)
+
+
+def calculate_universe_and_channel(led_index, start_address, channels_per_led, base_universe=0):
+    """
+    Calculate the universe and DMX channel for a given LED.
+    
+    LEDs cannot span across universes. Each universe has 512 channels (0-511).
+    When an LED would exceed universe boundary, it must start in the next universe.
+    
+    Args:
+        led_index: LED index (0-based)
+        start_address: Starting DMX address (1-based, e.g., 1)
+        channels_per_led: Number of channels per LED (3, 4, 5)
+        base_universe: Starting universe number (default 0)
+    
+    Returns:
+        tuple: (universe, dmx_channel_0indexed, dmx_address_1indexed)
+    
+    Example:
+        RGB (3 channels), 170 LEDs max per universe:
+        - LED 1: Universe 0, DMX Addresses 1-3
+        - LED 170: Universe 0, DMX Addresses 508-510 (last LED in universe)
+        - LED 171: Universe 1, DMX Addresses 1-3 (starts new universe)
+        
+        RGBW (4 channels), 128 LEDs max per universe:
+        - LED 1: Universe 0, DMX Addresses 1-4
+        - LED 128: Universe 0, DMX Addresses 509-512 (last LED in universe)
+        - LED 129: Universe 1, DMX Addresses 1-4 (starts new universe)
+    """
+    CHANNELS_PER_UNIVERSE = 512  # DMX512 standard
+    
+    # Calculate how many complete LEDs fit in one universe
+    leds_per_universe = CHANNELS_PER_UNIVERSE // channels_per_led
+    
+    # Which universe does this LED belong to?
+    universe_offset = led_index // leds_per_universe
+    universe = base_universe + universe_offset
+    
+    # Which LED within its universe (0-based index within universe)
+    led_in_universe = led_index % leds_per_universe
+    
+    # Calculate channel offset within this universe
+    # Start at (start_address - 1) for first LED, then add channels for each subsequent LED in universe
+    if universe_offset == 0:
+        # First universe: use provided start_address
+        channel_offset = (start_address - 1) + (led_in_universe * channels_per_led)
+    else:
+        # Subsequent universes: always start at channel 0
+        channel_offset = led_in_universe * channels_per_led
+    
+    # 1-based DMX address (for display/logging)
+    dmx_address = channel_offset + 1
+    
+    return (universe, channel_offset, dmx_address)
 
 
 @mapper_bp.route('/simple-test', methods=['POST'])
@@ -110,7 +164,7 @@ def simple_artnet_test():
         artnet = StupidArtnet(
             target_ip=actual_target,
             universe=universe,
-            packet_size=510,
+            packet_size=512,
             fps=30,
             even_packet_size=True,
             broadcast=use_broadcast,
@@ -122,7 +176,7 @@ def simple_artnet_test():
         logger.info(f"StupidArtnet started")
         
         # Send test packet (all channels at 255)
-        test_data = [255] * 510
+        test_data = [255] * 512
         artnet.set(test_data)
         logger.info(f"Data set in buffer")
         artnet.show()
@@ -132,7 +186,7 @@ def simple_artnet_test():
         time.sleep(2)
         
         # Turn off
-        artnet.set([0] * 510)
+        artnet.set([0] * 512)
         artnet.show()
         logger.info(f"Blackout sent")
         
@@ -277,7 +331,13 @@ def test_single_led():
         from stupidArtnet import StupidArtnet
         
         channels_per_led = get_channels_per_led(config['color_type'])
-        dmx_address = config['start_address'] + (led_index * channels_per_led) - 1  # 0-indexed
+        base_universe = config['universe']
+        start_address = config['start_address']
+        
+        # Calculate correct universe and channel for this LED
+        universe, channel_offset, dmx_address = calculate_universe_and_channel(
+            led_index, start_address, channels_per_led, base_universe
+        )
         
         # Determine target IP
         artnet_ip = config['artnet_ip']
@@ -291,8 +351,8 @@ def test_single_led():
         # Initialize Art-Net with source port 6454
         artnet = StupidArtnet(
             target_ip=target_ip,
-            universe=config['universe'],
-            packet_size=510,
+            universe=universe,  # Use calculated universe
+            packet_size=512,
             fps=30,
             even_packet_size=True,
             broadcast=use_broadcast,
@@ -302,38 +362,39 @@ def test_single_led():
         
         try:
             # Build DMX packet
-            dmx_data = [0] * 510
+            dmx_data = [0] * 512
             
             # Set LED to full white
             if config['color_type'] == 'rgb':
-                dmx_data[dmx_address] = 255      # R
-                dmx_data[dmx_address + 1] = 255  # G
-                dmx_data[dmx_address + 2] = 255  # B
+                dmx_data[channel_offset] = 255      # R
+                dmx_data[channel_offset + 1] = 255  # G
+                dmx_data[channel_offset + 2] = 255  # B
             elif config['color_type'] == 'rgbw':
-                dmx_data[dmx_address] = 255      # R
-                dmx_data[dmx_address + 1] = 255  # G
-                dmx_data[dmx_address + 2] = 255  # B
-                dmx_data[dmx_address + 3] = 255  # W
+                dmx_data[channel_offset] = 255      # R
+                dmx_data[channel_offset + 1] = 255  # G
+                dmx_data[channel_offset + 2] = 255  # B
+                dmx_data[channel_offset + 3] = 255  # W
             elif config['color_type'] in ['rgbww', 'rgbwwcw']:
                 # Set all channels to full
                 for i in range(channels_per_led):
-                    if dmx_address + i < 510:
-                        dmx_data[dmx_address + i] = 255
+                    if channel_offset + i < 512:
+                        dmx_data[channel_offset + i] = 255
             
             # Send via stupidArtnet (CRITICAL: must call both .set() AND .show())
             artnet.set(dmx_data)
             artnet.show()  # Actually transmits the packet
             
-            logger.info(f"Test LED #{led_index} at DMX address {dmx_address + 1} - packet transmitted")
+            logger.info(f"Test LED #{led_index + 1} at Universe {universe}, DMX address {dmx_address} - packet transmitted")
             
             return jsonify({
                 'success': True,
-                'dmx_address': dmx_address + 1  # Return 1-indexed for display
+                'universe': universe,
+                'dmx_address': dmx_address  # 1-indexed for display
             })
             
         finally:
             # Turn off LED
-            artnet.set([0] * 510)
+            artnet.set([0] * 512)
             artnet.show()
             artnet.stop()
         
@@ -515,7 +576,7 @@ def _mapping_sequence_task(task_id, config, app):
             artnet = StupidArtnet(
                 target_ip=target_ip,
                 universe=universe,
-                packet_size=510,  # 510 usable DMX channels
+                packet_size=512,  # DMX512 standard
                 fps=30,           # 30 fps refresh rate
                 even_packet_size=True,  # Even packet size for compatibility
                 broadcast=broadcast_enabled,  # Use broadcast if enabled
@@ -523,6 +584,9 @@ def _mapping_sequence_task(task_id, config, app):
             )
             artnet.start()
             logger.info(f"Task {task_id}: Art-Net sender started successfully")
+            
+            # Track current universe to switch when needed
+            current_universe = universe
             
             try:
                 for led_index in range(led_count):
@@ -532,40 +596,52 @@ def _mapping_sequence_task(task_id, config, app):
                             logger.info(f"Task {task_id}: Stopped by user")
                             break
                     
-                    # Calculate DMX address for this LED
-                    dmx_address = start_address + (led_index * channels_per_led) - 1  # 0-indexed
+                    # Calculate correct universe and channel for this LED
+                    led_universe, channel_offset, dmx_address = calculate_universe_and_channel(
+                        led_index, start_address, channels_per_led, universe
+                    )
                     
-                    # Validate DMX address fits within packet
-                    if dmx_address + channels_per_led > 510:
-                        logger.error(f"Task {task_id}: LED #{led_index + 1} DMX address {dmx_address + 1} exceeds packet size (510 channels)")
-                        continue
+                    # Switch universe if needed
+                    if led_universe != current_universe:
+                        logger.info(f"Task {task_id}: Switching from universe {current_universe} to {led_universe}")
+                        artnet.stop()
+                        artnet = StupidArtnet(
+                            target_ip=target_ip,
+                            universe=led_universe,
+                            packet_size=512,
+                            fps=30,
+                            even_packet_size=True,
+                            broadcast=broadcast_enabled,
+                            source_address=('0.0.0.0', 6454)
+                        )
+                        artnet.start()
+                        current_universe = led_universe
                     
-                    # Create DMX packet (all zeros except current LED) - 510 channels to match packet_size
-                    dmx_data = [0] * 510
+                    # Create DMX packet (all zeros except current LED)
+                    dmx_data = [0] * 512
                     
                     # Set LED to full white (or all channels to full)
                     if color_type == 'rgb':
-                        dmx_data[dmx_address] = 255      # R
-                        dmx_data[dmx_address + 1] = 255  # G
-                        dmx_data[dmx_address + 2] = 255  # B
-                        logger.info(f"Task {task_id}: LED #{led_index + 1}/{led_count} - DMX {dmx_address + 1}-{dmx_address + 3}: RGB(255,255,255)")
+                        dmx_data[channel_offset] = 255      # R
+                        dmx_data[channel_offset + 1] = 255  # G
+                        dmx_data[channel_offset + 2] = 255  # B
+                        logger.info(f"Task {task_id}: LED #{led_index + 1}/{led_count} - U{led_universe} DMX {dmx_address}-{dmx_address + 2}: RGB(255,255,255)")
                     elif color_type == 'rgbw':
-                        dmx_data[dmx_address] = 255      # R
-                        dmx_data[dmx_address + 1] = 255  # G
-                        dmx_data[dmx_address + 2] = 255  # B
-                        dmx_data[dmx_address + 3] = 255  # W
-                        logger.info(f"Task {task_id}: LED #{led_index + 1}/{led_count} - DMX {dmx_address + 1}-{dmx_address + 4}: RGBW(255,255,255,255)")
+                        dmx_data[channel_offset] = 255      # R
+                        dmx_data[channel_offset + 1] = 255  # G
+                        dmx_data[channel_offset + 2] = 255  # B
+                        dmx_data[channel_offset + 3] = 255  # W
+                        logger.info(f"Task {task_id}: LED #{led_index + 1}/{led_count} - U{led_universe} DMX {dmx_address}-{dmx_address + 3}: RGBW(255,255,255,255)")
                     elif color_type in ['rgbww', 'rgbwwcw']:
                         # Set all channels to full
                         for i in range(channels_per_led):
-                            if dmx_address + i < 510:  # 510 channels max
-                                dmx_data[dmx_address + i] = 255
-                        logger.info(f"Task {task_id}: LED #{led_index + 1}/{led_count} - DMX {dmx_address + 1}-{dmx_address + channels_per_led}: ALL(255) ({color_type})")
+                            dmx_data[channel_offset + i] = 255
+                        logger.info(f"Task {task_id}: LED #{led_index + 1}/{led_count} - U{led_universe} DMX {dmx_address}-{dmx_address + channels_per_led - 1}: ALL(255) ({color_type})")
                     
                     # Send to Art-Net (CRITICAL: must call both .set() AND .show())
                     artnet.set(dmx_data)
                     artnet.show()  # Actually transmits the packet over network
-                    logger.info(f"Task {task_id}: ✓ Art-Net packet transmitted to {artnet_ip}:{universe}")
+                    logger.info(f"Task {task_id}: ✓ Art-Net packet transmitted to {artnet_ip}:{led_universe}")
                     
                     # Get socketio from current app
                     socketio = current_app.extensions.get('socketio')
@@ -575,7 +651,8 @@ def _mapping_sequence_task(task_id, config, app):
                         socketio.emit('mapper:led_active', {
                             'led_index': led_index,
                             'total': led_count,
-                            'dmx_address': dmx_address + 1,  # 1-indexed for display
+                            'universe': led_universe,
+                            'dmx_address': dmx_address,  # 1-indexed for display
                             'task_id': task_id
                         })
                         logger.info(f"Task {task_id}: SocketIO event 'mapper:led_active' emitted")
@@ -585,7 +662,7 @@ def _mapping_sequence_task(task_id, config, app):
                     time.sleep(delay_ms / 1000.0)
                     
                     # Turn off LED before next one
-                    artnet.set([0] * 510)  # Match packet_size=510
+                    artnet.set([0] * 512)
                     artnet.show()
                     logger.info(f"Task {task_id}: LED #{led_index + 1} turned OFF")
                     time.sleep(0.1)  # Brief pause between LEDs
@@ -604,7 +681,7 @@ def _mapping_sequence_task(task_id, config, app):
             finally:
                 # Turn off all LEDs
                 logger.info(f"Task {task_id}: Turning off all LEDs and stopping Art-Net...")
-                artnet.set([0] * 510)
+                artnet.set([0] * 512)
                 artnet.show()
                 artnet.stop()
                 logger.info(f"Task {task_id}: Art-Net sender stopped")

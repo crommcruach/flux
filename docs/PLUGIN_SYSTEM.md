@@ -384,6 +384,63 @@ Dual-Slider (min/max Range)
 }
 ```
 
+### Parameter Grouping (Optional)
+
+Parameters can be organized into collapsible groups for cleaner UI by adding the optional `group` field.
+
+**Benefits:**
+- Related parameters grouped together
+- Collapsible sections for better overview
+- Shorter labels within groups (e.g., 'X' instead of 'Position X')
+- Backward compatible (plugins without groups work unchanged)
+
+**Example:**
+
+```python
+PARAMETERS = [
+    {
+        'name': 'position_x',
+        'label': 'X',
+        'type': ParameterType.FLOAT,
+        'default': 0.0,
+        'min': -2000.0,
+        'max': 2000.0,
+        'group': 'Position',  # ← Optional group field
+        'description': 'Horizontal position'
+    },
+    {
+        'name': 'position_y',
+        'label': 'Y',
+        'type': ParameterType.FLOAT,
+        'default': 0.0,
+        'min': -2000.0,
+        'max': 2000.0,
+        'group': 'Position',  # ← Same group renders together
+        'description': 'Vertical position'
+    },
+    {
+        'name': 'scale_xy',
+        'label': 'XY (Symmetric)',
+        'type': ParameterType.FLOAT,
+        'default': 100.0,
+        'min': 0.0,
+        'max': 500.0,
+        'group': 'Scale',  # ← Different group
+        'description': 'Symmetric scaling'
+    }
+]
+```
+
+**Common Group Names:**
+- `Position` - X/Y/Z position
+- `Scale` - Scaling parameters
+- `Rotation` - Rotation angles
+- `Color` - Color controls
+- `Timing` - Duration, speed, delay
+- `Advanced` - Expert settings
+
+---
+
 ## Plugin-Typen
 
 ### EFFECT

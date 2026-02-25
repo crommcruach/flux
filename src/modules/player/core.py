@@ -1320,11 +1320,43 @@ class Player:
                             video_dir = self.config.get('paths', {}).get('video_dir', 'video')
                             if not self.load_clip_layers(next_clip_id, self.clip_registry, video_dir):
                                 logger.warning(f"⚠️ [{self.player_name}] Could not load layers for clip {next_clip_id}, using single-source fallback")
+                            
+                            # CRITICAL: Reset transport effect after loading layers (same as load_clip_by_index)
+                            if self.layers:
+                                for layer in self.layers:
+                                    for effect in layer.effects:
+                                        if effect.get('id') == 'transport' and effect.get('instance'):
+                                            transport = effect['instance']
+                                            # Force full reset for new clip
+                                            transport._current_loop_iteration = 0
+                                            transport.current_position = 0
+                                            transport._virtual_frame = 0.0
+                                            transport.loop_completed = False
+                                            transport._has_played_once = False
+                                            transport._frame_source = None  # Force re-initialization
+                                            logger.debug(f"🔁 [{self.player_name}] Reset transport effect state after autoplay layer load")
+                            
                             debug_layers(logger, f"🔄 [{self.player_name}] Layers reloaded for new clip {next_clip_id}")
                         else:
                             # Same clip - just reset the source, keep existing layer objects
                             self._loaded_clip_id = next_clip_id
                             self.current_clip_id = next_clip_id
+                            
+                            # CRITICAL: Reset transport effect for clip replay (same as load_clip_by_index)
+                            if self.layers:
+                                for layer in self.layers:
+                                    for effect in layer.effects:
+                                        if effect.get('id') == 'transport' and effect.get('instance'):
+                                            transport = effect['instance']
+                                            # Force full reset for clip replay
+                                            transport._current_loop_iteration = 0
+                                            transport.current_position = 0
+                                            transport._virtual_frame = 0.0
+                                            transport.loop_completed = False
+                                            transport._has_played_once = False
+                                            transport._frame_source = None  # Force re-initialization
+                                            logger.debug(f"🔁 [{self.player_name}] Reset transport effect for same clip replay")
+                            
                             debug_layers(logger, f"🔁 [{self.player_name}] Same clip {next_clip_id}, reusing existing layers")
                         
                         item_name = generator_id if next_item_path.startswith('generator:') else os.path.basename(next_item_path)
@@ -1426,9 +1458,12 @@ class Player:
                 frame_for_artnet = self._alpha_composite_to_black(frame_for_artnet)
             
             # Speichere komplettes Frame für Video-Preview (BGR-Conversion mit Buffer-Reuse)
-            if not hasattr(self, '_bgr_buffer') or self._bgr_buffer.shape != frame_for_video_preview.shape[:2]:
-                self._bgr_buffer = np.empty((frame_for_video_preview.shape[0], frame_for_video_preview.shape[1], 3), dtype=np.uint8)
-            cv2.cvtColor(frame_for_video_preview, cv2.COLOR_RGB2BGR, dst=self._bgr_buffer)
+            # CRITICAL: Art-Net Player uses frame_for_artnet for preview, Video Player uses frame_for_video_preview
+            preview_frame = frame_for_artnet if self.enable_artnet else frame_for_video_preview
+            
+            if not hasattr(self, '_bgr_buffer') or self._bgr_buffer.shape != preview_frame.shape[:2]:
+                self._bgr_buffer = np.empty((preview_frame.shape[0], preview_frame.shape[1], 3), dtype=np.uint8)
+            cv2.cvtColor(preview_frame, cv2.COLOR_RGB2BGR, dst=self._bgr_buffer)
             self.last_video_frame = self._bgr_buffer
             
             # Distribute frame to output routing system (if enabled)

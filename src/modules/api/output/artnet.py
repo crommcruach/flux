@@ -853,10 +853,13 @@ def register_info_routes(app, player_manager, api=None, config=None):
     @app.route('/api/fullscreen/stream')
     def fullscreen_stream():
         """MJPEG Video-Stream in voller Player-Auflösung (ohne Skalierung)."""
-        from flask import Response
+        from flask import Response, request
         import cv2
         import numpy as np
         import time
+        
+        # Get player type from query parameter (video or artnet)
+        player_type = request.args.get('player', 'video')
         
         # Load config settings for fullscreen
         cfg = config if config else {}
@@ -872,7 +875,12 @@ def register_info_routes(app, player_manager, api=None, config=None):
             while True:
                 try:
                     frame_count += 1
-                    player = player_manager.player
+                    
+                    # Select player based on parameter
+                    if player_type == 'artnet':
+                        player = player_manager.artnet_player
+                    else:
+                        player = player_manager.player
                     
                     # Hole aktuelles Video-Frame (komplettes Bild)
                     if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:

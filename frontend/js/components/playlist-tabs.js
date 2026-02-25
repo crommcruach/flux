@@ -312,74 +312,243 @@ class PlaylistTabsManager {
     }
     
     async createPlaylist() {
-        const name = prompt('Enter playlist name:');
-        if (!name || name.trim() === '') return;
+        const input = document.getElementById('createPlaylistNameInput');
+        const modalElement = document.getElementById('createPlaylistModal');
+        const confirmBtn = document.getElementById('confirmCreatePlaylistBtn');
         
-        try {
-            const response = await fetch('/api/playlists/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    name: name.trim(),
-                    type: 'standard'
-                })
-            });
+        if (!input || !modalElement || !confirmBtn) {
+            console.error('Create playlist modal elements not found!');
+            // Fallback to prompt
+            const name = prompt('Enter playlist name:');
+            if (!name || name.trim() === '') return;
             
-            const data = await response.json();
+            try {
+                const response = await fetch('/api/playlists/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        name: name.trim(),
+                        type: 'standard'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    await this.loadPlaylists();
+                    this.render();
+                    this.viewPlaylist(data.playlist.id);
+                    if (this.onCreate) {
+                        this.onCreate(data.playlist);
+                    }
+                    console.log('Created new playlist:', name);
+                } else {
+                    alert('Failed to create playlist: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Failed to create playlist:', error);
+                alert('Failed to create playlist');
+            }
+            return;
+        }
+        
+        return new Promise((resolve) => {
+            const modal = new bootstrap.Modal(modalElement);
             
-            if (data.success) {
-                await this.loadPlaylists();
-                this.render();
+            // Clear previous value
+            input.value = '';
+            
+            // Show modal
+            modal.show();
+            
+            // Focus input after modal shown
+            modalElement.addEventListener('shown.bs.modal', function() {
+                input.focus();
+            }, { once: true });
+            
+            // Handle Enter key
+            const enterHandler = (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    confirmBtn.click();
+                }
+            };
+            input.addEventListener('keypress', enterHandler);
+            
+            // Clean up event listeners when modal closes (regardless of how)
+            const cleanupHandler = () => {
+                input.removeEventListener('keypress', enterHandler);
+                confirmBtn.removeEventListener('click', confirmHandler);
+                modalElement.removeEventListener('hidden.bs.modal', cleanupHandler);
+            };
+            modalElement.addEventListener('hidden.bs.modal', cleanupHandler, { once: true });
+            
+            // Handle confirm button
+            const confirmHandler = async () => {
+                const name = input.value.trim();
                 
-                // View the new playlist
-                this.viewPlaylist(data.playlist.id);
-                
-                if (this.onCreate) {
-                    this.onCreate(data.playlist);
+                if (!name) {
+                    resolve();
+                    modal.hide();
+                    return;
                 }
                 
-                console.log('Created playlist:', data.playlist.name);
-            } else {
-                alert('Failed to create playlist: ' + data.error);
-            }
-        } catch (error) {
-            console.error('Failed to create playlist:', error);
-            alert('Failed to create playlist');
-        }
+                modal.hide();
+                
+                try {
+                    const response = await fetch('/api/playlists/create', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            name: name,
+                            type: 'standard'
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        await this.loadPlaylists();
+                        this.render();
+                        
+                        // View the new playlist
+                        this.viewPlaylist(data.playlist.id);
+                        
+                        if (this.onCreate) {
+                            this.onCreate(data.playlist);
+                        }
+                        
+                        console.log('Created new playlist:', name);
+                    } else {
+                        alert('Failed to create playlist: ' + data.error);
+                    }
+                } catch (error) {
+                    console.error('Failed to create playlist:', error);
+                    alert('Failed to create playlist');
+                }
+                
+                resolve();
+            };
+            
+            confirmBtn.addEventListener('click', confirmHandler.bind(this), { once: true });
+        });
     }
     
     async renamePlaylist(playlistId) {
         const playlist = this.playlists.find(p => p.id === playlistId);
         if (!playlist) return;
         
-        const newName = prompt('Enter new name:', playlist.name);
-        if (!newName || newName.trim() === '' || newName === playlist.name) return;
+        const input = document.getElementById('renamePlaylistNameInput');
+        const modalElement = document.getElementById('renamePlaylistModal');
+        const confirmBtn = document.getElementById('confirmRenamePlaylistBtn');
         
-        try {
-            const response = await fetch(`/api/playlists/${playlistId}/rename`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newName.trim() })
-            });
+        if (!input || !modalElement || !confirmBtn) {
+            console.error('Rename playlist modal elements not found!');
+            // Fallback to prompt
+            const newName = prompt('Enter new name:', playlist.name);
+            if (!newName || newName.trim() === '' || newName === playlist.name) return;
             
-            const data = await response.json();
-            
-            if (data.success) {
-                await this.loadPlaylists();
-                this.render();
+            try {
+                const response = await fetch(`/api/playlists/${playlistId}/rename`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName.trim() })
+                });
                 
-                if (this.onRename) {
-                    this.onRename(playlistId, newName.trim());
+                const data = await response.json();
+                
+                if (data.success) {
+                    await this.loadPlaylists();
+                    this.render();
+                    if (this.onRename) {
+                        this.onRename(playlistId, newName.trim());
+                    }
+                    console.log('Renamed playlist to:', newName);
+                } else {
+                    alert('Failed to rename playlist: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Failed to rename playlist:', error);
+                alert('Failed to rename playlist');
+            }
+            return;
+        }
+        
+        return new Promise((resolve) => {
+            const modal = new bootstrap.Modal(modalElement);
+            
+            // Set current name
+            input.value = playlist.name;
+            
+            // Show modal
+            modal.show();
+            
+            // Focus and select input after modal shown
+            modalElement.addEventListener('shown.bs.modal', function() {
+                input.focus();
+                input.select();
+            }, { once: true });
+            
+            // Handle Enter key
+            const enterHandler = (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    confirmBtn.click();
+                }
+            };
+            input.addEventListener('keypress', enterHandler);
+            
+            // Clean up event listeners when modal closes (regardless of how)
+            const cleanupHandler = () => {
+                input.removeEventListener('keypress', enterHandler);
+                confirmBtn.removeEventListener('click', confirmHandler);
+                modalElement.removeEventListener('hidden.bs.modal', cleanupHandler);
+            };
+            modalElement.addEventListener('hidden.bs.modal', cleanupHandler, { once: true });
+            
+            // Handle confirm button
+            const confirmHandler = async () => {
+                const newName = input.value.trim();
+                
+                if (!newName || newName === playlist.name) {
+                    resolve();
+                    modal.hide();
+                    return;
                 }
                 
-                console.log('Renamed playlist to:', newName);
-            } else {
-                alert('Failed to rename playlist: ' + data.error);
-            }
-        } catch (error) {
-            console.error('Failed to rename playlist:', error);
-            alert('Failed to rename playlist');
-        }
+                modal.hide();
+                
+                try {
+                    const response = await fetch(`/api/playlists/${playlistId}/rename`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: newName })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        await this.loadPlaylists();
+                        this.render();
+                        
+                        if (this.onRename) {
+                            this.onRename(playlistId, newName);
+                        }
+                        
+                        console.log('Renamed playlist to:', newName);
+                    } else {
+                        alert('Failed to rename playlist: ' + data.error);
+                    }
+                } catch (error) {
+                    console.error('Failed to rename playlist:', error);
+                    alert('Failed to rename playlist');
+                }
+                
+                resolve();
+            };
+            
+            confirmBtn.addEventListener('click', confirmHandler.bind(this), { once: true });
+        });
     }
     
     async deletePlaylist(playlistId) {

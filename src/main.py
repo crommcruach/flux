@@ -382,25 +382,19 @@ def main():
     # User muss explizit ein Video laden (via Web-UI, API oder CLI)
     # Legacy video_path Variable wird nicht mehr verwendet (Player startet mit DummySource)
     
-    # Suche Punkte-JSON-Dateien
+    # DEPRECATED: Points file only used for legacy DMX recording (will be reimplemented)
+    # Find points JSON files for backward compatibility
     json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')] if os.path.exists(data_dir) else []
     
     if json_files:
-        # 1. Priorität: Konfigurierte Standard-Punkte
         default_points = config['paths'].get('default_points_json')
         if default_points and default_points in json_files:
             points_json_path = os.path.join(data_dir, default_points)
-            print(f"Punkte-Liste (config): {default_points}")
-        # 2. Fallback: Old config setting
         elif config['paths']['points_json'] in json_files:
             points_json_path = os.path.join(data_dir, config['paths']['points_json'])
-            print(f"Punkte-Liste: {config['paths']['points_json']}")
-        # 3. Fallback: Erste gefundene
         else:
             points_json_path = os.path.join(data_dir, sorted(json_files)[0])
-            print(f"Punkte-Liste: {sorted(json_files)[0]}")
     else:
-        print(f"WARNUNG: Keine Punkte-Liste gefunden in {data_dir}")
         points_json_path = os.path.join(data_dir, "punkte_export.json")
     
     # Konfiguration für Art-Net
@@ -411,31 +405,39 @@ def main():
     # Scripts-Ordner
     scripts_dir = os.path.join(base_path, config['paths']['scripts_dir'])
     
-    # Lade Points-Daten um Canvas-Dimensionen zu erhalten
-    from modules.content.points import PointsLoader
-    points_data = PointsLoader.load_points(points_json_path, validate_bounds=True)
-    
-    # Art-Net player uses resolution from points file (LED matrix dimensions)
-    artnet_canvas_width = points_data['canvas_width']
-    artnet_canvas_height = points_data['canvas_height']
-    
-    # Initialize session state early (needed for video player settings)
+    # Initialize session state early (needed for canvas size and player settings)
     from modules.session.state import init_session_state, get_session_state
     session_state_path = os.path.join(base_path, 'session_state.json')
     
-    # Lösche alte Session-Daten beim Neustart
+    # Clear old session state on startup to avoid inconsistencies
     if os.path.exists(session_state_path):
         try:
             os.remove(session_state_path)
-            logger.debug("Alte Session-Daten gelöscht (Neustart)")
+            logger.info("Cleared old session state on startup")
         except Exception as e:
-            logger.warning(f"Konnte Session-Daten nicht löschen: {e}")
+            logger.warning(f"Failed to clear session state: {e}")
     
+    # Initialize session state (starts fresh each time)
     session_state = init_session_state(session_state_path)
     logger.debug("SessionStateManager initialisiert")
     
-    # Get video player resolution from session state or config (preview only)
+    # Get canvas size from editor state (Priority 1: Editor, Priority 2: Default)
     session_state_instance = get_session_state()
+    editor_state = session_state_instance.get_editor_state() if session_state_instance else {}
+    editor_canvas = editor_state.get('canvas', {})
+    
+    if editor_canvas.get('width') and editor_canvas.get('height'):
+        # Use canvas size from editor
+        artnet_canvas_width = editor_canvas['width']
+        artnet_canvas_height = editor_canvas['height']
+        logger.info(f"Canvas size from editor: {artnet_canvas_width}x{artnet_canvas_height}")
+    else:
+        # Default canvas size
+        artnet_canvas_width = 1920
+        artnet_canvas_height = 1080
+        logger.info(f"Canvas size: {artnet_canvas_width}x{artnet_canvas_height} (default)")
+    
+    # Get video player resolution from session state or config (preview only)
     video_settings = {}
     if session_state_instance:
         video_settings = session_state_instance._state.get('video_player_settings', {})
@@ -465,7 +467,12 @@ def main():
         video_canvas_width, video_canvas_height = preset_resolutions.get(video_settings.get('preset', '1080p'), (1920, 1080))
     
     logger.info(f"Video player resolution: {video_canvas_width}x{video_canvas_height} (preset: {video_settings.get('preset', '1080p')}, autosize: {video_settings.get('autosize', 'off')})")
-    logger.info(f"Art-Net player resolution: {artnet_canvas_width}x{artnet_canvas_height} (from points file)")
+    
+    # DEPRECATED: Load points file for legacy DMX recording compatibility only
+    # Canvas size now comes from editor state, not points file
+    from modules.content.points import PointsLoader
+    points_data = PointsLoader.load_points(points_json_path, validate_bounds=False)
+    logger.debug(f"Points file loaded (legacy DMX recording): {os.path.basename(points_json_path)}")
     
     # ClipRegistry initialisieren (ERST, bevor Player erstellt werden)
     from modules.player.clips.registry import get_clip_registry
@@ -535,10 +542,10 @@ def main():
     from modules.artnet.routing_bridge import RoutingBridge
     routing_bridge = RoutingBridge(
         routing_manager=artnet_routing_manager,
-        canvas_width=video_canvas_width,
-        canvas_height=video_canvas_height
+        canvas_width=artnet_canvas_width,
+        canvas_height=artnet_canvas_height
     )
-    logger.debug("ArtNet Routing Bridge initialized")
+    logger.debug(f"ArtNet Routing Bridge initialized ({artnet_canvas_width}x{artnet_canvas_height})")
     
     # Connect routing bridge to Art-Net Player (NEW ArtNet output routing system)
     artnet_player.routing_bridge = routing_bridge
@@ -552,24 +559,10 @@ def main():
     set_playlist_system(playlist_system)
     player_manager.playlist_system = playlist_system
     
-    # Always try to restore playlists from session_state.json
-    try:
-        if os.path.exists(session_state_path):
-            with open(session_state_path, 'r', encoding='utf-8') as f:
-                saved_state = json.load(f)
-                playlists_data = saved_state.get('playlists', {})
-                if playlists_data and isinstance(playlists_data, dict) and playlists_data.get('items'):
-                    # Has playlists data - restore it
-                    if playlist_system.load_from_dict(playlists_data):
-                        logger.info(f"✅ Restored {len(playlist_system.playlists)} playlists from session state")
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to restore playlists from session state: {e}")
-    
-    # Create default playlist only if nothing was restored
-    if len(playlist_system.playlists) == 0:
-        default_playlist = playlist_system.create_playlist("Default", "standard")
-        playlist_system.activate_playlist(default_playlist.id)
-        logger.debug("Created and activated Default playlist (first start or empty session)")
+    # Create default playlist (session state cleared on startup)
+    default_playlist = playlist_system.create_playlist("Default", "standard")
+    playlist_system.activate_playlist(default_playlist.id)
+    logger.debug("Created and activated Default playlist (first start or empty session)")
     
     logger.debug("Multi-Playlist System initialisiert")
     

@@ -23,7 +23,7 @@
         <select id="canvasSize" class="form-select form-select-sm" style="width: 140px;">
           <option value="1024x768">1024 × 768</option>
           <option value="1280x720">1280 × 720</option>
-          <option value="1920x1080">1920 × 1080</option>
+          <option value="1920x1080" selected>1920 × 1080</option>
           <option value="2560x1440">2560 × 1440</option>
           <option value="3840x2160">3840 × 2160</option>
           <option value="custom">Benutzerdefiniert...</option>
@@ -77,7 +77,6 @@
         <button class="btn btn-success btn-sm w-100" onclick="showLEDMapper()" title="LED Visual Mapper - Capture LED positions using webcam" style="padding: 0.5rem;">
           📷 LED Mapper
         </button>
-        <small class="text-muted d-block mt-1" style="font-size: 0.7rem;">Map LEDs via webcam</small>
       </div>
 
       <div class="toolbar-section" id="textSection" style="display: none;">
@@ -201,7 +200,7 @@
     <!-- Canvas (Mitte) -->
     <div class="canvas-wrapper" id="canvasWrapper">
       <div class="canvas-container" id="canvasContainer">
-        <canvas id="canvas" width="1024" height="768"></canvas>
+        <canvas id="canvas" width="1920" height="1080"></canvas>
       </div>
     </div>
     <!-- Zoom Controls (positioned over canvas-wrapper) -->
@@ -256,6 +255,15 @@
     <div class="context-menu-item" data-action="ungroup">
       <span class="context-menu-icon">📤</span>
       <span>Gruppierung aufheben</span>
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" data-action="flipHorizontal">
+      <span class="context-menu-icon">↔️</span>
+      <span>Horizontal spiegeln</span>
+    </div>
+    <div class="context-menu-item" data-action="flipVertical">
+      <span class="context-menu-icon">↕️</span>
+      <span>Vertikal spiegeln</span>
     </div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item" data-action="selectAll">

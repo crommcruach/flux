@@ -572,17 +572,33 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             
             logger.info(f"✅ Effect '{plugin_id}' added to clip {clip_id} ({player_id})")
             
-            # Reload layer effects if this is a layer clip
-            clip_data = clip_registry.get_clip(clip_id)
-            logger.info(f"🔍 Checking if {clip_id} is a layer clip: metadata={clip_data.get('metadata') if clip_data else None}")
-            if clip_data and clip_data.get('metadata', {}).get('type') == 'layer':
-                # This is a layer - reload all layer effects
-                logger.info(f"🎯 Detected layer clip! Reloading effects for player {player_id}")
-                if player and hasattr(player, 'reload_all_layer_effects'):
-                    player.reload_all_layer_effects()
-                    logger.info(f"🔄 Reloaded layer effects for player {player_id}")
+            # Reload effects on ALL players that have this clip loaded
+            # (not just the player in the API route - clip might be in both video AND artnet players!)
+            logger.info(f"🔍 Checking all players for clip {clip_id}...")
+            reloaded_on_players = []
+            for check_player_id, check_player in player_manager.players.items():
+                if check_player and hasattr(check_player, 'layers') and check_player.layers:
+                    # Log what layers this player has
+                    layer_info = [(i, layer.clip_id if hasattr(layer, 'clip_id') else 'no-id') for i, layer in enumerate(check_player.layers)]
+                    logger.info(f"  Player '{check_player_id}': {len(check_player.layers)} layers - {layer_info}")
+                    
+                    clip_is_loaded = any(layer.clip_id == clip_id for layer in check_player.layers)
+                    if clip_is_loaded:
+                        logger.info(f"  ✅ Found clip {clip_id} in {check_player_id} player - reloading effects")
+                        if hasattr(check_player, 'reload_all_layer_effects'):
+                            check_player.reload_all_layer_effects()
+                            reloaded_on_players.append(check_player_id)
+                        else:
+                            logger.warning(f"⚠️ Player {check_player_id} doesn't have reload_all_layer_effects method")
+                    else:
+                        logger.debug(f"  ➖ Clip {clip_id} not found in {check_player_id} player")
                 else:
-                    logger.warning(f"⚠️ Player {player_id} doesn't have reload_all_layer_effects method")
+                    logger.debug(f"  Player '{check_player_id}': No layers or player not initialized")
+            
+            if reloaded_on_players:
+                logger.info(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+            else:
+                logger.warning(f"⚠️ Clip {clip_id} not currently loaded in any player, effects will be loaded when clip is played")
             
             # Auto-save session state
             session_state = get_session_state()
@@ -621,13 +637,24 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             
             logger.info(f"🗑️ Effect removed from clip {clip_id} at index {index}")
             
-            # Reload layer effects if this is a layer clip
-            clip_data = clip_registry.get_clip(clip_id)
-            if clip_data and clip_data.get('metadata', {}).get('type') == 'layer':
-                player = player_manager.get_player(player_id)
-                if player and hasattr(player, 'reload_all_layer_effects'):
-                    player.reload_all_layer_effects()
-                    debug_api(logger, f"🔄 Reloaded layer effects for player {player_id}")
+            # Reload effects on ALL players that have this clip loaded
+            # (not just the player in the API route - clip might be in both video AND artnet players!)
+            reloaded_on_players = []
+            for check_player_id, check_player in player_manager.players.items():
+                if check_player and hasattr(check_player, 'layers') and check_player.layers:
+                    clip_is_loaded = any(layer.clip_id == clip_id for layer in check_player.layers)
+                    if clip_is_loaded:
+                        logger.debug(f"Reloading effects for clip {clip_id} on {check_player_id} player")
+                        if hasattr(check_player, 'reload_all_layer_effects'):
+                            check_player.reload_all_layer_effects()
+                            reloaded_on_players.append(check_player_id)
+                        else:
+                            logger.warning(f"⚠️ Player {check_player_id} doesn't have reload_all_layer_effects method")
+            
+            if reloaded_on_players:
+                logger.info(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+            else:
+                logger.debug(f"Clip {clip_id} not currently loaded in any player, skipping effect reload")
             
             # Auto-save session state
             session_state = get_session_state()
@@ -697,10 +724,6 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     param_data = param_value
                 effect['parameters'][param_name] = param_data
             
-            # Update LIVE plugin instance in active layer (not registry instance!)
-            player = player_manager.get_player(player_id)
-            updated_live = False
-            
             # For transport_position, pass the full dict with range metadata
             # For other parameters, extract scalar value
             if param_name == 'transport_position':
@@ -711,29 +734,30 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 if isinstance(param_data, dict) and '_value' in param_data:
                     value_to_update = param_data['_value']
             
-            if player and hasattr(player, 'layers'):
-                for layer in player.layers:
-                    if hasattr(layer, 'clip_id') and layer.clip_id == clip_id:
-                        # Found the active layer - update its live effect instance
-                        if index < len(layer.effects):
-                            live_effect = layer.effects[index]
-                            if 'instance' in live_effect and live_effect['instance']:
-                                # CRITICAL: Log the caller to trace parameter updates (DEBUG level)
-                                import traceback
-                                caller_stack = traceback.extract_stack()
-                                # Get the API request origin (usually 5-6 frames up)
-                                callers = [f"{frame.filename.split('/')[-1]}:{frame.lineno}" for frame in caller_stack[-6:-1]]
-                                logger.debug(f"🔍 API CALL: update_parameter('{param_name}', {value_to_update}) from {' → '.join(callers)}")
-                                
-                                live_effect['instance'].update_parameter(param_name, value_to_update)
-                                updated_live = True
-                                logger.info(f"✅ Updated LIVE layer effect instance: Layer {layer.layer_id}, effect {index}, {param_name}")
-                                break
+            # Update LIVE plugin instances in ALL players that have this clip loaded
+            # (not just the player in the API route - clip might be in both video AND artnet players!)
+            updated_live_players = []
             
-            # Fallback: Update registry instance (for non-layer clips)
-            if not updated_live and 'instance' in effect and effect['instance']:
-                effect['instance'].update_parameter(param_name, value_to_update)
-                logger.info(f"✅ Updated registry effect instance: {clip_id}[{index}].{param_name}")
+            for check_player_id, check_player in player_manager.players.items():
+                if check_player and hasattr(check_player, 'layers'):
+                    for layer in check_player.layers:
+                        if hasattr(layer, 'clip_id') and layer.clip_id == clip_id:
+                            # Found the active layer - update its live effect instance
+                            if index < len(layer.effects):
+                                live_effect = layer.effects[index]
+                                if 'instance' in live_effect and live_effect['instance']:
+                                    live_effect['instance'].update_parameter(param_name, value_to_update)
+                                    updated_live_players.append(check_player_id)
+                                    logger.debug(f"✅ Updated live effect in {check_player_id} player: Layer {layer.layer_id}, effect {index}, {param_name}={value_to_update}")
+                                    break  # Only update first matching layer per player
+            
+            if updated_live_players:
+                logger.info(f"✅ Parameter updated on players: {', '.join(updated_live_players)}")
+            else:
+                # Fallback: Update registry instance (for non-layer clips)
+                if 'instance' in effect and effect['instance']:
+                    effect['instance'].update_parameter(param_name, value_to_update)
+                    logger.info(f"✅ Updated registry effect instance: {clip_id}[{index}].{param_name} (not currently loaded)")
             
             # B3: Invalidate cache so player detects parameter change
             clip_registry._invalidate_cache(clip_id)
@@ -779,6 +803,22 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             
             logger.info(f"Clip effect {clip_id}[{index}] toggled: {'enabled' if new_state else 'disabled'}")
             
+            # Reload effects on ALL players that have this clip loaded
+            reloaded_on_players = []
+            for check_player_id, check_player in player_manager.players.items():
+                if check_player and hasattr(check_player, 'layers') and check_player.layers:
+                    clip_is_loaded = any(layer.clip_id == clip_id for layer in check_player.layers)
+                    if clip_is_loaded:
+                        logger.debug(f"Reloading effects for clip {clip_id} on {check_player_id} player")
+                        if hasattr(check_player, 'reload_all_layer_effects'):
+                            check_player.reload_all_layer_effects()
+                            reloaded_on_players.append(check_player_id)
+            
+            if reloaded_on_players:
+                logger.info(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+            else:
+                logger.debug(f"Clip {clip_id} not currently loaded in any player, skipping effect reload")
+            
             # Auto-save session state
             session_state = get_session_state()
             if session_state:
@@ -811,6 +851,22 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     abs_path = clip_data['absolute_path']
                     if abs_path in player.clip_effects:
                         player.clip_effects[abs_path] = []
+                
+                # Reload effects on ALL players that have this clip loaded
+                reloaded_on_players = []
+                for check_player_id, check_player in player_manager.players.items():
+                    if check_player and hasattr(check_player, 'layers') and check_player.layers:
+                        clip_is_loaded = any(layer.clip_id == clip_id for layer in check_player.layers)
+                        if clip_is_loaded:
+                            logger.debug(f"Reloading effects for clip {clip_id} on {check_player_id} player")
+                            if hasattr(check_player, 'reload_all_layer_effects'):
+                                check_player.reload_all_layer_effects()
+                                reloaded_on_players.append(check_player_id)
+                
+                if reloaded_on_players:
+                    logger.info(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+                else:
+                    logger.debug(f"Clip {clip_id} not currently loaded in any player, skipping effect reload")
             
             logger.info(f"🗑️ All effects cleared from clip {clip_id}")
             
