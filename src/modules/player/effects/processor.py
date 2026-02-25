@@ -280,24 +280,24 @@ class EffectProcessor:
         self._apply_debug_counter += 1
         
         if self._apply_debug_counter % 120 == 1:  # Log every 2 seconds at 60fps
-            logger.info(f"🎨 [{player_name}] apply_effects: chain={chain_type}, player_fx={len(self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain)}, clip_id={current_clip_id is not None}, has_player={player is not None}")
+            logger.debug(f"🎨 [{player_name}] apply_effects: chain={chain_type}, player_fx={len(self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain)}, clip_id={current_clip_id is not None}, has_player={player is not None}")
         
         # 1. Apply player-level effects FIRST (base layer)
         effect_chain = self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain
         
         if effect_chain:
             if self._apply_debug_counter % 120 == 1:
-                logger.info(f"🔧 [{player_name}] Processing {len(effect_chain)} player-level effects...")
+                logger.debug(f"🔧 [{player_name}] Processing {len(effect_chain)} player-level effects...")
             
             for idx, effect in enumerate(effect_chain):
                 # Skip disabled effects
                 if not effect.get('enabled', True):
                     if self._apply_debug_counter % 120 == 1:
-                        logger.info(f"  ⏭️  Effect {idx}: '{effect.get('id', 'unknown')}' (DISABLED)")
+                        logger.debug(f"  ⏭️  Effect {idx}: '{effect.get('id', 'unknown')}' (DISABLED)")
                     continue
                 
                 if self._apply_debug_counter % 120 == 1:
-                    logger.info(f"  ▶️  Effect {idx}: '{effect.get('id', 'unknown')}' (processing...)")
+                    logger.debug(f"  ▶️  Effect {idx}: '{effect.get('id', 'unknown')}' (processing...)")
                 
                 try:
                     plugin_instance = effect['instance']
@@ -320,7 +320,7 @@ class EffectProcessor:
             # DEBUG: Log layer search details (throttled)
             if self._apply_debug_counter % 120 == 1:
                 layer_info = [(i, getattr(layer, 'clip_id', None), len(getattr(layer, 'effects', []))) for i, layer in enumerate(player.layers)]
-                logger.info(f"🔍 [{player_name}] Searching for clip {current_clip_id} in {len(player.layers)} layers: {layer_info}")
+                logger.debug(f"🔍 [{player_name}] Searching for clip {current_clip_id} in {len(player.layers)} layers: {layer_info}")
             
             # Find the layer with matching clip_id
             clip_effects = None
@@ -329,7 +329,7 @@ class EffectProcessor:
                     if hasattr(layer, 'effects') and layer.effects:
                         clip_effects = layer.effects
                         if self._apply_debug_counter % 120 == 1:
-                            logger.info(f"✅ [{player_name}] Using layer.effects for clip {current_clip_id} ({len(clip_effects)} effects)")
+                            logger.debug(f"✅ [{player_name}] Using layer.effects for clip {current_clip_id} ({len(clip_effects)} effects)")
                         break
             
             if clip_effects:
@@ -346,7 +346,7 @@ class EffectProcessor:
                         if plugin_id == 'transport' and hasattr(plugin_instance, '_initialize_state'):
                             if source and (not hasattr(plugin_instance, '_frame_source') or plugin_instance._frame_source is None):
                                 plugin_instance._initialize_state(source)
-                                logger.info(f"🎬 [{player_name}] Transport initialized for clip {current_clip_id}")
+                                logger.debug(f"🎬 [{player_name}] Transport initialized for clip {current_clip_id}")
                         
                         # Process frame (parameters are already set by update_parameter calls from sequence manager)
                         processed_frame = plugin_instance.process_frame(processed_frame, source=source, player=player)

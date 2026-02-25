@@ -479,10 +479,52 @@ class SequenceManager {
         const menu = document.getElementById('sequenceContextMenu');
         if (!menu) return;
         
-        // Position menu at click location
-        menu.style.left = event.pageX + 'px';
-        menu.style.top = event.pageY + 'px';
+        // Get cogwheel button position (the button that was clicked)
+        const button = event.currentTarget;
+        const buttonRect = button.getBoundingClientRect();
+        
+        // Position menu at right-bottom corner of cogwheel button
+        let posX = buttonRect.right;
+        let posY = buttonRect.bottom;
+        
+        // Position menu initially
+        menu.style.left = posX + 'px';
+        menu.style.top = posY + 'px';
         menu.classList.add('show');
+        
+        // After menu is visible, check bounds and adjust if needed
+        setTimeout(() => {
+            const menuRect = menu.getBoundingClientRect();
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+            
+            // Adjust horizontal position if menu overflows right edge
+            if (menuRect.right > viewportWidth) {
+                // Try to position to left of button instead
+                posX = buttonRect.left - menuRect.width;
+                // If still off-screen, clamp to viewport
+                if (posX < 10) {
+                    posX = viewportWidth - menuRect.width - 10;
+                }
+            }
+            
+            // Adjust vertical position if menu overflows bottom edge
+            if (menuRect.bottom > viewportHeight) {
+                // Try to position above button instead
+                posY = buttonRect.top - menuRect.height;
+                // If still off-screen, clamp to viewport
+                if (posY < 10) {
+                    posY = viewportHeight - menuRect.height - 10;
+                }
+            }
+            
+            // Ensure menu doesn't go off left/top edges
+            posX = Math.max(10, posX);
+            posY = Math.max(10, posY);
+            
+            menu.style.left = posX + 'px';
+            menu.style.top = posY + 'px';
+        }, 0);
     }
     
     /**

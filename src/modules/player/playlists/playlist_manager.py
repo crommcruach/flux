@@ -381,19 +381,19 @@ class MultiPlaylistSystem:
                     # Apply clip parameters (includes per-clip effects)
                     if hasattr(player, 'playlist_params'):
                         player.playlist_params = player_state.clip_params.copy()
-                        logger.info(f"[RESTORE DEBUG] {player_id} - Restored clip params for {len(player_state.clip_params)} clips")
+                        logger.debug(f"[RESTORE DEBUG] {player_id} - Restored clip params for {len(player_state.clip_params)} clips")
                         for clip_id, params in player_state.clip_params.items():
                             if 'effects' in params:
-                                logger.info(f"[RESTORE DEBUG] {player_id} - Clip {clip_id[:8]}... has {len(params['effects'])} effects")
+                                logger.debug(f"[RESTORE DEBUG] {player_id} - Clip {clip_id[:8]}... has {len(params['effects'])} effects")
                                 # Log first effect's parameters for debugging
                                 if params['effects']:
                                     first_effect = params['effects'][0]
-                                    logger.info(f"[RESTORE DEBUG] {player_id} -   Effect: {first_effect.get('plugin_id', 'unknown')}")
+                                    logger.debug(f"[RESTORE DEBUG] {player_id} -   Effect: {first_effect.get('plugin_id', 'unknown')}")
                                     if 'parameters' in first_effect:
                                         for param_name, param_value in list(first_effect['parameters'].items())[:5]:
-                                            logger.info(f"[RESTORE DEBUG] {player_id} -     {param_name} = {param_value}")
+                                            logger.debug(f"[RESTORE DEBUG] {player_id} -     {param_name} = {param_value}")
                             else:
-                                logger.info(f"[RESTORE DEBUG] {player_id} - Clip {clip_id[:8]}... has no effects key in params")
+                                logger.debug(f"[RESTORE DEBUG] {player_id} - Clip {clip_id[:8]}... has no effects key in params")
                     
                     # Apply global effects to player
                     if hasattr(player, 'effect_processor') and player.effect_processor:
@@ -401,7 +401,7 @@ class MultiPlaylistSystem:
                         try:
                             # Clear existing chain
                             player.effect_processor.clear_chain(chain_type=chain_type)
-                            logger.info(f"[RESTORE DEBUG] {player_id} - Cleared effect chain")
+                            logger.debug(f"[RESTORE DEBUG] {player_id} - Cleared effect chain")
                             
                             # Restore effects from playlist
                             restored_count = 0
@@ -409,12 +409,12 @@ class MultiPlaylistSystem:
                                 plugin_id = effect_data.get('plugin_id') or effect_data.get('id')
                                 enabled = effect_data.get('enabled', True)  # Check if effect is enabled
                                 
-                                logger.info(f"[RESTORE DEBUG] {player_id} - Effect {idx}: plugin_id={plugin_id}, enabled={enabled}")
-                                logger.info(f"[RESTORE DEBUG] {player_id} - Effect data keys: {list(effect_data.keys())}")
+                                logger.debug(f"[RESTORE DEBUG] {player_id} - Effect {idx}: plugin_id={plugin_id}, enabled={enabled}")
+                                logger.debug(f"[RESTORE DEBUG] {player_id} - Effect data keys: {list(effect_data.keys())}")
                                 
                                 # Skip disabled effects
                                 if not enabled:
-                                    logger.info(f"[RESTORE DEBUG] {player_id} - Skipping disabled effect '{plugin_id}'")
+                                    logger.debug(f"[RESTORE DEBUG] {player_id} - Skipping disabled effect '{plugin_id}'")
                                     continue
                                 
                                 config = effect_data.get('config', {})
@@ -422,21 +422,21 @@ class MultiPlaylistSystem:
                                 # Extract parameter values from parameters dict if present
                                 if 'parameters' in effect_data:
                                     config = effect_data['parameters']
-                                    logger.info(f"[RESTORE DEBUG] {player_id} - Using parameters: {list(config.keys())}")
+                                    logger.debug(f"[RESTORE DEBUG] {player_id} - Using parameters: {list(config.keys())}")
                                     # Log actual parameter values for debugging
                                     for param_name, param_value in list(config.items())[:5]:  # Log first 5 params
-                                        logger.info(f"[RESTORE DEBUG] {player_id} -   {param_name} = {param_value}")
+                                        logger.debug(f"[RESTORE DEBUG] {player_id} -   {param_name} = {param_value}")
                                 
                                 success, msg = player.add_effect_to_chain(plugin_id, config, chain_type=chain_type)
                                 if success:
                                     restored_count += 1
-                                    logger.info(f"[RESTORE DEBUG] {player_id} - ✅ Restored effect '{plugin_id}'")
+                                    logger.debug(f"[RESTORE DEBUG] {player_id} - ✅ Restored effect '{plugin_id}'")
                                 else:
-                                    logger.warning(f"[RESTORE DEBUG] {player_id} - ❌ Failed to restore effect '{plugin_id}': {msg}")
+                                    logger.debug(f"[RESTORE DEBUG] {player_id} - ❌ Failed to restore effect '{plugin_id}': {msg}")
                             
-                            logger.info(f"[RESTORE DEBUG] {player_id} - Restored {restored_count}/{len(player_state.global_effects)} enabled global effects")
+                            logger.debug(f"[RESTORE DEBUG] {player_id} - Restored {restored_count}/{len(player_state.global_effects)} enabled global effects")
                         except Exception as e:
-                            logger.error(f"[RESTORE DEBUG] {player_id} - Error applying effects: {e}", exc_info=True)
+                            logger.debug(f"[RESTORE DEBUG] {player_id} - Error applying effects: {e}", exc_info=True)
                     
                     logger.debug(f"Applied playlist '{playlist.name}' to {player_id}: "
                                f"{len(player_state.clips)} clips, autoplay={player_state.autoplay}, "

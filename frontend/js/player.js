@@ -2253,7 +2253,7 @@ function renderPlaylistGeneric(playlistId) {
             : '';
         
         // Generate layer previews HTML
-        const layerPreviewsHtml = generateLayerPreviewsHtml(item.id, playlistId);
+        const layerPreviewsHtml = generateLayerPreviewsHtml(item.id, playlistId, thumbnailUrl);
         
         itemsHtml += `
             <div class="playlist-item-wrapper ${isActive ? 'active' : ''}" data-clip-id="${item.id}">
@@ -3110,7 +3110,7 @@ window.updateMasterUI = function() {
 // If needed in future, implement via WebSocket events instead of polling
 
 // Generate layer previews HTML for a clip
-function generateLayerPreviewsHtml(clipId, playerId) {
+function generateLayerPreviewsHtml(clipId, playerId, clipThumbnailUrl) {
     // Check if clipLayers exists and has layers for this clip
     if (typeof clipLayers === 'undefined' || !clipLayers[clipId] || clipLayers[clipId].length === 0) {
         return ''; // No layers, no preview
@@ -3123,7 +3123,7 @@ function generateLayerPreviewsHtml(clipId, playerId) {
         const layerName = layer.name || `Layer ${idx + 1}`;
         const layerPath = layer.source || layer.path;
         
-        // Generate thumbnail URL if layer has a source
+        // Generate thumbnail URL - each layer shows its own thumbnail only
         let layerStyle = '';
         let hasThumb = false;
         if (layerPath && !layerPath.startsWith('generator:')) {
@@ -3131,6 +3131,7 @@ function generateLayerPreviewsHtml(clipId, playerId) {
             layerStyle = `background-image: url('${thumbnailUrl}');`;
             hasThumb = true;
         }
+        // No fallback - each layer should only show its own thumbnail
         
         // Get blend mode if available
         const blendMode = layer.blend_mode || 'normal';
@@ -3981,13 +3982,27 @@ function groupParameters(parameters) {
 function renderParameterGroup(groupName, params, effect, index, player, pluginId, clipId, isSystemPlugin) {
     const groupId = `${player}-effect-${index}-group-${groupName.replace(/\s+/g, '-').toLowerCase()}`;
     
+    // Check if any parameter in the group has a non-default value
+    const hasNonDefaultValue = params.some(param => {
+        const currentValue = effect.parameters[param.name];
+        const defaultValue = param.default;
+        // Consider undefined/null as default
+        if (currentValue === undefined || currentValue === null) return false;
+        return currentValue !== defaultValue;
+    });
+    
+    // Collapse by default if all parameters are at their default values
+    const isCollapsed = !hasNonDefaultValue;
+    const toggleIcon = isCollapsed ? '▶' : '▼';
+    const collapsedClass = isCollapsed ? ' collapsed' : '';
+    
     return `
         <div class="parameter-group">
             <div class="parameter-group-header" onclick="toggleParameterGroup('${groupId}', event)">
-                <span class="parameter-group-toggle">▼</span>
+                <span class="parameter-group-toggle">${toggleIcon}</span>
                 <span class="parameter-group-name">${groupName}</span>
             </div>
-            <div class="parameter-group-body" id="${groupId}">
+            <div class="parameter-group-body${collapsedClass}" id="${groupId}">
                 ${params.map(param => renderParameterControl(param, effect.parameters[param.name], index, player, pluginId, clipId, isSystemPlugin)).join('')}
             </div>
         </div>

@@ -38,7 +38,7 @@ class LayerManager:
         
     def _set_websocket_context_on_transport(self, clip_id, player_name=""):
         """Set WebSocket context on all transport effects in layers."""
-        logger.info(f"🎯 [{player_name}] _set_websocket_context_on_transport called with clip_id={clip_id}")
+        logger.debug(f"🎯 [{player_name}] _set_websocket_context_on_transport called with clip_id={clip_id}")
         
         if not self.player or not hasattr(self.player, 'player_manager'):
             logger.warning(f"⚠️ [{player_name}] Cannot set WebSocket context: player or player_manager not available")
@@ -63,7 +63,7 @@ class LayerManager:
                     transport.player_id = player_id
                     transport.clip_id = clip_id
                     transport_found = True
-                    logger.info(f"📡 [{player_name}] Set WebSocket context on transport: layer={layer_idx}, player_id={player_id}, clip_id={clip_id}, socketio={socketio is not None}")
+                    logger.debug(f"📡 [{player_name}] Set WebSocket context on transport: layer={layer_idx}, player_id={player_id}, clip_id={clip_id}, socketio={socketio is not None}")
         
         if not transport_found:
             logger.warning(f"⚠️ [{player_name}] No transport effect found in {len(self.layers)} layers to set WebSocket context")
@@ -180,7 +180,7 @@ class LayerManager:
                     new_layer.enabled = enabled
                     new_layers.append(new_layer)
                     
-                    logger.info(f"📐 Layer {layer_id} loaded: opacity={opacity}%, blend={blend_mode}, enabled={enabled}")
+                    logger.debug(f"📐 Layer {layer_id} loaded: opacity={opacity}%, blend={blend_mode}, enabled={enabled}")
                     
                     # Load effects from registry
                     if layer_clip_id:
@@ -450,12 +450,12 @@ class LayerManager:
             
             try:
                 instance = effect['instance']
-                plugin_id = effect.get('id', 'unknown')
-                logger.debug(f"  ✓ Layer {layer.layer_id} effect: {plugin_id}")
+                # PERFORMANCE: Remove debug logging (costs 0.1-0.5ms per layer per frame)
                 # Pass layer's source and player context
                 frame = instance.process_frame(frame, source=layer.source, player=None)
             except Exception as e:
-                logger.error(f"❌ [{player_name}] Layer {layer.layer_id} effect error: {e}")
+                plugin_id = effect.get('id', 'unknown')
+                logger.error(f"❌ [{player_name}] Layer {layer.layer_id} effect {plugin_id} error: {e}")
         
         return frame
     
@@ -549,6 +549,9 @@ class LayerManager:
         """
         Get BlendEffect plugin instance (cached for performance).
         
+        OPTIMIZATION: Cache by blend_mode only, update opacity dynamically.
+        This prevents cache pollution when opacity changes frequently (slider).
+        
         Args:
             blend_mode: Blend mode
             opacity: Opacity 0-100%
@@ -556,11 +559,16 @@ class LayerManager:
         Returns:
             BlendEffect plugin instance
         """
-        cache_key = (blend_mode, opacity)
+        # OPTIMIZATION: Cache by blend_mode only (not opacity)
+        # Opacity changes frequently via slider - don't create new instances!
+        cache_key = blend_mode
         
         # Check cache first
         if cache_key in self._blend_cache:
-            return self._blend_cache[cache_key]
+            blend = self._blend_cache[cache_key]
+            # Update opacity for this frame (lightweight attribute change)
+            blend.opacity = opacity
+            return blend
         
         # Create new instance and cache it
         from plugins.effects.blend import BlendEffect

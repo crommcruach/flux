@@ -72,7 +72,7 @@ class RoutingBridge:
             self._frame_counter = 0
         self._frame_counter += 1
         if self._frame_counter % 120 == 1:
-            logger.info(f"🎬 [RoutingBridge] Received frame: shape={frame.shape}, mean={frame.mean():.1f}")
+            logger.debug(f"🎬 [RoutingBridge] Received frame: shape={frame.shape}, mean={frame.mean():.1f}")
         
         try:
             # Get current objects and outputs from routing manager

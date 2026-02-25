@@ -963,12 +963,12 @@ class Player:
         debug_playback(logger, f"Play-Loop gestartet: FPS={fps}, Source={source_name}")
         
         # Check sequence manager setup (log every time play loop starts)
-        print(f"🎵🎵🎵 PLAY LOOP STARTED FOR: {source_name} 🎵🎵🎵")
-        logger.info(f"🎵 [SEQUENCE CHECK] player_manager exists: {hasattr(self, 'player_manager') and self.player_manager is not None}")
+        logger.debug(f"🎵 PLAY LOOP STARTED FOR: {source_name}")
+        logger.debug(f"🎵 [SEQUENCE CHECK] player_manager exists: {hasattr(self, 'player_manager') and self.player_manager is not None}")
         if hasattr(self, 'player_manager') and self.player_manager:
-            logger.info(f"🎵 [SEQUENCE CHECK] sequence_manager exists: {hasattr(self.player_manager, 'sequence_manager')}")
+            logger.debug(f"🎵 [SEQUENCE CHECK] sequence_manager exists: {hasattr(self.player_manager, 'sequence_manager')}")
             if hasattr(self.player_manager, 'sequence_manager'):
-                logger.info(f"🎵 [SEQUENCE CHECK] sequence count: {len(self.player_manager.sequence_manager.sequences)}")
+                logger.debug(f"🎵 [SEQUENCE CHECK] sequence count: {len(self.player_manager.sequence_manager.sequences)}")
         
         while self.is_running and self.is_playing:
             # Pause-Handling (Event-basiert für low-latency)
@@ -984,7 +984,7 @@ class Player:
             if self.player_manager and hasattr(self.player_manager, 'sequence_manager'):
                 dt = frame_time if frame_time > 0 else 1.0 / 30.0
                 if not hasattr(self, '_sequence_update_logged'):
-                    logger.info(f"🎵 Calling update_sequences(dt={dt:.3f})")
+                    logger.debug(f"🎵 Calling update_sequences(dt={dt:.3f})")
                     self._sequence_update_logged = True
                 self.player_manager.update_sequences(dt)
             elif not hasattr(self, '_no_sequence_manager_logged'):
@@ -1106,14 +1106,22 @@ class Player:
                             # Wenn immer noch None (z.B. fehlerhafte Source) - überspringe Layer
                             if overlay_frame is None:
                                 source_info = getattr(layer.source, 'video_path', getattr(layer.source, 'generator_name', 'Unknown'))
-                                logger.warning(f"⚠️ Layer {layer.layer_id} (source: {source_info}) returned None after reset, skipping")
+                                # Only log once per layer to avoid spamming in hot path
+                                if not hasattr(self, '_warned_layers'):
+                                    self._warned_layers = set()
+                                if layer.layer_id not in self._warned_layers:
+                                    logger.warning(f"⚠️ Layer {layer.layer_id} (source: {source_info}) returned None after reset, skipping")
+                                    self._warned_layers.add(layer.layer_id)
                                 continue
                             
                             # Wende Layer Effects an
                             overlay_frame = self.apply_layer_effects(layer, overlay_frame)
                             
-                            # Composite mit BlendEffect
+                            # OPTIMIZATION: Get blend plugin (cached, only updates opacity)
                             blend_plugin = self.get_blend_plugin(layer.blend_mode, layer.opacity)
+                            
+                            # PERFORMANCE CRITICAL: Composite mit BlendEffect
+                            # This is the most expensive operation (float32 conversion + blending)
                             frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
                     
                     # Frame ist jetzt das finale composited Frame
@@ -1260,7 +1268,7 @@ class Player:
                         # Use _loaded_clip_id to avoid property getter issues during layer reload
                         logger.debug(f"🔍 [{self.player_name}] Comparing clips: current={self._loaded_clip_id}, next={next_clip_id}, equal={self._loaded_clip_id == next_clip_id}")
                         if self._loaded_clip_id != next_clip_id:
-                            logger.info(f"🔄 [{self.player_name}] Different clip detected, reloading layers")
+                            logger.debug(f"🔄 [{self.player_name}] Different clip detected, reloading layers")
                             
                             # Update tracking variable FIRST, before loading layers
                             self._loaded_clip_id = next_clip_id

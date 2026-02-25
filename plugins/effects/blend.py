@@ -68,7 +68,7 @@ class BlendEffect(PluginBase):
         
         Args:
             frame: Basis-Frame (NumPy Array, RGB, uint8) - "Background"
-            overlay: Overlay-Frame (NumPy Array, RGB, uint8) - "Foreground"
+            overlay: Overlay-Frame (NumPy Array, RGB/RGBA, uint8) - "Foreground"
                      Falls None, wird nur Opacity angewendet
             **kwargs: Zusätzliche Parameter
             
@@ -79,15 +79,21 @@ class BlendEffect(PluginBase):
         if overlay is None:
             return self._apply_opacity(frame)
         
+        # PERFORMANCE: Extract alpha channel from RGBA overlay (from mask effect)
+        overlay_alpha = None
+        if len(overlay.shape) == 3 and overlay.shape[2] == 4:
+            overlay_alpha = overlay[:, :, 3].astype(np.float32) / 255.0  # Normalize to 0-1
+            overlay = overlay[:, :, :3]  # Extract RGB only
+        
         # OPTIMIZATION: Fast path for normal mode at 100% opacity (zero-copy)
-        if self.blend_mode == 'normal' and self.opacity >= 100.0:
+        if self.blend_mode == 'normal' and self.opacity >= 100.0 and overlay_alpha is None:
             # Ensure same dimensions
             if frame.shape != overlay.shape:
                 return cv2.resize(overlay, (frame.shape[1], frame.shape[0]))
             return overlay  # Direct return, no processing needed (saves 3-5ms)
         
         # OPTIMIZATION: Fast path for normal mode with opacity (skip float32 conversion)
-        if self.blend_mode == 'normal':
+        if self.blend_mode == 'normal' and overlay_alpha is None:
             # Ensure same dimensions
             if frame.shape != overlay.shape:
                 overlay = cv2.resize(overlay, (frame.shape[1], frame.shape[0]))
@@ -96,38 +102,54 @@ class BlendEffect(PluginBase):
             return cv2.addWeighted(frame, 1.0 - opacity_factor, overlay, opacity_factor, 0)
         
         # Stelle sicher, dass beide Frames gleiche Dimensionen haben
+        # OPTIMIZATION: Cache resize to avoid redundant operations
         if frame.shape != overlay.shape:
-            overlay = cv2.resize(overlay, (frame.shape[1], frame.shape[0]))
+            # Most expensive operation in blend - only do when needed
+            overlay = cv2.resize(overlay, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_LINEAR)
+            # Also resize alpha if present
+            if overlay_alpha is not None:
+                overlay_alpha = cv2.resize(overlay_alpha, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_LINEAR)
         
-        # Konvertiere zu float32 für präzise Berechnungen
-        base = frame.astype(np.float32) / 255.0
-        over = overlay.astype(np.float32) / 255.0
+        # OPTIMIZATION: For opacity >= 100%, skip opacity blending step
+        opacity_factor = self.opacity / 100.0
+        
+        # Konvertiere zu float32 für präzise Berechnungen (nur einmal!)
+        # PERFORMANCE: Use in-place division to save memory allocation
+        base_float = frame.astype(np.float32)
+        base_float *= (1.0 / 255.0)
+        over_float = overlay.astype(np.float32)
+        over_float *= (1.0 / 255.0)
         
         # Wende Blend-Modus an
-        if self.blend_mode == 'normal':
-            blended = self._blend_normal(base, over)
-        elif self.blend_mode == 'multiply':
-            blended = self._blend_multiply(base, over)
+        if self.blend_mode == 'multiply':
+            blended = self._blend_multiply(base_float, over_float)
         elif self.blend_mode == 'screen':
-            blended = self._blend_screen(base, over)
+            blended = self._blend_screen(base_float, over_float)
         elif self.blend_mode == 'add':
-            blended = self._blend_add(base, over)
+            blended = self._blend_add(base_float, over_float)
         elif self.blend_mode == 'subtract':
-            blended = self._blend_subtract(base, over)
+            blended = self._blend_subtract(base_float, over_float)
         elif self.blend_mode == 'overlay':
-            blended = self._blend_overlay(base, over)
+            blended = self._blend_overlay(base_float, over_float)
         elif self.blend_mode == 'mask':
-            blended = self._blend_mask(base, over)
+            blended = self._blend_mask(base_float, over_float)
         else:
-            # Fallback zu Normal
-            blended = self._blend_normal(base, over)
+            # Fallback zu Normal (should not happen)
+            blended = over_float
         
-        # Wende Opacity an (mit cv2.addWeighted für Performance)
-        opacity_factor = self.opacity / 100.0
+        # PERFORMANCE: Apply overlay alpha channel if present (from mask effect)
+        if overlay_alpha is not None:
+            # Expand alpha to 3 channels for RGB multiplication
+            alpha_3ch = np.stack([overlay_alpha, overlay_alpha, overlay_alpha], axis=2)
+            # Blend using alpha: result = base * (1 - alpha) + blended * alpha
+            blended = base_float * (1.0 - alpha_3ch) + blended * alpha_3ch
+        
+        # Wende Opacity an BEFORE converting back to uint8 (saves one conversion)
         if opacity_factor < 1.0:
-            blended = cv2.addWeighted(base, 1.0 - opacity_factor, blended, opacity_factor, 0)
+            # Mix on float32 for precision
+            blended = base_float * (1.0 - opacity_factor) + blended * opacity_factor
         
-        # Clip und konvertiere zurück zu uint8
+        # Clip und konvertiere zurück zu uint8 (nur einmal!)
         return np.clip(blended * 255.0, 0, 255).astype(np.uint8)
     
     def _apply_opacity(self, frame):

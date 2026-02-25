@@ -314,7 +314,7 @@ class RestAPI:
         
         @self.socketio.on('disconnect', namespace='/player')
         def handle_player_disconnect():
-            logger.info(f"Client disconnected from /player namespace: {request.sid}")
+            logger.debug(f"Client disconnected from /player namespace: {request.sid}")
         
         @self.socketio.on('command.play', namespace='/player')
         def handle_play(data):
@@ -450,7 +450,7 @@ class RestAPI:
         
         @self.socketio.on('disconnect', namespace='/effects')
         def handle_effects_disconnect():
-            logger.info(f"Client disconnected from /effects namespace: {request.sid}")
+            logger.debug(f"Client disconnected from /effects namespace: {request.sid}")
         
         @self.socketio.on('command.effect.param', namespace='/effects')
         def handle_effect_param_update(data):
@@ -633,7 +633,7 @@ class RestAPI:
         
         @self.socketio.on('disconnect', namespace='/layers')
         def handle_layers_disconnect():
-            logger.info(f"Client disconnected from /layers namespace: {request.sid}")
+            logger.debug(f"Client disconnected from /layers namespace: {request.sid}")
         
         @self.socketio.on('command.layer.opacity', namespace='/layers')
         def handle_layer_opacity(data):

@@ -379,14 +379,14 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             player = player_manager.get_player(player_id)
             active_layer_effects = None
             if player and hasattr(player, 'layers'):
-                logger.info(f"🔍 [get_clip_effects] Searching for active layer with clip_id={clip_id}, player has {len(player.layers)} layers")
+                logger.debug(f"🔍 [get_clip_effects] Searching for active layer with clip_id={clip_id}, player has {len(player.layers)} layers")
                 for layer_idx, layer in enumerate(player.layers):
                     layer_clip_id = getattr(layer, 'clip_id', None)
-                    logger.info(f"🔍 [get_clip_effects] Layer {layer_idx}: clip_id={layer_clip_id}, matches={layer_clip_id == clip_id}")
+                    logger.debug(f"🔍 [get_clip_effects] Layer {layer_idx}: clip_id={layer_clip_id}, matches={layer_clip_id == clip_id}")
                     if hasattr(layer, 'clip_id') and layer.clip_id == clip_id:
                         # Found the active layer - use its live effect instances
                         active_layer_effects = layer.effects
-                        logger.info(f"✅ [get_clip_effects] Found active layer {layer_idx} with clip_id {clip_id}, has {len(layer.effects) if layer.effects else 0} effects")
+                        logger.debug(f"✅ [get_clip_effects] Found active layer {layer_idx} with clip_id {clip_id}, has {len(layer.effects) if layer.effects else 0} effects")
                         break
             
             # Filter out non-serializable data and update with live parameters
@@ -403,13 +403,13 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     for layer_effect in active_layer_effects:
                         if layer_effect.get('id') == plugin_id:
                             live_instance = layer_effect.get('instance')
-                            logger.info(f"🔍 [get_clip_effects] Found LIVE instance for {plugin_id} in active layer")
+                            logger.debug(f"🔍 [get_clip_effects] Found LIVE instance for {plugin_id} in active layer")
                             break
                 
                 # Fallback to registry instance (will be stuck at position=0 during playback)
                 if not live_instance and 'instance' in effect:
                     live_instance = effect['instance']
-                    logger.info(f"⚠️ [get_clip_effects] Using REGISTRY instance for {plugin_id} (not live!)")
+                    logger.debug(f"⚠️ [get_clip_effects] Using REGISTRY instance for {plugin_id} (not live!)")
                 
                 # Get live parameters from instance if available
                 if live_instance is not None:
@@ -418,19 +418,19 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         if effect.get('plugin_id') == 'transport' and hasattr(live_instance, '_initialize_state'):
                             # Check if already initialized by looking at out_point
                             if live_instance.out_point == 0 and player and len(player.layers) > 0 and player.layers[0].source:
-                                logger.info(f"🎬 [get_clip_effects] Transport NOT initialized yet, initializing for clip {clip_id}")
+                                logger.debug(f"🎬 [get_clip_effects] Transport NOT initialized yet, initializing for clip {clip_id}")
                                 live_instance._initialize_state(player.layers[0].source)
-                                logger.info(f"🎬 [get_clip_effects] Transport initialized: out_point={live_instance.out_point}")
+                                logger.debug(f"🎬 [get_clip_effects] Transport initialized: out_point={live_instance.out_point}")
                             else:
-                                logger.info(f"🎬 [get_clip_effects] Transport already initialized, skipping (out_point={live_instance.out_point})")
+                                logger.debug(f"🎬 [get_clip_effects] Transport already initialized, skipping (out_point={live_instance.out_point})")
                         
                         live_params = live_instance.get_parameters()
                         if live_params:
                             effect_copy['parameters'] = live_params
                             # DEBUG: Log transport position
                             if effect.get('plugin_id') == 'transport':
-                                logger.info(f"🎬 [get_clip_effects] Transport params: current_position={live_instance.current_position}, in_point={live_instance.in_point}, out_point={live_instance.out_point}")
-                                logger.info(f"🎬 [get_clip_effects] Transport get_parameters returned: {live_params.get('transport_position', 'N/A')}")
+                                logger.debug(f"🎬 [get_clip_effects] Transport params: current_position={live_instance.current_position}, in_point={live_instance.in_point}, out_point={live_instance.out_point}")
+                                logger.debug(f"🎬 [get_clip_effects] Transport get_parameters returned: {live_params.get('transport_position', 'N/A')}")
                             debug_api(logger, f"Got live parameters for {effect.get('plugin_id')}: {live_params}")
                     except Exception as e:
                         logger.warning(f"Could not get live parameters from {effect.get('plugin_id')}: {e}")

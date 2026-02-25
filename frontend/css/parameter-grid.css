@@ -129,12 +129,7 @@
 /* Effect Toggle Arrow */
 .effect-item .effect-toggle {
     display: inline-block;
-    transition: transform 0.2s;
     margin-right: 4px;
-}
-
-.effect-item.expanded .effect-toggle {
-    transform: rotate(90deg);
 }
 
 /* Parameter Groups */
@@ -198,6 +193,7 @@
     max-height: 0;
     padding-top: 0;
     padding-bottom: 0;
+    overflow: hidden;
 }
 
 /* Nested parameter rows within groups */

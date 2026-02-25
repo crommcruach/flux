@@ -1083,10 +1083,11 @@ body {
 
 .generator-params-section .expand-icon {
     transition: transform 0.2s;
+    transform: rotate(-90deg); /* Collapsed: arrow points right */
 }
 
 .generator-params-section.expanded .expand-icon {
-    transform: rotate(180deg);
+    transform: rotate(0deg); /* Expanded: arrow points down */
 }
 
 /* ========================================
@@ -1699,7 +1700,6 @@ body {
 
 .effect-toggle {
     font-size: 0.8rem;
-    transition: transform 0.2s;
 }
 
 /* ========================================

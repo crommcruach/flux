@@ -126,7 +126,10 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                 return jsonify({'error': 'Missing type or target_parameter'}), 400
             
             # Import sequence classes
-            from .sequences import AudioSequence, LFOSequence, TimelineSequence, BPMSequence
+            from modules.audio.sequences.audio import AudioSequence
+            from modules.audio.sequences.lfo import LFOSequence
+            from modules.audio.sequences.timeline import TimelineSequence
+            from modules.audio.sequences.bpm import BPMSequence
             
             # Create sequence based on type
             if seq_type == 'audio':

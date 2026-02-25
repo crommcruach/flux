@@ -409,48 +409,32 @@ def main():
     from modules.session.state import init_session_state, get_session_state
     session_state_path = os.path.join(base_path, 'session_state.json')
     
-    # Clear old session state on startup to avoid inconsistencies
+    # ALWAYS start with clean session state (no fragments from previous sessions)
     if os.path.exists(session_state_path):
         try:
             os.remove(session_state_path)
-            logger.info("Cleared old session state on startup")
+            logger.info("✅ Cleared old session state on startup (clean start)")
         except Exception as e:
-            logger.warning(f"Failed to clear session state: {e}")
+            logger.warning(f"⚠️ Failed to clear session state: {e}")
     
     # Initialize session state (starts fresh each time)
     session_state = init_session_state(session_state_path)
-    logger.debug("SessionStateManager initialisiert")
+    logger.debug("SessionStateManager initialized with clean state")
     
-    # Get canvas size from editor state (Priority 1: Editor, Priority 2: Default)
-    session_state_instance = get_session_state()
-    editor_state = session_state_instance.get_editor_state() if session_state_instance else {}
-    editor_canvas = editor_state.get('canvas', {})
+    # Use default canvas size (no session restoration)
+    # Editor canvas will be set from config or defaults
+    artnet_canvas_width = config.get('artnet', {}).get('canvas_width', 1920)
+    artnet_canvas_height = config.get('artnet', {}).get('canvas_height', 1080)
+    logger.info(f"Canvas size: {artnet_canvas_width}x{artnet_canvas_height} (from config)")
     
-    if editor_canvas.get('width') and editor_canvas.get('height'):
-        # Use canvas size from editor
-        artnet_canvas_width = editor_canvas['width']
-        artnet_canvas_height = editor_canvas['height']
-        logger.info(f"Canvas size from editor: {artnet_canvas_width}x{artnet_canvas_height}")
-    else:
-        # Default canvas size
-        artnet_canvas_width = 1920
-        artnet_canvas_height = 1080
-        logger.info(f"Canvas size: {artnet_canvas_width}x{artnet_canvas_height} (default)")
-    
-    # Get video player resolution from session state or config (preview only)
-    video_settings = {}
-    if session_state_instance:
-        video_settings = session_state_instance._state.get('video_player_settings', {})
-    
-    if not video_settings:
-        # Use config defaults if no session settings
-        video_config = config.get('video', {}).get('player_resolution', {})
-        video_settings = {
-            'preset': video_config.get('preset', '1080p'),
-            'custom_width': video_config.get('custom_width', 1920),
-            'custom_height': video_config.get('custom_height', 1080),
-            'autosize': video_config.get('autosize', 'off')
-        }
+    # Get video player resolution from config (no session restoration)
+    video_config = config.get('video', {}).get('player_resolution', {})
+    video_settings = {
+        'preset': video_config.get('preset', '1080p'),
+        'custom_width': video_config.get('custom_width', 1920),
+        'custom_height': video_config.get('custom_height', 1080),
+        'autosize': video_config.get('autosize', 'off')
+    }
     
     # Calculate video player canvas dimensions based on preset or custom
     if video_settings.get('preset') == 'custom':

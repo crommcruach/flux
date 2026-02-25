@@ -767,11 +767,11 @@ class ClipRegistry:
         # DEBUG: Log actual parameter values in memory before serializing
         for clip_id, clip_data in self.clips.items():
             if 'effects' in clip_data:
-                logger.info(f"[SERIALIZE DEBUG] Clip {clip_id[:8]}... has {len(clip_data['effects'])} effects in memory")
+                logger.debug(f"[SERIALIZE DEBUG] Clip {clip_id[:8]}... has {len(clip_data['effects'])} effects in memory")
                 for i, effect in enumerate(clip_data['effects']):
                     if 'parameters' in effect:
                         for param_name, param_value in list(effect['parameters'].items())[:5]:
-                            logger.info(f"[SERIALIZE DEBUG]   effect[{i}].{param_name} = {param_value}")
+                            logger.debug(f"[SERIALIZE DEBUG]   effect[{i}].{param_name} = {param_value}")
         
         return {
             'clips': self.clips.copy(),

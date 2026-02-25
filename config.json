@@ -21,7 +21,7 @@
     "target_ip": "127.0.0.1"
   },
   "effects": {
-    "transport_position_update_interval": 10,
+    "transport_position_update_interval": 2,
     "_transport_position_update_interval_comment": "Send transport position WebSocket updates every N frames (lower = more updates, higher = less network traffic)",
     "video": [
       {

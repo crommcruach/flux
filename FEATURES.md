@@ -5,6 +5,7 @@
 ### Visualization
 - 3D Visualizer
 - 2D Visual Mapping Feature
+- Update Thumbnails
 
 ### Control Systems
 - DMX Control

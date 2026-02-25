@@ -472,7 +472,10 @@ class GeneratorSource(FrameSource):
         )
         
         if frame is None:
-            logger.warning(f"Generator {self.generator_id} returned None frame")
+            # Only log once to avoid spamming in 60Hz loop
+            if not hasattr(self, '_warned_none_frame'):
+                logger.warning(f"Generator {self.generator_id} returned None frame")
+                self._warned_none_frame = True
             # Return black frame as fallback
             frame = np.zeros((self.canvas_height, self.canvas_width, 3), dtype=np.uint8)
         
