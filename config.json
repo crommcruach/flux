@@ -12,7 +12,9 @@
     "file_log_level": "INFO",
     "_log_level_comment": "Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL",
     "max_log_files": 10,
-    "_max_log_files_comment": "Maximum number of log files to keep (0 = infinite, keep all logs)"
+    "_max_log_files_comment": "Maximum number of log files to keep (0 = infinite, keep all logs)",
+    "debug_modules": [],
+    "_debug_modules_comment": "List of module namespaces to enable DEBUG logging (supports wildcards: 'modules.player.*', 'modules.api.artnet')"
   },
   "artnet": {
     "broadcast": true,
@@ -147,6 +149,8 @@
     "default_brightness": 100,
     "default_fps": null,
     "default_speed": 1,
+    "preview_fps_limit": 30,
+    "_preview_fps_limit_comment": "FPS limit for preview players (null = use source FPS, number = limit to specific FPS)",
     "player_resolution": {
       "preset": "1080p",
       "custom_width": 1920,

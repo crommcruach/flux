@@ -2,6 +2,8 @@
 Player Manager - Central player container (Single Source of Truth)
 """
 import time
+import os
+import json
 from ..core.logger import get_logger, debug_playback
 
 logger = get_logger(__name__)
@@ -199,9 +201,21 @@ class PlayerManager:
             from .core import Player
             from .sources import VideoSource
             
+            # Load global config for preview_fps_limit setting
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config.json")
+            preview_fps = None  # Default: use source FPS
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    global_config = json.load(f)
+                    preview_fps = global_config.get('video', {}).get('preview_fps_limit')
+                    if preview_fps is not None:
+                        logger.debug(f"Preview FPS limit from config: {preview_fps}")
+            except Exception as e:
+                logger.warning(f"Could not load preview_fps_limit from config: {e}")
+            
             # Create video preview player (clone video player config)
             if self.video_player:
-                logger.info("Creating video preview player...")
+                logger.debug("Creating video preview player...")
                 
                 # Clone config for preview player
                 preview_config = self.video_player.config.copy() if self.video_player.config else {}
@@ -213,21 +227,22 @@ class PlayerManager:
                         canvas_height=self.video_player.canvas_height,
                         config=preview_config
                     ),
-                    points_json_path=self.video_player.points_json_path,
                     target_ip=self.video_player.target_ip,
                     start_universe=self.video_player.start_universe,
-                    fps_limit=15,  # Lower FPS for preview (optimization)
+                    fps_limit=preview_fps,  # Use config value (null = use source FPS)
                     config=preview_config,
                     enable_artnet=False,  # NO OUTPUT - preview only
                     player_name="VideoPreview",
-                    clip_registry=self.video_player.clip_registry
+                    clip_registry=self.video_player.clip_registry,
+                    canvas_width=self.video_player.canvas_width,
+                    canvas_height=self.video_player.canvas_height
                 )
                 self.players['video_preview'] = self.video_preview_player
-                logger.info("✅ Video preview player created (display output disabled)")
+                logger.debug("✅ Video preview player created (display output disabled)")
             
             # Create artnet preview player (clone artnet player config)
             if self.artnet_player:
-                logger.info("Creating Art-Net preview player...")
+                logger.debug("Creating Art-Net preview player...")
                 
                 # Clone config for preview player
                 preview_config = self.artnet_player.config.copy() if self.artnet_player.config else {}
@@ -239,21 +254,22 @@ class PlayerManager:
                         canvas_height=self.artnet_player.canvas_height,
                         config=preview_config
                     ),
-                    points_json_path=self.artnet_player.points_json_path,
                     target_ip=self.artnet_player.target_ip,
                     start_universe=self.artnet_player.start_universe,
-                    fps_limit=15,  # Lower FPS for preview (optimization)
+                    fps_limit=preview_fps,  # Use config value (null = use source FPS)
                     config=preview_config,
                     enable_artnet=False,  # NO OUTPUT - preview only
                     player_name="ArtNetPreview",
-                    clip_registry=self.artnet_player.clip_registry
+                    clip_registry=self.artnet_player.clip_registry,
+                    canvas_width=self.artnet_player.canvas_width,
+                    canvas_height=self.artnet_player.canvas_height
                 )
                 self.players['artnet_preview'] = self.artnet_preview_player
-                logger.info("✅ Art-Net preview player created (display output disabled)")
+                logger.debug("✅ Art-Net preview player created (display output disabled)")
             
             self._preview_players_created = True
             self._preview_last_used = time.time()
-            logger.info("🎭 Preview players initialized (isolated from output)")
+            logger.debug("🎭 Preview players initialized (isolated from output)")
             return True
             
         except Exception as e:
@@ -270,21 +286,21 @@ class PlayerManager:
         
         try:
             if self.video_preview_player:
-                logger.info("Destroying video preview player...")
+                logger.debug("Destroying video preview player...")
                 if self.video_preview_player.is_running:
                     self.video_preview_player.stop()
                 self.video_preview_player = None
                 self.players['video_preview'] = None
             
             if self.artnet_preview_player:
-                logger.info("Destroying Art-Net preview player...")
+                logger.debug("Destroying Art-Net preview player...")
                 if self.artnet_preview_player.is_running:
                     self.artnet_preview_player.stop()
                 self.artnet_preview_player = None
                 self.players['artnet_preview'] = None
             
             self._preview_players_created = False
-            logger.info("🗑️ Preview players destroyed")
+            logger.debug("🗑️ Preview players destroyed")
             
         except Exception as e:
             logger.error(f"Error destroying preview players: {e}", exc_info=True)
@@ -321,7 +337,7 @@ class PlayerManager:
         
         inactive_time = time.time() - self._preview_last_used
         if inactive_time > timeout_seconds:
-            logger.info(f"Preview players inactive for {inactive_time:.0f}s - destroying")
+            logger.debug(f"Preview players inactive for {inactive_time:.0f}s - destroying")
             self.destroy_preview_players()
             return True
         
@@ -350,10 +366,10 @@ class PlayerManager:
         try:
             # Stop any isolated preview players first (they conflict with takeover mode)
             if self._preview_players_created:
-                logger.info("🛑 Stopping isolated preview players for takeover mode")
+                logger.debug("🛑 Stopping isolated preview players for takeover mode")
                 self.destroy_preview_players()
             
-            from .api_playlists import get_playlist_system
+            from ..api.player.playlists import get_playlist_system
             playlist_system = get_playlist_system()
             
             if not playlist_system:
@@ -403,10 +419,10 @@ class PlayerManager:
                 # Pause active playback
                 if player.is_playing:
                     player.pause()
-                    logger.info(f"⏸️ Paused {pid} player for takeover preview")
+                    logger.debug(f"⏸️ Paused {pid} player for takeover preview")
             
             self._takeover_mode_active = True
-            logger.info(f"🎬 Takeover preview mode activated: {preview_playlist.name}")
+            logger.debug(f"🎬 Takeover preview mode activated: {preview_playlist.name}")
             
             return {
                 "success": True,
@@ -436,7 +452,7 @@ class PlayerManager:
             }
         
         try:
-            from .api_playlists import get_playlist_system
+            from ..api.player.playlists import get_playlist_system
             playlist_system = get_playlist_system()
             
             if not playlist_system:
@@ -476,10 +492,10 @@ class PlayerManager:
                 # Restore playback state
                 if saved_state['is_playing'] and not saved_state['is_paused']:
                     player.play()
-                    logger.info(f"▶️ Resumed {pid} player after takeover preview")
+                    logger.debug(f"▶️ Resumed {pid} player after takeover preview")
                 elif saved_state['is_paused']:
                     player.pause()
-                    logger.info(f"⏸️ Restored paused state for {pid} player")
+                    logger.debug(f"⏸️ Restored paused state for {pid} player")
                 
                 restored_players.append(pid)
             
@@ -487,7 +503,7 @@ class PlayerManager:
             prev_playlist_name = self._takeover_saved_state.get('preview_playlist_id', 'unknown')
             self._takeover_saved_state = {}
             
-            logger.info(f"🎬 Takeover preview mode stopped, active playlist restored")
+            logger.debug(f"🎬 Takeover preview mode stopped, active playlist restored")
             
             return {
                 "success": True,
@@ -541,9 +557,9 @@ class PlayerManager:
         
         # DEBUG: Log stack trace to find who's calling this
         import traceback
-        logger.info(f"👑 Master playlist: {old_master} → {player_id}")
+        logger.debug(f"👑 Master playlist: {old_master} → {player_id}")
         if old_master != player_id:  # Only log stack on actual change
-            logger.info(f"📞 set_master_playlist called from:\n{''.join(traceback.format_stack()[:-1])}")
+            logger.debug(f"📞 set_master_playlist called from:\n{''.join(traceback.format_stack()[:-1])}")
         
         # Emit WebSocket event for master/slave state change
         if self.socketio and old_master != player_id:
@@ -552,7 +568,7 @@ class PlayerManager:
                     'master_playlist': player_id,
                     'timestamp': time.time()
                 }, namespace='/player')
-                logger.info(f"📡 WebSocket: master_slave_changed emitted (master={player_id})")
+                logger.debug(f"📡 WebSocket: master_slave_changed emitted (master={player_id})")
             except Exception as e:
                 logger.error(f"❌ Error emitting master_slave_changed WebSocket event: {e}")
         
@@ -563,7 +579,7 @@ class PlayerManager:
                 player = self.get_player(pid)
                 if player and len(player.playlist) > 0:
                     was_playing = player.is_playing
-                    logger.info(f"Master mode activated - resetting {pid} to index 0, frame 0 (was at index {player.current_clip_index})")
+                    logger.debug(f"Master mode activated - resetting {pid} to index 0, frame 0 (was at index {player.current_clip_index})")
                     
                     # Force to index 0 (notify_manager=False to avoid triggering sync events)
                     player.load_clip_by_index(0, notify_manager=False)
@@ -670,7 +686,7 @@ class PlayerManager:
             
             # Mark as auto-stopped so it can be restarted when master returns to valid range
             slave_player._auto_stopped_by_master = True
-            logger.info(f"⏹️ Slave {slave_player.player_name} stopped (index {clip_index} out of range, has {len(playlist)} clips) - black screen")
+            logger.debug(f"⏹️ Slave {slave_player.player_name} stopped (index {clip_index} out of range, has {len(playlist)} clips) - black screen")
             return
         
         # Check if slave was previously auto-stopped by master (out of range)
@@ -682,7 +698,7 @@ class PlayerManager:
         if success:
             # If slave was auto-stopped and now has valid clip, restart playback
             if was_auto_stopped and not slave_player.is_playing:
-                logger.info(f"🔄 Slave {slave_player.player_name} was auto-stopped, restarting playback at index {clip_index}")
+                logger.debug(f"🔄 Slave {slave_player.player_name} was auto-stopped, restarting playback at index {clip_index}")
                 slave_player.start()
                 slave_player._auto_stopped_by_master = False  # Clear flag
             
@@ -751,7 +767,7 @@ class PlayerManager:
             self.sequencer.on_slot_change = self._on_sequencer_slot_change
             self.sequencer.on_position_update = self._on_sequencer_position_update
             
-            logger.info("🎵 AudioSequencer initialized")
+            logger.debug("🎵 AudioSequencer initialized")
         except Exception as e:
             logger.error(f"❌ Failed to initialize sequencer: {e}")
             import traceback
@@ -781,9 +797,9 @@ class PlayerManager:
             # Clear master playlist - sequencer controls all
             old_master = self.master_playlist
             self.master_playlist = None
-            logger.info(f"🎵 SEQUENCER MODE ON: Sequencer is MASTER, all playlists are SLAVES (previous master: {old_master})")
+            logger.debug(f"🎵 SEQUENCER MODE ON: Sequencer is MASTER, all playlists are SLAVES (previous master: {old_master})")
         else:
-            logger.info("🎵 SEQUENCER MODE OFF: Normal master/slave operation")
+            logger.debug("🎵 SEQUENCER MODE OFF: Normal master/slave operation")
             # Note: master_playlist will be set by user via transport position controls
         
         # Broadcast mode change via WebSocket
@@ -839,14 +855,14 @@ class PlayerManager:
                     player.last_video_frame = black_frame_bgr
                     player.last_frame = None
                     
-                    logger.info(f"⏹️ Sequencer slot {slot_index}: {player_id} stopped (only has {playlist_length} clips) - black screen")
+                    logger.debug(f"⏹️ Sequencer slot {slot_index}: {player_id} stopped (only has {playlist_length} clips) - black screen")
                     continue
                 
                 current_index = getattr(player, 'current_clip_index', -1)
                 target_index = slot_index
                 
                 if target_index != current_index or force_reload:
-                    logger.info(f"🔄 Sequencer: Loading {player_id} clip {target_index}")
+                    logger.debug(f"🔄 Sequencer: Loading {player_id} clip {target_index}")
                     
                     # Load clip at target index
                     success = player.load_clip_by_index(target_index, notify_manager=False)

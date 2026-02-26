@@ -62,7 +62,7 @@ def register_session_routes(app, session_state_manager):
             file_size = os.path.getsize(snapshot_path)
             created_time = datetime.now().isoformat()
             
-            logger.info(f"📸 Snapshot created: {filename}")
+            logger.debug(f"📸 Snapshot created: {filename}")
             
             return jsonify({
                 "success": True,
@@ -157,21 +157,21 @@ def register_session_routes(app, session_state_manager):
             with open(session_state_path, 'w', encoding='utf-8') as f:
                 json.dump(snapshot_data, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"🔒 Injected restore_timestamp: {restore_timestamp}")
+            logger.debug(f"🔒 Injected restore_timestamp: {restore_timestamp}")
             
             # Actively restore playlists if available
             playlist_system = get_playlist_system()
             if playlist_system:
                 playlists_data = snapshot_data.get('playlists', {})
-                logger.info(f"🎵 Playlists data found: {bool(playlists_data)}")
+                logger.debug(f"🎵 Playlists data found: {bool(playlists_data)}")
                 
                 if playlists_data and isinstance(playlists_data, dict):
                     items = playlists_data.get('items', {})
-                    logger.info(f"🎵 Playlist items count: {len(items)}")
+                    logger.debug(f"🎵 Playlist items count: {len(items)}")
                     
                     if playlist_system.load_from_dict(playlists_data):
                         playlist_count = len(playlist_system.playlists)
-                        logger.info(f"✅ Snapshot restored with {playlist_count} playlists: {filename}")
+                        logger.debug(f"✅ Snapshot restored with {playlist_count} playlists: {filename}")
                         
                         return jsonify({
                             "success": True,
@@ -188,7 +188,7 @@ def register_session_routes(app, session_state_manager):
             else:
                 logger.warning("⚠️ playlist_system not available")
             
-            logger.info(f"🔄 Snapshot restored (file only): {filename}")
+            logger.debug(f"🔄 Snapshot restored (file only): {filename}")
             
             return jsonify({
                 "success": True,
@@ -298,7 +298,7 @@ def register_session_routes(app, session_state_manager):
             
             os.remove(snapshot_path)
             
-            logger.info(f"🗑️ Snapshot deleted: {filename}")
+            logger.debug(f"🗑️ Snapshot deleted: {filename}")
             
             return jsonify({
                 "success": True,
@@ -326,7 +326,7 @@ def register_session_routes(app, session_state_manager):
             with open(session_state_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"💾 Complete session state updated")
+            logger.debug(f"💾 Complete session state updated")
             
             return jsonify({
                 "success": True,
@@ -354,7 +354,7 @@ def register_session_routes(app, session_state_manager):
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             download_name = f"session_state_{timestamp}.json"
             
-            logger.info(f"📥 Session state downloaded: {download_name}")
+            logger.debug(f"📥 Session state downloaded: {download_name}")
             
             return send_file(
                 session_state_path,
@@ -394,7 +394,7 @@ def register_session_routes(app, session_state_manager):
             with open(session_state_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"📤 Session state uploaded from: {file.filename}")
+            logger.debug(f"📤 Session state uploaded from: {file.filename}")
             
             return jsonify({
                 "success": True,
@@ -437,18 +437,18 @@ def register_session_routes(app, session_state_manager):
                 return jsonify({"success": False, "error": f"File '{filename}' already exists"}), 400
             
             # Force save current state
-            logger.info(f"[API SAVE] Checking app attributes...")
-            logger.info(f"[API SAVE]   hasattr(app, 'flux_player_manager') = {hasattr(app, 'flux_player_manager')}")
-            logger.info(f"[API SAVE]   hasattr(app, 'flux_clip_registry') = {hasattr(app, 'flux_clip_registry')}")
+            logger.debug(f"[API SAVE] Checking app attributes...")
+            logger.debug(f"[API SAVE]   hasattr(app, 'flux_player_manager') = {hasattr(app, 'flux_player_manager')}")
+            logger.debug(f"[API SAVE]   hasattr(app, 'flux_clip_registry') = {hasattr(app, 'flux_clip_registry')}")
             
             if hasattr(app, 'flux_player_manager') and hasattr(app, 'flux_clip_registry'):
-                logger.info(f"[API SAVE] ✅ Calling session_state_manager.save() NOW...")
+                logger.debug(f"[API SAVE] ✅ Calling session_state_manager.save() NOW...")
                 session_state_manager.save(
                     player_manager=app.flux_player_manager,
                     clip_registry=app.flux_clip_registry,
                     force=True
                 )
-                logger.info(f"[API SAVE] ✅ save() returned")
+                logger.debug(f"[API SAVE] ✅ save() returned")
             else:
                 logger.error(f"[API SAVE] ❌ SKIPPING save() - app attributes not found!")
                 logger.error(f"[API SAVE] ❌ This means we're copying an OLD session_state.json!")
@@ -468,7 +468,7 @@ def register_session_routes(app, session_state_manager):
             file_size = os.path.getsize(save_path)
             created_time = datetime.now().isoformat()
             
-            logger.info(f"💾 Session saved: {filename}")
+            logger.debug(f"💾 Session saved: {filename}")
             
             return jsonify({
                 "success": True,
@@ -554,8 +554,8 @@ def register_session_routes(app, session_state_manager):
             with open(save_path, 'r', encoding='utf-8') as f:
                 session_data = json.load(f)
             
-            logger.info(f"📂 Loaded session file: {filename}")
-            logger.info(f"📊 Session contains keys: {list(session_data.keys())}")
+            logger.debug(f"📂 Loaded session file: {filename}")
+            logger.debug(f"📊 Session contains keys: {list(session_data.keys())}")
             
             # Inject restore timestamp for locking mechanism
             from datetime import datetime
@@ -567,8 +567,8 @@ def register_session_routes(app, session_state_manager):
             with open(session_state_path, 'w', encoding='utf-8') as f:
                 json.dump(session_data, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"🔒 Injected restore_timestamp: {restore_timestamp}")
-            logger.info(f"💾 Wrote to session_state.json")
+            logger.debug(f"🔒 Injected restore_timestamp: {restore_timestamp}")
+            logger.debug(f"💾 Wrote to session_state.json")
             
             # CRITICAL: Restore clip_registry BEFORE playlists!
             # Playlists load will register clips, and we need the saved clip data (effects/layers) to exist first
@@ -578,7 +578,7 @@ def register_session_routes(app, session_state_manager):
             if clip_registry_data:
                 try:
                     clip_registry.deserialize(clip_registry_data)
-                    logger.info(f"📋 Clip registry restored from session: {len(clip_registry.clips)} clips")
+                    logger.debug(f"📋 Clip registry restored from session: {len(clip_registry.clips)} clips")
                 except Exception as e:
                     logger.error(f"⚠️ Failed to restore clip registry: {e}", exc_info=True)
             else:
@@ -588,15 +588,15 @@ def register_session_routes(app, session_state_manager):
             playlist_system = get_playlist_system()
             if playlist_system:
                 playlists_data = session_data.get('playlists', {})
-                logger.info(f"🎵 Playlists data found: {bool(playlists_data)}")
+                logger.debug(f"🎵 Playlists data found: {bool(playlists_data)}")
                 
                 if playlists_data and isinstance(playlists_data, dict):
                     items = playlists_data.get('items', {})
-                    logger.info(f"🎵 Playlist items count: {len(items)}")
+                    logger.debug(f"🎵 Playlist items count: {len(items)}")
                     
                     if playlist_system.load_from_dict(playlists_data):
                         playlist_count = len(playlist_system.playlists)
-                        logger.info(f"✅ Session restored with {playlist_count} playlists: {filename}")
+                        logger.debug(f"✅ Session restored with {playlist_count} playlists: {filename}")
                         
                         return jsonify({
                             "success": True,
@@ -613,7 +613,7 @@ def register_session_routes(app, session_state_manager):
             else:
                 logger.warning("⚠️ playlist_system not available")
             
-            logger.info(f"🔄 Session restored (file only): {filename}")
+            logger.debug(f"🔄 Session restored (file only): {filename}")
             
             return jsonify({
                 "success": True,
@@ -645,7 +645,7 @@ def register_session_routes(app, session_state_manager):
             
             os.remove(save_path)
             
-            logger.info(f"🗑️ Session deleted: {filename}")
+            logger.debug(f"🗑️ Session deleted: {filename}")
             
             return jsonify({
                 "success": True,

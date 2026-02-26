@@ -134,22 +134,22 @@ class RestAPI:
         # Unified Player API routes
         from .player.playback import register_unified_routes
         register_unified_routes(self.app, self.player_manager, self.config, self.socketio, playlist_system)
-        logger.info("Unified Player API routes registered")
+        logger.debug("Unified Player API routes registered")
         
         # Transition API routes
         from .player.transitions import register_transition_routes
         register_transition_routes(self.app, self.player_manager, playlist_system)
-        logger.info("Transition API routes registered")
+        logger.debug("Transition API routes registered")
         
         # Multi-Playlist API routes
         from .player.playlists import register_playlist_routes
         register_playlist_routes(self.app, self.player_manager, self.config, self.socketio)
-        logger.info("Multi-Playlist API routes registered")
+        logger.debug("Multi-Playlist API routes registered")
         
         # ArtNet Routing API routes
         from .artnet import register_artnet_routing_routes
         register_artnet_routing_routes(self.app, artnet_routing_manager)
-        logger.info("ArtNet Routing API routes registered")
+        logger.debug("ArtNet Routing API routes registered")
         
         # Set audio analyzer for BPM blueprint (already registered during init)
         if audio_analyzer:
@@ -157,7 +157,7 @@ class RestAPI:
             set_audio_analyzer(audio_analyzer)
             if hasattr(self.player_manager, 'sequence_manager'):
                 set_sequence_manager(self.player_manager.sequence_manager)
-            logger.info("BPM API configured with audio analyzer")
+            logger.debug("BPM API configured with audio analyzer")
     
     def _register_routes(self):
         """Registriert alle API-Routen."""
@@ -172,7 +172,6 @@ class RestAPI:
             register_settings_routes,
             register_artnet_routes,
             register_info_routes,
-            register_recording_routes,
             register_cache_routes,
             register_script_routes,
             register_background_routes
@@ -183,7 +182,7 @@ class RestAPI:
         from .system.config import register_config_routes
         from .system.logs import register_log_routes
         from .content.plugins import register_plugins_api
-        from .system.benchmark import register_benchmark_routes
+        # REMOVED: benchmark module deleted
         from .player.layers import register_layer_routes
         from .player.clips import register_clip_layer_routes
         from .output.routing import register_output_routes
@@ -195,7 +194,7 @@ class RestAPI:
         register_settings_routes(self.app, self.player_manager)
         register_artnet_routes(self.app, self.player_manager)
         register_info_routes(self.app, self.player_manager, self, self.config)
-        register_recording_routes(self.app, self.player_manager, self)
+        # REMOVED: register_recording_routes - Recording system removed
         register_cache_routes(self.app)
         register_script_routes(self.app, self.player_manager, self.config)
         register_points_routes(self.app, self.player_manager, self.data_dir)
@@ -204,7 +203,7 @@ class RestAPI:
         register_config_routes(self.app)
         register_log_routes(self.app)
         register_plugins_api(self.app)
-        register_benchmark_routes(self.app, self.player_manager)
+        # REMOVED: register_benchmark_routes - benchmark module deleted
         register_layer_routes(self.app, self.player_manager, self.config)
         register_clip_layer_routes(self.app, get_clip_registry(), self.player_manager, self.video_dir)
         register_output_routes(self.app, self.player_manager)
@@ -241,23 +240,23 @@ class RestAPI:
         # Register Sequencer API routes
         from .audio.sequencer import register_sequencer_routes
         register_sequencer_routes(self.app, self.player_manager, self.config, session_state)
-        logger.info("Sequencer API routes registered")
+        logger.debug("Sequencer API routes registered")
         
         # Register Dynamic Parameter Sequences API
         if hasattr(self.player_manager, 'sequence_manager') and hasattr(self.player_manager, 'audio_analyzer'):
             from .audio.sequences import register_sequence_routes
             register_sequence_routes(self.app, self.player_manager.sequence_manager, self.player_manager.audio_analyzer, self.player_manager, self.socketio)
-            logger.info("Parameter Sequence API routes registered with audio streaming")
+            logger.debug("Parameter Sequence API routes registered with audio streaming")
         
         # Register BPM API Blueprint
         from .audio.bpm import bpm_bp
         self.app.register_blueprint(bpm_bp)
-        logger.info("BPM API routes registered")
+        logger.debug("BPM API routes registered")
         
         # Register LED Mapper API Blueprint
         from .mapper import mapper_bp
         self.app.register_blueprint(mapper_bp)
-        logger.info("LED Mapper API routes registered")
+        logger.debug("LED Mapper API routes registered")
     
     def _register_socketio_events(self):
         """Registriert WebSocket Events."""
@@ -464,8 +463,8 @@ class RestAPI:
             range_max = data.get('rangeMax')
             uid = data.get('uid')  # Preserve UID for sequence restoration
             
-            # CRITICAL: Log every WebSocket call to trace 121.0 source
-            logger.warning(f"🌐 WebSocket 'command.effect.param': clip={clip_id[:8]}..., effect[{effect_index}].{param_name} = {value}")
+            # Debug: Log WebSocket effect parameter updates
+            logger.debug(f"🌐 WebSocket 'command.effect.param': clip={clip_id[:8]}..., effect[{effect_index}].{param_name} = {value}")
             
             try:
                 # Get player and update parameter
@@ -506,7 +505,7 @@ class RestAPI:
                             if uid:
                                 param_value_to_store['_uid'] = uid
                             effect['parameters'][param_name] = param_value_to_store
-                            logger.info(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value} (range: {range_min}-{range_max})")
+                            logger.debug(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value} (range: {range_min}-{range_max})")
                         else:
                             # For simple values, store as dict if UID is present, otherwise plain value
                             if uid:
@@ -517,7 +516,7 @@ class RestAPI:
                             else:
                                 param_value_to_store = value
                             effect['parameters'][param_name] = param_value_to_store
-                            logger.info(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value}")
+                            logger.debug(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value}")
                         
                         # Update LIVE effect instance in player layers (critical for transport trim!)
                         if player.layers and len(player.layers) > 0:
@@ -535,7 +534,7 @@ class RestAPI:
                                         logger.debug(f"  ✓ IDs match! instance={type(live_instance).__name__ if live_instance else None}")
                                         if live_instance and hasattr(live_instance, 'update_parameter'):
                                             result = live_instance.update_parameter(param_name, param_value_to_store)
-                                            logger.info(f"🔄 Updated LIVE instance: {registry_plugin_id}.{param_name} = {value} (result={result})")
+                                            logger.debug(f"🔄 Updated LIVE instance: {registry_plugin_id}.{param_name} = {value} (result={result})")
                                         else:
                                             logger.warning(f"⚠️ Live instance missing or no update_parameter method!")
                                         break
@@ -1174,7 +1173,7 @@ class RestAPI:
         """Background thread to broadcast BPM updates via WebSocket"""
         import time
         
-        logger.info("🎵 BPM broadcast thread started")
+        logger.debug("🎵 BPM broadcast thread started")
         
         while self._bpm_streaming_active and self.is_running:
             try:
@@ -1196,4 +1195,4 @@ class RestAPI:
                 logger.error(f"Error in BPM broadcast loop: {e}", exc_info=True)
                 time.sleep(1)  # Back off on error
         
-        logger.info("🎵 BPM broadcast thread stopped")
+        logger.debug("🎵 BPM broadcast thread stopped")

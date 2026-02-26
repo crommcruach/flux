@@ -69,7 +69,7 @@ class EffectProcessor:
                 self.video_effect_chain.append(effect_data)
                 chain_length = len(self.video_effect_chain)
             
-            logger.info(f"✅ Effect '{plugin_id}' added to {chain_type} chain (position {chain_length})")
+            logger.debug(f"✅ Effect '{plugin_id}' added to {chain_type} chain (position {chain_length})")
             return True, f"Effect '{plugin_id}' added to {chain_type} chain"
             
         except Exception as e:
@@ -96,7 +96,7 @@ class EffectProcessor:
                 return False, f"Invalid index {index} (chain length: {len(chain)})"
             
             effect = chain.pop(index)
-            logger.info(f"✅ Effect '{effect['id']}' removed from {chain_type} chain position {index}")
+            logger.debug(f"✅ Effect '{effect['id']}' removed from {chain_type} chain position {index}")
             return True, f"Effect removed from {chain_type} chain"
             
         except Exception as e:
@@ -120,7 +120,7 @@ class EffectProcessor:
             count = len(self.video_effect_chain)
             self.video_effect_chain.clear()
         
-        logger.info(f"✅ {count} effects cleared from {chain_type} chain")
+        logger.debug(f"✅ {count} effects cleared from {chain_type} chain")
         return True, f"{count} effects cleared from {chain_type} chain"
     
     def get_chain(self, chain_type='video', layers=None):
@@ -141,13 +141,9 @@ class EffectProcessor:
         for i, effect in enumerate(chain):
             plugin_instance = effect['instance']
             
-            # SPECIAL: If transport and has source, ensure it's initialized
-            if effect['id'] == 'transport' and hasattr(plugin_instance, '_initialize_state'):
-                if layers and len(layers) > 0 and layers[0].source:
-                    logger.info(f"🎬 [get_chain] Initializing transport with source: {type(layers[0].source).__name__}")
-                    plugin_instance._initialize_state(layers[0].source)
-                else:
-                    logger.warning(f"⚠️ [get_chain] Cannot initialize transport: no source available")
+            # REMOVED: Don't call _initialize_state here - it would reset saved parameters!
+            # get_chain() is called by frontend for display, shouldn't modify state
+            # Initialization happens in apply_clip_effects() and layer manager
             
             # Get current parameter values from plugin instance
             current_parameters = plugin_instance.get_parameters()
@@ -249,7 +245,7 @@ class EffectProcessor:
             effect['enabled'] = new_state
             
             plugin_id = effect['id']
-            logger.info(f"Effect '{plugin_id}' at index {index} is now {'enabled' if new_state else 'disabled'}")
+            logger.debug(f"Effect '{plugin_id}' at index {index} is now {'enabled' if new_state else 'disabled'}")
             
             return True, new_state, f"Effect {'enabled' if new_state else 'disabled'}"
             
@@ -343,10 +339,23 @@ class EffectProcessor:
                         plugin_id = effect_data.get('plugin_id', 'unknown')
                         
                         # Special handling for transport effect initialization
+                        # CRITICAL: Only initialize if no saved parameters exist (same logic as layer manager)
                         if plugin_id == 'transport' and hasattr(plugin_instance, '_initialize_state'):
                             if source and (not hasattr(plugin_instance, '_frame_source') or plugin_instance._frame_source is None):
-                                plugin_instance._initialize_state(source)
-                                logger.debug(f"🎬 [{player_name}] Transport initialized for clip {current_clip_id}")
+                                # Check if effect has saved parameters (not just defaults)
+                                params = effect_data.get('parameters', {})
+                                has_saved_params = params and any(key not in ['metadata', '_loop_iteration', '_random_frames_played'] for key in params.keys())
+                                
+                                if not has_saved_params:
+                                    # No saved params - initialize from source (sets full range)
+                                    plugin_instance._initialize_state(source)
+                                    logger.debug(f"🎬 [{player_name}] Transport initialized from source for clip {current_clip_id}")
+                                else:
+                                    # Has saved params - just update source reference without resetting trim
+                                    plugin_instance._frame_source = source
+                                    if hasattr(source, 'total_frames'):
+                                        plugin_instance._total_frames = source.total_frames
+                                    logger.debug(f"🎬 [{player_name}] Transport restored with saved trim [{plugin_instance.in_point}, {plugin_instance.out_point}] for clip {current_clip_id}")
                         
                         # Process frame (parameters are already set by update_parameter calls from sequence manager)
                         processed_frame = plugin_instance.process_frame(processed_frame, source=source, player=player)

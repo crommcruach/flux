@@ -59,7 +59,7 @@ class ThumbnailGenerator:
         self.worker_thread = None
         self.running = False
         
-        logger.info(f"🖼️ ThumbnailGenerator initialized: size={self.size}, quality={self.quality}, cache={self.cache_dir}")
+        logger.debug(f"🖼️ ThumbnailGenerator initialized: size={self.size}, quality={self.quality}, cache={self.cache_dir}")
         
     def start_worker(self):
         """Startet Worker-Thread für asynchrone Generierung"""
@@ -69,7 +69,7 @@ class ThumbnailGenerator:
         self.running = True
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker_thread.start()
-        logger.info("🖼️ Thumbnail worker thread started")
+        logger.debug("🖼️ Thumbnail worker thread started")
         
     def stop_worker(self):
         """Stoppt Worker-Thread"""
@@ -435,7 +435,7 @@ class ThumbnailGenerator:
                     thumbnail.unlink()
                     deleted_count += 1
                     
-            logger.info(f"🗑️ Cleaned up {deleted_count} old thumbnails/previews")
+            logger.debug(f"🗑️ Cleaned up {deleted_count} old thumbnails/previews")
             return deleted_count
             
         except Exception as e:

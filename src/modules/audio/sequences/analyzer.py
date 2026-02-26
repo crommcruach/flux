@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # BPM detection will use numpy-only implementation (no external dependencies)
 # Simple but effective onset-based tempo detection
 AUBIO_AVAILABLE = True  # Always available (using numpy-only implementation)
-logger.info("✓ BPM detection ready (using numpy-only implementation)")
+logger.debug("✓ BPM detection ready (using numpy-only implementation)")
 
 
 class AudioAnalyzer:
@@ -100,7 +100,7 @@ class AudioAnalyzer:
         self._stream: Optional[sd.InputStream] = None
         self._running = False
         
-        logger.info(f"AudioAnalyzer initialized: device={device}, rate={sample_rate}, block={block_size}")
+        logger.debug(f"AudioAnalyzer initialized: device={device}, rate={sample_rate}, block={block_size}")
     
     def set_device(self, device_index):
         """Set the audio input device

@@ -82,7 +82,7 @@ class ReplayManager:
             with open(filepath, 'r') as f:
                 self.current_recording = json.load(f)
             
-            logger.info(f"✅ Aufzeichnung geladen: {self.current_recording.get('name', filename)} "
+            logger.debug(f"✅ Aufzeichnung geladen: {self.current_recording.get('name', filename)} "
                        f"({self.current_recording.get('frame_count', 0)} Frames)")
             return True
         except Exception as e:
@@ -112,7 +112,7 @@ class ReplayManager:
         self.is_playing = True
         self.replay_thread = threading.Thread(target=self._replay_loop, daemon=True)
         self.replay_thread.start()
-        logger.info(f"▶️ Replay gestartet: {self.current_recording.get('name', 'Unknown')}")
+        logger.debug(f"▶️ Replay gestartet: {self.current_recording.get('name', 'Unknown')}")
         return True
     
     def stop(self):
@@ -127,7 +127,7 @@ class ReplayManager:
         # Deaktiviere Replay-Modus (erlaubt Video-Ausgabe)
         # Note: artnet_manager removed
         
-        logger.info("⏹️ Replay gestoppt")
+        logger.debug("⏹️ Replay gestoppt")
         return True
     
     def _replay_loop(self):

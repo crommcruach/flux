@@ -45,7 +45,7 @@ def _display_process_loop(output_id: str, window_name: str, window_title: str,
         
         if monitor_count == 1 and fullscreen:
             use_fullscreen = False
-            logger.info(f"[{output_id}] Only 1 monitor detected - using windowed mode")
+            logger.debug(f"[{output_id}] Only 1 monitor detected - using windowed mode")
         
         # Get monitor information
         monitor = get_monitor_by_index(monitor_index)
@@ -57,13 +57,13 @@ def _display_process_loop(output_id: str, window_name: str, window_title: str,
             cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
             cv2.moveWindow(window_name, monitor['x'], monitor['y'])
             cv2.resizeWindow(window_name, monitor['width'], monitor['height'])
-            logger.info(f"✅ [{output_id}] Display process started (fullscreen {monitor['width']}x{monitor['height']})")
+            logger.debug(f"✅ [{output_id}] Display process started (fullscreen {monitor['width']}x{monitor['height']})")
         else:
             cv2.resizeWindow(window_name, resolution[0], resolution[1])
             x = monitor['x'] + (monitor['width'] - resolution[0]) // 2
             y = monitor['y'] + (monitor['height'] - resolution[1]) // 2
             cv2.moveWindow(window_name, x, y)
-            logger.info(f"✅ [{output_id}] Display process started (windowed {resolution[0]}x{resolution[1]})")
+            logger.debug(f"✅ [{output_id}] Display process started (windowed {resolution[0]}x{resolution[1]})")
         
         cv2.setWindowTitle(window_name, window_title)
         window_created = True
@@ -100,7 +100,7 @@ def _display_process_loop(output_id: str, window_name: str, window_title: str,
                 
                 # ESC key - signal shutdown
                 if key == 27:
-                    logger.info(f"[{output_id}] ESC pressed in display process")
+                    logger.debug(f"[{output_id}] ESC pressed in display process")
                     stop_event.set()
                     break
                 
@@ -113,7 +113,7 @@ def _display_process_loop(output_id: str, window_name: str, window_title: str,
                 logger.error(f"[{output_id}] Display loop error: {e}")
                 time.sleep(0.1)
         
-        logger.info(f"[{output_id}] Display process shutting down ({frame_count} frames total)")
+        logger.debug(f"[{output_id}] Display process shutting down ({frame_count} frames total)")
         
     except Exception as e:
         logger.error(f"[{output_id}] Display process error: {e}", exc_info=True)
@@ -192,7 +192,7 @@ class DisplayOutput(OutputBase):
             
             if self.display_process.is_alive():
                 self.window_created = True  # Mark window as ready
-                logger.info(f"✅ [{self.output_id}] Display process started (PID: {self.display_process.pid})")
+                logger.debug(f"✅ [{self.output_id}] Display process started (PID: {self.display_process.pid})")
                 return True
             else:
                 logger.error(f"❌ [{self.output_id}] Display process failed to start")
@@ -251,7 +251,7 @@ class DisplayOutput(OutputBase):
             try:
                 # Signal process to stop
                 self.process_stop_event.set()
-                logger.info(f"[{self.output_id}] Stopping display process...")
+                logger.debug(f"[{self.output_id}] Stopping display process...")
                 
                 # Wait for clean exit (max 2 seconds)
                 self.display_process.join(timeout=2)
@@ -263,7 +263,7 @@ class DisplayOutput(OutputBase):
                     self.display_process.join(timeout=1)
                 
                 self.window_created = False
-                logger.info(f"[{self.output_id}] Display process stopped")
+                logger.debug(f"[{self.output_id}] Display process stopped")
                 
             except Exception as e:
                 logger.error(f"[{self.output_id}] Cleanup error: {e}", exc_info=True)

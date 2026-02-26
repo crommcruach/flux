@@ -512,4 +512,4 @@ def register_artnet_routing_routes(app, routing_manager: ArtNetRoutingManager):
             logger.error(f"Set state error: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
-    logger.info("✅ ArtNet routing API routes registered")
+    logger.debug("✅ ArtNet routing API routes registered")

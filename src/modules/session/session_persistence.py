@@ -44,7 +44,7 @@ class SessionPersistence:
         path = file_path or self.default_file_path
         
         if not os.path.exists(path):
-            logger.info(f"No session file found: {path}")
+            logger.debug(f"No session file found: {path}")
             return None
         
         try:
@@ -53,7 +53,7 @@ class SessionPersistence:
             
             playlists_count = len(state.get('playlists', {}).get('items', {}))
             clips_count = len(state.get('clip_registry', {}).get('clips', {}))
-            logger.info(f"Session loaded: {os.path.basename(path)} ({playlists_count} playlists, {clips_count} clips)")
+            logger.debug(f"Session loaded: {os.path.basename(path)} ({playlists_count} playlists, {clips_count} clips)")
             return state
             
         except json.JSONDecodeError as e:
@@ -89,7 +89,7 @@ class SessionPersistence:
                     
                     playlists_count = len(state.get('playlists', {}).get('items', {}))
                     clips_count = len(state.get('clip_registry', {}).get('clips', {}))
-                    logger.info(f"Session saved: {os.path.basename(path)} ({playlists_count} playlists, {clips_count} clips)")
+                    logger.debug(f"Session saved: {os.path.basename(path)} ({playlists_count} playlists, {clips_count} clips)")
                     return True
                     
                 except PermissionError as perm_err:
@@ -98,7 +98,7 @@ class SessionPersistence:
                         time.sleep(0.5)
                     else:
                         logger.error(f"Failed to write session file (locked): {perm_err}")
-                        logger.info("Tip: Close any programs that have session_state.json open")
+                        logger.debug("Tip: Close any programs that have session_state.json open")
                         return False
             
             return False
@@ -149,7 +149,7 @@ class SessionPersistence:
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                logger.info(f"Deleted session file: {os.path.basename(file_path)}")
+                logger.debug(f"Deleted session file: {os.path.basename(file_path)}")
                 return True
             return False
         except Exception as e:

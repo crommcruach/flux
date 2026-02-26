@@ -41,7 +41,7 @@ class RecordingManager:
         self.is_recording = True
         self.recorded_data.clear()
         self.recording_name = name or "Unnamed"
-        logger.info(f"Recording started: {self.recording_name}")
+        logger.debug(f"Recording started: {self.recording_name}")
         return True
     
     def stop_recording(self, canvas_width=None, canvas_height=None, total_points=None):
@@ -94,7 +94,7 @@ class RecordingManager:
         try:
             with open(filepath, 'w') as f:
                 json.dump(recording_data, f)
-            logger.info(f"✅ Recording saved: {filename} ({frame_count} frames)")
+            logger.debug(f"✅ Recording saved: {filename} ({frame_count} frames)")
             return filename
         except Exception as e:
             logger.error(f"❌ Error saving recording: {e}")

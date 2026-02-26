@@ -52,14 +52,13 @@ class SaturationEffect(PluginBase):
         if abs(self.saturation - 1.0) < 0.01:
             return frame  # No change
         
-        # Convert to HSV
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
+        # OPTIMIZED: Convert to HSV (cvtColor returns uint8, no need for astype)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
-        # Adjust saturation
-        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * self.saturation, 0, 255)
+        # Adjust saturation (in-place with integer math)
+        hsv[:, :, 1] = np.clip(hsv[:, :, 1].astype(np.float32) * self.saturation, 0, 255).astype(np.uint8)
         
         # Convert back to BGR
-        hsv = hsv.astype(np.uint8)
         return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
     
     def update_parameter(self, name, value):

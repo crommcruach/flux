@@ -53,7 +53,7 @@ class SessionStateManager:
         self._save_thread = threading.Thread(target=self._save_worker, daemon=True, name="SessionStateSaver")
         self._save_thread.start()
         
-        logger.info(f"SessionStateManager initialized: {os.path.basename(state_file_path)} (async mode)")
+        (f"SessionStateManager initialized: {os.path.basename(state_file_path)} (async mode)")
     
     def _load_or_create(self) -> Dict[str, Any]:
         """Load existing state or create empty."""
@@ -61,7 +61,7 @@ class SessionStateManager:
         if state:
             return state
         else:
-            logger.info("No session found - creating new")
+            ("No session found - creating new")
             return SessionPersistence.create_empty_state()
     
     def _save_worker(self):
@@ -291,7 +291,7 @@ class SessionStateManager:
                 sequences_by_uid[uid] = []
             sequences_by_uid[uid].append(seq.serialize())
         
-        logger.info(f"💾 Saved {len(sequences_by_uid)} parameter sequences (flat by UID)")
+        (f"💾 Saved {len(sequences_by_uid)} parameter sequences (flat by UID)")
         return sequences_by_uid
     
     def load(self) -> Dict[str, Any]:
@@ -331,7 +331,7 @@ class SessionStateManager:
             state = self._state
             
             if not state:
-                logger.info("Kein Session State zum Restaurieren vorhanden")
+                ("Kein Session State zum Restaurieren vorhanden")
                 return False
             
             # LEGACY: Root-level players state restore removed
@@ -341,7 +341,7 @@ class SessionStateManager:
             # ========== SEQUENCES RESTAURIEREN (FLAT BY UID) ==========
             sequences_data = state.get('sequences', {})
             if sequences_data and self.sequence_manager and player_manager.audio_analyzer:
-                logger.info(f"🔄 Restoring {len(sequences_data)} parameter sequences from flat structure...")
+                (f"🔄 Restoring {len(sequences_data)} parameter sequences from flat structure...")
                 
                 for uid, seq_list in sequences_data.items():
                     for seq_data in seq_list:
@@ -366,7 +366,7 @@ class SessionStateManager:
                             
                             # Add to sequence manager
                             self.sequence_manager.create(sequence)
-                            logger.info(f"✅ Restored sequence: {sequence.id} (UID: {uid})")
+                            (f"✅ Restored sequence: {sequence.id} (UID: {uid})")
                         except Exception as e:
                             logger.warning(f"⚠️ Failed to restore sequence for UID {uid}: {e}")
             
@@ -401,15 +401,15 @@ class SessionStateManager:
                             
                         if enabled:
                             audio_analyzer.enable_bpm_detection(True)
-                            logger.info(f"🎵 BPM detection restored: enabled=True, mode={bpm_data.get('mode', 'auto')}")
+                            (f"🎵 BPM detection restored: enabled=True, mode={bpm_data.get('mode', 'auto')}")
                         else:
                             audio_analyzer.enable_bpm_detection(False)
-                            logger.info("🎵 BPM detection disabled (from saved state)")
+                            ("🎵 BPM detection disabled (from saved state)")
                     else:
                         # No saved BPM data - enable by default
                         audio_analyzer = player_manager.audio_analyzer
                         audio_analyzer.enable_bpm_detection(True)
-                        logger.info("🎵 BPM detection enabled by default (no saved state)")
+                        ("🎵 BPM detection enabled by default (no saved state)")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to restore BPM state: {e}")
             
@@ -424,7 +424,7 @@ class SessionStateManager:
             if clip_registry_data:
                 try:
                     clip_registry.deserialize(clip_registry_data)
-                    logger.info(f"📋 Clip registry restored: {len(clip_registry.clips)} clips with complete state")
+                    (f"📋 Clip registry restored: {len(clip_registry.clips)} clips with complete state")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to restore clip registry: {e}")
             
@@ -437,7 +437,7 @@ class SessionStateManager:
                     success = player_manager.playlist_system.load_from_dict(playlists_data)
                     if success:
                         num_playlists = len(playlists_data.get('items', playlists_data.get('playlists', [])))
-                        logger.info(f"📋 Playlists system restored: {num_playlists} playlists")
+                        (f"📋 Playlists system restored: {num_playlists} playlists")
                     else:
                         logger.warning("⚠️ Failed to restore playlists system")
                 except Exception as e:
@@ -462,7 +462,7 @@ class SessionStateManager:
             self._state = SessionPersistence.create_empty_state()
             success = self.persistence.delete_file(self.state_file_path)
             if success:
-                logger.info("Session state cleared")
+                ("Session state cleared")
             return True
         except Exception as e:
             logger.error(f"Error clearing session state: {e}")
@@ -657,7 +657,7 @@ class SessionStateManager:
             sequence_manager: SequenceManager instance
         """
         self.sequence_manager = sequence_manager
-        logger.info("SequenceManager attached to SessionStateManager")
+        ("SequenceManager attached to SessionStateManager")
 
 
 # Singleton-Instanz

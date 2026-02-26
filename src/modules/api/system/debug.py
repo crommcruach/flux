@@ -2,7 +2,8 @@
 Debug API - Laufzeit-Kontrolle über Debug-Kategorien und Logging
 """
 from flask import Blueprint, jsonify, request
-from ...core.logger import DebugCategories, get_logger
+import logging
+from ...core.logger import DebugCategories, get_logger, FluxLogger
 
 logger = get_logger(__name__)
 
@@ -49,7 +50,7 @@ def enable_debug_categories():
         
         if 'all' in categories:
             DebugCategories.enable_all()
-            logger.info("🐛 Alle Debug-Kategorien aktiviert")
+            logger.debug("🐛 Alle Debug-Kategorien aktiviert")
             return jsonify({
                 'success': True,
                 'message': 'All debug categories enabled',
@@ -57,7 +58,7 @@ def enable_debug_categories():
             })
         
         DebugCategories.enable(*categories)
-        logger.info(f"🐛 Debug-Kategorien aktiviert: {', '.join(categories)}")
+        logger.debug(f"🐛 Debug-Kategorien aktiviert: {', '.join(categories)}")
         
         return jsonify({
             'success': True,
@@ -86,7 +87,7 @@ def disable_debug_categories():
         
         if 'all' in categories:
             DebugCategories.disable_all()
-            logger.info("🐛 Alle Debug-Kategorien deaktiviert")
+            logger.debug("🐛 Alle Debug-Kategorien deaktiviert")
             return jsonify({
                 'success': True,
                 'message': 'All debug categories disabled',
@@ -94,7 +95,7 @@ def disable_debug_categories():
             })
         
         DebugCategories.disable(*categories)
-        logger.info(f"🐛 Debug-Kategorien deaktiviert: {', '.join(categories)}")
+        logger.debug(f"🐛 Debug-Kategorien deaktiviert: {', '.join(categories)}")
         
         return jsonify({
             'success': True,
@@ -127,11 +128,11 @@ def toggle_debug_category():
         if DebugCategories.is_enabled(category):
             DebugCategories.disable(category)
             enabled = False
-            logger.info(f"🐛 Debug-Kategorie '{category}' deaktiviert")
+            logger.debug(f"🐛 Debug-Kategorie '{category}' deaktiviert")
         else:
             DebugCategories.enable(category)
             enabled = True
-            logger.info(f"🐛 Debug-Kategorie '{category}' aktiviert")
+            logger.debug(f"🐛 Debug-Kategorie '{category}' aktiviert")
         
         return jsonify({
             'success': True,
@@ -145,6 +146,106 @@ def toggle_debug_category():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@debug_bp.route('/api/debug/modules', methods=['GET'])
+def get_module_debug_levels():
+    """
+    Gibt alle konfigurierten Modul-spezifischen Debug-Levels zurück.
+    
+    Returns:
+        JSON mit allen Modulen und ihren Log-Levels
+    """
+    try:
+        flux_logger = FluxLogger()
+        module_levels = flux_logger.get_module_log_levels()
+        
+        return jsonify({
+            'success': True,
+            'modules': {
+                pattern: logging.getLevelName(level)
+                for pattern, level in module_levels.items()
+            },
+            'total': len(module_levels)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting module debug levels: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@debug_bp.route('/api/debug/modules/enable', methods=['POST'])
+def enable_module_debug():
+    """
+    Aktiviert DEBUG-Level für ein oder mehrere Module (runtime, ohne Neustart).
+    
+    Body:
+        {
+            "modules": ["modules.player.core", "modules.api.*"]
+        }
+    
+    Unterstützt Wildcards:
+        - "modules.player.*" = Alle Player-Module
+        - "modules.api.artnet" = Nur Art-Net API
+    """
+    try:
+        data = request.get_json()
+        modules = data.get('modules', [])
+        
+        if not modules:
+            return jsonify({'success': False, 'error': 'No modules specified'}), 400
+        
+        flux_logger = FluxLogger()
+        for module_pattern in modules:
+            flux_logger.set_module_log_level(module_pattern, logging.DEBUG)
+        
+        logger.info(f"🔍 Debug enabled for modules: {', '.join(modules)}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Debug enabled for {len(modules)} module(s)',
+            'modules': modules,
+            'current_levels': flux_logger.get_module_log_levels()
+        })
+    
+    except Exception as e:
+        logger.error(f"Error enabling module debug: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@debug_bp.route('/api/debug/modules/disable', methods=['POST'])
+def disable_module_debug():
+    """
+    Deaktiviert DEBUG-Level für Module (setzt auf INFO zurück).
+    
+    Body:
+        {
+            "modules": ["modules.player.core", "modules.api.*"]
+        }
+    """
+    try:
+        data = request.get_json()
+        modules = data.get('modules', [])
+        
+        if not modules:
+            return jsonify({'success': False, 'error': 'No modules specified'}), 400
+        
+        flux_logger = FluxLogger()
+        for module_pattern in modules:
+            flux_logger.set_module_log_level(module_pattern, logging.INFO)
+        
+        logger.info(f"🔍 Debug disabled for modules: {', '.join(modules)}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Debug disabled for {len(modules)} module(s)',
+            'modules': modules,
+            'current_levels': flux_logger.get_module_log_levels()
+        })
+    
+    except Exception as e:
+        logger.error(f"Error disabling module debug: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def register_debug_routes(app):
     """
     Registriert Debug-API-Routen in der Flask-App.
@@ -153,4 +254,4 @@ def register_debug_routes(app):
         app: Flask-App-Instanz
     """
     app.register_blueprint(debug_bp)
-    logger.info("✅ Debug API routes registered at /api/debug/*")
+    logger.debug("✅ Debug API routes registered at /api/debug/*")

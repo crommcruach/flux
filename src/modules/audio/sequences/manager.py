@@ -23,7 +23,7 @@ class SequenceManager:
         self._last_log_time = 0  # For throttled logging
         self._uid_warning_cache = set()  # Track UIDs we've already warned about
         self.clip_registry = clip_registry  # Reference to ClipRegistry
-        logger.info("SequenceManager initialized")
+        logger.debug("SequenceManager initialized")
     
     def set_clip_registry(self, clip_registry):
         """Set the clip registry reference"""

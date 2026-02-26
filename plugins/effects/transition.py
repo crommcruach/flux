@@ -33,7 +33,7 @@ def _load_available_transitions():
     # Always include 'none' option
     transitions['none'] = 'No Transition'
     
-    logger.info(f"Loaded {len(transitions)} transition options")
+    logger.debug(f"Loaded {len(transitions)} transition options")
     return transitions
 
 

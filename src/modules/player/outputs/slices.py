@@ -61,7 +61,7 @@ class SliceManager:
             description='Full canvas'
         )
         
-        logger.info(f"SliceManager initialized ({canvas_width}x{canvas_height})")
+        logger.debug(f"SliceManager initialized ({canvas_width}x{canvas_height})")
     
     def add_slice(self, slice_id: str, x: int, y: int, width: int, height: int,
                   rotation: float = 0, shape: str = 'rectangle',
@@ -285,14 +285,13 @@ class SliceManager:
             mask[:, i] *= alpha  # Left
             mask[:, w-1-i] *= alpha  # Right
         
-        # Apply mask to frame
+        # OPTIMIZED: Apply mask to frame without float conversion
+        # Use integer multiplication with proper scaling
+        mask_uint16 = mask.astype(np.uint16)
         if frame.shape[2] == 3:  # BGR
-            result = frame.astype(np.float32)
-            for c in range(3):
-                result[:, :, c] *= mask
-            result = result.astype(np.uint8)
+            result = (frame.astype(np.uint16) * mask_uint16[:, :, np.newaxis] / 255).astype(np.uint8)
         else:
-            result = (frame.astype(np.float32) * mask[:, :, np.newaxis]).astype(np.uint8)
+            result = (frame.astype(np.uint16) * mask_uint16[:, :, np.newaxis] / 255).astype(np.uint8)
         
         return result
     
@@ -366,4 +365,4 @@ class SliceManager:
                 description=slice_data.get('description', ''),
                 points=slice_data.get('points')
             )
-        logger.info(f"Restored {len(self.slices)} slices from session")
+        logger.debug(f"Restored {len(self.slices)} slices from session")

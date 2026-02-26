@@ -224,6 +224,125 @@ logger.info(f"Processing clip {clip_id} for user {user_id}")
 - Performance metrics
 - Security events
 
+### Debugging & Troubleshooting
+
+#### Selective Module Debugging
+
+**Most log messages are at DEBUG level** - This project uses INFO level for normal console output and DEBUG for detailed troubleshooting.
+
+**Enable debug for specific modules only** using the selective debugging system:
+
+##### Config-Based (Startup)
+Add modules to `config.json`:
+```json
+{
+  "app": {
+    "console_log_level": "INFO",
+    "file_log_level": "DEBUG",
+    "debug_modules": [
+      "modules.player.core",
+      "modules.artnet.*",
+      "modules.api.artnet"
+    ]
+  }
+}
+```
+
+##### Runtime API (No Restart)
+```bash
+# Enable debug for specific modules
+curl -X POST http://localhost:5000/api/debug/modules/enable \
+  -H "Content-Type: application/json" \
+  -d '{"modules": ["modules.player.*", "modules.api.artnet"]}'
+
+# Check current debug modules
+curl http://localhost:5000/api/debug/modules
+
+# Disable debug
+curl -X POST http://localhost:5000/api/debug/modules/disable \
+  -H "Content-Type: application/json" \
+  -d '{"modules": ["modules.player.*"]}'
+```
+
+##### Wildcard Patterns
+- `modules.player.*` - All player modules
+- `modules.api.*` - All API endpoints
+- `modules.artnet.*` - All Art-Net modules
+- `modules.audio.*` - All audio modules
+- `plugins.effects.*` - All effect plugins
+
+##### Common Debugging Scenarios
+
+**Art-Net output issues:**
+```json
+"debug_modules": ["modules.artnet.*", "modules.player.outputs.*"]
+```
+
+**Video playback problems:**
+```json
+"debug_modules": ["modules.player.core", "modules.player.sources"]
+```
+
+**Effects not working:**
+```json
+"debug_modules": ["modules.player.effects.*", "plugins.effects.*"]
+```
+
+**API endpoint debugging:**
+```json
+"debug_modules": ["modules.api.player.*", "modules.api.artnet"]
+```
+
+**Audio analyzer issues:**
+```json
+"debug_modules": ["modules.audio.*"]
+```
+
+#### Debugging Best Practices
+
+1. **Start Narrow**: Enable debug for specific module first
+2. **Use Wildcards**: `modules.player.*` instead of listing every submodule
+3. **Check Log Files**: All debug output goes to `logs/flux_*.log`
+4. **Runtime Testing**: Use API to test which modules need debug without restart
+5. **Module Names**: Follow file paths: `src/modules/player/core.py` → `modules.player.core`
+6. **Console Level**: Set `console_log_level: "WARNING"` to reduce console noise while debugging
+7. **File Level**: Always set `file_log_level: "DEBUG"` to capture all debug to files
+
+#### Finding Issues
+
+**Step 1: Identify the area**
+- Player issues → `modules.player.*`
+- API issues → `modules.api.*`
+- Art-Net issues → `modules.artnet.*`
+
+**Step 2: Enable debug**
+```bash
+curl -X POST http://localhost:5000/api/debug/modules/enable \
+  -H "Content-Type: application/json" \
+  -d '{"modules": ["modules.area.*"]}'
+```
+
+**Step 3: Reproduce the issue**
+- Trigger the problematic operation
+- Watch console and log files
+
+**Step 4: Analyze logs**
+- Check `logs/flux_*.log` for detailed debug output
+- Look for ERROR/WARNING messages
+- Trace the execution flow
+
+**Step 5: Clean up**
+```bash
+# Disable debug when done
+curl -X POST http://localhost:5000/api/debug/modules/disable \
+  -H "Content-Type: application/json" \
+  -d '{"modules": ["modules.area.*"]}'
+```
+
+#### Documentation
+- See `docs/SELECTIVE_MODULE_DEBUGGING.md` for complete guide
+- See `docs/SELECTIVE_DEBUG_QUICKSTART.md` for quick examples
+
 ### Asynchronous Programming
 
 #### Use async/await
@@ -906,10 +1025,11 @@ Idle State:
 11. **Tight coupling**: Keep components loosely coupled
 12. **No tests**: Write tests as you code
 13. **Hardcoded values**: Use configuration files
-14. **Poor logging**: Log meaningful information
-15. **Unnecessary overhead**: Don't add features that slow down the application
-16. **Premature optimization**: Profile before optimizing
-17. **Auto-pushing to Git**: Never automatically push commits ⭐
+14. **Poor logging**: Log meaningful information at appropriate levels (DEBUG for details, INFO for important events)
+15. **Debugging wrong**: Enable selective module debugging instead of changing log levels globally (use `debug_modules` in config) ⭐
+16. **Unnecessary overhead**: Don't add features that slow down the application
+17. **Premature optimization**: Profile before optimizing
+18. **Auto-pushing to Git**: Never automatically push commits ⭐
 
 ## Code Reusability & Exploration
 

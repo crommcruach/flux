@@ -113,7 +113,7 @@ class OutputBase(ABC):
         self.output_thread.start()
         
         self.enabled = True
-        logger.info(f"✅ [{self.output_id}] Output enabled")
+        logger.debug(f"✅ [{self.output_id}] Output enabled")
         return True
     
     def disable(self):
@@ -134,7 +134,7 @@ class OutputBase(ABC):
             logger.error(f"[{self.output_id}] Cleanup error: {e}")
         
         self.enabled = False
-        logger.info(f"[{self.output_id}] Output disabled")
+        logger.debug(f"[{self.output_id}] Output disabled")
     
     def queue_frame(self, frame: np.ndarray):
         """
@@ -169,7 +169,7 @@ class OutputBase(ABC):
                 # Debug: Log first few frames
                 frame_count += 1
                 if frame_count <= 5:
-                    logger.info(f"[{self.output_id}] Received frame #{frame_count} from queue (shape: {frame.shape})")
+                    logger.debug(f"[{self.output_id}] Received frame #{frame_count} from queue (shape: {frame.shape})")
                 
                 # Capture frame for streaming if enabled
                 if self.enable_capture:
@@ -188,7 +188,7 @@ class OutputBase(ABC):
                         self.frames_sent += 1
                         self.last_frame_time = time.time()
                     if frame_count <= 5:
-                        logger.info(f"[{self.output_id}] Frame #{frame_count} sent successfully")
+                        logger.debug(f"[{self.output_id}] Frame #{frame_count} sent successfully")
                 else:
                     with self.stats_lock:
                         self.frames_dropped += 1

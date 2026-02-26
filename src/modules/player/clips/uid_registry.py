@@ -35,7 +35,7 @@ class UIDRegistry:
             'misses': 0
         }
         
-        logger.info("✅ UID Registry initialized")
+        logger.debug("✅ UID Registry initialized")
     
     def register(self, uid: str, player, instance, param_name: str):
         """
@@ -136,7 +136,7 @@ class UIDRegistry:
             self.invalidate(uid)
         
         if to_remove:
-            logger.info(f"🗑️ Invalidated {len(to_remove)} UIDs for effect instance [{instance_id}]")
+            logger.debug(f"🗑️ Invalidated {len(to_remove)} UIDs for effect instance [{instance_id}]")
     
     def invalidate_by_player(self, player):
         """
@@ -161,7 +161,7 @@ class UIDRegistry:
             self.invalidate(uid)
         
         if to_remove:
-            logger.info(f"🗑️ Invalidated {len(to_remove)} UIDs for player [{player_id}]")
+            logger.debug(f"🗑️ Invalidated {len(to_remove)} UIDs for player [{player_id}]")
     
     def clear_for_clip(self, clip_id: str) -> int:
         """
@@ -187,7 +187,7 @@ class UIDRegistry:
             self.invalidate(uid)
         
         if to_remove:
-            logger.info(f"🗑️ Cleared {len(to_remove)} UIDs for clip {clip_id[:8]}...")
+            logger.debug(f"🗑️ Cleared {len(to_remove)} UIDs for clip {clip_id[:8]}...")
         
         return len(to_remove)
     
@@ -196,7 +196,7 @@ class UIDRegistry:
         count = len(self._registry)
         self._registry.clear()
         self._reverse_lookup.clear()
-        logger.info(f"🧹 Cleared UID registry ({count} entries)")
+        logger.debug(f"🧹 Cleared UID registry ({count} entries)")
     
     def get_stats(self) -> Dict[str, Any]:
         """Get registry statistics"""

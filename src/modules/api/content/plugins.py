@@ -324,4 +324,4 @@ def register_plugins_api(app):
         app: Flask-App-Instanz
     """
     app.register_blueprint(plugins_bp)
-    logger.info("Plugins API registriert: /api/plugins/*")
+    logger.debug("Plugins API registriert: /api/plugins/*")

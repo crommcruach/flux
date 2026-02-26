@@ -272,4 +272,4 @@ def register_effect_routes(app, player_manager):
                 'message': message
             }), 400
     
-    logger.info("Effect Chain API endpoints registered")
+    logger.debug("Effect Chain API endpoints registered")

@@ -29,7 +29,7 @@ class PlaylistManager:
         self.playlist = items
         self.playlist_ids = ids if ids else []
         self.playlist_index = -1
-        logger.info(f"Playlist set: {len(items)} items")
+        logger.debug(f"Playlist set: {len(items)} items")
         
     def get_current_item(self):
         """
@@ -225,4 +225,4 @@ class PlaylistManager:
         self.playlist_ids.clear()
         self.playlist_params.clear()
         self.playlist_index = -1
-        logger.info("Playlist cleared")
+        logger.debug("Playlist cleared")

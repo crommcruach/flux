@@ -215,10 +215,12 @@ class VideoSource(FrameSource):
     def _process_frame_transparency(self, frame):
         """Verarbeitet Transparenz in Frames (für GIFs mit Alpha-Channel)."""
         if frame.shape[2] == 4:  # RGBA
-            alpha = frame[:, :, 3:4] / 255.0
-            rgb = frame[:, :, :3]
-            bg = np.array(self.gif_transparency_bg, dtype=np.uint8).reshape(1, 1, 3)
-            frame = (rgb * alpha + bg * (1 - alpha)).astype(np.uint8)
+            # OPTIMIZED: Use integer math to avoid float conversion
+            alpha = frame[:, :, 3:4].astype(np.uint16)
+            rgb = frame[:, :, :3].astype(np.uint16)
+            bg = np.array(self.gif_transparency_bg, dtype=np.uint16).reshape(1, 1, 3)
+            # Integer alpha blending: (rgb * alpha + bg * (255 - alpha)) / 255
+            frame = ((rgb * alpha + bg * (255 - alpha)) / 255).astype(np.uint8)
         
         return frame[:, :, :3]
     
@@ -406,7 +408,7 @@ class GeneratorSource(FrameSource):
         pm = get_plugin_manager()
         
         # Erstelle Plugin-Instanz (load_plugin erstellt neue Instanz mit config)
-        logger.info(f"🔧 GeneratorSource initializing: {self.generator_id} with parameters: {self.parameters}")
+        logger.debug(f"🔧 GeneratorSource initializing: {self.generator_id} with parameters: {self.parameters}")
         self.plugin_instance = pm.load_plugin(self.generator_id, config=self.parameters)
         if not self.plugin_instance:
             logger.error(f"❌ Generator konnte nicht geladen werden: {self.generator_id}")
@@ -414,17 +416,17 @@ class GeneratorSource(FrameSource):
         
         self.start_time = time.time()
         
-        logger.info(f"✅ GeneratorSource initialisiert:")
-        logger.info(f"  Generator: {self.generator_id}")
-        logger.info(f"  Canvas: {self.canvas_width}x{self.canvas_height}")
-        logger.info(f"  Parameters: {self.parameters}")
-        logger.info(f"  Plugin instance: {type(self.plugin_instance).__name__}")
-        logger.info(f"  Has update_parameter: {hasattr(self.plugin_instance, 'update_parameter')}")
+        logger.debug(f"✅ GeneratorSource initialisiert:")
+        logger.debug(f"  Generator: {self.generator_id}")
+        logger.debug(f"  Canvas: {self.canvas_width}x{self.canvas_height}")
+        logger.debug(f"  Parameters: {self.parameters}")
+        logger.debug(f"  Plugin instance: {type(self.plugin_instance).__name__}")
+        logger.debug(f"  Has update_parameter: {hasattr(self.plugin_instance, 'update_parameter')}")
         
         # Apply any parameters that were set before initialization
         # (This handles race condition where frontend sets params before plugin is ready)
         if self.parameters and hasattr(self.plugin_instance, 'update_parameter'):
-            logger.info(f"📝 Applying pre-initialization parameters to plugin...")
+            logger.debug(f"📝 Applying pre-initialization parameters to plugin...")
             for param_name, param_value in self.parameters.items():
                 if param_name != 'duration':  # duration is handled separately
                     success = self.plugin_instance.update_parameter(param_name, param_value)
@@ -492,7 +494,7 @@ class GeneratorSource(FrameSource):
         """Aktualisiert Generator-Parameter zur Laufzeit."""
         # Check if plugin is initialized
         if not self.plugin_instance:
-            logger.info(f"📝 Parameter '{param_name}' stored for initialization (plugin not ready yet)")
+            logger.debug(f"📝 Parameter '{param_name}' stored for initialization (plugin not ready yet)")
             # Store in parameters dict for when plugin initializes
             self.parameters[param_name] = value
             # Return True because we've stored it successfully
@@ -511,14 +513,14 @@ class GeneratorSource(FrameSource):
         if param_name == 'duration':
             self.duration = min(60, max(1, float(value)))
             self.total_frames = int(self.duration * self.fps)
-            logger.info(f"Generator duration updated to {self.duration}s (total_frames={self.total_frames}, max 60s)")
+            logger.debug(f"Generator duration updated to {self.duration}s (total_frames={self.total_frames}, max 60s)")
             return True
         
         # Use plugin's update_parameter method if available (preferred)
         if self.plugin_instance and hasattr(self.plugin_instance, 'update_parameter'):
             success = self.plugin_instance.update_parameter(param_name, value)
             if success:
-                logger.info(f"Generator parameter updated: {param_name} = {value}")
+                logger.debug(f"Generator parameter updated: {param_name} = {value}")
                 return True
             else:
                 logger.debug(f"Plugin's update_parameter returned False for: {param_name}")
@@ -526,7 +528,7 @@ class GeneratorSource(FrameSource):
         # Fallback: Try to set as attribute directly
         if self.plugin_instance and hasattr(self.plugin_instance, param_name):
             setattr(self.plugin_instance, param_name, value)
-            logger.info(f"Generator parameter updated (direct): {param_name} = {value}")
+            logger.debug(f"Generator parameter updated (direct): {param_name} = {value}")
             return True
         
         logger.warning(f"Unknown generator parameter: {param_name} (plugin: {self.generator_id}, has update_parameter: {hasattr(self.plugin_instance, 'update_parameter') if self.plugin_instance else 'No instance'})")
@@ -593,7 +595,7 @@ class DummySource(FrameSource):
     def initialize(self):
         """Erstellt schwarzes Dummy-Frame."""
         self.frame = np.zeros((self.canvas_height, self.canvas_width, 3), dtype=np.uint8)
-        logger.info("Dummy Source initialisiert (leere Playlist)")
+        logger.debug("Dummy Source initialisiert (leere Playlist)")
         return True
     
     def get_next_frame(self):

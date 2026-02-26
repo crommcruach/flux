@@ -156,7 +156,7 @@ class MultiPlaylistSystem:
         self.active_playlist_id: Optional[str] = None   # Currently controlling playback
         self.viewed_playlist_id: Optional[str] = None   # Currently shown in GUI
         
-        logger.info("Multi-Playlist System initialized")
+        logger.debug("Multi-Playlist System initialized")
     
     # ========================================
     # PLAYLIST CRUD
@@ -169,19 +169,19 @@ class MultiPlaylistSystem:
         # Apply default effects from config to new playlist
         if self.config:
             effects_config = self.config.get('effects', {})
-            logger.info(f"[CREATE DEBUG] Effects config: video={len(effects_config.get('video', []))}, artnet={len(effects_config.get('artnet', []))}")
+            logger.debug(f"[CREATE DEBUG] Effects config: video={len(effects_config.get('video', []))}, artnet={len(effects_config.get('artnet', []))}")
             
             # Apply video default effects
             video_defaults = effects_config.get('video', [])
             if video_defaults:
                 playlist.players['video'].global_effects = self._serialize_default_effects(video_defaults)
-                logger.info(f"  ✅ Applied {len(video_defaults)} default effects to video player")
+                logger.debug(f"  ✅ Applied {len(video_defaults)} default effects to video player")
             
             # Apply artnet default effects
             artnet_defaults = effects_config.get('artnet', [])
             if artnet_defaults:
                 playlist.players['artnet'].global_effects = self._serialize_default_effects(artnet_defaults)
-                logger.info(f"  ✅ Applied {len(artnet_defaults)} default effects to artnet player")
+                logger.debug(f"  ✅ Applied {len(artnet_defaults)} default effects to artnet player")
         else:
             logger.warning(f"[CREATE DEBUG] No config available for default effects")
         
@@ -191,7 +191,7 @@ class MultiPlaylistSystem:
         if len(self.playlists) == 1:
             self.viewed_playlist_id = playlist.id
         
-        logger.info(f"Created playlist: {name} (id={playlist.id}, type={playlist_type})")
+        logger.debug(f"Created playlist: {name} (id={playlist.id}, type={playlist_type})")
         self._auto_save()
         
         return playlist
@@ -220,7 +220,7 @@ class MultiPlaylistSystem:
             # Switch to active playlist or first available
             self.viewed_playlist_id = self.active_playlist_id or next(iter(self.playlists.keys()))
         
-        logger.info(f"Deleted playlist: {playlist.name} (id={playlist_id})")
+        logger.debug(f"Deleted playlist: {playlist.name} (id={playlist_id})")
         self._auto_save()
         
         return True
@@ -256,7 +256,7 @@ class MultiPlaylistSystem:
         old_name = self.playlists[playlist_id].name
         self.playlists[playlist_id].name = new_name
         
-        logger.info(f"Renamed playlist: {old_name} → {new_name}")
+        logger.debug(f"Renamed playlist: {old_name} → {new_name}")
         self._auto_save()
         
         return True
@@ -294,7 +294,7 @@ class MultiPlaylistSystem:
         self.viewed_playlist_id = playlist_id
         
         playlist = self.playlists[playlist_id]
-        logger.info(f"Activated playlist: {playlist.name} (id={playlist_id})")
+        logger.debug(f"Activated playlist: {playlist.name} (id={playlist_id})")
         
         # Emit WebSocket event to all clients
         if self.websocket_manager:
@@ -325,7 +325,7 @@ class MultiPlaylistSystem:
         self.viewed_playlist_id = playlist_id
         playlist = self.playlists[playlist_id]
         
-        logger.info(f"Viewing playlist: {playlist.name} (id={playlist_id})")
+        logger.debug(f"Viewing playlist: {playlist.name} (id={playlist_id})")
         
         return True
     
@@ -451,13 +451,13 @@ class MultiPlaylistSystem:
             if sequencer_data.get('timeline'):
                 timeline_data = sequencer_data['timeline']
                 self.player_manager.sequencer.timeline.from_dict(timeline_data)
-                logger.info(f"✅ Loaded sequencer timeline from playlist '{playlist.name}': "
+                logger.debug(f"✅ Loaded sequencer timeline from playlist '{playlist.name}': "
                            f"{len(timeline_data.get('splits', []))} splits, "
                            f"audio: {timeline_data.get('audio_file', 'None')}")
             else:
                 # Clear timeline if playlist has no timeline data
                 self.player_manager.sequencer.timeline.clear_splits()
-                logger.info(f"🗑️ Cleared sequencer timeline (playlist '{playlist.name}' has no timeline)")
+                logger.debug(f"🗑️ Cleared sequencer timeline (playlist '{playlist.name}' has no timeline)")
         
         # Apply sequencer mode for this playlist
         if hasattr(self.player_manager, 'set_sequencer_mode'):
@@ -581,7 +581,7 @@ class MultiPlaylistSystem:
                                         clip_count += 1
                         
                         if clip_count > 0:
-                            logger.info(f"Captured live state: {player_id} player ({clip_count} clips)")
+                            logger.debug(f"Captured live state: {player_id} player ({clip_count} clips)")
         
         # Capture sequencer timeline and mode
         if hasattr(self.player_manager, 'sequencer') and self.player_manager.sequencer:
@@ -624,7 +624,7 @@ class MultiPlaylistSystem:
             
             # Fallback: support old 'playlists' array format for migration
             if not items_data and 'playlists' in data:
-                logger.info("Migrating from old 'playlists' array format to new 'items' dict format")
+                logger.debug("Migrating from old 'playlists' array format to new 'items' dict format")
                 playlists_data = data.get('playlists', [])
                 for playlist_data in playlists_data:
                     playlist = Playlist.from_dict(playlist_data)
@@ -693,7 +693,7 @@ class MultiPlaylistSystem:
                                         player_state.clip_params[clip_id]['effects'] = clip_data['effects']
                                         pass  # Effects extracted from registry
                     
-                    logger.info(f"✅ Re-populated clip_params from clip_registry for {len(self.playlists)} playlists")
+                    logger.debug(f"✅ Re-populated clip_params from clip_registry for {len(self.playlists)} playlists")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to re-populate clip_params from registry: {e}", exc_info=True)
             
@@ -705,7 +705,7 @@ class MultiPlaylistSystem:
             if self.active_playlist_id and self.active_playlist_id in self.playlists:
                 self.apply_playlist(self.active_playlist_id)
             
-            logger.info(f"Loaded {len(self.playlists)} playlists from session state")
+            logger.debug(f"Loaded {len(self.playlists)} playlists from session state")
             return True
             
         except Exception as e:

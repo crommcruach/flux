@@ -77,9 +77,9 @@ def register_transition_routes(app, player_manager, playlist_system=None):
             easing = data.get('easing', 'ease_in_out')
             
             # Debug: Log playlist state
-            logger.info(f"[TRANSITION CONFIG DEBUG] playlist_system exists: {playlist_system is not None}")
+            logger.debug(f"[TRANSITION CONFIG DEBUG] playlist_system exists: {playlist_system is not None}")
             if playlist_system:
-                logger.info(f"[TRANSITION CONFIG DEBUG] viewed={playlist_system.viewed_playlist_id}, active={playlist_system.active_playlist_id}")
+                logger.debug(f"[TRANSITION CONFIG DEBUG] viewed={playlist_system.viewed_playlist_id}, active={playlist_system.active_playlist_id}")
             
             # Validate duration range
             if not (0.1 <= duration <= 5.0):
@@ -103,7 +103,7 @@ def register_transition_routes(app, player_manager, playlist_system=None):
                         'easing': easing
                     }
                     
-                    logger.info(f"[TRANSITION CONFIG] Updated transition config for viewed playlist '{viewed_playlist.name}' {player_id}: enabled={enabled}, effect={effect}")
+                    logger.debug(f"[TRANSITION CONFIG] Updated transition config for viewed playlist '{viewed_playlist.name}' {player_id}: enabled={enabled}, effect={effect}")
                     
                     # Save playlist state
                     playlist_system._auto_save()
@@ -120,7 +120,7 @@ def register_transition_routes(app, player_manager, playlist_system=None):
                     })
             
             # Otherwise apply to physical player (active playlist)
-            logger.info(f"[TRANSITION CONFIG DEBUG] Applying to physical player (active playlist)")
+            logger.debug(f"[TRANSITION CONFIG DEBUG] Applying to physical player (active playlist)")
             
             # Check if transition plugin exists
             transition_plugin = None
@@ -158,7 +158,7 @@ def register_transition_routes(app, player_manager, playlist_system=None):
                 plugin=transition_plugin
             )
             
-            logger.info(f"✅ {player_id} transition config updated: "
+            logger.debug(f"✅ {player_id} transition config updated: "
                        f"enabled={enabled}, effect={effect}, duration={duration}s, easing={easing}")
             
             return jsonify({

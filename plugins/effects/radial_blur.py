@@ -98,13 +98,13 @@ class RadialBlurEffect(PluginBase):
                                     flags=cv2.INTER_LINEAR,
                                     borderMode=cv2.BORDER_REFLECT)
             
-            # Akkumuliere
-            result += zoomed.astype(np.float32)
+            # OPTIMIZED: Accumulate directly (auto-converts uint8 to float32)
+            result += zoomed
         
-        # Mittelwert bilden
-        result = result / iterations
+        # Average and convert back to uint8
+        result = (result / iterations).astype(np.uint8)
         
-        return result.astype(np.uint8)
+        return result
     
     def update_parameter(self, name, value):
         """Aktualisiert Parameter zur Laufzeit."""

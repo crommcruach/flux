@@ -9,11 +9,9 @@ import cv2
 import os
 from collections import deque
 from ..core.logger import get_logger, debug_transport, debug_layers, debug_playback, debug_effects
-from ..content.points import PointsLoader
 from .sources import VideoSource
 from ..plugins.manager import get_plugin_manager
 from .layers.layer import Layer
-from .recording.manager import RecordingManager
 from .transitions.manager import TransitionManager
 from .effects.processor import EffectProcessor
 from .playlists.manager import PlaylistManager
@@ -36,13 +34,13 @@ class Player:
     Unterstützt Videos, Scripts und zukünftige Medien-Typen.
     """
     
-    def __init__(self, frame_source, points_json_path, target_ip='127.0.0.1', start_universe=0, fps_limit=None, config=None, enable_artnet=True, player_name="Player", clip_registry=None):
+    def __init__(self, frame_source, points_json_path=None, target_ip='127.0.0.1', start_universe=0, fps_limit=None, config=None, enable_artnet=True, player_name="Player", clip_registry=None, canvas_width=None, canvas_height=None):
         """
         Initialisiert Player mit Frame-Quelle.
         
         Args:
             frame_source: FrameSource-Instanz (VideoSource, GeneratorSource, etc.)
-            points_json_path: Pfad zur Points-JSON-Datei
+            points_json_path: DEPRECATED - Wird ignoriert (für Kompatibilität)
             target_ip: Art-Net Ziel-IP
             start_universe: Start-Universum für Art-Net
             fps_limit: FPS-Limit (None = Source-FPS)
@@ -50,10 +48,16 @@ class Player:
             enable_artnet: Aktiviert Art-Net Ausgabe (False für Preview-Only Player)
             player_name: Name des Players für Logging
             clip_registry: ClipRegistry Instanz für UUID-basierte Clip-Verwaltung
+            canvas_width: Canvas Breite (optional, auto-detect from source if not provided)
+            canvas_height: Canvas Höhe (optional, auto-detect from source if not provided)
         """
         self.player_name = player_name
         self.enable_artnet = enable_artnet
         self.clip_registry = clip_registry
+        
+        # DEPRECATED: Points JSON path (kept for compatibility only)
+        if points_json_path is not None:
+            logger.debug(f"points_json_path parameter is deprecated and will be ignored")
         
         # Player ID für Clip Registry (normalisiert)
         if 'art-net' in player_name.lower() or 'artnet' in player_name.lower():
@@ -67,7 +71,6 @@ class Player:
         # Track which clip is actually loaded (separate from property-based current_clip_id)
         self._loaded_clip_id = None
         
-        self.points_json_path = points_json_path
         self.target_ip = target_ip
         self.start_universe = start_universe
         self.fps_limit = fps_limit
@@ -76,36 +79,24 @@ class Player:
         # Plugin Manager (needed for LayerManager)
         self.plugin_manager = get_plugin_manager()
         
-        # Lade Points-Konfiguration (needed for LayerManager initialization)
-        # validate_bounds nur für Videos, nicht für Scripts
-        validate_bounds = isinstance(frame_source, VideoSource)
-        points_data = PointsLoader.load_points(points_json_path, validate_bounds=validate_bounds)
-        
-        self.point_coords = points_data['point_coords']
-        
-        # Canvas size: Use frame source dimensions for video player, points file for artnet
-        if enable_artnet:
-            # Art-Net player: Use points file canvas dimensions
-            self.canvas_width = points_data['canvas_width']
-            self.canvas_height = points_data['canvas_height']
+        # Canvas size: Auto-detect from frame source or use provided values
+        if canvas_width is not None and canvas_height is not None:
+            # Explicit canvas size provided
+            self.canvas_width = canvas_width
+            self.canvas_height = canvas_height
+        elif hasattr(frame_source, 'width') and hasattr(frame_source, 'height'):
+            # Get from frame source (VideoSource, GeneratorSource, etc.)
+            self.canvas_width = frame_source.width
+            self.canvas_height = frame_source.height
+        elif hasattr(frame_source, 'canvas_width') and hasattr(frame_source, 'canvas_height'):
+            # Alternative property names
+            self.canvas_width = frame_source.canvas_width
+            self.canvas_height = frame_source.canvas_height
         else:
-            # Video player: Use frame source dimensions (check both width and canvas_width)
-            if hasattr(frame_source, 'width'):
-                self.canvas_width = frame_source.width
-                self.canvas_height = frame_source.height
-            elif hasattr(frame_source, 'canvas_width'):
-                self.canvas_width = frame_source.canvas_width
-                self.canvas_height = frame_source.canvas_height
-            else:
-                # Fallback to points file dimensions
-                self.canvas_width = points_data['canvas_width']
-                self.canvas_height = points_data['canvas_height']
-        
-        self.universe_mapping = points_data['universe_mapping']
-        self.total_points = points_data['total_points']
-        self.total_channels = points_data['total_channels']
-        self.required_universes = points_data['required_universes']
-        self.channels_per_universe = points_data['channels_per_universe']
+            # Fallback to default 1080p
+            self.canvas_width = 1920
+            self.canvas_height = 1080
+            logger.warning(f"Canvas size not provided or detected, using default: {self.canvas_width}x{self.canvas_height}")
         
         # Layer Manager (Multi-Layer System)
         self.layer_manager = LayerManager(
@@ -149,11 +140,7 @@ class Player:
         )
         self.current_clip_id = None  # UUID of currently loaded clip (for clip effects from registry)
         
-        # Recording Manager
-        self.recording_manager = RecordingManager(max_frames=36000)
-        
         # Preview Frames
-        self.last_frame = None  # Letztes Frame (LED-Punkte RGB) für Preview
         self.last_video_frame = None  # Letztes komplettes Frame für Preview
         
         # Transition Manager
@@ -174,8 +161,6 @@ class Player:
         debug_playback(logger, f"{self.player_name} initialisiert:")
         debug_playback(logger, f"  Source: {self.source.get_source_name()} ({type(self.source).__name__})")
         debug_playback(logger, f"  Canvas: {self.canvas_width}x{self.canvas_height}")
-        debug_playback(logger, f"  Punkte: {self.total_points}, Kanäle: {self.total_channels}")
-        debug_playback(logger, f"  Universen: {self.required_universes}")
         debug_playback(logger, f"  Art-Net: {'Enabled' if enable_artnet else 'Disabled'} ({target_ip}, Start-Universe: {start_universe})")
         
         # ArtNet Routing Bridge (NEW - for routing system output)
@@ -208,7 +193,7 @@ class Player:
                 
                 if output_definitions:
                     created = self.output_manager.load_outputs_from_config(output_definitions)
-                    logger.info(f"✅ Loaded {created} outputs from config.json")
+                    logger.debug(f"✅ Loaded {created} outputs from config.json")
                 else:
                     logger.warning("No output definitions found in config.json")
                 
@@ -224,18 +209,18 @@ class Player:
                 if saved_state:
                     try:
                         self.output_manager.set_state(saved_state)
-                        logger.info(f"Output state restored for {self.player_name}: {len(saved_state.get('outputs', {}))} output configs, {len(saved_state.get('slices', {}))} slices")
+                        logger.debug(f"Output state restored for {self.player_name}: {len(saved_state.get('outputs', {}))} output configs, {len(saved_state.get('slices', {}))} slices")
                     except Exception as e:
                         logger.warning(f"Failed to restore output state: {e}")
                 else:
-                    logger.info(f"No saved output state found for {self.player_name}")
+                    logger.debug(f"No saved output state found for {self.player_name}")
                 
                 # Register auto-save callback
                 self.output_manager.set_state_save_callback(
                     lambda player_name, state: session_state.save_output_state(player_name, state)
                 )
                 
-                logger.info(f"✅ Output Manager initialized for {self.player_name}")
+                logger.debug(f"✅ Output Manager initialized for {self.player_name}")
             except Exception as e:
                 logger.error(f"Output Manager initialization failed: {e}", exc_info=True)
                 self.output_manager = None
@@ -291,7 +276,7 @@ class Player:
                                 clip_id=clip_id,
                                 player_name=self.player_name
                             )
-                            logger.info(f"[{self.player_name}] Layer {layer_idx} video source updated to {new_width}x{new_height}")
+                            logger.debug(f"[{self.player_name}] Layer {layer_idx} video source updated to {new_width}x{new_height}")
                     elif isinstance(old_source, GeneratorSource):
                         # Recreate generator source with new dimensions
                         generator_id = old_source.generator_id if hasattr(old_source, 'generator_id') else None
@@ -304,7 +289,7 @@ class Player:
                                 canvas_width=new_width,
                                 canvas_height=new_height
                             )
-                            logger.info(f"[{self.player_name}] Layer {layer_idx} generator source updated to {new_width}x{new_height}")
+                            logger.debug(f"[{self.player_name}] Layer {layer_idx} generator source updated to {new_width}x{new_height}")
         
         # If a video source is currently loaded, recreate it with new dimensions
         if hasattr(self, 'source') and self.source:
@@ -342,7 +327,7 @@ class Player:
                 # Recreate dummy source with new dimensions
                 self.source = DummySource(new_width, new_height)
         
-        logger.info(f"[{self.player_name}] Resolution updated: {old_width}x{old_height} → {new_width}x{new_height}")
+        logger.debug(f"[{self.player_name}] Resolution updated: {old_width}x{old_height} → {new_width}x{new_height}")
     
     # Properties that delegate to source
     @property
@@ -515,7 +500,7 @@ class Player:
             logger.error(f"Neue Source konnte nicht initialisiert werden: {self.source.get_source_name()}")
             return False
         
-        logger.info(f"Source gewechselt: {self.source.get_source_name()} ({type(self.source).__name__})")
+        logger.debug(f"Source gewechselt: {self.source.get_source_name()} ({type(self.source).__name__})")
         
         # Starte Wiedergabe wieder falls vorher aktiv
         if was_playing:
@@ -561,7 +546,7 @@ class Player:
         self.current_clip_index = index
         self.playlist_manager.set_index(index)
         
-        logger.info(f"[{self.player_name}] Loading clip at index {index}, current state: playing={self.is_playing}, paused={self.is_paused}")
+        logger.debug(f"[{self.player_name}] Loading clip at index {index}, current state: playing={self.is_playing}, paused={self.is_paused}")
         
         # Save playback state
         was_playing = self.is_playing
@@ -588,7 +573,7 @@ class Player:
             
             if transition_config:
                 plugin_name = transition_config.get('plugin')
-                logger.info(f"🎬 [{self.player_name}] Custom transition found: plugin={plugin_name}, duration={transition_config.get('duration')}s, easing={transition_config.get('easing')}")
+                logger.debug(f"🎬 [{self.player_name}] Custom transition found: plugin={plugin_name}, duration={transition_config.get('duration')}s, easing={transition_config.get('easing')}")
                 
                 # Load the actual transition plugin instance using load_plugin()
                 transition_plugin_instance = self.plugin_manager.load_plugin(plugin_name)
@@ -610,11 +595,11 @@ class Player:
                             duration=duration,
                             easing=easing
                         )
-                        logger.info(f"🎬 [{self.player_name}] Applied transition plugin instance: {transition_plugin_instance}")
+                        logger.debug(f"🎬 [{self.player_name}] Applied transition plugin instance: {transition_plugin_instance}")
                 else:
                     logger.error(f"🎬 [{self.player_name}] Transition plugin not found: {plugin_name}")
             else:
-                logger.info(f"🎬 [{self.player_name}] No custom transition, restoring playlist defaults")
+                logger.debug(f"🎬 [{self.player_name}] No custom transition, restoring playlist defaults")
                 # Reset to playlist defaults by reloading the default transition plugin
                 if self.transition_manager:
                     # Get current playlist transition config (defaults)
@@ -637,7 +622,7 @@ class Player:
                     original_plugin = getattr(self.transition_manager, '_original_plugin', None)
                     
                     if current_effect != original_effect or original_plugin:
-                        logger.info(f"🎬 [{self.player_name}] Restoring playlist default transition: {original_effect}")
+                        logger.debug(f"🎬 [{self.player_name}] Restoring playlist default transition: {original_effect}")
                         # Reload the original plugin
                         if original_plugin is None:
                             original_plugin = self.plugin_manager.load_plugin(original_effect)
@@ -710,7 +695,7 @@ class Player:
                 video_dir = self.config.get('paths', {}).get('video_dir', 'video')
                 try:
                     self.load_clip_layers(clip_id, self.clip_registry, video_dir)
-                    logger.info(f"🎨 [{self.player_name}] Loaded layers for clip {clip_id}")
+                    logger.debug(f"🎨 [{self.player_name}] Loaded layers for clip {clip_id}")
                 except Exception as e:
                     logger.warning(f"⚠️ [{self.player_name}] Failed to load clip layers: {e}")
             
@@ -729,11 +714,11 @@ class Player:
                             transport._frame_source = None  # Force re-initialization
                             logger.debug(f"🔁 [{self.player_name}] Reset transport effect state on clip load")
             
-            logger.info(f"✅ [{self.player_name}] Loaded clip at index {index}")
+            logger.debug(f"✅ [{self.player_name}] Loaded clip at index {index}")
             
             # Restart playback if it was playing before
             if was_playing:
-                logger.info(f"[{self.player_name}] Restarting playback (was_playing={was_playing})...")
+                logger.debug(f"[{self.player_name}] Restarting playback (was_playing={was_playing})...")
                 
                 # Registriere als aktiver Player NUR wenn Art-Net enabled ist
                 if self.enable_artnet:
@@ -750,7 +735,7 @@ class Player:
                 new_source.reset()
                 self.thread = threading.Thread(target=self._play_loop, daemon=True)
                 self.thread.start()
-                logger.info(f"[{self.player_name}] Playback restarted, thread alive={self.thread.is_alive()}")
+                logger.debug(f"[{self.player_name}] Playback restarted, thread alive={self.thread.is_alive()}")
                 
                 if was_paused:
                     self.pause()
@@ -792,13 +777,13 @@ class Player:
                 # Stoppe alten Art-Net Player falls vorhanden
                 if lock_module._active_player and lock_module._active_player is not self:
                     old_player = lock_module._active_player
-                    logger.info(f"Stoppe alten Art-Net Player: {old_player.player_name}")
+                    logger.debug(f"Stoppe alten Art-Net Player: {old_player.player_name}")
                     old_player.stop()
                 
                 lock_module._active_player = self
-                logger.info(f"Aktiver Art-Net Player: {self.player_name} ({self.source.get_source_name()})")
+                logger.debug(f"Aktiver Art-Net Player: {self.player_name} ({self.source.get_source_name()})")
         else:
-            logger.info(f"{self.player_name}: Starte Preview-Only (kein Art-Net)")
+            logger.debug(f"{self.player_name}: Starte Preview-Only (kein Art-Net)")
         
         # Prüfe ob Source vorhanden ist
         if not self.source:
@@ -823,7 +808,7 @@ class Player:
         self.source.reset()
         self.thread = threading.Thread(target=self._play_loop, daemon=True)
         self.thread.start()
-        logger.info(f"Wiedergabe gestartet: {self.source.get_source_name()}")
+        logger.debug(f"Wiedergabe gestartet: {self.source.get_source_name()}")
     
     def stop(self):
         """Stoppt die Wiedergabe."""
@@ -867,7 +852,17 @@ class Player:
                 if lock_module._active_player is self:
                     lock_module._active_player = None
         
-        logger.info(f"{self.player_name}: Wiedergabe gestoppt")
+        logger.debug(f"{self.player_name}: Wiedergabe gestoppt")
+    
+    def clear_frame(self):
+        """Löscht den aktuellen Frame und zeigt schwarzen Bildschirm (für leere Playlist)."""
+        if hasattr(self, 'last_video_frame'):
+            # Create black frame with same dimensions as last frame
+            black_frame = np.zeros_like(self.last_video_frame)
+            self.last_video_frame = black_frame
+            logger.debug(f"🖤 {self.player_name}: Cleared video preview (black screen)")
+        else:
+            logger.debug(f"🖤 {self.player_name}: No frame to clear")
     
     def pause(self):
         """Pausiert die Wiedergabe."""
@@ -906,6 +901,43 @@ class Player:
         self.start()
         
         debug_playback(logger, "Wiedergabe neu gestartet (vom ersten Frame)")
+    
+    def _preprocess_layer_transport(self, layer):
+        """
+        Preprocess transport effect for a layer BEFORE fetching frame.
+        This allows transport to control which frame is fetched.
+        
+        Args:
+            layer: Layer object with .effects and .source
+            
+        Returns:
+            bool: True if transport was preprocessed, False otherwise
+        """
+        if not layer.effects or not layer.source:
+            return False
+            
+        for effect in layer.effects:
+            if effect.get('id') == 'transport' and effect.get('enabled', True):
+                transport_instance = effect.get('instance')
+                
+                if transport_instance:
+                    # Initialize transport state if needed (only once)
+                    if hasattr(transport_instance, '_initialize_state'):
+                        if transport_instance.out_point == 0:
+                            transport_instance._initialize_state(layer.source)
+                            debug_transport(logger, f"🎬 Layer {layer.layer_id} Transport initialized: out_point={transport_instance.out_point}")
+                    
+                    # Calculate and set next frame BEFORE fetch
+                    if hasattr(transport_instance, '_calculate_next_frame'):
+                        next_frame = transport_instance._calculate_next_frame()
+                        # Set current_frame on source (works for VideoSource, GeneratorSource, ScriptSource)
+                        if hasattr(layer.source, 'current_frame'):
+                            layer.source.current_frame = next_frame
+                            debug_transport(logger, f"🎯 Layer {layer.layer_id} Transport pre-set frame to {next_frame}")
+                            return True
+                break
+        
+        return False
     
     def _check_transport_loop_completion(self):
         """
@@ -1027,105 +1059,11 @@ class Player:
             
             # ========== MULTI-LAYER COMPOSITING ==========
             if not should_autoadvance and self.layers and len(self.layers) > 0:
-                # OPTIMIZATION: Single-layer fast path (skip all compositing logic)
-                if len(self.layers) == 1:
-                    # Only one layer - no blending needed, process directly (saves 5-8ms)
-                    layer = self.layers[0]
-                    
-                    # PRE-PROCESS: Transport effect if present
-                    if layer.effects and layer.source:
-                        for effect in layer.effects:
-                            if effect.get('id') == 'transport' and effect.get('enabled', True):
-                                transport_instance = effect.get('instance')
-                                if transport_instance:
-                                    if hasattr(transport_instance, '_initialize_state'):
-                                        if transport_instance.out_point == 0:
-                                            transport_instance._initialize_state(layer.source)
-                                    if hasattr(transport_instance, '_calculate_next_frame'):
-                                        next_frame = transport_instance._calculate_next_frame()
-                                        if hasattr(layer.source, 'current_frame'):
-                                            layer.source.current_frame = next_frame
-                                break
-                    
-                    # Fetch and process single layer
-                    frame, source_delay = layer.source.get_next_frame()
-                    if frame is not None:
-                        frame = self.apply_layer_effects(layer, frame)
-                    # Continue to effect processing below (skip multi-layer compositing)
-                    
-                else:
-                    # Multiple layers - full compositing pipeline
-                    # PRE-PROCESS: Let transport effect calculate next frame BEFORE fetching
-                    # This prevents fetching frames outside trim range
-                    transport_preprocessed = False
-                    if self.layers[0].effects and self.layers[0].source:
-                        # Use LAYER transport instance, not registry instance!
-                        # This ensures the live instance gets updated current_position
-                        for effect in self.layers[0].effects:
-                            if effect.get('id') == 'transport' and effect.get('enabled', True):
-                                transport_instance = effect.get('instance')
-                                
-                                if transport_instance:
-                                    # Initialize transport state if needed (only once)
-                                    if hasattr(transport_instance, '_initialize_state'):
-                                        if transport_instance.out_point == 0:
-                                            transport_instance._initialize_state(self.layers[0].source)
-                                            debug_transport(logger, f"🎬 Transport initialized: out_point={transport_instance.out_point}")
-                                    
-                                    # Calculate and set next frame BEFORE fetch
-                                    if hasattr(transport_instance, '_calculate_next_frame'):
-                                        next_frame = transport_instance._calculate_next_frame()
-                                        # Set current_frame on source (works for VideoSource, GeneratorSource, ScriptSource)
-                                        if hasattr(self.layers[0].source, 'current_frame'):
-                                            self.layers[0].source.current_frame = next_frame
-                                            transport_preprocessed = True
-                                            debug_transport(logger, f"🎯 Transport pre-set frame to {next_frame}, live instance current_position={transport_instance.current_position}")
-                                break
-                    
-                    # Master Frame (Layer 0 bestimmt Timing und Länge)
-                    frame, source_delay = self.layers[0].source.get_next_frame()
-                    
-                    if frame is not None:
-                        # Wende Layer 0 Effects an (Transport controls playback here)
-                        frame = self.apply_layer_effects(self.layers[0], frame)
-                        
-                        # Composite Slave Layers (1-N)
-                        for layer in self.layers[1:]:
-                            # Skip invisible layers (saves get_next_frame + effects + blending)
-                            if not layer.enabled or layer.opacity <= 0:
-                                continue
-                            
-                            overlay_frame, _ = layer.source.get_next_frame()
-                            
-                            # Auto-Reset wenn Slave-Layer am Ende (Looping!)
-                            if overlay_frame is None:
-                                debug_layers(logger, f"🔁 Layer {layer.layer_id} reached end, auto-reset (slave loop)")
-                                layer.source.reset()
-                                overlay_frame, _ = layer.source.get_next_frame()
-                            
-                            # Wenn immer noch None (z.B. fehlerhafte Source) - überspringe Layer
-                            if overlay_frame is None:
-                                source_info = getattr(layer.source, 'video_path', getattr(layer.source, 'generator_name', 'Unknown'))
-                                # Only log once per layer to avoid spamming in hot path
-                                if not hasattr(self, '_warned_layers'):
-                                    self._warned_layers = set()
-                                if layer.layer_id not in self._warned_layers:
-                                    logger.warning(f"⚠️ Layer {layer.layer_id} (source: {source_info}) returned None after reset, skipping")
-                                    self._warned_layers.add(layer.layer_id)
-                                continue
-                            
-                            # Wende Layer Effects an
-                            overlay_frame = self.apply_layer_effects(layer, overlay_frame)
-                            
-                            # OPTIMIZATION: Get blend plugin (cached, only updates opacity)
-                            blend_plugin = self.get_blend_plugin(layer.blend_mode, layer.opacity)
-                            
-                            # PERFORMANCE CRITICAL: Composite mit BlendEffect
-                            # This is the most expensive operation (float32 conversion + blending)
-                            frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
-                    
-                    # Frame ist jetzt das finale composited Frame
-                    # Weiter mit existing logic (brightness, effects, etc.)
+                # Delegate all layer compositing to LayerManager
+                frame, source_delay = self.layer_manager.composite_layers(
+                    preprocess_transport_callback=self._preprocess_layer_transport,
+                    player_name=self.player_name
+                )
                 
             elif not should_autoadvance:
                 # Fallback: Single-Source Mode (Backward Compatibility)
@@ -1282,7 +1220,7 @@ class Player:
                                 
                                 if transition_config:
                                     plugin_name = transition_config.get('plugin')
-                                    logger.info(f"🎬 [{self.player_name}] Autoplay: Custom transition on clip: {plugin_name}")
+                                    logger.debug(f"🎬 [{self.player_name}] Autoplay: Custom transition on clip: {plugin_name}")
                                     
                                     # Load and apply transition plugin
                                     transition_plugin_instance = self.plugin_manager.load_plugin(plugin_name)
@@ -1312,7 +1250,7 @@ class Player:
                                 else:
                                     # No custom transition - restore defaults
                                     if self.transition_manager and hasattr(self.transition_manager, '_original_effect'):
-                                        logger.info(f"🎬 [{self.player_name}] Autoplay: Restoring default transition")
+                                        logger.debug(f"🎬 [{self.player_name}] Autoplay: Restoring default transition")
                                         original_plugin = self.transition_manager._original_plugin
                                         if original_plugin is None:
                                             original_plugin = self.plugin_manager.load_plugin(self.transition_manager._original_effect)
@@ -1486,47 +1424,8 @@ class Player:
                 except Exception as e:
                     logger.error(f"[OUTPUT] Frame update error: {e}", exc_info=True)
             
-            # DMX extraction - only if needed (Art-Net enabled OR recording active)
-            # This saves ~2-3ms per frame when Art-Net is disabled
-            needs_dmx = (self.enable_artnet and self.routing_bridge) or self.recording_manager.is_recording
-
-            
-            if needs_dmx:
-                # NumPy-optimierte Pixel-Extraktion (verwende Art-Net Frame!)
-                valid_mask = (
-                    (self.point_coords[:, 1] >= 0) & 
-                    (self.point_coords[:, 1] < self.canvas_height) &
-                    (self.point_coords[:, 0] >= 0) & 
-                    (self.point_coords[:, 0] < self.canvas_width)
-                )
-                
-                # Extrahiere RGB-Werte für alle Punkte aus Art-Net Frame
-                y_coords = self.point_coords[valid_mask, 1]
-                x_coords = self.point_coords[valid_mask, 0]
-                rgb_values = frame_for_artnet[y_coords, x_coords]
-                
-                # DMX-Buffer erstellen
-                dmx_buffer = np.zeros((len(self.point_coords), 3), dtype=np.uint8)
-                dmx_buffer[valid_mask] = rgb_values
-                dmx_buffer = dmx_buffer.flatten().tolist()
-                
-                # Speichere für Preview (Liste ist bereits Kopie, kein .copy() nötig)
-                self.last_frame = dmx_buffer
-            else:
-                # No DMX needed - just set empty buffer for preview
-                dmx_buffer = None
-                self.last_frame = None
-            
-            # Recording
-            if self.recording_manager.is_recording and dmx_buffer:
-                self.recording_manager.add_frame({
-                    'frame': self.source.current_frame,
-                    'timestamp': time.time() - self.start_time,
-                    'dmx_data': dmx_buffer.copy()
-                })
-            
             # ArtNet Routing System (NEW - processes video frame for routing outputs)
-            #  Only run on Art-Net player (not Video player) for ArtNet output routing
+            # Only run on Art-Net player (not Video player) for ArtNet output routing
             if self.routing_bridge and self.enable_artnet and self.is_running:
                 try:
                     # Use the OUTPUT frame (after effects but before DMX extraction)
@@ -1702,92 +1601,14 @@ class Player:
         Returns:
             RGB frame with alpha composited onto black
         """
-        # Extract RGB and alpha
-        rgb = rgba_frame[:, :, :3].astype(np.float32)
-        alpha = rgba_frame[:, :, 3:].astype(np.float32) / 255.0
+        # OPTIMIZED: Extract RGB and alpha with combined operations
+        rgb = rgba_frame[:, :, :3]
+        alpha = rgba_frame[:, :, 3:]
         
-        # Composite: result = rgb * alpha + black * (1 - alpha) = rgb * alpha
-        composited = (rgb * alpha).astype(np.uint8)
+        # Composite using integer math (avoid float conversion)
+        composited = (rgb.astype(np.uint16) * alpha.astype(np.uint16) / 255).astype(np.uint8)
         
         return composited
-    
-    # Recording - Delegated to RecordingManager
-    def start_recording(self, name=None):
-        """Startet Aufzeichnung."""
-        if not self.is_playing:
-            logger.debug("Aufzeichnung nur während Wiedergabe möglich!")
-            return False
-        return self.recording_manager.start_recording(name)
-    
-    def stop_recording(self):
-        """Stoppt Aufzeichnung und speichert sie."""
-        return self.recording_manager.stop_recording(
-            canvas_width=self.canvas_width,
-            canvas_height=self.canvas_height,
-            total_points=self.total_points
-        )
-    
-    def load_points(self, points_json_path):
-        """
-        Lädt neue Points-Konfiguration und passt Player entsprechend an.
-        
-        WICHTIG: Stoppt/Startet Source neu, da Canvas-Größe sich ändern kann!
-        
-        Args:
-            points_json_path: Pfad zur neuen Points-JSON-Datei
-        """
-        logger.info(f"Lade neue Points-Konfiguration: {os.path.basename(points_json_path)}")
-        
-        # Lade neue Points-Daten
-        validate_bounds = isinstance(self.source, VideoSource)
-        points_data = PointsLoader.load_points(points_json_path, validate_bounds=validate_bounds)
-        
-        # Prüfe ob Canvas-Größe sich ändert
-        canvas_changed = (
-            points_data['canvas_width'] != self.canvas_width or 
-            points_data['canvas_height'] != self.canvas_height
-        )
-        
-        # Update Points-Daten
-        old_points = self.total_points
-        old_universes = self.required_universes
-        
-        self.points_json_path = points_json_path
-        self.point_coords = points_data['point_coords']
-        self.canvas_width = points_data['canvas_width']
-        self.canvas_height = points_data['canvas_height']
-        self.universe_mapping = points_data['universe_mapping']
-        self.total_points = points_data['total_points']
-        self.total_channels = points_data['total_channels']
-        self.required_universes = points_data['required_universes']
-        self.channels_per_universe = points_data['channels_per_universe']
-        
-        # Wenn Canvas-Größe sich ändert, muss Source neu initialisiert werden
-        if canvas_changed:
-            logger.info(f"Canvas-Größe geändert: {self.canvas_width}x{self.canvas_height}")
-            
-            # Stoppe Source
-            self.source.cleanup()
-            
-            # Erstelle neue Source-Instanz mit neuer Canvas-Größe
-            source_path = self.source.source_path if hasattr(self.source, 'source_path') else None
-            is_video_source = isinstance(self.source, VideoSource)
-            
-            if is_video_source:
-                self.source = VideoSource(source_path, self.canvas_width, self.canvas_height, self.config, player_name=self.player_name)
-            else:
-                # ScriptSource oder andere - passe Canvas-Größe an
-                self.source.canvas_width = self.canvas_width
-                self.source.canvas_height = self.canvas_height
-            
-            # Neu initialisieren
-            if not self.source.initialize():
-                raise ValueError(f"Source konnte nicht neu initialisiert werden")
-        
-        logger.info(f"✅ Points gewechselt:")
-        logger.info(f"   Punkte: {old_points} → {self.total_points}")
-        logger.info(f"   Universen: {old_universes} → {self.required_universes}")
-        logger.info(f"   Canvas: {self.canvas_width}x{self.canvas_height}")
     
     # ========== Multi-Layer Management ==========
     

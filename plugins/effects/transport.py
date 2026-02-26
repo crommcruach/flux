@@ -62,7 +62,12 @@ class TransportEffect(PluginBase):
             'name': 'playback_mode',
             'type': ParameterType.SELECT,
             'default': 'repeat',
-            'options': ['repeat', 'play_once', 'bounce', 'random'],
+            'options': [
+                {'value': 'repeat', 'label': '🔁', 'tooltip': 'Repeat'},
+                {'value': 'play_once', 'label': '➡️', 'tooltip': 'Play Once'},
+                {'value': 'bounce', 'label': '↔️', 'tooltip': 'Bounce'},
+                {'value': 'random', 'label': '🔀', 'tooltip': 'Random'}
+            ],
             'description': 'Playback Mode'
         },
         {
@@ -73,6 +78,12 @@ class TransportEffect(PluginBase):
             'max': 999,
             'control_type': 'input',
             'description': 'Loop Count (0 = infinite, 1+ = play N times then advance)'
+        },
+        {
+            'name': 'paused',
+            'type': ParameterType.BOOL,
+            'default': False,
+            'description': 'Pause clip playback (freeze current frame)'
         }
     ]
     
@@ -86,6 +97,7 @@ class TransportEffect(PluginBase):
         self.reverse = False
         self.playback_mode = 'repeat'
         self.loop_count = 0
+        self.paused = False
         self._virtual_frame = 0.0
         self._bounce_direction = 1
         self._has_played_once = False
@@ -223,6 +235,14 @@ class TransportEffect(PluginBase):
                 self.current_position = max(self.in_point, min(self.current_position, self.out_point))
                 self._virtual_frame = float(self.current_position)
                 info_log_conditional(logger, DebugCategories.TRANSPORT, f"Transport: Preserved custom trim [{self.in_point}, {self.out_point}] for source with {self._total_frames} frames")
+                
+                # Persist preserved trim to config
+                if hasattr(self, 'config') and self.config:
+                    self.config['transport_position'] = {
+                        '_value': self.current_position,
+                        '_rangeMin': self.in_point,
+                        '_rangeMax': self.out_point
+                    }
             else:
                 # No valid trim settings - initialize to full range
                 self.in_point = 0
@@ -230,6 +250,14 @@ class TransportEffect(PluginBase):
                 self.current_position = 0
                 self._virtual_frame = 0.0
                 info_log_conditional(logger, DebugCategories.TRANSPORT, f"Transport: Initialized to full range [0, {self.out_point}] ({self._total_frames} frames)")
+                
+                # Persist full range to config
+                if hasattr(self, 'config') and self.config:
+                    self.config['transport_position'] = {
+                        '_value': self.current_position,
+                        '_rangeMin': self.in_point,
+                        '_rangeMax': self.out_point
+                    }
             
             # Reset loop counters
             self._current_loop_iteration = 0
@@ -262,6 +290,10 @@ class TransportEffect(PluginBase):
     
     def _calculate_next_frame(self):
         """Berechnet nächsten Frame basierend auf Speed, Direction und Mode."""
+        # If paused, freeze on current frame
+        if self.paused:
+            return self.current_position
+        
         # Check if we're being controlled by sequence sync
         # If we received a sync update recently (< 1 second ago), don't auto-advance
         import time
@@ -436,6 +468,15 @@ class TransportEffect(PluginBase):
                 
                 debug_transport(logger, f"✅ Transport ranges updated: in_point={self.in_point}, out_point={self.out_point} (clamped to 0-{max_frame})")
                 
+                # CRITICAL: Persist trim values to config so they survive reloads
+                if hasattr(self, 'config') and self.config:
+                    self.config['transport_position'] = {
+                        '_value': int(new_position),
+                        '_rangeMin': self.in_point,
+                        '_rangeMax': self.out_point
+                    }
+                    debug_transport(logger, f"✅ Transport trim persisted to config: [{self.in_point}, {self.out_point}]")
+                
                 # Update position (user can drag position handle to jump)
                 new_pos_int = int(new_position)
                 if self.in_point <= new_pos_int <= self.out_point:
@@ -496,6 +537,16 @@ class TransportEffect(PluginBase):
                 # Reset loop counter when count changes
                 self._current_loop_iteration = 0
                 debug_transport(logger, f"Transport: loop_count changed to {self.loop_count} (0=infinite)")
+            return True
+        
+        elif name == 'paused':
+            # Extract actual value if it's a range metadata dict
+            if isinstance(value, dict) and '_value' in value:
+                value = value['_value']
+            old_paused = self.paused
+            self.paused = bool(value)
+            if old_paused != self.paused:
+                debug_transport(logger, f"⏸️ Transport: paused changed to {self.paused} (freeze frame: {self.current_position})")
             return True
         
         return False

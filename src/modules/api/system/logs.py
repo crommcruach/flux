@@ -266,11 +266,11 @@ def register_log_routes(app):
             elif level == 'warn':
                 logger.warning(log_msg)
             elif level == 'info':
-                logger.info(log_msg)
+                logger.debug(log_msg)
             elif level == 'debug':
                 logger.debug(log_msg)
             else:  # log
-                logger.info(log_msg)
+                logger.debug(log_msg)
             
             return jsonify({
                 'success': True,

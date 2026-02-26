@@ -35,7 +35,8 @@ class ClipRegistry:
         player_id: str, 
         absolute_path: str, 
         relative_path: str,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        clip_id: Optional[str] = None
     ) -> str:
         """
         Registriert einen neuen Clip mit eindeutiger UUID.
@@ -47,11 +48,17 @@ class ClipRegistry:
             absolute_path: Absoluter Pfad zur Video-Datei
             relative_path: Relativer Pfad (für UI)
             metadata: Optionale Metadaten (fps, duration, etc.)
+            clip_id: Optional clip_id (wenn Frontend UUID bereitstellt)
         
         Returns:
             clip_id: Eindeutige UUID für diesen Clip
         """
-        # CRITICAL FIX: Check if clip already exists (for session restore)
+        # If clip_id is provided and already exists, return it (idempotent)
+        if clip_id and clip_id in self.clips:
+            logger.debug(f"🔄 Clip already registered: {clip_id} → {player_id}/{os.path.basename(absolute_path)} (reusing existing data)")
+            return clip_id
+        
+        # CRITICAL FIX: Check if clip already exists by path (for session restore)
         # When restoring from saved state, clips are already in registry with effects/layers
         # We must NOT overwrite them with fresh registrations!
         existing_clip_id = self.find_clip_by_path(player_id, absolute_path)
@@ -59,8 +66,9 @@ class ClipRegistry:
             logger.debug(f"🔄 Clip already registered: {existing_clip_id} → {player_id}/{os.path.basename(absolute_path)} (reusing existing data)")
             return existing_clip_id
         
-        # Create NEW clip only if it doesn't exist yet
-        clip_id = str(uuid.uuid4())
+        # Create NEW clip with provided or generated UUID
+        if not clip_id:
+            clip_id = str(uuid.uuid4())
         
         # Speichere Clip-Daten
         self.clips[clip_id] = {
@@ -80,7 +88,7 @@ class ClipRegistry:
             'reverse': False    # Rückwärts abspielen
         }
         
-        logger.info(f"✅ Clip registriert: {clip_id} → {player_id}/{os.path.basename(absolute_path)}")
+        logger.debug(f"✅ Clip registriert: {clip_id} → {player_id}/{os.path.basename(absolute_path)}")
         
         # Auto-apply default effects if manager is configured
         if self._default_effects_manager:
@@ -88,7 +96,7 @@ class ClipRegistry:
                 logger.debug(f"🔧 Attempting to apply default effects to clip {clip_id}")
                 applied = self._default_effects_manager.apply_to_clip(self, clip_id)
                 if applied > 0:
-                    logger.info(f"🎨 Auto-applied {applied} default effects to new clip {clip_id}")
+                    logger.debug(f"🎨 Auto-applied {applied} default effects to new clip {clip_id}")
                 else:
                     logger.debug(f"ℹ️ No default effects configured for clips")
             except Exception as e:
@@ -202,7 +210,7 @@ class ClipRegistry:
             manager: DefaultEffectsManager instance
         """
         self._default_effects_manager = manager
-        logger.info("🎨 Default Effects Manager configured for ClipRegistry")
+        logger.debug("🎨 Default Effects Manager configured for ClipRegistry")
     
     def unregister_clip(self, clip_id: str) -> bool:
         """
@@ -225,7 +233,7 @@ class ClipRegistry:
         if index_key in self._path_index:
             del self._path_index[index_key]
         
-        logger.info(f"🗑️ Clip unregistriert: {clip_id}")
+        logger.debug(f"🗑️ Clip unregistriert: {clip_id}")
         return True
     
     def add_effect_to_clip(self, clip_id: str, effect_data: Dict) -> bool:
@@ -407,7 +415,7 @@ class ClipRegistry:
         
         layers.append(layer_config)
         
-        logger.info(f"✅ Layer {layer_id} zu Clip {clip_id} hinzugefügt: {layer_config['source_type']}")
+        logger.debug(f"✅ Layer {layer_id} zu Clip {clip_id} hinzugefügt: {layer_config['source_type']}")
         return layer_id
     
     def get_clip_layers(self, clip_id: str) -> List[Dict]:
@@ -458,7 +466,7 @@ class ClipRegistry:
         new_opacity = layer.get('opacity', 'N/A')
         
         if 'opacity' in updates:
-            logger.info(f"💾 Layer {layer_id} opacity updated in registry: {old_opacity} → {new_opacity}")
+            logger.debug(f"💾 Layer {layer_id} opacity updated in registry: {old_opacity} → {new_opacity}")
         
         logger.debug(f"Layer {layer_id} von Clip {clip_id} aktualisiert: {updates}")
         return True
@@ -491,7 +499,7 @@ class ClipRegistry:
             return False
         
         removed = layers.pop(layer_index)
-        logger.info(f"✅ Layer {layer_id} von Clip {clip_id} entfernt: {removed.get('source_path')}")
+        logger.debug(f"✅ Layer {layer_id} von Clip {clip_id} entfernt: {removed.get('source_path')}")
         return True
     
     def reorder_clip_layers(self, clip_id: str, new_order: List[int]) -> bool:
@@ -802,7 +810,7 @@ class ClipRegistry:
         # DEBUG: Log layer counts after deserialize
         total_layers = sum(len(clip.get('layers', [])) for clip in self.clips.values())
         clips_with_layers = sum(1 for clip in self.clips.values() if len(clip.get('layers', [])) > 0)
-        logger.info(f"📋 ClipRegistry deserialized: {len(self.clips)} clips restored with complete state ({total_layers} total layers, {clips_with_layers} clips with layers)")
+        logger.debug(f"📋 ClipRegistry deserialized: {len(self.clips)} clips restored with complete state ({total_layers} total layers, {clips_with_layers} clips with layers)")
 
 
 
@@ -820,5 +828,5 @@ def get_clip_registry() -> ClipRegistry:
     global _clip_registry
     if _clip_registry is None:
         _clip_registry = ClipRegistry()
-        logger.info("📋 ClipRegistry initialisiert")
+        logger.debug("📋 ClipRegistry initialisiert")
     return _clip_registry

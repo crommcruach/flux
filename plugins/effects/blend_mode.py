@@ -113,9 +113,11 @@ class BlendModeEffect(PluginBase):
         # Create blend color layer (same size as frame)
         blend_layer = np.full_like(frame, [color_b, color_g, color_r], dtype=np.uint8)
         
-        # Convert to float for blending (0-1 range)
-        base = frame.astype(np.float32) / 255.0
-        blend = blend_layer.astype(np.float32) / 255.0
+        # OPTIMIZED: Convert to float for blending (0-1 range) - combined operation
+        base = frame.astype(np.float32)
+        base *= (1.0 / 255.0)
+        blend = blend_layer.astype(np.float32)
+        blend *= (1.0 / 255.0)
         
         # Apply blend mode
         if mode == 'normal':

@@ -24,7 +24,7 @@ class DefaultEffectsManager:
         self.plugin_manager = plugin_manager
         self.effects_config = config.get('effects', {})
         
-        logger.info("🎨 Default Effects Manager initialized")
+        logger.debug("🎨 Default Effects Manager initialized")
         self._log_config()
     
     def _log_config(self):
@@ -35,14 +35,14 @@ class DefaultEffectsManager:
         clip_count = len(clip_effects) if isinstance(clip_effects, list) else 0
         
         if video_count > 0:
-            logger.info(f"  📹 Video default effects: {video_count} configured")
+            logger.debug(f"  📹 Video default effects: {video_count} configured")
         if artnet_count > 0:
-            logger.info(f"  💡 Art-Net default effects: {artnet_count} configured")
+            logger.debug(f"  💡 Art-Net default effects: {artnet_count} configured")
         if clip_count > 0:
-            logger.info(f"  🎬 Clip default effects: {clip_count} effects (applied to ALL clips)")
+            logger.debug(f"  🎬 Clip default effects: {clip_count} effects (applied to ALL clips)")
         
         if video_count == 0 and artnet_count == 0 and clip_count == 0:
-            logger.info("  ℹ️  No default effects configured")
+            logger.debug("  ℹ️  No default effects configured")
     
     def get_video_effects(self) -> List[Dict[str, Any]]:
         """
@@ -158,7 +158,7 @@ class DefaultEffectsManager:
                 logger.error(f"  ❌ Error applying '{plugin_id}': {e}")
         
         if applied_count > 0:
-            logger.info(f"🎨 Applied {applied_count}/{len(effects)} default effects to {player_type} player")
+            logger.debug(f"🎨 Applied {applied_count}/{len(effects)} default effects to {player_type} player")
         
         return applied_count
     
@@ -260,7 +260,7 @@ class DefaultEffectsManager:
                 
                 if success:
                     applied_count += 1
-                    logger.info(f"  ✅ Applied default effect '{plugin_id}' to clip {clip_id}")
+                    logger.debug(f"  ✅ Applied default effect '{plugin_id}' to clip {clip_id}")
                 else:
                     logger.warning(f"  ❌ Failed to add '{plugin_id}' to clip registry")
                     
@@ -268,7 +268,7 @@ class DefaultEffectsManager:
                 logger.error(f"  ❌ Error applying '{plugin_id}' to clip: {e}")
         
         if applied_count > 0:
-            logger.info(f"🎨 Applied {applied_count}/{len(effects)} default effects to clip {clip_id}")
+            logger.debug(f"🎨 Applied {applied_count}/{len(effects)} default effects to clip {clip_id}")
         
         return applied_count
     

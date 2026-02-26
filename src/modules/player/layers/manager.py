@@ -61,9 +61,12 @@ class LayerManager:
                     transport = effect['instance']
                     transport.socketio = socketio
                     transport.player_id = player_id
-                    transport.clip_id = clip_id
+                    # IMPORTANT: Use layer's own clip_id, not parent clip_id
+                    # This ensures each layer's transport sends updates with its own unique ID
+                    layer_clip_id = getattr(layer, 'clip_id', clip_id)
+                    transport.clip_id = layer_clip_id
                     transport_found = True
-                    logger.debug(f"📡 [{player_name}] Set WebSocket context on transport: layer={layer_idx}, player_id={player_id}, clip_id={clip_id}, socketio={socketio is not None}")
+                    logger.debug(f"📡 [{player_name}] Set WebSocket context on transport: layer={layer_idx}, player_id={player_id}, layer_clip_id={layer_clip_id}, socketio={socketio is not None}")
         
         if not transport_found:
             logger.warning(f"⚠️ [{player_name}] No transport effect found in {len(self.layers)} layers to set WebSocket context")
@@ -272,7 +275,7 @@ class LayerManager:
                 'clip_id': layer_clip_id
             }
             self.clip_registry.add_layer_to_clip(clip_id, layer_config)
-            logger.info(f"💾 Layer {layer_id} added to clip {clip_id} registry for persistence")
+            logger.debug(f"💾 Layer {layer_id} added to clip {clip_id} registry for persistence")
         
         # Create layer with clip_id
         layer = Layer(layer_id, source, blend_mode, opacity, layer_clip_id)
@@ -282,7 +285,7 @@ class LayerManager:
         if layer_clip_id:
             self.load_layer_effects_from_registry(layer, player_name)
         
-        logger.info(
+        logger.debug(
             f"✅ [{player_name}] Layer {layer_id} added: {source.get_source_name()} "
             f"(blend={blend_mode}, opacity={opacity}%, clip_id={layer_clip_id})"
         )
@@ -308,7 +311,7 @@ class LayerManager:
                 # Remove from list
                 del self.layers[i]
                 
-                logger.info(f"🗑️ [{player_name}] Layer {layer_id} removed")
+                logger.debug(f"🗑️ [{player_name}] Layer {layer_id} removed")
                 return True
         
         logger.warning(f"⚠️ [{player_name}] Layer {layer_id} not found")
@@ -351,7 +354,7 @@ class LayerManager:
         # Set new order
         self.layers = [layer_map[lid] for lid in new_order]
         
-        logger.info(f"🔄 [{player_name}] Layers reordered: {new_order}")
+        logger.debug(f"🔄 [{player_name}] Layers reordered: {new_order}")
         return True
     
     def update_layer_config(self, layer_id, blend_mode=None, opacity=None, enabled=None, player_name=""):
@@ -537,13 +540,13 @@ class LayerManager:
         """
         Reload effects for all layers from ClipRegistry.
         """
-        logger.info(f"🔄 [{player_name}] Reloading all layer effects, layers={len(self.layers)}")
+        logger.debug(f"🔄 [{player_name}] Reloading all layer effects, layers={len(self.layers)}")
         
         for layer in self.layers:
             if layer.clip_id:
                 self.load_layer_effects_from_registry(layer, player_name)
         
-        logger.info(f"✅ [{player_name}] All layer effects reloaded")
+        logger.debug(f"✅ [{player_name}] All layer effects reloaded")
     
     def get_blend_plugin(self, blend_mode, opacity):
         """
@@ -581,6 +584,93 @@ class LayerManager:
         
         self._blend_cache[cache_key] = blend
         return blend
+    
+    def composite_layers(self, preprocess_transport_callback, player_name="Player"):
+        """
+        Composite all layers into a single frame.
+        
+        PERFORMANCE CRITICAL: This is the main render loop for multi-layer compositing.
+        
+        Args:
+            preprocess_transport_callback: Callback function to preprocess transport for a layer
+            player_name: Player name for logging
+        
+        Returns:
+            tuple: (composited_frame, source_delay) or (None, 0) if no layers
+        """
+        if not self.layers or len(self.layers) == 0:
+            return None, 0
+        
+        # OPTIMIZATION: Single-layer fast path (skip all compositing logic)
+        if len(self.layers) == 1:
+            # Only one layer - no blending needed, process directly (saves 5-8ms)
+            layer = self.layers[0]
+            
+            # PRE-PROCESS: Transport effect if present
+            preprocess_transport_callback(layer)
+            
+            # Fetch and process single layer
+            frame, source_delay = layer.source.get_next_frame()
+            if frame is not None:
+                frame = self.apply_layer_effects(layer, frame, player_name)
+            
+            return frame, source_delay
+        
+        # Multiple layers - full compositing pipeline
+        # PRE-PROCESS: Let transport effect calculate next frame BEFORE fetching
+        # This prevents fetching frames outside trim range
+        # Apply transport preprocessing to Layer 0 (master)
+        preprocess_transport_callback(self.layers[0])
+        
+        # Master Frame (Layer 0 determines timing and length)
+        frame, source_delay = self.layers[0].source.get_next_frame()
+        
+        if frame is None:
+            return None, source_delay
+        
+        # Apply Layer 0 effects (Transport controls playback here)
+        frame = self.apply_layer_effects(self.layers[0], frame, player_name)
+        
+        # Composite Slave Layers (1-N)
+        for layer in self.layers[1:]:
+            # Skip invisible layers (saves get_next_frame + effects + blending)
+            if not layer.enabled or layer.opacity <= 0:
+                continue
+            
+            # PRE-PROCESS: Apply transport preprocessing for this layer
+            # This ensures each layer respects its own transport settings
+            preprocess_transport_callback(layer)
+            
+            overlay_frame, _ = layer.source.get_next_frame()
+            
+            # Auto-Reset when slave layer ends (Looping!)
+            if overlay_frame is None:
+                debug_layers(logger, f"🔁 Layer {layer.layer_id} reached end, auto-reset (slave loop)")
+                layer.source.reset()
+                overlay_frame, _ = layer.source.get_next_frame()
+            
+            # If still None (e.g., broken source) - skip layer
+            if overlay_frame is None:
+                source_info = getattr(layer.source, 'video_path', getattr(layer.source, 'generator_name', 'Unknown'))
+                # Only log once per layer to avoid spamming in hot path
+                if not hasattr(self, '_warned_layers'):
+                    self._warned_layers = set()
+                if layer.layer_id not in self._warned_layers:
+                    logger.warning(f"⚠️ Layer {layer.layer_id} (source: {source_info}) returned None after reset, skipping")
+                    self._warned_layers.add(layer.layer_id)
+                continue
+            
+            # Apply layer effects
+            overlay_frame = self.apply_layer_effects(layer, overlay_frame, player_name)
+            
+            # OPTIMIZATION: Get blend plugin (cached, only updates opacity)
+            blend_plugin = self.get_blend_plugin(layer.blend_mode, layer.opacity)
+            
+            # PERFORMANCE CRITICAL: Composite with BlendEffect
+            # This is the most expensive operation (float32 conversion + blending)
+            frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
+        
+        return frame, source_delay
     
     def clear(self):
         """Clear all layers."""

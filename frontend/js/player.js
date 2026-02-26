@@ -502,8 +502,11 @@ async function init() {
             
             // Listen for transport position updates (REPLACES polling)
             effectsSocket.on('transport.position', (data) => {
-                // Only update if this is the currently selected clip
-                if (data.clip_id === selectedClipId && data.player_id === selectedClipPlayerType) {
+                // Layer-as-Clips Architecture: Check both selectedClipId and selectedLayerClipId
+                // When a layer is selected, data.clip_id will be the layer's clip_id
+                const targetClipId = selectedLayerClipId || selectedClipId;
+                
+                if (data.clip_id === targetClipId && data.player_id === selectedClipPlayerType) {
                     updateTransportPositionDisplay(data);
                 }
             });
@@ -2813,6 +2816,8 @@ window.removeFromVideoPlaylist = async function(index) {
             debug.log('⏹️ No more clips in playlist - stopping player');
             try {
                 await fetch(`${API_BASE}/api/player/video/stop`, { method: 'POST' });
+                // Clear frame to show black screen (only when playlist is empty)
+                await fetch(`${API_BASE}/api/player/video/clear`, { method: 'POST' });
             } catch (error) {
                 console.error('Error stopping player:', error);
             }
@@ -3412,6 +3417,8 @@ window.removeFromArtnetPlaylist = async function(index) {
             debug.log('⏹️ No more clips in artnet playlist - stopping player');
             try {
                 await fetch(`${API_BASE}/api/player/artnet/stop`, { method: 'POST' });
+                // Clear frame to show black screen (only when playlist is empty)
+                await fetch(`${API_BASE}/api/player/artnet/clear`, { method: 'POST' });
             } catch (error) {
                 console.error('Error stopping artnet player:', error);
             }
@@ -3817,6 +3824,7 @@ async function updateClipEffectLiveParameters() {
 }
 
 function renderClipEffects() {
+    
     const container = document.getElementById('clipFxList');
     const title = document.getElementById('clipFxTitle');
     
@@ -3850,13 +3858,13 @@ function renderClipEffects() {
         expandedStates.add(item.id);
     });
     
-    // Build HTML: Trim Controls + Generator Parameters (if any) + Effects
+    // Build HTML: Generator Parameters (if any) + All Effects (transport first)
     let html = '';
     
     // Add generator parameters section
     html += renderGeneratorParametersSection();
     
-    // Add effects section
+    // Add all effects (transport will be first since it's ordered first in backend)
     if (clipEffects.length === 0) {
         html += `
             <div class="empty-state">
@@ -3868,12 +3876,20 @@ function renderClipEffects() {
     } else {
         // Use layer's clip_id if layer is selected, otherwise use selected clip
         const targetClipId = selectedLayerClipId || selectedClipId;
-        html += clipEffects.map((effect, index) => 
-            renderEffectItem(effect, index, 'clip', targetClipId)
-        ).join('');
+        html += clipEffects.map((effect, index) => {
+            return renderEffectItem(effect, index, 'clip', targetClipId);
+        }).join('');
     }
     
     container.innerHTML = html;
+    
+    // Attach transport event handlers if transport effect is present
+    if (typeof window.attachTransportEventHandlers === 'function') {
+        // Use setTimeout to ensure DOM is fully rendered
+        setTimeout(() => {
+            window.attachTransportEventHandlers();
+        }, 0);
+    }
     
     // Restore expanded states after rerender
     if (generatorParamsExpanded) {
@@ -4014,6 +4030,23 @@ function renderEffectItem(effect, index, player, clipId = null) {
     const parameters = metadata.parameters || [];
     const isSystemPlugin = metadata.system_plugin === true;
     const pluginId = effect.plugin_id || '';
+    
+    // Use custom transport UI for transport effect
+    if (pluginId === 'transport' && typeof window.renderTransportControls === 'function') {
+        return `
+            <div class="effect-item system-plugin transport-effect" id="${player}-effect-${index}">
+                <div class="effect-header" onclick="toggleEffect('${player}', ${index}, event)">
+                    <div class="effect-title">
+                        <span class="effect-toggle"></span>
+                        <span>⏯️ Transport Controls 🔒</span>
+                    </div>
+                </div>
+                <div class="effect-body">
+                    ${window.renderTransportControls(effect, index, player, clipId)}
+                </div>
+            </div>
+        `;
+    }
     
     // Debug: Log effect data
     if (parameters.length === 0) {
@@ -4247,7 +4280,19 @@ window.removeEffect = async function(player, index, e) {
 // ========================================
 
 function renderParameterControl(param, currentValue, effectIndex, player, pluginId = '', clipId = null, isSystemPlugin = false) {
-    const value = currentValue !== undefined ? currentValue : param.default;
+    // Extract actual value from object structure if needed (e.g., {_value: X} or direct value)
+    let value;
+    if (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) {
+        // Object with metadata (e.g., transport_position)
+        value = currentValue._value;
+    } else if (currentValue !== undefined) {
+        // Direct value
+        value = currentValue;
+    } else {
+        // Use parameter default
+        value = param.default;
+    }
+    
     // Use plugin_id for stability (survives effect reordering)
     const controlId = clipId 
         ? `${player}_${clipId}_${pluginId}_${param.name}` 
@@ -4379,7 +4424,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             
             // Check if parameter should be rendered as input field instead of slider
             if (param.control_type === 'input') {
-                const inputActualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : value;
+                const inputActualValue = value;  // Already extracted above
                 
                 control = `
                     <div class="parameter-grid-row">
@@ -4410,7 +4455,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             // Restore saved range if available, otherwise use full range
             const intSavedRangeMin = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMin !== undefined ? currentValue._rangeMin : intMin;
             const intSavedRangeMax = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMax !== undefined ? currentValue._rangeMax : intMax;
-            const intActualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : value;
+            const intActualValue = value;  // Already extracted above
             
             // Extract metadata (displayFormat, fps, totalFrames) from currentValue
             const displayFormat = (currentValue && typeof currentValue === 'object' && currentValue._displayFormat) || param.displayFormat || 'number';
@@ -4679,6 +4724,21 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             break;
             
         case 'SELECT':
+            // Handle both object options {value, label, tooltip} and simple string options
+            const optionsHtml = param.options.map(opt => {
+                if (typeof opt === 'object' && opt.value !== undefined) {
+                    const optValue = opt.value;
+                    const optLabel = opt.label || opt.value;
+                    const optTooltip = opt.tooltip || '';
+                    const selected = value === optValue ? 'selected' : '';
+                    const titleAttr = optTooltip ? `title="${optTooltip}"` : '';
+                    return `<option value="${optValue}" ${selected} ${titleAttr}>${optLabel}</option>`;
+                } else {
+                    const selected = value === opt ? 'selected' : '';
+                    return `<option value="${opt}" ${selected}>${opt}</option>`;
+                }
+            }).join('');
+            
             control = `
                 <div class="parameter-grid-row">
                     <div class="param-cogwheel">
@@ -4693,7 +4753,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             id="${controlId}"
                             onchange="updateParameter('${player}', ${effectIndex}, '${param.name}', this.value)"
                         >
-                            ${param.options.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                            ${optionsHtml}
                         </select>
                     </div>
                 </div>
@@ -4791,6 +4851,9 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
     
     return control;
 }
+
+// Make renderParameterControl globally available (needed by transport-ui.js)
+window.renderParameterControl = renderParameterControl;
 
 // Debounce timer für Parameter-Updates
 const parameterUpdateTimers = {};
@@ -5803,6 +5866,7 @@ async function loadClipLayers(clipId) {
         const data = await response.json();
         
         if (data.success) {
+            const previousLayerCount = clipLayers[clipId] ? clipLayers[clipId].length : 0;
             const layers = data.layers || [];
             clipLayers[clipId] = layers;
             debug.log(`✅ Loaded ${layers.length} layers for clip ${clipId}`);
@@ -5812,8 +5876,9 @@ async function loadClipLayers(clipId) {
                 renderSelectedClipLayers();
             }
             
-            // Re-render playlist to update badge (only if clip has overlay layers)
-            if (layers.length > 1) {  // Only if has overlay layers (Layer 0 is always present)
+            // Re-render playlist if layer count changed (to update badge)
+            // This includes when badge appears (>1) or disappears (<=1)
+            if (previousLayerCount !== layers.length) {
                 // Find which playlist this clip belongs to
                 const inVideo = playerConfigs.video.files.some(f => f.id === clipId);
                 const inArtnet = playerConfigs.artnet.files.some(f => f.id === clipId);
@@ -6203,17 +6268,18 @@ window.removeLayerFromClip = async function(clipId, layerId, e) {
         clearTimeout(resetTimer);
         
         try {
-            // Cleanup sequences for this layer BEFORE removing it
-            if (window.sequenceManager) {
-                await window.sequenceManager.cleanupSequencesForLayer(clipId, layerId);
-            }
-            
             const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
                 method: 'DELETE'
             });
             
             const data = await response.json();
             if (data.success) {
+                // Cleanup sequences for the layer's clip_id (if it had one)
+                if (window.sequenceManager && data.layer_clip_id) {
+                    await window.sequenceManager.cleanupSequencesForClip(data.layer_clip_id);
+                    debug.log(`🧹 Cleaned up sequences for layer clip_id: ${data.layer_clip_id}`);
+                }
+                
                 showToast(`Layer ${layerId} removed`, 'success');
                 await loadClipLayers(clipId);
                 renderSelectedClipLayers();

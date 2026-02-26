@@ -35,7 +35,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
         import time
         nonlocal _streaming_active
         
-        logger.info("Audio feature streaming thread started")
+        logger.debug("Audio feature streaming thread started")
         
         while _streaming_active:
             try:
@@ -53,7 +53,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
                 logger.error(f"Error in audio streaming: {e}")
                 time.sleep(0.1)
         
-        logger.info("Audio feature streaming thread stopped")
+        logger.debug("Audio feature streaming thread stopped")
     
     def start_audio_streaming():
         """Start the audio feature streaming thread"""
@@ -65,7 +65,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
         _streaming_active = True
         _streaming_thread = threading.Thread(target=audio_feature_streamer, daemon=True)
         _streaming_thread.start()
-        logger.info("Audio feature streaming started")
+        logger.debug("Audio feature streaming started")
     
     def stop_audio_streaming():
         """Stop the audio feature streaming thread"""
@@ -75,7 +75,7 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
         if _streaming_thread:
             _streaming_thread.join(timeout=1.0)
             _streaming_thread = None
-        logger.info("Audio feature streaming stopped")
+        logger.debug("Audio feature streaming stopped")
     
     # Start streaming if SocketIO is available
     if socketio:
@@ -631,4 +631,4 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
             logger.error(f"Error getting audio status: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
     
-    logger.info("Sequence API routes registered")
+    logger.debug("Sequence API routes registered")

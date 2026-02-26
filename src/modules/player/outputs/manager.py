@@ -60,7 +60,7 @@ class OutputManager:
         # State persistence callback
         self._state_save_callback = None
         
-        logger.info(f"✅ OutputManager initialized for '{player_name}' ({canvas_width}x{canvas_height})")
+        logger.debug(f"✅ OutputManager initialized for '{player_name}' ({canvas_width}x{canvas_height})")
     
     def load_outputs_from_config(self, output_definitions: list) -> int:
         """
@@ -102,12 +102,12 @@ class OutputManager:
                 
                 # Register output
                 self.outputs[output_id] = output
-                logger.info(f"✅ [{self.player_name}] Output '{output_id}' created (type: {output_type})")
+                logger.debug(f"✅ [{self.player_name}] Output '{output_id}' created (type: {output_type})")
                 
                 # Enable if configured
                 if enabled:
                     if output.enable():
-                        logger.info(f"✅ [{self.player_name}] Output '{output_id}' enabled")
+                        logger.debug(f"✅ [{self.player_name}] Output '{output_id}' enabled")
                     else:
                         logger.error(f"❌ [{self.player_name}] Failed to enable output '{output_id}'")
                 
@@ -159,7 +159,7 @@ class OutputManager:
             if config.get('enabled', False):
                 self.enable_output(output_id)
             
-            logger.info(f"✅ [{self.player_name}] Output '{output_id}' created dynamically (type: {output_type})")
+            logger.debug(f"✅ [{self.player_name}] Output '{output_id}' created dynamically (type: {output_type})")
             return True
             
         except Exception as e:
@@ -244,7 +244,7 @@ class OutputManager:
             self._frame_count = 0
         self._frame_count += 1
         if self._frame_count <= 5:
-            logger.info(f"[{self.player_name}] update_frame called (frame #{self._frame_count}), outputs: {len(self.outputs)}, enabled: {sum(1 for o in self.outputs.values() if o.enabled)}")
+            logger.debug(f"[{self.player_name}] update_frame called (frame #{self._frame_count}), outputs: {len(self.outputs)}, enabled: {sum(1 for o in self.outputs.values() if o.enabled)}")
         
         # Distribute to all enabled outputs (use list() to avoid RuntimeError if outputs dict changes during iteration)
         for output_id, output in list(self.outputs.items()):
@@ -643,7 +643,7 @@ class OutputManager:
             return False
         
         self.outputs[output_id].config['source'] = source
-        logger.info(f"[{self.player_name}] Output '{output_id}' source set to '{source}'")
+        logger.debug(f"[{self.player_name}] Output '{output_id}' source set to '{source}'")
         self._save_state()
         return True
     
@@ -668,7 +668,7 @@ class OutputManager:
         self.outputs[output_id].config['slice'] = slice_id
         # Clear composition when setting single slice
         self.outputs[output_id].config.pop('composition', None)
-        logger.info(f"[{self.player_name}] Output '{output_id}' slice set to '{slice_id}'")
+        logger.debug(f"[{self.player_name}] Output '{output_id}' slice set to '{slice_id}'")
         self._save_state()
         return True
     
@@ -705,7 +705,7 @@ class OutputManager:
         # Clear single slice when setting composition
         self.outputs[output_id].config.pop('slice', None)
         
-        logger.info(f"[{self.player_name}] Output '{output_id}' composition set with {len(composition['slices'])} slices")
+        logger.debug(f"[{self.player_name}] Output '{output_id}' composition set with {len(composition['slices'])} slices")
         self._save_state()
         return True
     
@@ -731,7 +731,7 @@ class OutputManager:
                 logger.error(f"Error cleaning up output '{output_id}': {e}")
         
         self.outputs.clear()
-        logger.info(f"[{self.player_name}] OutputManager cleaned up")
+        logger.debug(f"[{self.player_name}] OutputManager cleaned up")
     
     def get_state(self) -> dict:
         """
@@ -810,7 +810,7 @@ class OutputManager:
                     else:
                         logger.warning(f"Cannot restore output '{output_id}' with unknown type '{output_type}'")
         
-        logger.info(f"[{self.player_name}] Output state restored from session")
+        logger.debug(f"[{self.player_name}] Output state restored from session")
     
     def add_slice(self, slice_id: str, slice_data: dict) -> bool:
         """

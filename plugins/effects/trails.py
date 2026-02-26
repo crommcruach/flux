@@ -68,19 +68,22 @@ class TrailsEffect(PluginBase):
         if len(self.frame_history) < 2:
             return frame  # Not enough history yet
         
-        # Blend frames with decay
+        # OPTIMIZED: Pre-convert all frames to float32 (avoid conversion in loop)
         result = np.zeros_like(frame, dtype=np.float32)
         total_weight = 0.0
         
+        # Pre-convert current frame
+        frames_float = [f.astype(np.float32) for f in self.frame_history]
+        
         # Blend from oldest to newest
-        for i, hist_frame in enumerate(self.frame_history):
+        for i, hist_frame in enumerate(frames_float):
             # Calculate weight (exponential decay)
-            weight = self.decay ** (len(self.frame_history) - i - 1)
-            result += hist_frame.astype(np.float32) * weight
+            weight = self.decay ** (len(frames_float) - i - 1)
+            result += hist_frame * weight
             total_weight += weight
         
         # Normalize by total weight
-        result = result / total_weight
+        result /= total_weight
         return np.clip(result, 0, 255).astype(np.uint8)
     
     def update_parameter(self, name, value):

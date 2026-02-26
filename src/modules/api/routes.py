@@ -129,7 +129,7 @@ def register_web_routes(app, config=None, player_manager=None):
         })
     
     # DEBUG: Log registered routes  
-    logger.info(f"✅ Web routes registered. Total routes: {len(list(app.url_map.iter_rules()))}")
+    logger.debug(f"✅ Web routes registered. Total routes: {len(list(app.url_map.iter_rules()))}")
     for rule in app.url_map.iter_rules():
         methods = ', '.join(sorted(rule.methods - {'HEAD', 'OPTIONS'}))
         logger.debug(f"   Route: {rule.rule} [{methods}] -> {rule.endpoint}")

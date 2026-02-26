@@ -49,7 +49,7 @@ class VirtualOutput(OutputBase):
     
     def initialize(self) -> bool:
         """Initialize virtual output (no-op, always succeeds)"""
-        logger.info(f"✅ [{self.output_id}] Virtual output initialized: {self.name} ({self.resolution[0]}x{self.resolution[1]})")
+        logger.debug(f"✅ [{self.output_id}] Virtual output initialized: {self.name} ({self.resolution[0]}x{self.resolution[1]})")
         return True
     
     def send_frame(self, frame: np.ndarray) -> bool:
@@ -92,7 +92,7 @@ class VirtualOutput(OutputBase):
         """Cleanup virtual output (clear stored frame)"""
         with self.frame_lock:
             self.latest_frame = None
-        logger.info(f"[{self.output_id}] Virtual output cleaned up")
+        logger.debug(f"[{self.output_id}] Virtual output cleaned up")
     
     def get_info(self) -> dict:
         """

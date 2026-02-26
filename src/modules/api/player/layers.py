@@ -144,7 +144,7 @@ def register_layer_routes(app, player_manager, config):
             layer_dict = layer.to_dict() if layer else {}
             layer_clip_id = layer.clip_id if layer else None
             
-            logger.info(f"✅ Layer {layer_id} added to player {player_id}: {source.get_source_name()}")
+            logger.debug(f"✅ Layer {layer_id} added to player {player_id}: {source.get_source_name()}")
             
             return jsonify({
                 "success": True,
@@ -175,7 +175,7 @@ def register_layer_routes(app, player_manager, config):
             if not success:
                 return jsonify({"success": False, "error": f"Layer {layer_id} not found"}), 404
             
-            logger.info(f"🗑️ Layer {layer_id} removed from player {player_id}")
+            logger.debug(f"🗑️ Layer {layer_id} removed from player {player_id}")
             
             return jsonify({
                 "success": True,
@@ -222,7 +222,7 @@ def register_layer_routes(app, player_manager, config):
             layer = player.get_layer(layer_id)
             layer_dict = layer.to_dict() if layer else {}
             
-            logger.info(f"🔧 Layer {layer_id} updated in player {player_id}")
+            logger.debug(f"🔧 Layer {layer_id} updated in player {player_id}")
             
             return jsonify({
                 "success": True,
@@ -264,7 +264,7 @@ def register_layer_routes(app, player_manager, config):
             # Get updated layer list
             layers_data = [layer.to_dict() for layer in player.layers]
             
-            logger.info(f"🔄 Layers reordered in player {player_id}: {new_order}")
+            logger.debug(f"🔄 Layers reordered in player {player_id}: {new_order}")
             
             return jsonify({
                 "success": True,
@@ -378,7 +378,7 @@ def register_layer_routes(app, player_manager, config):
             
             layer_dict = layer.to_dict()
             
-            logger.info(f"🔄 Layer {layer_id} source replaced in player {player_id}: {source.get_source_name()}")
+            logger.debug(f"🔄 Layer {layer_id} source replaced in player {player_id}: {source.get_source_name()}")
             
             return jsonify({
                 "success": True,
@@ -395,4 +395,4 @@ def register_layer_routes(app, player_manager, config):
             return jsonify({"success": False, "error": str(e)}), 500
     
     
-    logger.info("✅ Layer API routes registered")
+    logger.debug("✅ Layer API routes registered")

@@ -85,12 +85,14 @@ class TintEffect(PluginBase):
         if self.amount < 0.01:
             return frame  # No tint
         
-        # Create tint multiplier (BGR format)
+        # OPTIMIZED: Create tint multiplier and apply in one step
         tint = np.array([self.blue, self.green, self.red], dtype=np.float32)
         
-        # Apply tint
-        tinted = frame.astype(np.float32) * tint
-        tinted = np.clip(tinted, 0, 255).astype(np.uint8)
+        # Apply tint (combined operation)
+        tinted = frame.astype(np.float32)
+        tinted *= tint
+        np.clip(tinted, 0, 255, out=tinted)
+        tinted = tinted.astype(np.uint8)
         
         # Blend with original based on amount
         if self.amount < 0.99:

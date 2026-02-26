@@ -56,8 +56,9 @@ class PosterizeEffect(PluginBase):
         levels = max(2, int(self.levels))
         step = 255.0 / (levels - 1)
         
-        # Quantize colors
-        result = np.floor(frame.astype(np.float32) / step) * step
+        # OPTIMIZED: Quantize colors using integer math (avoid float32 conversion)
+        step_int = int(step)
+        result = (frame // step_int) * step_int
         return np.clip(result, 0, 255).astype(np.uint8)
     
     def update_parameter(self, name, value):

@@ -79,7 +79,8 @@ class StrobeEffect(PluginBase):
         if cycle_position < self.duration:
             # Show frame with intensity
             if self.intensity < 0.99:
-                result = (frame.astype(np.float32) * self.intensity).astype(np.uint8)
+                # OPTIMIZED: Use uint16 for intermediate calculation (no float conversion)
+                result = (frame.astype(np.uint16) * int(self.intensity * 255) // 255).astype(np.uint8)
             else:
                 result = frame
         else:

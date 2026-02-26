@@ -270,9 +270,9 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                 is_active = viewed.id == active_id
                 
                 # DEBUG: Log what we're returning
-                logger.info(f"[VIEW DEBUG] Viewing playlist: {viewed.name} (id={viewed.id}, active={is_active})")
-                logger.info(f"[VIEW DEBUG] Stored video clips: {viewed.players['video'].clips}")
-                logger.info(f"[VIEW DEBUG] Stored video clip_ids: {viewed.players['video'].clip_ids}")
+                logger.debug(f"[VIEW DEBUG] Viewing playlist: {viewed.name} (id={viewed.id}, active={is_active})")
+                logger.debug(f"[VIEW DEBUG] Stored video clips: {viewed.players['video'].clips}")
+                logger.debug(f"[VIEW DEBUG] Stored video clip_ids: {viewed.players['video'].clip_ids}")
                 
                 # If viewing the active playlist, get live data from players
                 # (active playlist state is in players, not saved to playlist object yet)
@@ -435,7 +435,7 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                                 if final_clip_id not in clip_params:
                                     clip_params[final_clip_id] = {}
                                 clip_params[final_clip_id]['effects'] = clip_data['effects']
-                                logger.info(f"📌 Extracted {len(clip_data['effects'])} effects for clip {final_clip_id[:8]}...")
+                                logger.debug(f"📌 Extracted {len(clip_data['effects'])} effects for clip {final_clip_id[:8]}...")
                         
                     except:
                         logger.warning(f"Failed to convert path: {path}")
@@ -445,14 +445,14 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
             player_state = target_playlist.players[player_id]
             
             # DEBUG: Log what we're updating
-            logger.info(f"[UPDATE DEBUG] Updating playlist: {target_playlist.name} (id={playlist_id})")
-            logger.info(f"[UPDATE DEBUG] Processing {len(clips)} clips")
-            logger.info(f"[UPDATE DEBUG] clip_params populated for {len(clip_params)} clips")
+            logger.debug(f"[UPDATE DEBUG] Updating playlist: {target_playlist.name} (id={playlist_id})")
+            logger.debug(f"[UPDATE DEBUG] Processing {len(clips)} clips")
+            logger.debug(f"[UPDATE DEBUG] clip_params populated for {len(clip_params)} clips")
             
             # Log per-clip effects summary
             for cid, params in clip_params.items():
                 if 'effects' in params:
-                    logger.info(f"[UPDATE DEBUG]   Clip {cid[:8]}... has {len(params['effects'])} effects")
+                    logger.debug(f"[UPDATE DEBUG]   Clip {cid[:8]}... has {len(params['effects'])} effects")
             
             player_state.clips = clips
             player_state.clip_ids = clip_ids
@@ -469,10 +469,10 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                     player.playlist_ids = clip_ids
                     if hasattr(player, 'playlist_params'):
                         player.playlist_params = clip_params
-                        logger.info(f"[UPDATE DEBUG] Set player.playlist_params with {len(clip_params)} clip entries")
+                        logger.debug(f"[UPDATE DEBUG] Set player.playlist_params with {len(clip_params)} clip entries")
                     player.autoplay = autoplay
                     player.loop_playlist = loop
-                    logger.info(f"[UPDATE DEBUG] Updated live {player_id} player (active playlist)")
+                    logger.debug(f"[UPDATE DEBUG] Updated live {player_id} player (active playlist)")
             
             # Save to session state WITHOUT capturing active playlist
             # (we just explicitly updated the playlist state above)
@@ -480,7 +480,7 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
             session_state = get_session_state()
             session_state.save_without_capture(player_manager, clip_registry)
             
-            logger.info(f"Updated {player_id} playlist in '{target_playlist.name}' (id={playlist_id}, active={is_active})")
+            logger.debug(f"Updated {player_id} playlist in '{target_playlist.name}' (id={playlist_id}, active={is_active})")
             
             return jsonify({
                 "success": True,
@@ -732,7 +732,7 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                             safe_index = max(0, min(clip_index, len(player.playlist) - 1))
                             player.load_clip_by_index(safe_index, notify_manager=False)
                             player.play()
-                            logger.info(f"🎬 Loaded preview playlist into {pid} player at clip {safe_index}")
+                            logger.debug(f"🎬 Loaded preview playlist into {pid} player at clip {safe_index}")
                 
                 return jsonify(result)
             else:

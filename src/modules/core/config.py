@@ -325,7 +325,7 @@ class ConfigValidator:
                 for error in errors:
                     logger.error(f"  - {error}")
             else:
-                logger.info("Config-Validierung erfolgreich")
+                logger.debug("Config-Validierung erfolgreich")
             
             return is_valid, errors
             

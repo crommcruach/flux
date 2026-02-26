@@ -11,6 +11,7 @@ Ermöglicht:
 from flask import request, jsonify
 import logging
 from plugins.effects.blend import BlendEffect
+from ...session.state import get_session_state
 
 logger = logging.getLogger(__name__)
 
@@ -155,18 +156,47 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
     def remove_clip_layer(clip_id, layer_id):
         """Entfernt einen Layer von einem Clip."""
         try:
+            # Get layer info before removal for cleanup
+            clip_data = clip_registry.get_clip(clip_id)
+            if not clip_data:
+                return jsonify({"success": False, "error": "Clip not found"}), 404
+            
+            # Find the layer's clip_id for cleanup
+            layers = clip_data.get('layers', [])
+            layer_clip_id = None
+            for layer in layers:
+                if layer.get('layer_id') == layer_id:
+                    layer_clip_id = layer.get('clip_id')
+                    break
+            
+            # Remove layer from registry
             success = clip_registry.remove_layer_from_clip(clip_id, layer_id)
             
             if not success:
                 return jsonify({"success": False, "error": "Failed to remove layer"}), 400
             
+            # Cleanup: If layer had its own clip_id, unregister it from clip registry
+            if layer_clip_id and layer_clip_id != clip_id:
+                try:
+                    clip_registry.unregister_clip(layer_clip_id)
+                    logger.debug(f"🗑️ Unregistered layer clip_id: {layer_clip_id[:8]}...")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to unregister layer clip_id: {e}")
+            
             # Reload layers in player if this clip is currently active
             reload_player_layers_if_active(clip_id)
+            
+            # Auto-save session state
+            session_state = get_session_state()
+            if session_state:
+                session_state.save_async(player_manager, clip_registry)
+                logger.debug(f"💾 Session state saved after layer {layer_id} removal")
             
             return jsonify({
                 "success": True,
                 "clip_id": clip_id,
-                "layer_id": layer_id
+                "layer_id": layer_id,
+                "layer_clip_id": layer_clip_id  # Return for frontend cleanup
             })
             
         except Exception as e:
@@ -244,4 +274,4 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
             logger.error(f"Error reordering clip layers: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
     
-    logger.info("✅ Clip Layer API routes registered")
+    logger.debug("✅ Clip Layer API routes registered")

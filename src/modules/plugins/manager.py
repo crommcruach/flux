@@ -51,7 +51,7 @@ class PluginManager:
         Scannt plugins/ Ordner nach Plugin-Klassen.
         Lädt alle Python-Module und registriert PluginBase-Subklassen.
         """
-        logger.info(f"Plugin Discovery gestartet: {self.plugins_dir.absolute()}")
+        logger.debug(f"Plugin Discovery gestartet: {self.plugins_dir.absolute()}")
         
         if not self.plugins_dir.exists():
             logger.warning(f"Plugins-Ordner nicht gefunden: {self.plugins_dir.absolute()}")
@@ -352,7 +352,7 @@ class PluginManager:
             instance = self.instances[plugin_id]
             instance.cleanup()
             del self.instances[plugin_id]
-            logger.info(f"Plugin '{plugin_id}' entladen")
+            logger.debug(f"Plugin '{plugin_id}' entladen")
     
     def reload_plugins(self):
         """
@@ -367,7 +367,7 @@ class PluginManager:
         
         # Discover neu
         self.discover_plugins()
-        logger.info("Alle Plugins neu geladen")
+        logger.debug("Alle Plugins neu geladen")
     
     def get_stats(self) -> Dict:
         """

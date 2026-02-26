@@ -119,6 +119,9 @@ class FluxLogger:
         logging.getLogger('socketio').setLevel(logging.WARNING)
         logging.getLogger('engineio').setLevel(logging.WARNING)
         
+        # Store module-specific log levels
+        self.module_log_levels = {}
+        
         # Startup-Log (nur in Datei, nicht auf Konsole)
         # Temporär Console-Handler entfernen
         root_logger.removeHandler(console_handler)
@@ -153,6 +156,61 @@ class FluxLogger:
         if hasattr(self, 'console_handler'):
             return self.console_handler.level
         return logging.WARNING
+    
+    def set_module_log_level(self, module_pattern, level=logging.DEBUG):
+        """
+        Setzt Log-Level für ein bestimmtes Modul oder Modul-Pattern.
+        
+        Args:
+            module_pattern: Modulname oder Pattern (z.B. 'modules.player.core' oder 'modules.player.*')
+            level: Log-Level (logging.DEBUG, logging.INFO, etc.)
+        """
+        # Store pattern for later reference
+        self.module_log_levels[module_pattern] = level
+        
+        # Apply to all existing loggers matching the pattern
+        import fnmatch
+        for logger_name in logging.Logger.manager.loggerDict:
+            if fnmatch.fnmatch(logger_name, module_pattern):
+                logger = logging.getLogger(logger_name)
+                logger.setLevel(level)
+                level_name = logging.getLevelName(level)
+                # Log only to file, not console
+                root_logger = logging.getLogger()
+                if hasattr(self, 'console_handler'):
+                    root_logger.removeHandler(self.console_handler)
+                root_logger.info(f"Module '{logger_name}' log level set to {level_name}")
+                if hasattr(self, 'console_handler'):
+                    root_logger.addHandler(self.console_handler)
+    
+    def apply_debug_modules(self, debug_modules):
+        """
+        Aktiviert DEBUG-Level für eine Liste von Modulen.
+        
+        Args:
+            debug_modules: Liste von Modul-Patterns (z.B. ['modules.player.*', 'modules.api.artnet'])
+        """
+        if not debug_modules:
+            return
+        
+        for module_pattern in debug_modules:
+            self.set_module_log_level(module_pattern, logging.DEBUG)
+        
+        root_logger = logging.getLogger()
+        if hasattr(self, 'console_handler'):
+            root_logger.removeHandler(self.console_handler)
+        root_logger.info(f"🔍 Debug enabled for modules: {', '.join(debug_modules)}")
+        if hasattr(self, 'console_handler'):
+            root_logger.addHandler(self.console_handler)
+    
+    def get_module_log_levels(self):
+        """
+        Gibt alle konfigurierten Modul-Log-Levels zurück.
+        
+        Returns:
+            dict: Module patterns und ihre Log-Levels
+        """
+        return self.module_log_levels.copy()
     
     @staticmethod
     def get_logger(name):
@@ -245,7 +303,7 @@ def log_video_info(logger, video_path, frames, fps, dimensions):
         fps: Frames pro Sekunde
         dimensions: Tuple (width, height)
     """
-    logger.info(f"Video geladen: {os.path.basename(video_path)}")
+    logger.debug(f"Video geladen: {os.path.basename(video_path)}")
     logger.debug(f"  └─ Frames: {frames}, FPS: {fps:.2f}, Auflösung: {dimensions[0]}x{dimensions[1]}")
 
 
@@ -266,7 +324,7 @@ def log_cache_operation(logger, operation, video_hash, success, details=None):
         msg += f" ({details})"
     
     if success:
-        logger.info(msg)
+        logger.debug(msg)
     else:
         logger.warning(msg)
 
@@ -403,7 +461,7 @@ def info_log_conditional(logger, category, message, *args, **kwargs):
     if DebugCategories.is_enabled(category):
         if args or kwargs:
             message = message % args if args else message.format(**kwargs)
-        logger.info(f"[{category}] {message}")
+        logger.debug(f"[{category}] {message}")
 
 
 # Convenience-Funktionen für häufig genutzte Kategorien

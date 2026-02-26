@@ -365,11 +365,17 @@ def main():
     # Logging initialisieren mit Levels aus Config
     flux_logger = FluxLogger()
     flux_logger.setup_logging(log_level=file_level, console_level=console_level, max_log_files=max_log_files)
+    
+    # Apply module-specific debug levels
+    debug_modules = config.get('app', {}).get('debug_modules', [])
+    if debug_modules:
+        flux_logger.apply_debug_modules(debug_modules)
+    
     logger.debug("Flux startet...")
     logger.debug("Konfiguration geladen")
     
     # Pfade
-    base_path = os.path.dirname(os.path.dirname(__file__))
+    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     video_dir = os.path.join(base_path, config['paths']['video_dir'])
     data_dir = os.path.join(base_path, config['paths']['data_dir'])
     
@@ -381,21 +387,6 @@ def main():
     # Video-Ordner Existenz ist sichergestellt, aber kein Video wird automatisch geladen
     # User muss explizit ein Video laden (via Web-UI, API oder CLI)
     # Legacy video_path Variable wird nicht mehr verwendet (Player startet mit DummySource)
-    
-    # DEPRECATED: Points file only used for legacy DMX recording (will be reimplemented)
-    # Find points JSON files for backward compatibility
-    json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')] if os.path.exists(data_dir) else []
-    
-    if json_files:
-        default_points = config['paths'].get('default_points_json')
-        if default_points and default_points in json_files:
-            points_json_path = os.path.join(data_dir, default_points)
-        elif config['paths']['points_json'] in json_files:
-            points_json_path = os.path.join(data_dir, config['paths']['points_json'])
-        else:
-            points_json_path = os.path.join(data_dir, sorted(json_files)[0])
-    else:
-        points_json_path = os.path.join(data_dir, "punkte_export.json")
     
     # Konfiguration für Art-Net
     target_ip = config['artnet']['target_ip']
@@ -452,12 +443,6 @@ def main():
     
     logger.info(f"Video player resolution: {video_canvas_width}x{video_canvas_height} (preset: {video_settings.get('preset', '1080p')}, autosize: {video_settings.get('autosize', 'off')})")
     
-    # DEPRECATED: Load points file for legacy DMX recording compatibility only
-    # Canvas size now comes from editor state, not points file
-    from modules.content.points import PointsLoader
-    points_data = PointsLoader.load_points(points_json_path, validate_bounds=False)
-    logger.debug(f"Points file loaded (legacy DMX recording): {os.path.basename(points_json_path)}")
-    
     # ClipRegistry initialisieren (ERST, bevor Player erstellt werden)
     from modules.player.clips.registry import get_clip_registry
     clip_registry = get_clip_registry()
@@ -467,19 +452,10 @@ def main():
     # Starte mit leerer DummySource - User muss Video explizit laden
     from modules.player.sources import DummySource
     video_source = DummySource(video_canvas_width, video_canvas_height)
-    player = Player(video_source, points_json_path, target_ip, start_universe, fps_limit, config, 
-                   enable_artnet=False, player_name="Video Player (Preview)", clip_registry=clip_registry)
+    player = Player(video_source, target_ip=target_ip, start_universe=start_universe, fps_limit=fps_limit, config=config, 
+                   enable_artnet=False, player_name="Video Player (Preview)", clip_registry=clip_registry,
+                   canvas_width=video_canvas_width, canvas_height=video_canvas_height)
     logger.debug(f"Video Player initialisiert (Preview only, kein Video geladen)")
-    
-    # Replay Manager global initialisieren (mit Player-Referenz)
-    # Note: artnet_manager removed - replay functionality will be reimplemented with routing_bridge
-    from modules.player.recording.replay import ReplayManager
-    replay_manager = ReplayManager(None, config, player)
-    logger.debug("Replay Manager initialisiert (ohne Art-Net Manager)")
-
-    
-    # Speichere data_dir für spätere Verwendung
-    player.data_dir = data_dir
     
     # Setze Standard-Werte aus Config
     player.set_brightness(config['video']['default_brightness'])
@@ -488,8 +464,9 @@ def main():
     # Art-Net Player initialisieren (separat vom Video Player)
     # Starte mit leerer DummySource - User muss Video explizit laden
     artnet_video_source = DummySource(artnet_canvas_width, artnet_canvas_height)
-    artnet_player = Player(artnet_video_source, points_json_path, target_ip, start_universe, fps_limit, config,
-                          enable_artnet=True, player_name="Art-Net Player", clip_registry=clip_registry)
+    artnet_player = Player(artnet_video_source, target_ip=target_ip, start_universe=start_universe, fps_limit=fps_limit, config=config,
+                          enable_artnet=True, player_name="Art-Net Player", clip_registry=clip_registry,
+                          canvas_width=artnet_canvas_width, canvas_height=artnet_canvas_height)
     logger.debug(f"Art-Net Player initialisiert (kein Video geladen)")
 
     
@@ -612,7 +589,8 @@ def main():
     # See snippets/old-dmx-input/ for archived implementation
     
     # REST API initialisieren und automatisch starten
-    rest_api = RestAPI(player_manager, None, data_dir, video_dir, config, replay_manager=replay_manager)
+    # Note: replay_manager=None - Recording system removed, will be reimplemented later
+    rest_api = RestAPI(player_manager, None, data_dir, video_dir, config, replay_manager=None)
     
     # Register all routes that depend on objects created after RestAPI init
     # (playlist_system, artnet_routing_manager, audio_analyzer)

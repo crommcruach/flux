@@ -91,7 +91,7 @@ class PointsLoader:
                 universe_offset = max_channels_8_universes - current_channel
                 obj_start_channel = current_channel + universe_offset
                 obj_end_channel = obj_start_channel + obj_channels
-                logger.info(f"Objekt '{obj_id}' verschoben zu Universum 9+ (würde Grenze überschreiten)")
+                logger.debug(f"Objekt '{obj_id}' verschoben zu Universum 9+ (würde Grenze überschreiten)")
             
             # Füge Punkte hinzu und speichere Universe-Mapping
             for point in valid_points:
@@ -107,7 +107,7 @@ class PointsLoader:
         total_channels = total_points * channels_per_point + universe_offset
         required_universes = (total_channels + channels_per_universe - 1) // channels_per_universe
         
-        logger.info(f"Points geladen: {total_points} Punkte, {required_universes} Universen")
+        logger.debug(f"Points geladen: {total_points} Punkte, {required_universes} Universen")
         
         return {
             'point_coords': point_coords,

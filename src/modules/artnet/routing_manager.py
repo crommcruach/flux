@@ -30,7 +30,7 @@ class ArtNetRoutingManager:
         self.objects: Dict[str, ArtNetObject] = {}
         self.outputs: Dict[str, ArtNetOutput] = {}
         
-        logger.info("ArtNetRoutingManager initialized")
+        logger.debug("ArtNetRoutingManager initialized")
     
     # =============================================================================
     # Sync from Editor
@@ -69,7 +69,7 @@ class ArtNetRoutingManager:
         shapes = editor_state.get('shapes', [])
         
         if not shapes:
-            logger.info("No editor shapes found in session state")
+            logger.debug("No editor shapes found in session state")
             return {'created': [], 'updated': [], 'removed': []}
         
         # Track shape IDs that exist in editor
@@ -100,7 +100,7 @@ class ArtNetRoutingManager:
         if remove_orphaned:
             removed_ids = self._remove_orphaned_objects(editor_shape_ids)
         
-        logger.info(
+        logger.debug(
             f"✅ Sync complete: {len(created_objects)} created, "
             f"{len(skipped_objects)} skipped, {len(removed_ids)} removed"
         )
@@ -279,7 +279,7 @@ class ArtNetRoutingManager:
             except Exception as e:
                 logger.error(f"Failed to restore output {out_id}: {e}")
         
-        logger.info(f"✅ Restored state: {len(self.objects)} objects, {len(self.outputs)} outputs")
+        logger.debug(f"✅ Restored state: {len(self.objects)} objects, {len(self.outputs)} outputs")
     
     # =============================================================================
     # Object CRUD Operations
@@ -293,7 +293,7 @@ class ArtNetRoutingManager:
             obj: ArtNetObject to add
         """
         self.objects[obj.id] = obj
-        logger.info(f"Created object {obj.id}")
+        logger.debug(f"Created object {obj.id}")
     
     def get_object(self, obj_id: str) -> Optional[ArtNetObject]:
         """
@@ -367,7 +367,7 @@ class ArtNetRoutingManager:
         if any(k in updates for k in ['ledType', 'led_type', 'channelsPerPixel', 'channels_per_pixel', 'points']):
             obj.universe_start, obj.universe_end = obj.calculate_universe_range()
         
-        logger.info(f"Updated object {obj_id}")
+        logger.debug(f"Updated object {obj_id}")
     
     def delete_object(self, obj_id: str):
         """
@@ -390,7 +390,7 @@ class ArtNetRoutingManager:
                 output.assigned_objects.remove(obj_id)
         
         del self.objects[obj_id]
-        logger.info(f"Deleted object {obj_id}")
+        logger.debug(f"Deleted object {obj_id}")
     
     # =============================================================================
     # Output CRUD Operations
@@ -404,7 +404,7 @@ class ArtNetRoutingManager:
             output: ArtNetOutput to add
         """
         self.outputs[output.id] = output
-        logger.info(f"Created output {output.id}")
+        logger.debug(f"Created output {output.id}")
     
     def get_output(self, out_id: str) -> Optional[ArtNetOutput]:
         """
@@ -461,7 +461,7 @@ class ArtNetRoutingManager:
             if hasattr(output, prop_name):
                 setattr(output, prop_name, value)
         
-        logger.info(f"Updated output {out_id}")
+        logger.debug(f"Updated output {out_id}")
     
     def delete_output(self, out_id: str):
         """
@@ -477,7 +477,7 @@ class ArtNetRoutingManager:
             raise ValueError(f"Output {out_id} not found")
         
         del self.outputs[out_id]
-        logger.info(f"Deleted output {out_id}")
+        logger.debug(f"Deleted output {out_id}")
     
     # =============================================================================
     # Assignment Operations
@@ -502,7 +502,7 @@ class ArtNetRoutingManager:
         output = self.outputs[out_id]
         if obj_id not in output.assigned_objects:
             output.assigned_objects.append(obj_id)
-            logger.info(f"Assigned object {obj_id} to output {out_id}")
+            logger.debug(f"Assigned object {obj_id} to output {out_id}")
         else:
             logger.debug(f"Object {obj_id} already assigned to output {out_id}")
     
@@ -523,7 +523,7 @@ class ArtNetRoutingManager:
         output = self.outputs[out_id]
         if obj_id in output.assigned_objects:
             output.assigned_objects.remove(obj_id)
-            logger.info(f"Removed object {obj_id} from output {out_id}")
+            logger.debug(f"Removed object {obj_id} from output {out_id}")
         else:
             logger.debug(f"Object {obj_id} not assigned to output {out_id}")
     

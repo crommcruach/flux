@@ -55,7 +55,7 @@ class RoutingBridge:
                     logger.error(f"Failed to configure output {output.name}: {e}")
         
         self.initialized = True
-        logger.info(f"Routing bridge initialized with {len(outputs)} output(s)")
+        logger.debug(f"Routing bridge initialized with {len(outputs)} output(s)")
     
     def process_frame(self, frame: np.ndarray):
         """
@@ -110,7 +110,7 @@ class RoutingBridge:
             self.initialize()
         
         self.enabled = True
-        logger.info("Routing bridge started")
+        logger.debug("Routing bridge started")
     
     def stop(self):
         """Disable routing system and send blackout"""
@@ -121,7 +121,7 @@ class RoutingBridge:
         except Exception as e:
             logger.error(f"Error during blackout: {e}")
         
-        logger.info("Routing bridge stopped")
+        logger.debug("Routing bridge stopped")
     
     def blackout(self):
         """Send blackout to all outputs"""
@@ -159,7 +159,7 @@ class RoutingBridge:
             else:
                 self.sender.remove_output(output.id)
         
-        logger.info("All routing outputs reconfigured")
+        logger.debug("All routing outputs reconfigured")
     
     def get_last_frames(self) -> Dict[str, bytes]:
         """
@@ -188,4 +188,4 @@ class RoutingBridge:
         self.stop()
         self.sender.cleanup()
         self.output_manager.reset_all()
-        logger.info("Routing bridge cleaned up")
+        logger.debug("Routing bridge cleaned up")

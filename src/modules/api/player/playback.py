@@ -62,7 +62,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 from ...player.sources import GeneratorSource
                 
                 # Create generator source
-                logger.info(f"Loading generator '{generator_id}' with parameters: {parameters}")
+                logger.debug(f"Loading generator '{generator_id}' with parameters: {parameters}")
                 generator_source = GeneratorSource(
                     generator_id=generator_id,
                     parameters=parameters,
@@ -71,59 +71,33 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     config=config
                 )
                 
-                # Register clip with provided or generated ID
+                # Register clip with provided or generated ID (applies default effects)
                 clip_id = data.get('clip_id')  # Frontend can provide UUID
-                if clip_id:
-                    # Use frontend-provided clip_id - only register if not already exists!
-                    gen_path = f"generator:{generator_id}"
-                    if clip_id not in clip_registry.clips:
-                        from datetime import datetime
-                        clip_registry.clips[clip_id] = {
-                            'clip_id': clip_id,
-                            'player_id': player_id,
-                            'absolute_path': gen_path,
-                            'relative_path': gen_path,
-                            'metadata': {'type': 'generator', 'generator_id': generator_id, 'parameters': parameters},
-                            'created_at': datetime.now().isoformat(),
-                            'effects': []
-                        }
+                gen_path = f"generator:{generator_id}"
+                
+                # Use register_clip() to ensure default effects are applied
+                clip_id = clip_registry.register_clip(
+                    player_id=player_id,
+                    absolute_path=gen_path,
+                    relative_path=gen_path,
+                    metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters},
+                    clip_id=clip_id  # Pass frontend-provided UUID if available
+                )
                     
-                    # Update playlist_ids list at current index (if in playlist)
-                    if hasattr(player, 'playlist') and gen_path in player.playlist:
-                        idx = player.playlist.index(gen_path)
-                        if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
-                            player.playlist_ids = []
-                        # Extend list if needed
-                        while len(player.playlist_ids) <= idx:
-                            player.playlist_ids.append(None)
-                        player.playlist_ids[idx] = clip_id
-                    
-                    # Store parameters for future access
-                    if not hasattr(player, 'playlist_params'):
-                        player.playlist_params = {}
-                    player.playlist_params[generator_id] = parameters.copy()
-                else:
-                    # Fallback: Generate new clip_id
-                    gen_path = f"generator:{generator_id}"
-                    clip_id = clip_registry.register_clip(
-                        player_id=player_id,
-                        absolute_path=gen_path,
-                        relative_path=gen_path,
-                        metadata={'type': 'generator', 'generator_id': generator_id, 'parameters': parameters}
-                    )
-                    # Store in playlist_ids list at current index (if in playlist)
-                    if hasattr(player, 'playlist') and gen_path in player.playlist:
-                        idx = player.playlist.index(gen_path)
-                        if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
-                            player.playlist_ids = []
-                        while len(player.playlist_ids) <= idx:
-                            player.playlist_ids.append(None)
-                        player.playlist_ids[idx] = clip_id
-                    
-                    # Store parameters for future access
-                    if not hasattr(player, 'playlist_params'):
-                        player.playlist_params = {}
-                    player.playlist_params[generator_id] = parameters.copy()
+                # Update playlist_ids list at current index (if in playlist)
+                if hasattr(player, 'playlist') and gen_path in player.playlist:
+                    idx = player.playlist.index(gen_path)
+                    if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
+                        player.playlist_ids = []
+                    # Extend list if needed
+                    while len(player.playlist_ids) <= idx:
+                        player.playlist_ids.append(None)
+                    player.playlist_ids[idx] = clip_id
+                
+                # Store parameters for future access
+                if not hasattr(player, 'playlist_params'):
+                    player.playlist_params = {}
+                player.playlist_params[generator_id] = parameters.copy()
                 
                 # Load generator into player
                 success = player.switch_source(generator_source)
@@ -133,7 +107,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 
                 # Set current clip ID for effect management
                 player.current_clip_id = clip_id
-                logger.info(f"✅ [{player_id}] Loaded generator: {generator_id} (clip_id={clip_id})")
+                logger.debug(f"✅ [{player_id}] Loaded generator: {generator_id} (clip_id={clip_id})")
                 
                 # Load clip layers from registry
                 player.load_clip_layers(clip_id, clip_registry, video_dir)
@@ -156,7 +130,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     if player.is_playing:
                         player.stop()
                     player.play()
-                    logger.info(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
+                    logger.debug(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
                 
                 # Auto-save session state (force=True für kritische Clip-Änderung)
                 session_state = get_session_state()
@@ -165,7 +139,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 
                 # Save clip to viewed playlist
                 try:
-                    from .api_playlists import get_playlist_system
+                    from .playlists import get_playlist_system
                     playlist_system = get_playlist_system()
                     if playlist_system:
                         viewed = playlist_system.get_viewed_playlist()
@@ -209,39 +183,26 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 if not os.path.exists(absolute_path):
                     return jsonify({"success": False, "error": f"Video not found: {video_path}"}), 404
                 
-                # Register clip with provided or generated ID
+                # Register clip with provided or generated ID (applies default effects)
                 clip_id = data.get('clip_id')  # Frontend can provide UUID
-                if clip_id:
-                    # Use frontend-provided clip_id - only register if not already exists!
-                    if clip_id not in clip_registry.clips:
-                        from datetime import datetime
-                        clip_registry.clips[clip_id] = {
-                            'clip_id': clip_id,
-                            'player_id': player_id,
-                            'absolute_path': absolute_path,
-                            'relative_path': relative_path,
-                            'filename': os.path.basename(absolute_path),
-                            'metadata': {},
-                            'created_at': datetime.now().isoformat(),
-                            'effects': []
-                        }
+                
+                # Use register_clip() to ensure default effects are applied
+                clip_id = clip_registry.register_clip(
+                    player_id=player_id,
+                    absolute_path=absolute_path,
+                    relative_path=relative_path,
+                    metadata={},
+                    clip_id=clip_id  # Pass frontend-provided UUID if available
+                )
                     
-                    # Update playlist_ids list at current index (if in playlist)
-                    if hasattr(player, 'playlist') and absolute_path in player.playlist:
-                        idx = player.playlist.index(absolute_path)
-                        if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
-                            player.playlist_ids = []
-                        while len(player.playlist_ids) <= idx:
-                            player.playlist_ids.append(None)
-                        player.playlist_ids[idx] = clip_id
-                else:
-                    # Fallback: Generate new clip_id
-                    clip_id = clip_registry.register_clip(
-                        player_id=player_id,
-                        absolute_path=absolute_path,
-                        relative_path=relative_path,
-                        metadata={}
-                    )
+                # Update playlist_ids list at current index (if in playlist)
+                if hasattr(player, 'playlist') and absolute_path in player.playlist:
+                    idx = player.playlist.index(absolute_path)
+                    if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
+                        player.playlist_ids = []
+                    while len(player.playlist_ids) <= idx:
+                        player.playlist_ids.append(None)
+                    player.playlist_ids[idx] = clip_id
                 
                 # Load video into player with clip_id for trim/reverse support
                 video_source = VideoSource(
@@ -267,7 +228,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     while len(player.playlist_ids) <= idx:
                         player.playlist_ids.append(None)
                     player.playlist_ids[idx] = clip_id
-                logger.info(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
+                logger.debug(f"✅ [{player_id}] Loaded clip: {os.path.basename(absolute_path)} (clip_id={clip_id})")
                 debug_api(logger, f"   Player state: current_clip_id={player.current_clip_id}, source type={type(video_source).__name__}")
                 
                 # Load clip layers from registry
@@ -292,7 +253,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     if player.is_playing:
                         player.stop()
                     player.play()
-                    logger.info(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
+                    logger.debug(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
                 
                 # Auto-save session state (force=True für kritische Clip-Änderung)
                 session_state = get_session_state()
@@ -301,7 +262,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 
                 # Save clip to viewed playlist
                 try:
-                    from .api_playlists import get_playlist_system
+                    from .playlists import get_playlist_system
                     playlist_system = get_playlist_system()
                     if playlist_system:
                         viewed = playlist_system.get_viewed_playlist()
@@ -378,6 +339,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             # Check if this clip_id belongs to an active layer - if so, get live instances
             player = player_manager.get_player(player_id)
             active_layer_effects = None
+            active_layer_source = None  # Track layer's source for transport initialization
             if player and hasattr(player, 'layers'):
                 logger.debug(f"🔍 [get_clip_effects] Searching for active layer with clip_id={clip_id}, player has {len(player.layers)} layers")
                 for layer_idx, layer in enumerate(player.layers):
@@ -386,6 +348,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     if hasattr(layer, 'clip_id') and layer.clip_id == clip_id:
                         # Found the active layer - use its live effect instances
                         active_layer_effects = layer.effects
+                        active_layer_source = layer.source  # Store layer's source
                         logger.debug(f"✅ [get_clip_effects] Found active layer {layer_idx} with clip_id {clip_id}, has {len(layer.effects) if layer.effects else 0} effects")
                         break
             
@@ -417,9 +380,12 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         # SPECIAL: Initialize transport ONLY if not already initialized
                         if effect.get('plugin_id') == 'transport' and hasattr(live_instance, '_initialize_state'):
                             # Check if already initialized by looking at out_point
-                            if live_instance.out_point == 0 and player and len(player.layers) > 0 and player.layers[0].source:
+                            # Use active layer's source if available, otherwise fallback to Layer 0
+                            transport_source = active_layer_source if active_layer_source else (player.layers[0].source if player and len(player.layers) > 0 else None)
+                            
+                            if live_instance.out_point == 0 and transport_source:
                                 logger.debug(f"🎬 [get_clip_effects] Transport NOT initialized yet, initializing for clip {clip_id}")
-                                live_instance._initialize_state(player.layers[0].source)
+                                live_instance._initialize_state(transport_source)
                                 logger.debug(f"🎬 [get_clip_effects] Transport initialized: out_point={live_instance.out_point}")
                             else:
                                 logger.debug(f"🎬 [get_clip_effects] Transport already initialized, skipping (out_point={live_instance.out_point})")
@@ -503,20 +469,16 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                             break
                     
                     if found_path:
-                        from datetime import datetime
-                        logger.info(f"✅ Lazy registering clip {clip_id} for path: {found_path}")
+                        logger.debug(f"✅ Lazy registering clip {clip_id} for path: {found_path}")
                         
-                        # Register the clip
-                        clip_registry.clips[clip_id] = {
-                            'clip_id': clip_id,
-                            'player_id': player_id,
-                            'absolute_path': found_path,
-                            'relative_path': os.path.relpath(found_path, video_dir) if not found_path.startswith('generator:') else found_path,
-                            'filename': os.path.basename(found_path),
-                            'metadata': {},
-                            'created_at': datetime.now().isoformat(),
-                            'effects': []
-                        }
+                        # Register the clip using register_clip() to apply default effects
+                        clip_id = clip_registry.register_clip(
+                            player_id=player_id,
+                            absolute_path=found_path,
+                            relative_path=os.path.relpath(found_path, video_dir) if not found_path.startswith('generator:') else found_path,
+                            metadata={},
+                            clip_id=clip_id  # Pass frontend-provided UUID
+                        )
                     else:
                         return jsonify({"success": False, "error": f"Clip '{clip_id}' not found in playlist"}), 404
                 else:
@@ -570,21 +532,21 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             if not success:
                 return jsonify({"success": False, "error": "Failed to add effect"}), 500
             
-            logger.info(f"✅ Effect '{plugin_id}' added to clip {clip_id} ({player_id})")
+            logger.debug(f"✅ Effect '{plugin_id}' added to clip {clip_id} ({player_id})")
             
             # Reload effects on ALL players that have this clip loaded
             # (not just the player in the API route - clip might be in both video AND artnet players!)
-            logger.info(f"🔍 Checking all players for clip {clip_id}...")
+            logger.debug(f"🔍 Checking all players for clip {clip_id}...")
             reloaded_on_players = []
             for check_player_id, check_player in player_manager.players.items():
                 if check_player and hasattr(check_player, 'layers') and check_player.layers:
                     # Log what layers this player has
                     layer_info = [(i, layer.clip_id if hasattr(layer, 'clip_id') else 'no-id') for i, layer in enumerate(check_player.layers)]
-                    logger.info(f"  Player '{check_player_id}': {len(check_player.layers)} layers - {layer_info}")
+                    logger.debug(f"  Player '{check_player_id}': {len(check_player.layers)} layers - {layer_info}")
                     
                     clip_is_loaded = any(layer.clip_id == clip_id for layer in check_player.layers)
                     if clip_is_loaded:
-                        logger.info(f"  ✅ Found clip {clip_id} in {check_player_id} player - reloading effects")
+                        logger.debug(f"  ✅ Found clip {clip_id} in {check_player_id} player - reloading effects")
                         if hasattr(check_player, 'reload_all_layer_effects'):
                             check_player.reload_all_layer_effects()
                             reloaded_on_players.append(check_player_id)
@@ -596,7 +558,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     logger.debug(f"  Player '{check_player_id}': No layers or player not initialized")
             
             if reloaded_on_players:
-                logger.info(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+                logger.debug(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
             else:
                 logger.warning(f"⚠️ Clip {clip_id} not currently loaded in any player, effects will be loaded when clip is played")
             
@@ -635,7 +597,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             if not success:
                 return jsonify({"success": False, "error": "Failed to remove effect"}), 500
             
-            logger.info(f"🗑️ Effect removed from clip {clip_id} at index {index}")
+            logger.debug(f"🗑️ Effect removed from clip {clip_id} at index {index}")
             
             # Reload effects on ALL players that have this clip loaded
             # (not just the player in the API route - clip might be in both video AND artnet players!)
@@ -652,7 +614,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                             logger.warning(f"⚠️ Player {check_player_id} doesn't have reload_all_layer_effects method")
             
             if reloaded_on_players:
-                logger.info(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+                logger.debug(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
             else:
                 logger.debug(f"Clip {clip_id} not currently loaded in any player, skipping effect reload")
             
@@ -712,7 +674,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 if uid:
                     param_data['_uid'] = uid
                 effect['parameters'][param_name] = param_data
-                logger.info(f"🎚️ API received triple-slider: {param_name}={param_value}, range=[{range_min}, {range_max}]")
+                logger.debug(f"🎚️ API received triple-slider: {param_name}={param_value}, range=[{range_min}, {range_max}]")
             else:
                 # For simple values, store as dict if UID is present, otherwise plain value
                 if uid:
@@ -752,12 +714,12 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                                     break  # Only update first matching layer per player
             
             if updated_live_players:
-                logger.info(f"✅ Parameter updated on players: {', '.join(updated_live_players)}")
+                logger.debug(f"✅ Parameter updated on players: {', '.join(updated_live_players)}")
             else:
                 # Fallback: Update registry instance (for non-layer clips)
                 if 'instance' in effect and effect['instance']:
                     effect['instance'].update_parameter(param_name, value_to_update)
-                    logger.info(f"✅ Updated registry effect instance: {clip_id}[{index}].{param_name} (not currently loaded)")
+                    logger.debug(f"✅ Updated registry effect instance: {clip_id}[{index}].{param_name} (not currently loaded)")
             
             # B3: Invalidate cache so player detects parameter change
             clip_registry._invalidate_cache(clip_id)
@@ -801,7 +763,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             # Invalidate cache so player detects the change
             clip_registry._invalidate_cache(clip_id)
             
-            logger.info(f"Clip effect {clip_id}[{index}] toggled: {'enabled' if new_state else 'disabled'}")
+            logger.debug(f"Clip effect {clip_id}[{index}] toggled: {'enabled' if new_state else 'disabled'}")
             
             # Reload effects on ALL players that have this clip loaded
             reloaded_on_players = []
@@ -815,7 +777,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                             reloaded_on_players.append(check_player_id)
             
             if reloaded_on_players:
-                logger.info(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+                logger.debug(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
             else:
                 logger.debug(f"Clip {clip_id} not currently loaded in any player, skipping effect reload")
             
@@ -864,11 +826,11 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                                 reloaded_on_players.append(check_player_id)
                 
                 if reloaded_on_players:
-                    logger.info(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+                    logger.debug(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
                 else:
                     logger.debug(f"Clip {clip_id} not currently loaded in any player, skipping effect reload")
             
-            logger.info(f"🗑️ All effects cleared from clip {clip_id}")
+            logger.debug(f"🗑️ All effects cleared from clip {clip_id}")
             
             # Auto-save session state
             session_state = get_session_state()
@@ -936,9 +898,9 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
             # Debug: Log playlist state
-            logger.info(f"[EFFECT ADD DEBUG] playlist_system exists: {playlist_system is not None}")
+            logger.debug(f"[EFFECT ADD DEBUG] playlist_system exists: {playlist_system is not None}")
             if playlist_system:
-                logger.info(f"[EFFECT ADD DEBUG] viewed={playlist_system.viewed_playlist_id}, active={playlist_system.active_playlist_id}")
+                logger.debug(f"[EFFECT ADD DEBUG] viewed={playlist_system.viewed_playlist_id}, active={playlist_system.active_playlist_id}")
             
             # Check if we're viewing a different playlist than the active one
             if playlist_system and playlist_system.viewed_playlist_id != playlist_system.active_playlist_id:
@@ -957,7 +919,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     }
                     player_state.global_effects.append(effect_entry)
                     
-                    logger.info(f"[EFFECT ADD] Added '{plugin_id}' to viewed playlist '{viewed_playlist.name}' {player_id} effects")
+                    logger.debug(f"[EFFECT ADD] Added '{plugin_id}' to viewed playlist '{viewed_playlist.name}' {player_id} effects")
                     
                     # Save playlist state
                     playlist_system._auto_save()
@@ -976,7 +938,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     return jsonify({"success": True, "message": f"Effect '{plugin_id}' added to viewed playlist", "player_id": player_id})
             
             # Otherwise add to physical player (active playlist)
-            logger.info(f"[EFFECT ADD DEBUG] Adding to physical player (active playlist)")
+            logger.debug(f"[EFFECT ADD DEBUG] Adding to physical player (active playlist)")
             # Use appropriate chain type
             chain_type = 'artnet' if player_id == 'artnet' else 'video'
             success, message = player.add_effect_to_chain(plugin_id, config, chain_type=chain_type)
@@ -1029,7 +991,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         for i, effect in enumerate(player_state.global_effects):
                             effect['index'] = i
                         
-                        logger.info(f"[EFFECT REMOVE] Removed effect at index {index} from viewed playlist '{viewed_playlist.name}' {player_id}")
+                        logger.debug(f"[EFFECT REMOVE] Removed effect at index {index} from viewed playlist '{viewed_playlist.name}' {player_id}")
                         
                         # Save playlist state
                         playlist_system._auto_save()
@@ -1095,7 +1057,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     player_state = viewed_playlist.players[player_id]
                     player_state.global_effects = []
                     
-                    logger.info(f"[EFFECT CLEAR] Cleared all effects from viewed playlist '{viewed_playlist.name}' {player_id}")
+                    logger.debug(f"[EFFECT CLEAR] Cleared all effects from viewed playlist '{viewed_playlist.name}' {player_id}")
                     
                     # Save playlist state
                     playlist_system._auto_save()
@@ -1182,7 +1144,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         if 'config' in effect:
                             effect['config'][param_name] = effect['parameters'][param_name]
                         
-                        logger.info(f"[EFFECT PARAM] Updated {param_name}={value} for effect at index {index} in viewed playlist '{viewed_playlist.name}' {player_id}")
+                        logger.debug(f"[EFFECT PARAM] Updated {param_name}={value} for effect at index {index} in viewed playlist '{viewed_playlist.name}' {player_id}")
                         
                         # Save playlist state
                         playlist_system._auto_save()
@@ -1222,7 +1184,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 else:
                     effect['config'][param_name] = value
             
-            logger.info(f"✅ Parameter '{param_name}' von Effect {index} auf {value} gesetzt ({player_id})")
+            logger.debug(f"✅ Parameter '{param_name}' von Effect {index} auf {value} gesetzt ({player_id})")
             
             # Auto-save session state
             session_state = get_session_state()
@@ -1254,7 +1216,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         effect = player_state.global_effects[index]
                         effect['enabled'] = not effect.get('enabled', True)
                         
-                        logger.info(f"[EFFECT TOGGLE] Toggled effect at index {index} to {effect['enabled']} in viewed playlist '{viewed_playlist.name}' {player_id}")
+                        logger.debug(f"[EFFECT TOGGLE] Toggled effect at index {index} to {effect['enabled']} in viewed playlist '{viewed_playlist.name}' {player_id}")
                         
                         # Save playlist state
                         playlist_system._auto_save()
@@ -1299,11 +1261,11 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             # Prüfe ob echtes Video geladen ist (nicht DummySource)
             from ...player.sources import DummySource
             if not player.source or isinstance(player.source, DummySource):
-                logger.info(f"⚠️ [{player_id}] Kein Video geladen - Play abgebrochen")
+                logger.debug(f"⚠️ [{player_id}] Kein Video geladen - Play abgebrochen")
                 return jsonify({"success": False, "error": "Kein Video geladen"}), 400
             
             player.play()
-            logger.info(f"▶️ Player '{player_id}' playing")
+            logger.debug(f"▶️ Player '{player_id}' playing")
             
             return jsonify({"success": True, "player_id": player_id, "status": "playing"})
             
@@ -1320,7 +1282,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
             player.pause()
-            logger.info(f"⏸️ Player '{player_id}' paused")
+            logger.debug(f"⏸️ Player '{player_id}' paused")
             
             return jsonify({"success": True, "player_id": player_id, "status": "paused"})
             
@@ -1337,12 +1299,29 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
             player.stop()
-            logger.info(f"⏹️ Player '{player_id}' stopped")
+            logger.debug(f"⏹️ Player '{player_id}' stopped")
             
             return jsonify({"success": True, "player_id": player_id, "status": "stopped"})
             
         except Exception as e:
             logger.error(f"Error stopping: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @app.route('/api/player/<player_id>/clear', methods=['POST'])
+    def unified_clear(player_id):
+        """Löscht den aktuellen Frame (zeigt schwarzen Bildschirm bei leerer Playlist)."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+            
+            player.clear_frame()
+            logger.debug(f"🖤 Player '{player_id}' frame cleared (black screen)")
+            
+            return jsonify({"success": True, "player_id": player_id, "status": "cleared"})
+            
+        except Exception as e:
+            logger.error(f"Error clearing frame: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
     
     # ========================================
@@ -1698,7 +1677,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 return jsonify({"success": False, "error": "Current source is not a generator"}), 400
             
             # Log the update attempt
-            logger.info(f"🔧 [{player_id}] Attempting to update generator parameter: {param_name} = {param_value} (generator: {player.source.generator_id})")
+            logger.debug(f"🔧 [{player_id}] Attempting to update generator parameter: {param_name} = {param_value} (generator: {player.source.generator_id})")
             
             # Update parameter
             success = player.source.update_parameter(param_name, param_value)
@@ -1717,9 +1696,9 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         if 'parameters' not in clip['metadata']:
                             clip['metadata']['parameters'] = {}
                         clip['metadata']['parameters'][param_name] = param_value
-                        logger.info(f"📝 [{player_id}] Updated ClipRegistry metadata: {param_name} = {param_value}")
+                        logger.debug(f"📝 [{player_id}] Updated ClipRegistry metadata: {param_name} = {param_value}")
                 
-                logger.info(f"✅ [{player_id}] Generator parameter updated: {param_name} = {param_value}")
+                logger.debug(f"✅ [{player_id}] Generator parameter updated: {param_name} = {param_value}")
                 
                 # Auto-save session state
                 session_state = get_session_state()
@@ -1873,11 +1852,11 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 # Starte automatisch wenn nicht schon läuft
                 if not player.is_playing:
                     player.play()
-                    logger.info(f"▶️ [{player_id}] Video automatisch gestartet (in Playlist)")
+                    logger.debug(f"▶️ [{player_id}] Video automatisch gestartet (in Playlist)")
             else:
                 # Aktuelles Video wurde aus Playlist entfernt ODER kein Video geladen
                 if hasattr(player.source, 'video_path') and player.source.video_path:
-                    logger.info(f"🗑️ [{player_id}] Video aus Playlist entfernt - lade leere Source: {os.path.basename(player.source.video_path)}")
+                    logger.debug(f"🗑️ [{player_id}] Video aus Playlist entfernt - lade leere Source: {os.path.basename(player.source.video_path)}")
                     player.stop()
                     # Entlade das Video vollständig
                     if hasattr(player, 'source') and player.source:
@@ -1902,7 +1881,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 if should_autostart:
                     player.playlist_index = 0
                     first_item = absolute_playlist[0]
-                    logger.info(f"🎬 [{player_id}] Autoplay aktiviert - lade erstes Video: {os.path.basename(first_item)}")
+                    logger.debug(f"🎬 [{player_id}] Autoplay aktiviert - lade erstes Video: {os.path.basename(first_item)}")
                     logger.debug(f"   playlist_ids mapping: {playlist_ids}")
                     
                     # Lade erstes Video/Generator
@@ -1963,13 +1942,13 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                             logger.warning(f"⚠️ [{player_id}] Could not load layers for first clip, using single-source fallback")
                         
                         player.play()
-                        logger.info(f"▶️ [{player_id}] Erstes Video automatisch gestartet (clip_id={first_clip_id})")
+                        logger.debug(f"▶️ [{player_id}] Erstes Video automatisch gestartet (clip_id={first_clip_id})")
                     else:
                         logger.error(f"❌ [{player_id}] Fehler beim Laden des ersten Videos")
                 
                 player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
             
-            logger.info(f"✅ [{player_id}] Playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}")
+            logger.debug(f"✅ [{player_id}] Playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}")
             
             # Auto-save session state (force=True für kritische Playlist-Änderung)
             session_state = get_session_state()
@@ -2038,7 +2017,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             with open(playlist_path, 'w', encoding='utf-8') as f:
                 json.dump(playlist_data, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"💾 Playlists saved: {name} (Video: {len(video_playlist)}, Art-Net: {len(artnet_playlist)}, Sequencer: {'Yes' if sequencer_state else 'No'})")
+            logger.debug(f"💾 Playlists saved: {name} (Video: {len(video_playlist)}, Art-Net: {len(artnet_playlist)}, Sequencer: {'Yes' if sequencer_state else 'No'})")
             return jsonify({
                 "success": True,
                 "status": "success",
@@ -2080,14 +2059,14 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         timeline_data = sequencer_data.get('timeline', {})
                         if timeline_data:
                             player_manager.sequencer.timeline.from_dict(timeline_data)
-                            logger.info(f"🎵 Timeline restored: {len(timeline_data.get('splits', []))} splits, {len(timeline_data.get('clip_mapping', {}))} clip mappings")
+                            logger.debug(f"🎵 Timeline restored: {len(timeline_data.get('splits', []))} splits, {len(timeline_data.get('clip_mapping', {}))} clip mappings")
                             logger.debug(f"   Clip mappings: {timeline_data.get('clip_mapping', {})}")
                         
                         # Restore sequencer mode
                         mode_active = sequencer_data.get('mode_active', False)
                         player_manager.set_sequencer_mode(mode_active)
                         
-                        logger.info(f"🎵 Sequencer restored from playlist: audio={os.path.basename(audio_file)}, mode_active={mode_active}")
+                        logger.debug(f"🎵 Sequencer restored from playlist: audio={os.path.basename(audio_file)}, mode_active={mode_active}")
                 except Exception as e:
                     logger.warning(f"Failed to restore sequencer from playlist: {e}")
                     import traceback
@@ -2099,11 +2078,11 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 try:
                     success = player_manager.set_master_playlist(master_playlist)
                     if success:
-                        logger.info(f"👑 Master playlist restored from playlist: {master_playlist}")
+                        logger.debug(f"👑 Master playlist restored from playlist: {master_playlist}")
                 except Exception as e:
                     logger.warning(f"Failed to restore master/slave state from playlist: {e}")
             
-            logger.info(f"📂 Playlist loaded: {name}")
+            logger.debug(f"📂 Playlist loaded: {name}")
             return jsonify({
                 "success": True,
                 "name": name,
@@ -2170,7 +2149,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 return jsonify({"success": False, "message": f"Playlist '{name}' not found"}), 404
             
             os.remove(playlist_path)
-            logger.info(f"🗑️ Playlist deleted: {name}")
+            logger.debug(f"🗑️ Playlist deleted: {name}")
             
             return jsonify({"success": True, "message": f"Playlist '{name}' deleted"})
         
@@ -2251,7 +2230,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         'playlist_name': viewed_playlist.name,
                         'timestamp': time.time()
                     }, namespace='/player')
-                    logger.info(f"📡 WebSocket: master_slave_changed emitted (master={viewed_playlist.master_player}, playlist={viewed_playlist.name})")
+                    logger.debug(f"📡 WebSocket: master_slave_changed emitted (master={viewed_playlist.master_player}, playlist={viewed_playlist.name})")
                 except Exception as e:
                     logger.error(f"❌ Error emitting master_slave_changed WebSocket event: {e}")
             
@@ -2262,7 +2241,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             clip_registry = get_clip_registry()
             session_state.save_without_capture(player_manager, clip_registry)
             
-            logger.info(f"👑 Set master_player={viewed_playlist.master_player} for playlist '{viewed_playlist.name}' (id={viewed_playlist.id})")
+            logger.debug(f"👑 Set master_player={viewed_playlist.master_player} for playlist '{viewed_playlist.name}' (id={viewed_playlist.id})")
             
             message = f"Master player set to {viewed_playlist.master_player} for playlist '{viewed_playlist.name}'" if viewed_playlist.master_player else f"Master mode disabled for playlist '{viewed_playlist.name}'"
             
@@ -2403,7 +2382,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 # Update player resolution with autosize mode
                 video_player.update_resolution(new_width, new_height, settings.get('autosize', 'off'))
             
-            logger.info(f"Video player settings saved and applied: {settings}")
+            logger.debug(f"Video player settings saved and applied: {settings}")
             
             return jsonify({
                 'success': True,
@@ -2488,7 +2467,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 # Update player resolution with autosize mode
                 artnet_player.update_resolution(new_width, new_height, settings.get('autosize', 'off'))
             
-            logger.info(f"Art-Net player settings saved and applied: {settings}")
+            logger.debug(f"Art-Net player settings saved and applied: {settings}")
             
             return jsonify({
                 'success': True,
@@ -2586,8 +2565,8 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             with open(points_json_path, 'w', encoding='utf-8') as f:
                 json.dump(points_data, f, indent=2)
             
-            logger.info(f"Art-Net canvas resolution updated from {old_width}x{old_height} to {new_width}x{new_height}")
-            logger.info(f"Backup created at {backup_path}")
+            logger.debug(f"Art-Net canvas resolution updated from {old_width}x{old_height} to {new_width}x{new_height}")
+            logger.debug(f"Backup created at {backup_path}")
             
             return jsonify({
                 'success': True,
