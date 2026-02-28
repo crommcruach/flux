@@ -41,9 +41,16 @@ class VirtualOutput(OutputBase):
         self.resolution = config.get('resolution', [1920, 1080])
         self.name = config.get('name', f'Virtual Output {output_id}')
         
-        # Store latest frame for preview
+        # Store latest frame for preview (direct reference, no copy needed)
         self.latest_frame: Optional[np.ndarray] = None
         self.frame_lock = threading.Lock()
+        
+        # OPTIMIZATION: Virtual output uses direct frame references (no copy)
+        # Base class default is True (copy), we override to False
+        self.needs_frame_copy = False
+        
+        # Virtual output doesn't need queue/thread (zero overhead)
+        self.use_queue = False
         
         logger.debug(f"[{self.output_id}] VirtualOutput initialized ({self.resolution[0]}x{self.resolution[1]})")
     
@@ -52,31 +59,68 @@ class VirtualOutput(OutputBase):
         logger.debug(f"✅ [{self.output_id}] Virtual output initialized: {self.name} ({self.resolution[0]}x{self.resolution[1]})")
         return True
     
+    def enable(self) -> bool:
+        """
+        Enable virtual output (no thread needed, direct storage)
+        
+        Returns:
+            bool: Always True
+        """
+        if self.enabled:
+            return True
+        
+        if not self.initialize():
+            return False
+        
+        # Virtual output doesn't need thread - direct storage in queue_frame()
+        self.enabled = True
+        logger.debug(f"✅ [{self.output_id}] Virtual output enabled (no thread, zero overhead)")
+        return True
+    
+    def disable(self):
+        """Disable virtual output"""
+        if not self.enabled:
+            return
+        
+        self.enabled = False
+        with self.frame_lock:
+            self.latest_frame = None
+        logger.debug(f"[{self.output_id}] Virtual output disabled")
+    
+    def queue_frame(self, frame: np.ndarray):
+        """
+        Override queue_frame to directly store frame reference (no copy, no queue)
+        
+        Args:
+            frame: Frame to store (numpy array, BGR format)
+        """
+        if not self.enabled:
+            return
+        
+        try:
+            # Store frame reference directly (no copy needed)
+            # Frame data is stable until next update_frame() call
+            with self.frame_lock:
+                self.latest_frame = frame
+            
+            # Update stats
+            with self.stats_lock:
+                self.frames_sent += 1
+        
+        except Exception as e:
+            logger.error(f"[{self.output_id}] Virtual output error: {e}")
+    
     def send_frame(self, frame: np.ndarray) -> bool:
         """
-        Store frame in memory for preview access
+        Legacy send_frame (not used for VirtualOutput, kept for compatibility)
         
         Args:
             frame: Frame to store (numpy array, BGR format)
             
         Returns:
-            bool: Always True (virtual output never fails)
+            bool: Always True
         """
-        try:
-            # Resize frame to target resolution if needed
-            if frame.shape[1] != self.resolution[0] or frame.shape[0] != self.resolution[1]:
-                import cv2
-                frame = cv2.resize(frame, tuple(self.resolution))
-            
-            # Store frame (thread-safe)
-            with self.frame_lock:
-                self.latest_frame = frame.copy()
-            
-            return True
-        
-        except Exception as e:
-            logger.error(f"[{self.output_id}] Virtual output error: {e}")
-            return False
+        return True
     
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """

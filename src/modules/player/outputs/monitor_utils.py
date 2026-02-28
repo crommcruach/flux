@@ -44,6 +44,11 @@ def get_available_monitors() -> List[Dict]:
     try:
         monitors = get_monitors()
         
+        # Log detected monitors for debugging
+        logger.info(f"🖥️ Detected {len(monitors)} monitor(s):")
+        for i, m in enumerate(monitors):
+            logger.info(f"  Monitor {i}: {getattr(m, 'name', 'Unknown')} @ {m.x},{m.y} - {m.width}x{m.height} (primary: {getattr(m, 'is_primary', i == 0)})")
+        
         return [
             {
                 'index': i,
@@ -58,7 +63,7 @@ def get_available_monitors() -> List[Dict]:
         ]
     
     except Exception as e:
-        logger.error(f"Failed to detect monitors: {e}")
+        logger.error(f"❌ Failed to detect monitors: {e}", exc_info=True)
         return [{
             'index': 0,
             'name': 'Monitor 1',

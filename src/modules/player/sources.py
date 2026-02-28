@@ -98,6 +98,19 @@ class VideoSource(FrameSource):
         self.loop_frame_cache = None  # Will store list of decoded frames
         self.loop_cache_active = False
         self.loop_number = 0
+        
+        # OPTIMIZATION: Cache whether scaling is needed (set during initialize())
+        self._needs_scaling = True  # Assume true until we check video resolution
+        
+        # Scaling interpolation quality (configurable for performance vs quality trade-off)
+        # Options: 'nearest' (fastest, blocky), 'linear' (fast, smooth), 'area' (slow, best quality)
+        scaling_quality = config.get('performance', {}).get('video_scaling_quality', 'linear') if config else 'linear'
+        self.scaling_interpolation = {
+            'nearest': cv2.INTER_NEAREST,  # ~1-2ms - fastest, pixelated/blocky
+            'linear': cv2.INTER_LINEAR,    # ~3-5ms - fast, good quality (default)
+            'cubic': cv2.INTER_CUBIC,      # ~8-12ms - slower, high quality
+            'area': cv2.INTER_AREA         # ~15-30ms - slowest, best for downscaling
+        }.get(scaling_quality.lower(), cv2.INTER_LINEAR)
     
     def _is_gif_file(self, path):
         """Prüft ob Datei ein GIF ist."""
@@ -146,7 +159,7 @@ class VideoSource(FrameSource):
         
         if self.autosize_mode == 'stretch':
             # Stretch - distort to fit canvas (ignores aspect ratio)
-            return cv2.resize(frame, (canvas_w, canvas_h), interpolation=cv2.INTER_AREA)
+            return cv2.resize(frame, (canvas_w, canvas_h), interpolation=self.scaling_interpolation)
         
         elif self.autosize_mode == 'fill':
             # Fill - crop to fill canvas (preserves aspect ratio)
@@ -163,7 +176,7 @@ class VideoSource(FrameSource):
                 new_h = int(frame_h * (canvas_w / frame_w))
             
             # Resize to larger dimension
-            scaled = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            scaled = cv2.resize(frame, (new_w, new_h), interpolation=self.scaling_interpolation)
             
             # Crop to canvas size (center crop)
             x_offset = (new_w - canvas_w) // 2
@@ -185,7 +198,7 @@ class VideoSource(FrameSource):
                 new_w = int(frame_w * (canvas_h / frame_h))
             
             # Resize to fit
-            scaled = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            scaled = cv2.resize(frame, (new_w, new_h), interpolation=self.scaling_interpolation)
             
             # Create black canvas and paste scaled frame
             result = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
@@ -205,7 +218,7 @@ class VideoSource(FrameSource):
                 new_h = canvas_h
                 new_w = int(frame_w * (canvas_h / frame_h))
             
-            scaled = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            scaled = cv2.resize(frame, (new_w, new_h), interpolation=self.scaling_interpolation)
             result = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
             x_offset = (canvas_w - new_w) // 2
             y_offset = (canvas_h - new_h) // 2
@@ -297,6 +310,13 @@ class VideoSource(FrameSource):
         original_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         original_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
+        # OPTIMIZATION: Cache whether scaling is needed (checked once vs every frame)
+        self._needs_scaling = (original_width != self.canvas_width or original_height != self.canvas_height)
+        if self._needs_scaling:
+            logger.debug(f"  ⚠️ Video resolution mismatch: {original_width}x{original_height} → {self.canvas_width}x{self.canvas_height} (scaling will apply ~15-25ms overhead per frame)")
+        else:
+            logger.debug(f"  ✅ Video resolution matches canvas: {original_width}x{original_height} (no scaling needed)")
+        
         # Update ClipRegistry with total_frames if clip_id is set
         if self.clip_id:
             from .clips.registry import get_clip_registry
@@ -328,21 +348,29 @@ class VideoSource(FrameSource):
             # Double-check cap is still valid after acquiring lock (race condition)
             if not self.cap:
                 return None, 0
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+            
+            # FAST PATH: Only seek if frame position is not sequential
+            # Sequential reading is 10-30x faster than seeking
+            current_pos = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+            if current_pos != self.current_frame:
+                # Non-sequential: need to seek (transport jumped, loop wrapped, etc.)
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+            
             ret, frame = self.cap.read()
         
         if not ret:
             return None, 0  # End of video
         
-        # BGR zu RGB konvertieren
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Keep frame in native BGR format (no conversion needed)
+        # New output routing system handles format conversions internally
+        # Effects work on numpy arrays regardless of channel order
         
         # Transparenz verarbeiten (GIF)
         if self.is_gif:
             frame = self._process_frame_transparency(frame)
         
-        # Auf Canvas-Größe skalieren mit Autosize-Modus
-        if frame.shape[1] != self.canvas_width or frame.shape[0] != self.canvas_height:
+        # Auf Canvas-Größe skalieren mit Autosize-Modus (FAST PATH: cached check)
+        if self._needs_scaling:
             frame = self._apply_autosize_scaling(frame)
         
         # Frame-Delay berechnen

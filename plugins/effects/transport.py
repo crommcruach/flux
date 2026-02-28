@@ -347,9 +347,12 @@ class TransportEffect(PluginBase):
             return frame_num
         
         # Speed anwenden (mit Bounce-Direction)
-        direction = -1 if self.reverse else 1
         if self.playback_mode == 'bounce':
-            direction *= self._bounce_direction
+            # In bounce mode, ignore reverse flag - bounce_direction controls movement
+            direction = self._bounce_direction
+        else:
+            # In other modes, respect reverse flag
+            direction = -1 if self.reverse else 1
         
         # DEBUG: Log speed application every 30 frames
         if int(self._virtual_frame) % 30 == 0:
@@ -643,16 +646,16 @@ class TransportEffect(PluginBase):
     
     def get_parameters(self):
         """Gibt aktuelle Parameter-Werte zurück mit Range Metadata für Transport."""
-        # Ensure _totalFrames is valid (use out_point as fallback for short clips)
-        total_frames = self._total_frames if self._total_frames is not None else max(self.out_point, 100)
+        # Ensure _totalFrames is valid
+        total_frames = self._total_frames if self._total_frames is not None else max(self.out_point + 1, 100)
         
         return {
             'transport_position': {
                 '_value': self.current_position,
                 '_rangeMin': self.in_point,
-                '_rangeMax': self.out_point,
+                '_rangeMax': self.out_point,  # User's trim end point or last frame
                 '_fps': self._fps,
-                '_totalFrames': total_frames,
+                '_totalFrames': total_frames,  # Total frames for duration calculation
                 '_displayFormat': 'time'
             },
             'speed': self.speed,

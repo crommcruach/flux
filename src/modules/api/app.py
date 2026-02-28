@@ -224,6 +224,11 @@ class RestAPI:
         from .system.debug import register_debug_routes
         register_debug_routes(self.app)
         
+        # Register Performance Monitoring API
+        from .system.performance import register_performance_routes
+        register_performance_routes(self.app, self.player_manager)
+        logger.debug("Performance Monitoring API routes registered")
+        
         # Store config in app for route access
         self.app.flux_config = self.config
         

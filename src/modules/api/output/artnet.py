@@ -325,13 +325,15 @@ def register_info_routes(app, player_manager, api=None, config=None):
             }
         })
     
-    def apply_mask_to_frame(frame, mask_config):
+    def apply_mask_to_frame(frame, mask_config, slice_x=0, slice_y=0):
         """
         Apply a mask to frame (make masked region black)
         
         Args:
-            frame: Input frame
-            mask_config: Mask definition with shape, position, etc.
+            frame: Input frame (extracted slice)
+            mask_config: Mask definition with shape, position, etc. (in canvas coordinates)
+            slice_x: X position of the slice on canvas (for coordinate translation)
+            slice_y: Y position of the slice on canvas (for coordinate translation)
         
         Returns:
             np.ndarray: Frame with mask applied
@@ -347,22 +349,35 @@ def register_info_routes(app, player_manager, api=None, config=None):
             mask = np.ones((h, w), dtype=np.uint8) * 255
             
             if mask_shape == 'rectangle':
-                x = int(mask_config.get('x', 0))
-                y = int(mask_config.get('y', 0))
+                # Translate mask coordinates from canvas to slice-relative coordinates
+                x = int(mask_config.get('x', 0)) - slice_x
+                y = int(mask_config.get('y', 0)) - slice_y
                 mask_width = int(mask_config.get('width', w))
                 mask_height = int(mask_config.get('height', h))
-                cv2.rectangle(mask, (x, y), (x + mask_width, y + mask_height), 0, -1)
+                
+                # Only draw if mask intersects with slice
+                if x < w and y < h and x + mask_width > 0 and y + mask_height > 0:
+                    cv2.rectangle(mask, (x, y), (x + mask_width, y + mask_height), 0, -1)
                 
             elif mask_shape == 'circle':
-                centerX = int(mask_config.get('centerX', w // 2))
-                centerY = int(mask_config.get('centerY', h // 2))
+                # Translate mask coordinates from canvas to slice-relative coordinates
+                centerX = int(mask_config.get('centerX', w // 2)) - slice_x
+                centerY = int(mask_config.get('centerY', h // 2)) - slice_y
                 radius = int(mask_config.get('radius', min(w, h) // 4))
-                cv2.circle(mask, (centerX, centerY), radius, 0, -1)
+                
+                # Only draw if circle intersects with slice
+                if (centerX + radius > 0 and centerX - radius < w and 
+                    centerY + radius > 0 and centerY - radius < h):
+                    cv2.circle(mask, (centerX, centerY), radius, 0, -1)
                 
             elif mask_shape in ['polygon', 'triangle', 'freehand']:
                 points = mask_config.get('points', [])
                 if points and len(points) >= 3:
-                    pts = np.array([[int(p.get('x', 0)), int(p.get('y', 0))] for p in points], dtype=np.int32)
+                    # Translate all points from canvas to slice-relative coordinates
+                    pts = np.array([
+                        [int(p.get('x', 0)) - slice_x, int(p.get('y', 0)) - slice_y] 
+                        for p in points
+                    ], dtype=np.int32)
                     cv2.fillPoly(mask, [pts], 0)
             
             # Apply mask
@@ -456,7 +471,8 @@ def register_info_routes(app, player_manager, api=None, config=None):
                 logger.debug(f"Applying {len(masks)} mask(s) to slice")
                 for mask in masks:
                     if mask.get('visible', True):
-                        sliced = apply_mask_to_frame(sliced, mask)
+                        # Pass slice origin for coordinate translation
+                        sliced = apply_mask_to_frame(sliced, mask, slice_x=x, slice_y=y)
             
             return sliced
             

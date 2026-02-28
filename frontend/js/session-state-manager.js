@@ -11,6 +11,7 @@ class SessionStateManager {
         this.listeners = [];
         this._saveTimeouts = {};
         this._loadPromise = null; // Track ongoing load promise
+        this.debug = false; // Set to true to enable debug console logs
     }
 
     /**
@@ -19,13 +20,13 @@ class SessionStateManager {
     async load() {
         // If already loaded, return cached state
         if (this.loaded) {
-            console.log('⏭️ Session state already loaded');
+            if (this.debug) console.log('⏭️ Session state already loaded');
             return this.state;
         }
 
         // If currently loading, wait for existing load to complete
         if (this.loading && this._loadPromise) {
-            console.log('⏭️ Session state loading in progress, waiting...');
+            if (this.debug) console.log('⏭️ Session state loading in progress, waiting...');
             return this._loadPromise;
         }
 
@@ -38,7 +39,7 @@ class SessionStateManager {
      * Force reload session state from server (used after modifications)
      */
     async reload() {
-        console.log('🔄 Reloading session state...');
+        if (this.debug) console.log('🔄 Reloading session state...');
         this.loaded = false;
         this._loadPromise = null; // Clear cached promise
         return this.load();
@@ -52,7 +53,7 @@ class SessionStateManager {
         const startTime = performance.now();
         
         try {
-            console.log('🔄 Loading session state...');
+            if (this.debug) console.log('🔄 Loading session state...');
             const response = await fetch('/api/session/state');
             
             if (response.ok) {
@@ -61,7 +62,7 @@ class SessionStateManager {
                 this.loaded = true;
                 
                 const loadTime = (performance.now() - startTime).toFixed(2);
-                console.log(`✅ Session state loaded in ${loadTime}ms`);
+                if (this.debug) console.log(`✅ Session state loaded in ${loadTime}ms`);
                 
                 this.notifyListeners();
                 

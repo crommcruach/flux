@@ -436,8 +436,49 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
             # Remove from clip_registry (NEW ARCHITECTURE)
             if clip_id and effect_index is not None and param_name:
                 clip_registry = get_clip_registry()
+                
+                # Get the plugin's default parameter value to reset to
+                default_value = None
+                clip_data = clip_registry.get_clip(clip_id)
+                if clip_data:
+                    # Get the correct effects list (clip-level or layer-level)
+                    if layer_index is not None:
+                        effects_list = clip_data.get('layers', [])[layer_index].get('effects', []) if layer_index < len(clip_data.get('layers', [])) else []
+                    else:
+                        effects_list = clip_data.get('effects', [])
+                    
+                    # Get the plugin_id to look up default value
+                    if effect_index < len(effects_list):
+                        effect = effects_list[effect_index]
+                        plugin_id = effect.get('plugin_id')
+                        
+                        # Get plugin metadata from plugin manager to find default value
+                        if plugin_id and player_manager:
+                            try:
+                                # Get any player to access plugin_manager
+                                player = player_manager.get_player('video') or player_manager.get_player('artnet')
+                                if player and hasattr(player, 'plugin_manager'):
+                                    plugin_metadata = player.plugin_manager.get_plugin_metadata(plugin_id)
+                                    if plugin_metadata and 'parameters' in plugin_metadata:
+                                        for param in plugin_metadata['parameters']:
+                                            if param.get('name') == param_name:
+                                                default_value = param.get('default')
+                                                logger.debug(f"📦 Found default value for {param_name}: {default_value}")
+                                                break
+                            except Exception as e:
+                                logger.warning(f"Could not get default value for {param_name}: {e}")
+                
                 clip_registry.remove_sequence_from_effect(clip_id, effect_index, param_name, layer_index)
                 logger.debug(f"Removed sequence from clip_registry: clip {clip_id[:8]}..., effect {effect_index}, param {param_name}")
+                
+                # Reset the parameter to its default value (if found)
+                if default_value is not None:
+                    # Apply the default value to the live effect instance
+                    success = sequence_manager._apply_modulation(target_parameter, default_value, player_manager)
+                    if success:
+                        logger.info(f"🔄 Reset parameter {param_name} to default value: {default_value}")
+                    else:
+                        logger.warning(f"⚠️ Failed to reset parameter {param_name} to default value")
             
             # Delete the sequence from active pool
             success = sequence_manager.delete(sequence_id)

@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Performance Monitor - Flux</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        body {
+            background: #1a1a1a;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #333;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 32px;
+            color: #4285f4;
+        }
+        
+        .header-controls {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            background: #333;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        
+        .btn:hover {
+            background: #444;
+        }
+        
+        .btn-primary {
+            background: #4285f4;
+        }
+        
+        .btn-primary:hover {
+            background: #3367d6;
+        }
+        
+        .btn-danger {
+            background: #d32f2f;
+        }
+        
+        .btn-danger:hover {
+            background: #b71c1c;
+        }
+        
+        .players-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 20px;
+        }
+        
+        .player-card {
+            background: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .player-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #444;
+        }
+        
+        .player-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4285f4;
+        }
+        
+        .player-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+            color: #aaa;
+        }
+        
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .stat-label {
+            color: #888;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .frame-time-summary {
+            background: #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .frame-time-title {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .frame-time-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .frame-time-value.good {
+            color: #4CAF50;
+        }
+        
+        .frame-time-value.warning {
+            color: #ff9800;
+        }
+        
+        .frame-time-value.critical {
+            color: #f44336;
+        }
+        
+        .frame-time-details {
+            display: flex;
+            gap: 15px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        
+        .pipeline-stages {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .stage-row {
+            background: #333;
+            border-radius: 6px;
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transition: background 0.3s;
+        }
+        
+        .stage-row:hover {
+            background: #3a3a3a;
+        }
+        
+        .stage-name {
+            flex: 0 0 180px;
+            font-size: 14px;
+            color: #fff;
+            font-weight: 500;
+        }
+        
+        .stage-bar-container {
+            flex: 1;
+            height: 30px;
+            background: #222;
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .stage-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4285f4, #00bcd4);
+            transition: width 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .stage-metrics {
+            flex: 0 0 150px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            font-size: 12px;
+        }
+        
+        .stage-time {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .stage-percentage {
+            color: #888;
+            font-size: 11px;
+        }
+        
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 18px;
+        }
+        
+        .error-message {
+            background: #d32f2f;
+            color: #fff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-indicator.active {
+            background: #4CAF50;
+            box-shadow: 0 0 8px #4CAF50;
+        }
+        
+        .status-indicator.inactive {
+            background: #666;
+        }
+        
+        .pipeline-diagram {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 10px;
+        }
+        
+        .diagram-title {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #4285f4;
+            font-weight: bold;
+        }
+        
+        .diagram-flow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .diagram-stage {
+            background: #333;
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            text-align: center;
+            min-width: 140px;
+        }
+        
+        .diagram-arrow {
+            color: #666;
+            font-size: 24px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚡ Performance Monitor</h1>
+        <div class="header-controls">
+            <button class="btn" onclick="toggleAutoRefresh()">
+                <span id="autoRefreshBtn">⏸️ Pause</span>
+            </button>
+            <button class="btn btn-primary" onclick="refreshMetrics()">🔄 Refresh</button>
+            <button class="btn btn-danger" onclick="resetMetrics()">🔥 Reset</button>
+            <button class="btn" onclick="window.location.href='/'">🏠 Home</button>
+        </div>
+    </div>
+    
+    <div class="pipeline-diagram">
+        <div class="diagram-title">📊 Processing Pipeline</div>
+        <div class="diagram-flow">
+            <div class="diagram-stage">Source Decode<br><small>(FFmpeg/HAP)</small></div>
+            <div class="diagram-arrow">→</div>
+            <div class="diagram-stage">Clip Effects<br><small>(Per-layer)</small></div>
+            <div class="diagram-arrow">→</div>
+            <div class="diagram-stage">Layer Composition<br><small>(Blending)</small></div>
+            <div class="diagram-arrow">→</div>
+            <div class="diagram-stage">Player Effects<br><small>(Global)</small></div>
+            <div class="diagram-arrow">→</div>
+            <div class="diagram-stage">Audio Sequences<br><small>(Modulation)</small></div>
+            <div class="diagram-arrow">→</div>
+            <div class="diagram-stage">Transitions<br><small>(Crossfade)</small></div>
+            <div class="diagram-arrow">→</div>
+            <div class="diagram-stage">Background<br><small>(Composite)</small></div>
+            <div class="diagram-arrow">→</div>
+            <div class="diagram-stage">Output Routing<br><small>(ArtNet)</small></div>
+            <div class="diagram-arrow">→</div>
+            <div class="diagram-stage">Frame Delivery<br><small>(Display)</small></div>
+        </div>
+    </div>
+    
+    <div id="errorContainer"></div>
+    <div id="playersContainer" class="players-container"></div>
+    
+    <script>
+        let autoRefresh = true;
+        let refreshInterval = null;
+        
+        // Stage labels with emoji
+        const stageLabels = {
+            'source_decode': '🎬 Source Decode',
+            'clip_effects': '✨ Clip Effects',
+            'layer_composition': '🎨 Layer Composition',
+            'player_effects': '🎭 Player Effects',
+            'audio_sequences': '🎵 Audio Sequences',
+            'transitions': '🔀 Transitions',
+            'background_composite': '🖼️ Background Composite',
+            'output_routing': '📡 Output Routing',
+            'frame_delivery': '📤 Frame Delivery'
+        };
+        
+        async function fetchMetrics() {
+            try {
+                const response = await fetch('/api/performance/metrics');
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayMetrics(data.metrics);
+                    clearError();
+                } else {
+                    showError(data.error || 'Failed to fetch metrics');
+                }
+            } catch (error) {
+                showError('Connection error: ' + error.message);
+            }
+        }
+        
+        function displayMetrics(metrics) {
+            const container = document.getElementById('playersContainer');
+            
+            if (Object.keys(metrics).length === 0) {
+                container.innerHTML = '<div class="no-data">No performance data available. Start playback to collect metrics.</div>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            for (const [playerName, data] of Object.entries(metrics)) {
+                const playerCard = createPlayerCard(playerName, data);
+                container.appendChild(playerCard);
+            }
+        }
+        
+        function createPlayerCard(playerName, data) {
+            const card = document.createElement('div');
+            card.className = 'player-card';
+            
+            // Status indicator
+            const statusIndicator = data.enabled ? 
+                '<span class="status-indicator active"></span>Profiling Active' :
+                '<span class="status-indicator inactive"></span>Profiling Disabled';
+            
+            // Frame time classification
+            const avgTime = data.total_frame_time.avg_ms;
+            let timeClass = 'good';
+            if (avgTime > data.total_frame_time.target_frame_time_ms) {
+                timeClass = 'critical';
+            } else if (avgTime > data.total_frame_time.target_frame_time_ms * 0.8) {
+                timeClass = 'warning';
+            }
+            
+            card.innerHTML = `
+                <div class="player-header">
+                    <div class="player-title">${playerName}</div>
+                    <div class="player-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">FPS</span>
+                            <span class="stat-value">${data.fps}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Frames</span>
+                            <span class="stat-value">${data.total_frames.toLocaleString()}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Uptime</span>
+                            <span class="stat-value">${formatUptime(data.uptime_seconds)}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="frame-time-summary">
+                    <div class="frame-time-title">${statusIndicator}</div>
+                    <div class="frame-time-value ${timeClass}">${avgTime.toFixed(2)} ms/frame</div>
+                    <div class="frame-time-details">
+                        <span>Target: ${data.total_frame_time.target_frame_time_ms.toFixed(2)} ms</span>
+                        <span>Min: ${data.total_frame_time.min_ms.toFixed(2)} ms</span>
+                        <span>Max: ${data.total_frame_time.max_ms.toFixed(2)} ms</span>
+                        <span>Performance: ${(data.total_frame_time.performance_ratio * 100).toFixed(1)}%</span>
+                    </div>
+                </div>
+                
+                <div class="pipeline-stages">
+                    ${data.stages.map(stage => createStageRow(stage, avgTime)).join('')}
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        function createStageRow(stage, totalTime) {
+            const label = stageLabels[stage.name] || stage.name;
+            const percentage = stage.percentage;
+            const barWidth = Math.min(percentage, 100);
+            
+            // Color gradient based on percentage
+            let barColor = '#4285f4';
+            if (percentage > 40) {
+                barColor = '#ff9800';
+            }
+            if (percentage > 60) {
+                barColor = '#f44336';
+            }
+            
+            return `
+                <div class="stage-row">
+                    <div class="stage-name">${label}</div>
+                    <div class="stage-bar-container">
+                        <div class="stage-bar" style="width: ${barWidth}%; background: ${barColor};">
+                            ${percentage > 10 ? percentage.toFixed(1) + '%' : ''}
+                        </div>
+                    </div>
+                    <div class="stage-metrics">
+                        <div class="stage-time">${stage.avg_ms.toFixed(2)} ms</div>
+                        <div class="stage-percentage">min: ${stage.min_ms.toFixed(2)} ms | max: ${stage.max_ms.toFixed(2)} ms</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function formatUptime(seconds) {
+            if (seconds < 60) return `${seconds.toFixed(0)}s`;
+            if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`;
+            return `${(seconds / 3600).toFixed(1)}h`;
+        }
+        
+        function showError(message) {
+            const container = document.getElementById('errorContainer');
+            container.innerHTML = `<div class="error-message">⚠️ ${message}</div>`;
+        }
+        
+        function clearError() {
+            const container = document.getElementById('errorContainer');
+            container.innerHTML = '';
+        }
+        
+        async function resetMetrics() {
+            if (!confirm('Reset all performance metrics?')) return;
+            
+            try {
+                const response = await fetch('/api/performance/reset', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    await fetchMetrics();
+                } else {
+                    showError(data.error || 'Failed to reset metrics');
+                }
+            } catch (error) {
+                showError('Connection error: ' + error.message);
+            }
+        }
+        
+        function toggleAutoRefresh() {
+            autoRefresh = !autoRefresh;
+            const btn = document.getElementById('autoRefreshBtn');
+            
+            if (autoRefresh) {
+                btn.textContent = '⏸️ Pause';
+                startAutoRefresh();
+            } else {
+                btn.textContent = '▶️ Resume';
+                stopAutoRefresh();
+            }
+        }
+        
+        function startAutoRefresh() {
+            if (refreshInterval) return;
+            refreshInterval = setInterval(fetchMetrics, 1000); // 1 second refresh
+        }
+        
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+        
+        function refreshMetrics() {
+            fetchMetrics();
+        }
+        
+        // Initialize
+        fetchMetrics();
+        startAutoRefresh();
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            stopAutoRefresh();
+        });
+    </script>
+</body>
+</html>

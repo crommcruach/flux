@@ -102,9 +102,11 @@ class OutputBase(ABC):
             logger.warning(f"[{self.output_id}] Already enabled")
             return True
         
+        logger.info(f"⚡ [{self.output_id}] Enabling output...")
+        
         # Initialize plugin
         if not self.initialize():
-            logger.error(f"[{self.output_id}] Initialization failed")
+            logger.error(f"❌ [{self.output_id}] Initialization failed - output NOT enabled")
             return False
         
         # Start output thread
@@ -113,7 +115,7 @@ class OutputBase(ABC):
         self.output_thread.start()
         
         self.enabled = True
-        logger.debug(f"✅ [{self.output_id}] Output enabled")
+        logger.info(f"✅ [{self.output_id}] Output enabled successfully")
         return True
     
     def disable(self):
@@ -147,8 +149,14 @@ class OutputBase(ABC):
             return
         
         try:
+            # OPTIMIZATION: Only copy if output requires it (e.g., multiprocessing)
+            # VirtualOutput overrides this to use direct reference
+            # Default to True for safety (backwards compatibility)
+            if getattr(self, 'needs_frame_copy', True):
+                frame = frame.copy()
+            
             # Non-blocking put (drop frame if queue full)
-            self.frame_queue.put_nowait(frame.copy())
+            self.frame_queue.put_nowait(frame)
         except Full:
             with self.stats_lock:
                 self.frames_dropped += 1

@@ -67,6 +67,16 @@ class RoutingBridge:
         if not self.enabled or not self.initialized:
             return
         
+        # FAST PATH: Skip if no outputs configured (saves CPU on pixel sampling)
+        outputs = self.routing_manager.get_all_outputs()
+        if not outputs:
+            return
+        
+        # FAST PATH: Check if any outputs are actually active
+        active_outputs = [o for o in outputs.values() if o.active]
+        if not active_outputs:
+            return
+        
         # Debug logging (throttled)
         if not hasattr(self, '_frame_counter'):
             self._frame_counter = 0
@@ -75,9 +85,8 @@ class RoutingBridge:
             logger.debug(f"🎬 [RoutingBridge] Received frame: shape={frame.shape}, mean={frame.mean():.1f}")
         
         try:
-            # Get current objects and outputs from routing manager
+            # Get current objects from routing manager
             objects = self.routing_manager.get_all_objects()
-            outputs = self.routing_manager.get_all_outputs()
             
             # Render frame to DMX data per output
             rendered_outputs = self.output_manager.render_frame(

@@ -371,6 +371,12 @@ def main():
     if debug_modules:
         flux_logger.apply_debug_modules(debug_modules)
     
+    # Configure performance profiling (before players are created)
+    from modules.performance import set_profiling_enabled
+    profiling_enabled = config.get('performance', {}).get('profiling_enabled', True)
+    set_profiling_enabled(profiling_enabled)
+    logger.debug(f"Performance profiling: {'enabled' if profiling_enabled else 'disabled (zero overhead)'}")
+    
     logger.debug("Flux startet...")
     logger.debug("Konfiguration geladen")
     

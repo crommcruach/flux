@@ -98,10 +98,11 @@
     "_comment": "WebSocket command channels for low-latency control. Video preview uses MJPEG."
   },
   "performance": {
+    "profiling_enabled": false,
     "enable_loop_cache": false,
     "enable_rgb_cache": false,
     "loop_cache_max_duration": 10.0,
-    "_comment": "Frame caching optimization. enable_loop_cache: cache decoded frames for short loops. enable_rgb_cache: cache pre-computed RGB frames. Disable for debugging."
+    "_comment": "Performance monitoring and optimization. profiling_enabled: enable performance profiler (set to false in production for zero overhead). enable_loop_cache: cache decoded frames for short loops. enable_rgb_cache: cache pre-computed RGB frames."
   },
   "outputs": {
     "_comment": "Output definitions - hardware/infrastructure configuration",

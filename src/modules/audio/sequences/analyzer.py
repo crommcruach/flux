@@ -60,10 +60,14 @@ class AudioAnalyzer:
         self._bpm_enabled = True
         self._current_bpm = 0.0
         self._bpm_confidence = 0.0
-        self._bpm_history = deque(maxlen=10)
+        self._bpm_history = deque(maxlen=30)  # Increased from 10 for more stability
         self._beat_times = deque(maxlen=100)
         self._last_beat_time = 0.0
         self._beat_count = 0
+        
+        # BPM stability check (prevents jumps from bass level changes)
+        self._bpm_candidate = None  # Candidate new BPM for big changes
+        self._bpm_candidate_count = 0  # How many consecutive times we've seen similar candidate
         
         # Tap tempo
         self._tap_times = deque(maxlen=8)
@@ -358,7 +362,7 @@ class AudioAnalyzer:
             self._bass_history.append(bass_norm)
             
             # Get beat sensitivity from config (0.1 = very sensitive, 3.0 = very insensitive)
-            beat_sensitivity = max(0.1, self.config.get('beat_sensitivity', 1.0))  # Ensure minimum 0.1 to avoid division by zero
+            beat_sensitivity = max(0.1, self.config.get('beat_sensitivity', 1.0))  # Ensure minimum 0.1
             
             # Calculate averages
             avg_peak = np.mean(self._peak_history) if len(self._peak_history) > 5 else 0.0
@@ -372,7 +376,7 @@ class AudioAnalyzer:
                 peak_condition = peak > avg_peak * threshold_multiplier
             else:
                 # Quiet signal: use absolute threshold
-                abs_threshold = 0.15 / beat_sensitivity  # 0.05 to 0.45 depending on sensitivity
+                abs_threshold = 0.15 * beat_sensitivity  # 0.015 to 0.45 depending on sensitivity
                 peak_condition = peak > abs_threshold
             
             # Bass energy spike detection (beats usually have strong bass)
@@ -668,7 +672,10 @@ class AudioAnalyzer:
             logger.error(f"BPM detection error: {e}", exc_info=True)
     
     def _update_bpm(self, bpm: float, confidence: float):
-        """Update BPM with smoothing
+        """Update BPM with smoothing and stability check
+        
+        Implements a stability check to prevent BPM jumps from bass level changes.
+        New BPM must be within ±5% of current BPM, or seen 3+ times consecutively.
         
         Args:
             bpm: Detected BPM value
@@ -677,18 +684,65 @@ class AudioAnalyzer:
         if self._bpm_mode != 'auto':
             return  # Don't update if manual or tap mode
         
-        # Add to history
-        self._bpm_history.append(bpm)
+        # If we have no current BPM, accept immediately
+        if self._current_bpm == 0:
+            self._bpm_history.append(bpm)
+            self._current_bpm = float(bpm)
+            self._bpm_confidence = confidence
+            self._bpm_candidate = None
+            self._bpm_candidate_count = 0
+            return
         
-        # Smooth BPM (weighted average)
-        if len(self._bpm_history) >= 3:
-            weights = np.linspace(0.5, 1.0, len(self._bpm_history))
-            smoothed_bpm = np.average(list(self._bpm_history), weights=weights)
+        # Stability check: new BPM must be within ±5% of current BPM
+        tolerance = 0.05  # 5%
+        bpm_diff_ratio = abs(bpm - self._current_bpm) / self._current_bpm
+        
+        if bpm_diff_ratio <= tolerance:
+            # Stable: within acceptable range, add to history
+            self._bpm_history.append(bpm)
+            self._bpm_candidate = None
+            self._bpm_candidate_count = 0
+            
+            # Smooth BPM (weighted average favoring recent values)
+            if len(self._bpm_history) >= 3:
+                weights = np.linspace(0.5, 1.0, len(self._bpm_history))
+                smoothed_bpm = np.average(list(self._bpm_history), weights=weights)
+            else:
+                smoothed_bpm = bpm
+            
+            self._current_bpm = float(smoothed_bpm)
+            self._bpm_confidence = confidence
         else:
-            smoothed_bpm = bpm
-        
-        self._current_bpm = float(smoothed_bpm)
-        self._bpm_confidence = confidence
+            # Unstable: BPM changed significantly (>5%)
+            # Require 3 consecutive similar detections before accepting change
+            if self._bpm_candidate is None:
+                # First time seeing a different BPM
+                self._bpm_candidate = bpm
+                self._bpm_candidate_count = 1
+                logger.debug(f"BPM candidate: {bpm:.1f} (current: {self._current_bpm:.1f}, diff: {bpm_diff_ratio*100:.1f}%)")
+            else:
+                # Check if new BPM is similar to candidate (within ±5%)
+                candidate_diff = abs(bpm - self._bpm_candidate) / self._bpm_candidate
+                if candidate_diff <= tolerance:
+                    # Similar to candidate - increment counter
+                    self._bpm_candidate_count += 1
+                    logger.debug(f"BPM candidate confirmed {self._bpm_candidate_count}/3: {bpm:.1f}")
+                    
+                    # If we've seen this 3+ times consecutively, accept the change
+                    if self._bpm_candidate_count >= 3:
+                        logger.info(f"🎵 BPM changed: {self._current_bpm:.1f} → {bpm:.1f} BPM")
+                        # Reset history and start fresh with new BPM
+                        self._bpm_history.clear()
+                        self._bpm_history.append(bpm)
+                        self._current_bpm = float(bpm)
+                        self._bpm_confidence = confidence
+                        self._bpm_candidate = None
+                        self._bpm_candidate_count = 0
+                else:
+                    # Different from candidate - reset and start over
+                    self._bpm_candidate = bpm
+                    self._bpm_candidate_count = 1
+                    logger.debug(f"BPM candidate reset: {bpm:.1f} (was tracking {self._bpm_candidate:.1f})")
     
     def _get_beat_phase(self) -> float:
         """Get current beat phase (0.0 to 1.0)

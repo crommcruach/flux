@@ -84,6 +84,11 @@ def register_web_routes(app, config=None, player_manager=None):
         """Serve the output settings page."""
         return send_from_directory(app.static_folder, 'output-settings.html')
     
+    @app.route('/performance')
+    def performance():
+        """Serve the performance monitoring page."""
+        return send_from_directory(app.static_folder, 'performance.html')
+    
     # ========================================
     # STATISCHE DATEIEN
     # ========================================

@@ -55,6 +55,7 @@ const app = {
     // Slices & Selection
     slices: [],
     selectedSlice: null,
+    selectedMask: null,
     
     // ArtNet State
     artnetObjects: [],
@@ -99,6 +100,9 @@ const app = {
     snapToGrid: false,
     gridSize: 10,
     
+    // Debug Mode
+    debug: false,  // Set to true to enable debug console logs
+    
     // Outputs (dynamically loaded from backend)
     screens: [],
     customScreens: [],
@@ -117,9 +121,52 @@ const app = {
     outputContextMenuTarget: null,
 
     // ========================================
+    // DEBOUNCE UTILITY
+    // ========================================
+    // Debouncing prevents HTML regeneration during user interactions (clicks, etc.)
+    // Without debouncing, innerHTML updates destroy DOM elements before click events can fire
+    // With 50ms debounce delay, click events complete before HTML is regenerated
+    // This allows standard onclick handlers to work reliably instead of complex event delegation
+    
+    _debounceTimers: {},
+    
+    debounce(func, key, delay = 200) {
+        // Clear existing timer for this key
+        if (this._debounceTimers[key]) {
+            clearTimeout(this._debounceTimers[key]);
+        }
+        
+        // Set new timer
+        this._debounceTimers[key] = setTimeout(() => {
+            func.call(this);
+            delete this._debounceTimers[key];
+        }, delay);
+    },
+    
+    // ========================================
     // INITIALIZATION
     // ========================================
     async init() {
+        // Clean up any lingering modal backdrops from previous sessions
+        document.querySelectorAll('.modal-backdrop').forEach(el => {
+            console.warn('🧹 Removing lingering modal backdrop on init');
+            el.remove();
+        });
+        document.body.classList.remove('modal-open');
+        document.body.style.overflow = '';
+        document.body.style.paddingRight = '';
+        
+        // Aggressive backdrop cleanup - check every 2 seconds
+        setInterval(() => {
+            const backdrops = document.querySelectorAll('.modal-backdrop');
+            if (backdrops.length > 0) {
+                console.warn(`🧹 Removing ${backdrops.length} lingering modal backdrop(s) during periodic cleanup`);
+                backdrops.forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = '';
+            }
+        }, 2000);
+        
         this.canvas = document.getElementById('sliceCanvas');
         this.ctx = this.canvas.getContext('2d');
         this.videoCanvas = document.getElementById('videoCanvas');
@@ -132,9 +179,11 @@ const app = {
         // Mode will be restored from session state in loadFromBackend()
         // Don't use localStorage - it breaks session snapshots!
 
+        // Mouse events: mousedown on canvas, but move/up on document
+        // This prevents "stuck" resize when releasing mouse outside canvas
         this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
-        this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
-        this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
+        document.addEventListener('mousemove', (e) => this.onMouseMove(e));
+        document.addEventListener('mouseup', (e) => this.onMouseUp(e));
         this.canvas.addEventListener('contextmenu', (e) => this.onContextMenu(e));
 
         // Close output context menu on outside click
@@ -185,11 +234,24 @@ const app = {
         // Apply the restored mode (this will set up UI visibility), silent = true to avoid toast on init
         this.setMode(this.currentMode, true);
         
-        this.updateScreenButtons();
-        this.updateUI();
+        // Initial UI update (immediate, not debounced)
+        this.updateScreenButtonsImmediate();
+        this.updateUIImmediate();
         this.updateToggleButtonStates();
         this.updateZoomControlsPosition(); // Set initial zoom controls position
         this.render();
+        
+        // Periodic check for lingering modal backdrops (every 2 seconds)
+        setInterval(() => {
+            const backdrops = document.querySelectorAll('.modal-backdrop');
+            if (backdrops.length > 0) {
+                console.warn(`🧹 Found ${backdrops.length} lingering modal backdrop(s), removing...`);
+                backdrops.forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = '';
+                document.body.style.paddingRight = '';
+            }
+        }, 2000);
     },
 
     async loadVideoPlayerSettings() {
@@ -221,7 +283,7 @@ const app = {
                 document.getElementById('canvasWidth').value = width;
                 document.getElementById('canvasHeight').value = height;
                 
-                console.log('✅ Canvas resolution loaded from player settings:', width, 'x', height);
+                if (this.debug) console.log('✅ Canvas resolution loaded from player settings:', width, 'x', height);
                 
                 // Update canvas after loading settings
                 this.updateCanvasSize();
@@ -250,10 +312,10 @@ const app = {
         
         // Show warning if trying to add mask without selected slice
         const warning = document.getElementById('maskWarning');
-        if (type === 'mask' && (!this.selectedSlice || this.selectedSlice.type === 'mask')) {
-    warning.style.display = 'block';
+        if (type === 'mask' && (!this.selectedSlice || this.selectedSlice.type !== 'slice')) {
+            warning.style.display = 'block';
         } else {
-    warning.style.display = 'none';
+            warning.style.display = 'none';
         }
         
         this.updateAddButton();
@@ -286,9 +348,9 @@ const app = {
     // ========================================
     startDrawing() {
         // Don't allow adding mask without a selected slice
-        if (this.currentType === 'mask' && (!this.selectedSlice || this.selectedSlice.type === 'mask')) {
-    this.showToast('Select a slice first to add masks', 'error');
-    return;
+        if (this.currentType === 'mask' && (!this.selectedSlice || this.selectedSlice.type !== 'slice')) {
+            this.showToast('Select a slice first to add masks', 'error');
+            return;
         }
         
         this.drawingMode = true;
@@ -297,7 +359,14 @@ const app = {
         const needsFinish = ['polygon', 'freehand'].includes(this.currentShape);
         document.getElementById('finishDrawBtn').style.display = needsFinish ? 'block' : 'none';
         document.getElementById('cancelDrawBtn').style.display = 'block';
+        
+        // Set crosshair cursor on both canvas and wrapper
         this.canvas.style.cursor = 'crosshair';
+        const wrapper = document.getElementById('canvasWrapper');
+        if (wrapper) {
+            wrapper.style.cursor = 'crosshair';
+        }
+        
         this.showToast(`Draw ${this.currentShape}`);
     },
 
@@ -316,7 +385,14 @@ const app = {
         this.tempShape = null;
         document.getElementById('finishDrawBtn').style.display = 'none';
         document.getElementById('cancelDrawBtn').style.display = 'none';
+        
+        // Restore default cursor
         this.canvas.style.cursor = 'default';
+        const wrapper = document.getElementById('canvasWrapper');
+        if (wrapper) {
+            wrapper.style.cursor = 'grab';
+        }
+        
         this.render();
     },
 
@@ -386,13 +462,22 @@ const app = {
     // Add as new slice
     this.slices.push(shape);
     this.selectedSlice = shape;
+    this.selectedMask = null;
         } else {
     // Add as mask to selected slice
     if (this.selectedSlice && this.selectedSlice.type === 'slice') {
         if (!this.selectedSlice.masks) this.selectedSlice.masks = [];
-        console.log('Adding mask to slice:', shape);
+        if (this.debug) console.log('✅ Adding mask to slice:', shape);
+        console.log('   Mask properties:', {
+            type: shape.type,
+            shape: shape.shape,
+            visible: shape.visible,
+            label: shape.label
+        });
         this.selectedSlice.masks.push(shape);
-        // Keep the parent slice selected
+        // Select the newly created mask
+        this.selectedMask = shape;
+        console.log('   Selected mask set:', this.selectedMask);
     }
         }
 
@@ -528,31 +613,60 @@ const app = {
         }
 
         // Check rotation handle (rectangles only) - but not if transformed
-        if (this.selectedSlice && this.selectedSlice.shape === 'rectangle' && !this.isTransformed(this.selectedSlice) && this.isOnRotationHandle(pos, this.selectedSlice)) {
-    this.isRotating = true;
-    this.dragStart = pos;
-    return;
+        const shapeToCheck = this.selectedMask || this.selectedSlice;
+        if (shapeToCheck && shapeToCheck.shape === 'rectangle' && !this.isTransformed(shapeToCheck) && this.isOnRotationHandle(pos, shapeToCheck)) {
+            this.isRotating = true;
+            this.dragStart = pos;
+            return;
         }
 
-        // Check resize handle (rectangles only) - but not if transformed
-        if (this.selectedSlice && this.selectedSlice.shape === 'rectangle' && !this.isTransformed(this.selectedSlice)) {
-    const handle = this.getResizeHandle(pos, this.selectedSlice);
-    if (handle) {
-        this.isResizing = true;
-        this.resizeHandle = handle;
-        this.dragStart = pos;
-        return;
-    }
+        // Check resize handle (all shapes) - but not if transformed
+        if (shapeToCheck && !this.isTransformed(shapeToCheck)) {
+            if (this.debug) console.log('🔍 Checking handles for selected shape:', shapeToCheck.shape, shapeToCheck.label || shapeToCheck.id);
+            const handle = this.getResizeHandle(pos, shapeToCheck);
+            if (handle) {
+                if (this.debug) console.log('🎯 Clicked resize handle:', handle, 'for shape:', shapeToCheck.shape);
+                this.isResizing = true;
+                this.resizeHandle = handle;
+                this.dragStart = pos;
+                return;
+            } else {
+                if (this.debug) console.log('❌ No handle detected at:', Math.round(pos.x), Math.round(pos.y));
+            }
         }
 
         // Check click on shape
-        const clickedSlice = this.getSliceAt(pos);
-        if (clickedSlice) {
-    this.selectedSlice = clickedSlice;
-    this.isDragging = true;
-    this.dragStart = pos;
+        const clickedItem = this.getSliceAt(pos);
+        if (clickedItem) {
+            console.log('🖱️ Clicked on shape:', clickedItem.shape, clickedItem.type || 'slice');
+            
+            // Check if clicked item is a mask
+            let isMask = false;
+            let parentSlice = null;
+            for (let slice of this.slices) {
+                if (slice.masks && slice.masks.includes(clickedItem)) {
+                    isMask = true;
+                    parentSlice = slice;
+                    break;
+                }
+            }
+            
+            if (isMask && parentSlice) {
+                // Clicked on a mask - select parent slice and track the mask
+                this.selectedSlice = parentSlice;
+                this.selectedMask = clickedItem;
+                console.log('👆 Clicked on mask:', clickedItem.shape, clickedItem.label, 'in slice:', parentSlice.id);
+            } else {
+                // Clicked on a slice
+                this.selectedSlice = clickedItem;
+                this.selectedMask = null;
+            }
+            
+            this.isDragging = true;
+            this.dragStart = pos;
         } else {
-    this.selectedSlice = null;
+            this.selectedSlice = null;
+            this.selectedMask = null;
         }
 
         this.updateUI();
@@ -632,17 +746,19 @@ const app = {
         }
 
         if (this.isRotating && this.selectedSlice) {
-    this.rotateSlice(pos);
-    this.render();
-        } else if (this.isDragging && this.selectedSlice) {
-    const dx = pos.x - this.dragStart.x;
-    const dy = pos.y - this.dragStart.y;
-    this.moveShape(this.selectedSlice, dx, dy);
-    this.dragStart = pos;
-    this.render();
-        } else if (this.isResizing && this.selectedSlice) {
-    this.resizeSlice(pos);
-    this.render();
+            this.rotateSlice(pos);
+            this.render();
+        } else if (this.isDragging && (this.selectedMask || this.selectedSlice)) {
+            const dx = pos.x - this.dragStart.x;
+            const dy = pos.y - this.dragStart.y;
+            // Move the mask if one is selected, otherwise move the slice
+            const shapeToMove = this.selectedMask || this.selectedSlice;
+            this.moveShape(shapeToMove, dx, dy);
+            this.dragStart = pos;
+            this.render();
+        } else if (this.isResizing && (this.selectedMask || this.selectedSlice)) {
+            this.resizeSlice(pos);
+            this.render();
         }
     },
 
@@ -693,6 +809,12 @@ const app = {
         this.isTransforming = false;
         this.draggingCorner = null;
         this.resizeHandle = null;
+        
+        // Clean up bounding box cache from resize operation
+        const shape = this.selectedMask || this.selectedSlice;
+        if (shape && shape._boundingBox) {
+            delete shape._boundingBox;
+        }
 
         if (!this.drawingMode) {
             this.saveToBackend(); // Auto-save to backend
@@ -797,9 +919,27 @@ const app = {
     shape.centerX = Math.round(newCenterX);
     shape.centerY = Math.round(newCenterY);
         } else if (shape.points) {
+    // Point-based shapes (triangle, polygon, freehand) - constrain to canvas bounds
+    // Calculate current bounding box
+    const minX = Math.min(...shape.points.map(p => p.x));
+    const maxX = Math.max(...shape.points.map(p => p.x));
+    const minY = Math.min(...shape.points.map(p => p.y));
+    const maxY = Math.max(...shape.points.map(p => p.y));
+    
+    // Calculate proposed movement
+    let actualDx = dx;
+    let actualDy = dy;
+    
+    // Constrain movement to keep shape within canvas
+    if (minX + actualDx < 0) actualDx = -minX;
+    if (maxX + actualDx > this.canvasWidth) actualDx = this.canvasWidth - maxX;
+    if (minY + actualDy < 0) actualDy = -minY;
+    if (maxY + actualDy > this.canvasHeight) actualDy = this.canvasHeight - maxY;
+    
+    // Apply constrained movement
     shape.points.forEach(p => {
-        p.x = Math.round(p.x + dx);
-        p.y = Math.round(p.y + dy);
+        p.x = Math.round(p.x + actualDx);
+        p.y = Math.round(p.y + actualDy);
     });
         }
     },
@@ -961,161 +1101,423 @@ const app = {
     },
 
     rotateSlice(pos) {
-        const slice = this.selectedSlice;
-        if (slice.shape !== 'rectangle') return;
+        // Work with either mask or slice
+        const shape = this.selectedMask || this.selectedSlice;
+        if (!shape || shape.shape !== 'rectangle') return;
         
-        const centerX = slice.x + slice.width / 2;
-        const centerY = slice.y + slice.height / 2;
+        const centerX = shape.x + shape.width / 2;
+        const centerY = shape.y + shape.height / 2;
         let angle = Math.atan2(pos.y - centerY, pos.x - centerX) * 180 / Math.PI + 90;
         angle = angle % 360;
         
         // Snap to 0, 90, 180, 270 degrees if within 3 degrees
         const snapAngles = [0, 90, 180, 270, 360];
         for (let snapAngle of snapAngles) {
-    if (Math.abs(angle - snapAngle) < 3) {
+            if (Math.abs(angle - snapAngle) < 3) {
         angle = snapAngle % 360;
         break;
     }
         }
         
         // Calculate rotation delta
-        const oldRotation = slice.rotation || 0;
+        const oldRotation = shape.rotation || 0;
         const newRotation = Math.round(angle * 10) / 10;
         const deltaRotation = (newRotation - oldRotation) * Math.PI / 180;
         
-        slice.rotation = newRotation;
+        shape.rotation = newRotation;
         
         // Rotate transform corners if they exist
-        if (slice.transformCorners && Math.abs(deltaRotation) > 0.001) {
-    const cx = slice.width / 2;
-    const cy = slice.height / 2;
-    
-    slice.transformCorners = slice.transformCorners.map(corner => {
-        // Translate to center
-        const x = corner.x - cx;
-        const y = corner.y - cy;
-        
-        // Rotate
-        const cos = Math.cos(deltaRotation);
-        const sin = Math.sin(deltaRotation);
-        const newX = x * cos - y * sin;
-        const newY = x * sin + y * cos;
-        
-        // Translate back
-        return {
-    x: newX + cx,
-    y: newY + cy
-        };
-    });
+        if (shape.transformCorners && Math.abs(deltaRotation) > 0.001) {
+            const cx = shape.width / 2;
+            const cy = shape.height / 2;
+            
+            shape.transformCorners = shape.transformCorners.map(corner => {
+                // Translate to center
+                const x = corner.x - cx;
+                const y = corner.y - cy;
+                
+                // Rotate
+                const cos = Math.cos(deltaRotation);
+                const sin = Math.sin(deltaRotation);
+                const newX = x * cos - y * sin;
+                const newY = x * sin + y * cos;
+                
+                // Translate back
+                return {
+                    x: newX + cx,
+                    y: newY + cy
+                };
+            });
         }
     },
 
     resizeSlice(pos) {
-        const slice = this.selectedSlice;
+        // Work with either mask or slice
+        const shape = this.selectedMask || this.selectedSlice;
+        if (!shape) return;
         const h = this.resizeHandle;
 
-        switch (h) {
-    case 'se':
-        slice.width = Math.round(Math.max(10, pos.x - slice.x));
-        slice.height = Math.round(Math.max(10, pos.y - slice.y));
-        break;
-    case 'sw':
-        const newW = slice.width + (slice.x - pos.x);
-        if (newW >= 10) {
-    slice.x = Math.round(pos.x);
-    slice.width = Math.round(newW);
-        }
-        slice.height = Math.round(Math.max(10, pos.y - slice.y));
-        break;
-    case 'ne':
-        slice.width = Math.round(Math.max(10, pos.x - slice.x));
-        const newH = slice.height + (slice.y - pos.y);
-        if (newH >= 10) {
-    slice.y = Math.round(pos.y);
-    slice.height = Math.round(newH);
-        }
-        break;
-    case 'nw':
-        const nw = slice.width + (slice.x - pos.x);
-        const nh = slice.height + (slice.y - pos.y);
-        if (nw >= 10 && nh >= 10) {
-    slice.x = Math.round(pos.x);
-    slice.y = Math.round(pos.y);
-    slice.width = Math.round(nw);
-    slice.height = Math.round(nh);
-        }
-        break;
-    case 'e': // East - change width only
-        slice.width = Math.round(Math.max(10, pos.x - slice.x));
-        break;
-    case 'w': // West - change width only
-        const newWest = slice.width + (slice.x - pos.x);
-        if (newWest >= 10) {
-    slice.x = Math.round(pos.x);
-    slice.width = Math.round(newWest);
-        }
-        break;
-    case 's': // South - change height only
-        slice.height = Math.round(Math.max(10, pos.y - slice.y));
-        break;
-    case 'n': // North - change height only
-        const newNorth = slice.height + (slice.y - pos.y);
-        if (newNorth >= 10) {
-    slice.y = Math.round(pos.y);
-    slice.height = Math.round(newNorth);
-        }
-        break;
+        if (shape.shape === 'rectangle') {
+            // Rectangle resize logic
+            switch (h) {
+                case 'se':
+                    shape.width = Math.round(Math.max(10, pos.x - shape.x));
+                    shape.height = Math.round(Math.max(10, pos.y - shape.y));
+                    break;
+                case 'sw':
+                    const newW = shape.width + (shape.x - pos.x);
+                    if (newW >= 10) {
+                        shape.x = Math.round(pos.x);
+                        shape.width = Math.round(newW);
+                    }
+                    shape.height = Math.round(Math.max(10, pos.y - shape.y));
+                    break;
+                case 'ne':
+                    shape.width = Math.round(Math.max(10, pos.x - shape.x));
+                    const newH = shape.height + (shape.y - pos.y);
+                    if (newH >= 10) {
+                        shape.y = Math.round(pos.y);
+                        shape.height = Math.round(newH);
+                    }
+                    break;
+                case 'nw':
+                    const nw = shape.width + (shape.x - pos.x);
+                    const nh = shape.height + (shape.y - pos.y);
+                    if (nw >= 10 && nh >= 10) {
+                        shape.x = Math.round(pos.x);
+                        shape.y = Math.round(pos.y);
+                        shape.width = Math.round(nw);
+                        shape.height = Math.round(nh);
+                    }
+                    break;
+                case 'e':
+                    shape.width = Math.round(Math.max(10, pos.x - shape.x));
+                    break;
+                case 'w':
+                    const newWest = shape.width + (shape.x - pos.x);
+                    if (newWest >= 10) {
+                        shape.x = Math.round(pos.x);
+                        shape.width = Math.round(newWest);
+                    }
+                    break;
+                case 's':
+                    shape.height = Math.round(Math.max(10, pos.y - shape.y));
+                    break;
+                case 'n':
+                    const newNorth = shape.height + (shape.y - pos.y);
+                    if (newNorth >= 10) {
+                        shape.y = Math.round(pos.y);
+                        shape.height = Math.round(newNorth);
+                    }
+                    break;
+            }
+            
+            // Constrain rectangle to canvas bounds after resize
+            if (shape.x < 0) {
+                shape.width += shape.x;
+                shape.x = 0;
+            }
+            if (shape.y < 0) {
+                shape.height += shape.y;
+                shape.y = 0;
+            }
+            if (shape.x + shape.width > this.canvasWidth) {
+                shape.width = this.canvasWidth - shape.x;
+            }
+            if (shape.y + shape.height > this.canvasHeight) {
+                shape.height = this.canvasHeight - shape.y;
+            }
+        } else if (shape.shape === 'circle') {
+            // Circle resize: adjust radius based on bounding box handle dragging
+            const cx = shape.centerX;
+            const cy = shape.centerY;
+            const r = shape.radius;
+            
+            // Current bounding box
+            const oldMinX = cx - r;
+            const oldMinY = cy - r;
+            const oldMaxX = cx + r;
+            const oldMaxY = cy + r;
+            
+            // Calculate new bounding box based on handle
+            let newMinX = oldMinX, newMinY = oldMinY;
+            let newMaxX = oldMaxX, newMaxY = oldMaxY;
+            
+            switch (h) {
+                case 'se':
+                    newMaxX = pos.x;
+                    newMaxY = pos.y;
+                    break;
+                case 'sw':
+                    newMinX = pos.x;
+                    newMaxY = pos.y;
+                    break;
+                case 'ne':
+                    newMaxX = pos.x;
+                    newMinY = pos.y;
+                    break;
+                case 'nw':
+                    newMinX = pos.x;
+                    newMinY = pos.y;
+                    break;
+                case 'e':
+                    newMaxX = pos.x;
+                    break;
+                case 'w':
+                    newMinX = pos.x;
+                    break;
+                case 's':
+                    newMaxY = pos.y;
+                    break;
+                case 'n':
+                    newMinY = pos.y;
+                    break;
+            }
+            
+            // Calculate new radius and center from bounding box
+            const newWidth = newMaxX - newMinX;
+            const newHeight = newMaxY - newMinY;
+            const newRadius = Math.max(newWidth, newHeight) / 2;
+            
+            if (newRadius >= 5) {
+                shape.radius = Math.round(newRadius);
+                shape.centerX = Math.round(newMinX + newWidth / 2);
+                shape.centerY = Math.round(newMinY + newHeight / 2);
+                
+                // Constrain circle to canvas bounds after resize
+                if (shape.centerX - shape.radius < 0) {
+                    shape.centerX = shape.radius;
+                }
+                if (shape.centerY - shape.radius < 0) {
+                    shape.centerY = shape.radius;
+                }
+                if (shape.centerX + shape.radius > this.canvasWidth) {
+                    shape.centerX = this.canvasWidth - shape.radius;
+                }
+                if (shape.centerY + shape.radius > this.canvasHeight) {
+                    shape.centerY = this.canvasHeight - shape.radius;
+                }
+            }
+        } else if (shape.points && shape.points.length > 0) {
+            // Point-based shapes: scale all points relative to bounding box
+            if (!shape._boundingBox) {
+                // Calculate bounding box if not already done
+                let minX = Infinity, minY = Infinity;
+                let maxX = -Infinity, maxY = -Infinity;
+                shape.points.forEach(p => {
+                    minX = Math.min(minX, p.x);
+                    minY = Math.min(minY, p.y);
+                    maxX = Math.max(maxX, p.x);
+                    maxY = Math.max(maxY, p.y);
+                });
+                shape._boundingBox = { minX, minY, maxX, maxY };
+            }
+            
+            const bbox = shape._boundingBox;
+            const centerX = (bbox.minX + bbox.maxX) / 2;
+            const centerY = (bbox.minY + bbox.maxY) / 2;
+            const oldWidth = bbox.maxX - bbox.minX;
+            const oldHeight = bbox.maxY - bbox.minY;
+            
+            // Calculate new bounding box based on handle
+            let newMinX = bbox.minX, newMinY = bbox.minY;
+            let newMaxX = bbox.maxX, newMaxY = bbox.maxY;
+            
+            switch (h) {
+                case 'se':
+                    newMaxX = pos.x;
+                    newMaxY = pos.y;
+                    break;
+                case 'sw':
+                    newMinX = pos.x;
+                    newMaxY = pos.y;
+                    break;
+                case 'ne':
+                    newMaxX = pos.x;
+                    newMinY = pos.y;
+                    break;
+                case 'nw':
+                    newMinX = pos.x;
+                    newMinY = pos.y;
+                    break;
+                case 'e':
+                    newMaxX = pos.x;
+                    break;
+                case 'w':
+                    newMinX = pos.x;
+                    break;
+                case 's':
+                    newMaxY = pos.y;
+                    break;
+                case 'n':
+                    newMinY = pos.y;
+                    break;
+            }
+            
+            const newWidth = newMaxX - newMinX;
+            const newHeight = newMaxY - newMinY;
+            
+            // Prevent negative or too small sizes
+            if (newWidth < 10 || newHeight < 10) return;
+            
+            // Calculate scale factors
+            const scaleX = newWidth / oldWidth;
+            const scaleY = newHeight / oldHeight;
+            const newCenterX = (newMinX + newMaxX) / 2;
+            const newCenterY = (newMinY + newMaxY) / 2;
+            
+            // Scale all points relative to center
+            shape.points = shape.points.map(p => ({
+                x: Math.round(newCenterX + (p.x - centerX) * scaleX),
+                y: Math.round(newCenterY + (p.y - centerY) * scaleY)
+            }));
+            
+            // Constrain all points to canvas bounds after resize
+            shape.points.forEach(p => {
+                p.x = Math.max(0, Math.min(p.x, this.canvasWidth));
+                p.y = Math.max(0, Math.min(p.y, this.canvasHeight));
+            });
+            
+            // Update bounding box for next resize
+            shape._boundingBox = { minX: newMinX, minY: newMinY, maxX: newMaxX, maxY: newMaxY };
         }
     },
 
     getResizeHandle(pos, slice) {
-        if (slice.shape !== 'rectangle') return null;
-        const handleSize = 10;
-        const centerX = slice.x + slice.width / 2;
-        const centerY = slice.y + slice.height / 2;
-        const rotation = (slice.rotation || 0) * Math.PI / 180;
+        const handleSize = 18;  // Increased hitbox for easier clicking
         
-        // Helper function to rotate a point around center
-        const rotatePoint = (x, y) => {
-    const dx = x - centerX;
-    const dy = y - centerY;
-    return {
-        x: centerX + dx * Math.cos(rotation) - dy * Math.sin(rotation),
-        y: centerY + dx * Math.sin(rotation) + dy * Math.cos(rotation)
-    };
-        };
-        
-        // Corner handles (unrotated positions)
-        const corners = {
-    'nw': { x: slice.x, y: slice.y },
-    'ne': { x: slice.x + slice.width, y: slice.y },
-    'sw': { x: slice.x, y: slice.y + slice.height },
-    'se': { x: slice.x + slice.width, y: slice.y + slice.height }
-        };
+        if (slice.shape === 'rectangle') {
+            const centerX = slice.x + slice.width / 2;
+            const centerY = slice.y + slice.height / 2;
+            const rotation = (slice.rotation || 0) * Math.PI / 180;
+            
+            // Helper function to rotate a point around center
+            const rotatePoint = (x, y) => {
+                const dx = x - centerX;
+                const dy = y - centerY;
+                return {
+                    x: centerX + dx * Math.cos(rotation) - dy * Math.sin(rotation),
+                    y: centerY + dx * Math.sin(rotation) + dy * Math.cos(rotation)
+                };
+            };
+            
+            // Corner handles (unrotated positions)
+            const corners = {
+                'nw': { x: slice.x, y: slice.y },
+                'ne': { x: slice.x + slice.width, y: slice.y },
+                'sw': { x: slice.x, y: slice.y + slice.height },
+                'se': { x: slice.x + slice.width, y: slice.y + slice.height }
+            };
 
-        // Check corners first (priority)
-        for (let [handle, hPos] of Object.entries(corners)) {
-    const rotPos = rotatePoint(hPos.x, hPos.y);
-    if (Math.abs(pos.x - rotPos.x) < handleSize && Math.abs(pos.y - rotPos.y) < handleSize) {
-        return handle;
-    }
+            // Check corners first (priority)
+            for (let [handle, hPos] of Object.entries(corners)) {
+                const rotPos = rotatePoint(hPos.x, hPos.y);
+                if (Math.abs(pos.x - rotPos.x) < handleSize && Math.abs(pos.y - rotPos.y) < handleSize) {
+                    return handle;
+                }
+            }
+            
+            // Edge handles (middle of each side)
+            const edges = {
+                'n': { x: slice.x + slice.width / 2, y: slice.y },
+                's': { x: slice.x + slice.width / 2, y: slice.y + slice.height },
+                'e': { x: slice.x + slice.width, y: slice.y + slice.height / 2 },
+                'w': { x: slice.x, y: slice.y + slice.height / 2 }
+            };
+            
+            for (let [handle, hPos] of Object.entries(edges)) {
+                const rotPos = rotatePoint(hPos.x, hPos.y);
+                if (Math.abs(pos.x - rotPos.x) < handleSize && Math.abs(pos.y - rotPos.y) < handleSize) {
+                    return handle;
+                }
+            }
+        } else if (slice.shape === 'circle') {
+            // Circle: handles at bounding box corners (matches drawn handles)
+            const cx = slice.centerX;
+            const cy = slice.centerY;
+            const r = slice.radius;
+            
+            const minX = cx - r;
+            const minY = cy - r;
+            const maxX = cx + r;
+            const maxY = cy + r;
+            
+            // Check corners first (priority)
+            const corners = {
+                'nw': { x: minX, y: minY },
+                'ne': { x: maxX, y: minY },
+                'sw': { x: minX, y: maxY },
+                'se': { x: maxX, y: maxY }
+            };
+            
+            for (let [handle, hPos] of Object.entries(corners)) {
+                if (Math.abs(pos.x - hPos.x) < handleSize && Math.abs(pos.y - hPos.y) < handleSize) {
+                    if (this.debug) console.log('✅ Circle corner handle detected:', handle, 'at', Math.round(hPos.x), Math.round(hPos.y));
+                    return handle;
+                }
+            }
+            
+            // Check edges
+            const edges = {
+                'n': { x: (minX + maxX) / 2, y: minY },
+                's': { x: (minX + maxX) / 2, y: maxY },
+                'e': { x: maxX, y: (minY + maxY) / 2 },
+                'w': { x: minX, y: (minY + maxY) / 2 }
+            };
+            
+            for (let [handle, hPos] of Object.entries(edges)) {
+                if (Math.abs(pos.x - hPos.x) < handleSize && Math.abs(pos.y - hPos.y) < handleSize) {
+                    if (this.debug) console.log('✅ Circle edge handle detected:', handle, 'at', Math.round(hPos.x), Math.round(hPos.y));
+                    return handle;
+                }
+            }
+        } else if (slice.points && slice.points.length > 0) {
+            // Point-based shapes: calculate bounding box and add corner handles
+            let minX = Infinity, minY = Infinity;
+            let maxX = -Infinity, maxY = -Infinity;
+            
+            slice.points.forEach(p => {
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+            });
+            
+            // Store bounding box for resize operation
+            slice._boundingBox = { minX, minY, maxX, maxY };
+            
+            const corners = {
+                'nw': { x: minX, y: minY },
+                'ne': { x: maxX, y: minY },
+                'sw': { x: minX, y: maxY },
+                'se': { x: maxX, y: maxY }
+            };
+            
+            // Check corners first (priority)
+            for (let [handle, hPos] of Object.entries(corners)) {
+                if (Math.abs(pos.x - hPos.x) < handleSize && Math.abs(pos.y - hPos.y) < handleSize) {
+                    if (this.debug) console.log('✅ Point-shape corner handle detected:', handle, 'at', Math.round(hPos.x), Math.round(hPos.y));
+                    return handle;
+                }
+            }
+            
+            // Edge handles (middle of each side)
+            const edges = {
+                'n': { x: (minX + maxX) / 2, y: minY },
+                's': { x: (minX + maxX) / 2, y: maxY },
+                'e': { x: maxX, y: (minY + maxY) / 2 },
+                'w': { x: minX, y: (minY + maxY) / 2 }
+            };
+            
+            for (let [handle, hPos] of Object.entries(edges)) {
+                if (Math.abs(pos.x - hPos.x) < handleSize && Math.abs(pos.y - hPos.y) < handleSize) {
+                    if (this.debug) console.log('✅ Point-shape edge handle detected:', handle, 'at', Math.round(hPos.x), Math.round(hPos.y));
+                    return handle;
+                }
+            }
         }
         
-        // Edge handles (middle of each side)
-        const edges = {
-    'n': { x: slice.x + slice.width / 2, y: slice.y },
-    's': { x: slice.x + slice.width / 2, y: slice.y + slice.height },
-    'e': { x: slice.x + slice.width, y: slice.y + slice.height / 2 },
-    'w': { x: slice.x, y: slice.y + slice.height / 2 }
-        };
-        
-        for (let [handle, hPos] of Object.entries(edges)) {
-    const rotPos = rotatePoint(hPos.x, hPos.y);
-    if (Math.abs(pos.x - rotPos.x) < handleSize && Math.abs(pos.y - rotPos.y) < handleSize) {
-        return handle;
-    }
-        }
-        
+        if (this.debug) console.log('❌ No handle found at:', Math.round(pos.x), Math.round(pos.y));
         return null;
     },
 
@@ -1303,7 +1705,7 @@ const app = {
     this.ctx.fill();
 
     // Draw slice outline
-    this.ctx.strokeStyle = isSelected ? '#ffffff' : slice.color;
+    this.ctx.strokeStyle = isSelected ? '#ff00ff' : slice.color;
     this.ctx.lineWidth = isSelected ? 3 : 2;
     this.drawShapePath(slice, slice.shape);
     this.ctx.stroke();
@@ -1319,10 +1721,19 @@ const app = {
     this.ctx.restore();
 
     // Draw masks for this slice
+    let selectedMaskInSlice = null;
     if (slice.masks && slice.masks.length > 0) {
         slice.masks.forEach(mask => {
     if (mask.visible === false) return; // Skip hidden masks
-    const isMaskSelected = mask === this.selectedSlice;
+    const isMaskSelected = mask === this.selectedMask;
+    const isInverted = mask.inverted === true;
+    const maskColor = isInverted ? '#00ff00' : '#ff0000'; // Green for inverted (keeps area), red for normal (removes area)
+    
+    // Track selected mask for handle drawing later
+    if (isMaskSelected) {
+        selectedMaskInSlice = mask;
+    }
+    
     this.ctx.save();
             
     // Apply rotation for rectangles
@@ -1335,12 +1746,12 @@ const app = {
     }
             
     // Draw mask fill
-    this.ctx.fillStyle = '#ff000022';
+    this.ctx.fillStyle = maskColor + '22';
     this.drawShapePath(mask, mask.shape);
     this.ctx.fill();
             
     // Hatch pattern
-    this.ctx.strokeStyle = '#ff0000';
+    this.ctx.strokeStyle = maskColor;
     this.ctx.lineWidth = 1;
     this.ctx.save();
     this.drawShapePath(mask, mask.shape);
@@ -1356,26 +1767,27 @@ const app = {
     this.ctx.restore();
             
     // Draw mask outline (thicker if selected)
-    this.ctx.strokeStyle = isMaskSelected ? '#ffffff' : '#ff0000';
+    this.ctx.strokeStyle = isMaskSelected ? '#ffffff' : maskColor;
     this.ctx.lineWidth = isMaskSelected ? 3 : 2;
     this.drawShapePath(mask, mask.shape);
     this.ctx.stroke();
             
     // Draw mask label
     const maskLabelPos = this.getShapeLabelPosition(mask);
-    this.ctx.fillStyle = isMaskSelected ? '#ffffff' : '#ff0000';
+    this.ctx.fillStyle = isMaskSelected ? '#ffffff' : maskColor;
     this.ctx.font = 'bold 16px Arial';
     this.ctx.textAlign = 'left';
     this.ctx.textBaseline = 'top';
     this.ctx.fillText(mask.label, maskLabelPos.x, maskLabelPos.y);
             
-    // Draw handles for selected mask (rectangles only)
-    if (isMaskSelected && mask.shape === 'rectangle') {
-        this.drawResizeHandles(mask);
-    }
-            
     this.ctx.restore();
         });
+    }
+    
+    // Draw handles for selected mask (outside transform context)
+    if (selectedMaskInSlice) {
+        if (this.debug) console.log('🎯 Drawing resize handles for mask:', selectedMaskInSlice.shape, selectedMaskInSlice.label);
+        this.drawResizeHandles(selectedMaskInSlice);
     }
 
     // Draw handles for selected slice
@@ -1467,49 +1879,144 @@ const app = {
     },
 
     drawResizeHandles(slice) {
-        const centerX = slice.x + slice.width / 2;
-        const centerY = slice.y + slice.height / 2;
-        const rotation = (slice.rotation || 0) * Math.PI / 180;
-        
-        // Helper function to rotate a point around center
-        const rotatePoint = (x, y) => {
-    const dx = x - centerX;
-    const dy = y - centerY;
-    return [
-        centerX + dx * Math.cos(rotation) - dy * Math.sin(rotation),
-        centerY + dx * Math.sin(rotation) + dy * Math.cos(rotation)
-    ];
-        };
-        
-        // Corner handles (unrotated positions)
-        const corners = [
-    [slice.x, slice.y],
-    [slice.x + slice.width, slice.y],
-    [slice.x, slice.y + slice.height],
-    [slice.x + slice.width, slice.y + slice.height]
-        ];
-        
-        // Edge handles (middle of each side)
-        const edges = [
-    [slice.x + slice.width / 2, slice.y], // North
-    [slice.x + slice.width / 2, slice.y + slice.height], // South
-    [slice.x + slice.width, slice.y + slice.height / 2], // East
-    [slice.x, slice.y + slice.height / 2] // West
-        ];
-        
-        // Draw corner handles (larger, white)
-        this.ctx.fillStyle = '#ffffff';
-        corners.forEach(([x, y]) => {
-    const [rx, ry] = rotatePoint(x, y);
-    this.ctx.fillRect(rx - 6, ry - 6, 12, 12);
-        });
-        
-        // Draw edge handles (smaller, blue)
-        this.ctx.fillStyle = '#2196F3';
-        edges.forEach(([x, y]) => {
-    const [rx, ry] = rotatePoint(x, y);
-    this.ctx.fillRect(rx - 5, ry - 5, 10, 10);
-        });
+        if (slice.shape === 'rectangle') {
+            // Rectangle: existing logic with rotation
+            const centerX = slice.x + slice.width / 2;
+            const centerY = slice.y + slice.height / 2;
+            const rotation = (slice.rotation || 0) * Math.PI / 180;
+            
+            // Helper function to rotate a point around center
+            const rotatePoint = (x, y) => {
+                const dx = x - centerX;
+                const dy = y - centerY;
+                return [
+                    centerX + dx * Math.cos(rotation) - dy * Math.sin(rotation),
+                    centerY + dx * Math.sin(rotation) + dy * Math.cos(rotation)
+                ];
+            };
+            
+            // Corner handles (unrotated positions)
+            const corners = [
+                [slice.x, slice.y],
+                [slice.x + slice.width, slice.y],
+                [slice.x, slice.y + slice.height],
+                [slice.x + slice.width, slice.y + slice.height]
+            ];
+            
+            // Edge handles (middle of each side)
+            const edges = [
+                [slice.x + slice.width / 2, slice.y], // North
+                [slice.x + slice.width / 2, slice.y + slice.height], // South
+                [slice.x + slice.width, slice.y + slice.height / 2], // East
+                [slice.x, slice.y + slice.height / 2] // West
+            ];
+            
+            // Draw corner handles (larger, white)
+            this.ctx.fillStyle = '#ffffff';
+            corners.forEach(([x, y]) => {
+                const [rx, ry] = rotatePoint(x, y);
+                this.ctx.fillRect(rx - 6, ry - 6, 12, 12);
+            });
+            
+            // Draw edge handles (smaller, blue)
+            this.ctx.fillStyle = '#2196F3';
+            edges.forEach(([x, y]) => {
+                const [rx, ry] = rotatePoint(x, y);
+                this.ctx.fillRect(rx - 5, ry - 5, 10, 10);
+            });
+        } else if (slice.shape === 'circle') {
+            // Circle: Draw bounding box around circle
+            const cx = slice.centerX;
+            const cy = slice.centerY;
+            const r = slice.radius;
+            
+            // Bounding box coordinates
+            const minX = cx - r;
+            const minY = cy - r;
+            const maxX = cx + r;
+            const maxY = cy + r;
+            
+            // Draw bounding box outline (dashed line)
+            this.ctx.strokeStyle = '#00ffff';
+            this.ctx.lineWidth = 1;
+            this.ctx.setLineDash([5, 5]);
+            this.ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+            this.ctx.setLineDash([]);
+            
+            // Corner handles
+            const corners = [
+                [minX, minY],
+                [maxX, minY],
+                [minX, maxY],
+                [maxX, maxY]
+            ];
+            
+            // Edge handles
+            const edges = [
+                [(minX + maxX) / 2, minY], // North
+                [(minX + maxX) / 2, maxY], // South
+                [maxX, (minY + maxY) / 2], // East
+                [minX, (minY + maxY) / 2]  // West
+            ];
+            
+            // Draw corner handles (larger, white)
+            this.ctx.fillStyle = '#ffffff';
+            corners.forEach(([x, y]) => {
+                this.ctx.fillRect(x - 6, y - 6, 12, 12);
+            });
+            
+            // Draw edge handles (smaller, blue)
+            this.ctx.fillStyle = '#2196F3';
+            edges.forEach(([x, y]) => {
+                this.ctx.fillRect(x - 5, y - 5, 10, 10);
+            });
+        } else if (slice.points && slice.points.length > 0) {
+            // Point-based shapes: calculate bounding box
+            let minX = Infinity, minY = Infinity;
+            let maxX = -Infinity, maxY = -Infinity;
+            
+            slice.points.forEach(p => {
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+            });
+            
+            // Draw bounding box outline (dashed line)
+            this.ctx.strokeStyle = '#00ffff';
+            this.ctx.lineWidth = 1;
+            this.ctx.setLineDash([5, 5]);
+            this.ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+            this.ctx.setLineDash([]);
+            
+            // Corner handles
+            const corners = [
+                [minX, minY],
+                [maxX, minY],
+                [minX, maxY],
+                [maxX, maxY]
+            ];
+            
+            // Edge handles
+            const edges = [
+                [(minX + maxX) / 2, minY], // North
+                [(minX + maxX) / 2, maxY], // South
+                [maxX, (minY + maxY) / 2], // East
+                [minX, (minY + maxY) / 2]  // West
+            ];
+            
+            // Draw corner handles (larger, white)
+            this.ctx.fillStyle = '#ffffff';
+            corners.forEach(([x, y]) => {
+                this.ctx.fillRect(x - 6, y - 6, 12, 12);
+            });
+            
+            // Draw edge handles (smaller, blue)
+            this.ctx.fillStyle = '#2196F3';
+            edges.forEach(([x, y]) => {
+                this.ctx.fillRect(x - 5, y - 5, 10, 10);
+            });
+        }
     },
 
     drawRotationHandle(slice) {
@@ -1675,96 +2182,103 @@ const app = {
     },
 
     deleteSelected() {
-        if (this.selectedSlice) {
-    // Check if selected item is a mask
-    let isMask = false;
-    for (let slice of this.slices) {
-        if (slice.masks && slice.masks.includes(this.selectedSlice)) {
-    slice.masks = slice.masks.filter(m => m !== this.selectedSlice);
-    isMask = true;
-    this.showToast('Mask deleted');
-    break;
+        // Check if a mask is selected
+        if (this.selectedMask) {
+            // Find parent slice and remove mask
+            for (let slice of this.slices) {
+                if (slice.masks && slice.masks.includes(this.selectedMask)) {
+                    slice.masks = slice.masks.filter(m => m !== this.selectedMask);
+                    this.showToast('Mask deleted');
+                    break;
+                }
+            }
+            this.selectedMask = null;
+            this.updateUI();
+            this.render();
+            return;
         }
-    }
-    
-    // If not a mask, delete slice
-    if (!isMask) {
-        this.slices = this.slices.filter(s => s !== this.selectedSlice);
-        this.showToast('Shape deleted');
-    }
-    
-    this.selectedSlice = null;
-    this.updateUI();
-    this.render();
+        
+        // Otherwise delete selected slice
+        if (this.selectedSlice) {
+            this.slices = this.slices.filter(s => s !== this.selectedSlice);
+            this.showToast('Shape deleted');
+            this.selectedSlice = null;
+            this.updateUI();
+            this.render();
         }
     },
 
     duplicateSelected() {
+        // Check if a mask is selected
+        if (this.selectedMask) {
+            // Find parent slice
+            let parentSlice = null;
+            for (let slice of this.slices) {
+                if (slice.masks && slice.masks.includes(this.selectedMask)) {
+                    parentSlice = slice;
+                    break;
+                }
+            }
+            
+            if (parentSlice) {
+                // Duplicate mask
+                const mask = this.selectedMask;
+                const duplicate = JSON.parse(JSON.stringify(mask));
+                duplicate.id = crypto.randomUUID();
+                duplicate.label = mask.label + ' Copy';
+                
+                // Offset position
+                if (duplicate.shape === 'rectangle') {
+                    duplicate.x += 20;
+                    duplicate.y += 20;
+                } else if (duplicate.shape === 'circle') {
+                    duplicate.centerX += 20;
+                    duplicate.centerY += 20;
+                } else if (duplicate.points) {
+                    duplicate.points = duplicate.points.map(p => ({ x: p.x + 20, y: p.y + 20 }));
+                }
+                
+                parentSlice.masks.push(duplicate);
+                this.selectedMask = duplicate;
+                this.showToast('Mask duplicated');
+                this.updateUI();
+                this.render();
+            }
+            return;
+        }
+        
+        // Otherwise duplicate selected slice
         if (!this.selectedSlice) return;
         
-        // Check if selected item is a mask
-        let isMask = false;
-        let parentSlice = null;
-        for (let slice of this.slices) {
-    if (slice.masks && slice.masks.includes(this.selectedSlice)) {
-        isMask = true;
-        parentSlice = slice;
-        break;
-    }
+        // Duplicate slice
+        const slice = this.selectedSlice;
+        const duplicate = JSON.parse(JSON.stringify(slice));
+        duplicate.id = crypto.randomUUID();
+        duplicate.label = slice.label + ' Copy';
+        
+        // Offset position
+        if (duplicate.shape === 'rectangle') {
+            duplicate.x += 20;
+            duplicate.y += 20;
+        } else if (duplicate.shape === 'circle') {
+            duplicate.centerX += 20;
+            duplicate.centerY += 20;
+        } else if (duplicate.points) {
+            duplicate.points = duplicate.points.map(p => ({x: p.x + 20, y: p.y + 20}));
         }
         
-        if (isMask && parentSlice) {
-    // Duplicate mask
-    const mask = this.selectedSlice;
-    const duplicate = JSON.parse(JSON.stringify(mask));
-	duplicate.id = crypto.randomUUID();
-	duplicate.label = mask.label + ' Copy';
-	
-	// Offset position
-	if (duplicate.shape === 'rectangle') {
-	    duplicate.x += 20;
-	    duplicate.y += 20;
-	} else if (duplicate.shape === 'circle') {
-	    duplicate.centerX += 20;
-	    duplicate.centerY += 20;
-	} else if (duplicate.points) {
-	    duplicate.points = duplicate.points.map(p => ({x: p.x + 20, y: p.y + 20}));
-	}
-	
-	parentSlice.masks.push(duplicate);
-	this.selectedSlice = duplicate;
-	this.showToast('Mask duplicated');
-        } else if (this.selectedSlice.type === 'slice') {
-	// Duplicate slice
-	const slice = this.selectedSlice;
-	const duplicate = JSON.parse(JSON.stringify(slice));
-	duplicate.id = crypto.randomUUID();
-	duplicate.label = slice.label + ' Copy';
-	
-	// Offset position
-	if (duplicate.shape === 'rectangle') {
-	    duplicate.x += 20;
-	    duplicate.y += 20;
-	} else if (duplicate.shape === 'circle') {
-	    duplicate.centerX += 20;
-	    duplicate.centerY += 20;
-	} else if (duplicate.points) {
-	    duplicate.points = duplicate.points.map(p => ({x: p.x + 20, y: p.y + 20}));
-	}
-	
-	// Duplicate masks with new IDs
-	if (duplicate.masks && duplicate.masks.length > 0) {
-	    duplicate.masks = duplicate.masks.map(m => {
-		const newMask = JSON.parse(JSON.stringify(m));
-		newMask.id = crypto.randomUUID();
-		return newMask;
-	    });
-	}
-	
-	this.slices.push(duplicate);
-	this.selectedSlice = duplicate;
-	this.showToast('Slice duplicated');
+        // Duplicate masks with new IDs
+        if (duplicate.masks && duplicate.masks.length > 0) {
+            duplicate.masks = duplicate.masks.map(m => {
+                const newMask = JSON.parse(JSON.stringify(m));
+                newMask.id = crypto.randomUUID();
+                return newMask;
+            });
         }
+        
+        this.slices.push(duplicate);
+        this.selectedSlice = duplicate;
+        this.showToast('Slice duplicated');
         
         this.updateUI();
         this.render();
@@ -1966,145 +2480,6 @@ const app = {
         this.render();
     },
 
-    showPreview() {
-        if (!this.selectedSlice) {
-    this.showToast('Select a slice first', 'error');
-    return;
-        }
-
-        const modal = document.getElementById('previewModal');
-        const canvas = document.getElementById('previewCanvas');
-        const ctx = canvas.getContext('2d');
-        const infoDiv = document.getElementById('previewInfo');
-
-        const slice = this.selectedSlice;
-        
-        // Update modal title with slice name
-        const modalTitle = modal.querySelector('.preview-header h3');
-        modalTitle.textContent = `Slice Preview - ${slice.label}`;
-        
-        // Determine slice bounds
-        let bounds;
-        if (slice.shape === 'rectangle') {
-    bounds = { x: slice.x, y: slice.y, width: slice.width, height: slice.height };
-        } else {
-    bounds = this.getShapeBounds(slice);
-        }
-
-        // Scale to fit max 800x600
-        const maxWidth = 800;
-        const maxHeight = 600;
-        const scale = Math.min(maxWidth / bounds.width, maxHeight / bounds.height, 1);
-        
-        canvas.width = bounds.width * scale;
-        canvas.height = bounds.height * scale;
-        canvas.style.width = canvas.width + 'px';
-        canvas.style.height = canvas.height + 'px';
-
-        // Draw scaled slice preview
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        ctx.save();
-        ctx.scale(scale, scale);
-        ctx.translate(-bounds.x, -bounds.y);
-
-        // Apply rotation if rectangle
-        if (slice.shape === 'rectangle' && slice.rotation) {
-    const centerX = slice.x + slice.width / 2;
-    const centerY = slice.y + slice.height / 2;
-    ctx.translate(centerX, centerY);
-    ctx.rotate(slice.rotation * Math.PI / 180);
-    ctx.translate(-centerX, -centerY);
-        }
-
-        // Draw slice shape
-        ctx.fillStyle = slice.color + '44';
-        this.drawShapePath(slice, slice.shape);
-        ctx.fill();
-
-        ctx.strokeStyle = slice.color;
-        ctx.lineWidth = 3;
-        this.drawShapePath(slice, slice.shape);
-        ctx.stroke();
-
-        // Draw masks
-        if (slice.masks && slice.masks.length > 0) {
-    slice.masks.forEach(mask => {
-        // Apply rotation if rectangle mask
-        if (mask.shape === 'rectangle' && mask.rotation) {
-    const centerX = mask.x + mask.width / 2;
-    const centerY = mask.y + mask.height / 2;
-    ctx.translate(centerX, centerY);
-    ctx.rotate(mask.rotation * Math.PI / 180);
-    ctx.translate(-centerX, -centerY);
-        }
-
-        ctx.fillStyle = '#ff000044';
-        this.drawShapePath(mask, mask.shape);
-        ctx.fill();
-
-        ctx.strokeStyle = '#ff0000';
-        ctx.lineWidth = 2;
-        this.drawShapePath(mask, mask.shape);
-        ctx.stroke();
-    });
-        }
-
-        ctx.restore();
-
-        // Update info
-        const isMask = slice.type === 'mask';
-        infoDiv.innerHTML = `
-    <div class="preview-info-row">
-        <span class="preview-info-label">Type:</span>
-        <span>${isMask ? 'Mask' : 'Slice'}</span>
-    </div>
-    <div class="preview-info-row">
-        <span class="preview-info-label">Label:</span>
-        <span>${slice.label}</span>
-    </div>
-    <div class="preview-info-row">
-        <span class="preview-info-label">Shape:</span>
-        <span>${slice.shape}</span>
-    </div>
-    <div class="preview-info-row">
-        <span class="preview-info-label">Position:</span>
-        <span>${Math.round(bounds.x)}, ${Math.round(bounds.y)}</span>
-    </div>
-    <div class="preview-info-row">
-        <span class="preview-info-label">Size:</span>
-        <span>${Math.round(bounds.width)} x ${Math.round(bounds.height)}</span>
-    </div>
-    ${slice.rotation ? `
-    <div class="preview-info-row">
-        <span class="preview-info-label">Rotation:</span>
-        <span>${Math.round(slice.rotation)}°</span>
-    </div>` : ''}
-    ${slice.screens ? `
-    <div class="preview-info-row">
-        <span class="preview-info-label">Outputs:</span>
-        <span>${slice.screens.join(', ')}</span>
-    </div>` : ''}
-    ${slice.masks && slice.masks.length > 0 ? `
-    <div class="preview-info-row">
-        <span class="preview-info-label">Masks:</span>
-        <span>${slice.masks.length}</span>
-    </div>` : ''}
-    <div class="preview-info-row">
-        <span class="preview-info-label">Scale:</span>
-        <span>${Math.round(scale * 100)}%</span>
-    </div>
-        `;
-
-        modal.classList.add('active');
-    },
-
-    closePreview() {
-        const modal = document.getElementById('previewModal');
-        modal.classList.remove('active');
-    },
-
     zoomIn() {
         this.zoomToCenter(1);
     },
@@ -2249,6 +2624,12 @@ const app = {
 
     async addOutput() {
         try {
+            // Remove any lingering Bootstrap modal backdrops (prevents blocking)
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.paddingRight = '';
+            
             // Fetch available output types from backend
             const response = await fetch('/api/outputs/types');
             if (!response.ok) throw new Error('Failed to fetch output types');
@@ -2279,6 +2660,12 @@ const app = {
             // Store used monitors for validation
             this.usedMonitors = usedMonitors;
             
+            // Debug: Log available output types and monitors
+            console.log('📺 Available output types:', outputTypes);
+            if (outputTypes.display && outputTypes.display.configurable_fields) {
+                console.log('🖥️ Monitor options:', outputTypes.display.configurable_fields.monitor_index?.options);
+            }
+            
             // Create modal content
             let modalContent = `
                 <div style="margin-bottom: 20px;">
@@ -2304,10 +2691,10 @@ const app = {
             // Store output types data for form generation
             this.availableOutputTypes = outputTypes;
             
-            // Create modal
+            // Create modal (use unique ID to avoid conflict with ArtNet modal)
             const modal = ModalManager.create({
-                id: 'addOutputModal',
-                title: '➕ Add Output',
+                id: 'videoAddOutputModal',
+                title: '➕ Add Video Output',
                 content: modalContent,
                 size: 'lg',
                 buttons: [
@@ -2347,6 +2734,10 @@ const app = {
         const typeInfo = this.availableOutputTypes[selectedType];
         description.textContent = typeInfo.description || '';
         
+        // Debug: Log type info and fields
+        console.log(`🔧 Building form for type: ${selectedType}`, typeInfo);
+        console.log('📋 Configurable fields:', typeInfo.configurable_fields);
+        
         // Build configuration form
         let formHtml = '<div style="background: #1a1a1a; padding: 15px; border-radius: 8px; margin-top: 15px;">';
         formHtml += '<h6 style="margin-bottom: 15px;">Configuration:</h6>';
@@ -2361,6 +2752,7 @@ const app = {
         
         // Type-specific fields
         const fields = typeInfo.configurable_fields || {};
+        console.log('🔨 Building fields:', Object.keys(fields));
         
         for (const [fieldName, fieldConfig] of Object.entries(fields)) {
             formHtml += this.buildFormField(fieldName, fieldConfig, typeInfo);
@@ -2372,16 +2764,20 @@ const app = {
     },
     
     buildFormField(fieldName, fieldConfig, typeInfo) {
+        console.log(`  🔹 Building field: ${fieldName}`, fieldConfig);
+        
         let html = '<div class="mb-3">';
         html += `<label for="output_${fieldName}" class="form-label">${fieldConfig.label}:</label>`;
         
         switch (fieldConfig.type) {
             case 'select':
+                console.log(`    📋 Select field "${fieldName}" with ${fieldConfig.options?.length || 0} options`);
                 html += `<select id="output_${fieldName}" class="form-select" ${fieldConfig.required ? 'required' : ''}>`;
                 if (!fieldConfig.required) {
                     html += '<option value="">-- Select --</option>';
                 }
                 fieldConfig.options.forEach(opt => {
+                    console.log(`      - Option: ${opt.label} = ${opt.value}`);
                     // Check if this monitor is already in use
                     const isMonitorField = fieldName === 'monitor_index';
                     const monitorInUse = isMonitorField && this.usedMonitors && this.usedMonitors.has(opt.value);
@@ -2477,16 +2873,16 @@ const app = {
                 return;
             }
             
-            // Build output configuration
-            const config = {
+            // Build output configuration - start with defaults
+            const typeInfo = this.availableOutputTypes[outputType];
+            const config = Object.assign({}, typeInfo.default_config || {}, {
                 type: outputType,
                 enabled: true,
                 source: 'canvas',
                 slice: 'full'
-            };
+            });
             
-            // Collect field values
-            const typeInfo = this.availableOutputTypes[outputType];
+            // Collect field values (overrides defaults)
             const fields = typeInfo.configurable_fields || {};
             
             for (const [fieldName, fieldConfig] of Object.entries(fields)) {
@@ -2501,9 +2897,15 @@ const app = {
                     config.resolution = [width, height];
                 } else if (fieldConfig.type === 'select') {
                     config[fieldName] = parseInt(element.value) || element.value;
-                } else if (element) {
+                } else if (element && element.value) {
+                    // Only set if value is not empty
                     config[fieldName] = element.value;
                 }
+            }
+            
+            // If window_title is empty, set default based on output name
+            if (!config.window_title || config.window_title.trim() === '') {
+                config.window_title = `Flux ${outputName}`;
             }
             
             // VALIDATION: Check for duplicate monitor usage
@@ -2513,11 +2915,6 @@ const app = {
                     return;
                 }
             }
-            
-            // Add default values from type
-            Object.assign(config, typeInfo.default_config);
-            config.type = outputType; // Ensure type is correct
-            config.enabled = true; // Enable by default
             
             // Create output via API
             const response = await fetch('/api/outputs/video', {
@@ -2540,9 +2937,12 @@ const app = {
             // Reload outputs list
             await this.loadExistingOutputs();
             
-            // Close modal
-            const modal = ModalManager.get('addOutputModal');
-            if (modal) modal.hide();
+            // Close modal (handle both video and artnet modals)
+            const videoModal = ModalManager.get('videoAddOutputModal');
+            if (videoModal) videoModal.hide();
+            
+            const editModal = ModalManager.get('videoEditOutputModal');
+            if (editModal) editModal.hide();
             
         } catch (error) {
             console.error('Failed to create output:', error);
@@ -2550,8 +2950,14 @@ const app = {
         }
     },
 
-    updateScreenButtons() {
+    // Immediate screen buttons update
+    updateScreenButtonsImmediate() {
         const container = document.getElementById('screenButtonsContainer');
+        
+        if (!container) {
+            console.error('❌ screenButtonsContainer not found!');
+            return;
+        }
         
         // Check if we have loaded outputs from backend
         if (!this.existingOutputs) {
@@ -2592,7 +2998,7 @@ const app = {
                                 ${typeIcon} ${outputId} <span style="color: #666; font-size: 10px;">(${monitorInfo})</span>
                             </label>
                         </div>
-                        <button class="small" onclick="app.openOutputComposer('${outputId}'); event.stopPropagation();" 
+                        <button class="small" onclick="app.openOutputComposer('${outputId}')"
                                 style="padding: 4px 8px; font-size: 10px; background: #2a5a8a; border: 1px solid #3a7aaa; flex-shrink: 0;" 
                                 title="Compose multiple slices for this output">
                             🎨
@@ -2607,26 +3013,48 @@ const app = {
         container.innerHTML = html;
     },
     
+    // Debounced screen buttons update (use this for most cases)
+    updateScreenButtons() {
+        this.debounce(this.updateScreenButtonsImmediate, 'updateScreenButtons');
+    },
+    
     async toggleOutputForSlice(outputId) {
-        if (!this.selectedSlice || this.selectedSlice.type !== 'slice') {
+        if (!this.selectedSlice) {
+            this.showToast('⚠️ Please select a slice first', 'warning');
+            return;
+        }
+        
+        if (this.selectedSlice.type !== 'slice') {
+            this.showToast('⚠️ Please select a slice (not a mask)', 'warning');
             return;
         }
         
         const checkbox = document.getElementById(`output_${outputId}`);
+        if (!checkbox) {
+            console.error('❌ Checkbox not found:', `output_${outputId}`);
+            return;
+        }
         
-        if (checkbox.checked) {
-            // First, ensure the slice exists in the backend
-            await this.saveSliceToBackend(this.selectedSlice);
-            
-            // Then assign this slice to the output
-            const sliceId = this.selectedSlice.id || this.selectedSlice.label;
-            const sliceName = this.selectedSlice.name || this.selectedSlice.label;
-            await this.updateOutputSlice(outputId, sliceId);
-            this.showToast(`${outputId} ← ${sliceName}`, 'success');
-        } else {
-            // Unassign (set to full)
-            await this.updateOutputSlice(outputId, 'full');
-            this.showToast(`${outputId} ← Full Canvas`, 'info');
+        try {
+            if (checkbox.checked) {
+                // First, ensure the slice exists in the backend
+                await this.saveSliceToBackend(this.selectedSlice);
+                
+                // Then assign this slice to the output
+                const sliceId = this.selectedSlice.id || this.selectedSlice.label;
+                const sliceName = this.selectedSlice.name || this.selectedSlice.label;
+                await this.updateOutputSlice(outputId, sliceId);
+                this.showToast(`${outputId} ← ${sliceName}`, 'success');
+            } else {
+                // Unassign (set to full)
+                await this.updateOutputSlice(outputId, 'full');
+                this.showToast(`${outputId} ← Full Canvas`, 'info');
+            }
+        } catch (error) {
+            console.error('❌ Failed to toggle output assignment:', error);
+            // Revert checkbox state on error
+            checkbox.checked = !checkbox.checked;
+            this.showToast('Failed to assign slice', 'error');
         }
     },
     
@@ -2653,7 +3081,6 @@ const app = {
     
     async updateOutputSlice(outputId, newSlice) {
         try {
-            console.log(`Updating output ${outputId} slice to:`, newSlice);
             const response = await fetch(`/api/outputs/video/${outputId}/slice`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -2661,16 +3088,17 @@ const app = {
             });
             
             const data = await response.json();
+            
             if (data.success) {
                 this.showToast(`${outputId}: Slice → ${newSlice}`, 'success');
                 await this.loadExistingOutputs(); // Reload to update display
                 this.updateUI(); // Refresh right sidebar to show new assignments
             } else {
-                console.error('API error:', data.error);
+                console.error('❌ API error:', data.error);
                 this.showToast(`Failed: ${data.error}`, 'error');
             }
         } catch (error) {
-            console.error('Failed to update slice:', error);
+            console.error('❌ Failed to update slice:', error);
             this.showToast('Failed to update slice', 'error');
         }
     },
@@ -2728,12 +3156,12 @@ const app = {
                                     scale: s.scale || 1.0
                                 }))
                             };
-                            console.log(`✅ Restored composition for ${outputId}:`, this.compositions[outputId]);
+                            if (this.debug) console.log(`✅ Restored composition for ${outputId}:`, this.compositions[outputId]);
                         }
                     }
                 }
-                console.log('✅ Loaded existing outputs:', Object.keys(this.existingOutputs).length);
-                console.log('✅ Loaded compositions:', Object.keys(this.compositions).length, this.compositions);
+                if (this.debug) console.log('✅ Loaded existing outputs:', Object.keys(this.existingOutputs).length);
+                if (this.debug) console.log('✅ Loaded compositions:', Object.keys(this.compositions).length, this.compositions);
             } else {
                 this.existingOutputs = {};
             }
@@ -2800,7 +3228,12 @@ const app = {
         }
     },
 
-    updateUI() {
+    // ========================================
+    // UI UPDATE FUNCTIONS (with debouncing)
+    // ========================================
+    
+    // Immediate UI update (use sparingly - only on init or after async operations)
+    updateUIImmediate() {
         const sliceCount = this.slices.filter(s => s.type === 'slice').length;
         const sliceCountEl = document.getElementById('sliceCount');
         if (sliceCountEl) {
@@ -3016,7 +3449,7 @@ const app = {
     // Show masks under the slice
     if (slice.masks && slice.masks.length > 0) {
         slice.masks.forEach(mask => {
-                    const isMaskActive = mask === this.selectedSlice ? 'active' : '';
+                    const isMaskActive = mask === this.selectedMask ? 'active' : '';
                     listHtml += `
                         <div style="padding-left: 20px; margin-top: 4px;">
                             <div class="slice-item ${isMaskActive}" style="background: #1a1a1a; border-color: #f44336;" onclick="app.selectMask('${slice.id}', '${mask.id}'); event.stopPropagation();">
@@ -3041,6 +3474,11 @@ const app = {
         });
 
         document.getElementById('slicesList').innerHTML = listHtml;
+    },
+    
+    // Debounced UI update (use this for most cases - prevents HTML regeneration during clicks)
+    updateUI() {
+        this.debounce(this.updateUIImmediate, 'updateUI');
     },
 
     renderSliceItem(slice, isActive, isAssigned = false) {
@@ -3097,12 +3535,16 @@ const app = {
 
     selectSlice(id) {
         const slice = this.slices.find(s => s.id === id);
+        
         // Toggle selection if clicking the same slice
         if (this.selectedSlice === slice) {
             this.selectedSlice = null;
         } else {
             this.selectedSlice = slice || null;
         }
+        // Clear mask selection when selecting a slice
+        this.selectedMask = null;
+        
         this.updateUI();
         this.render();
     },
@@ -3110,22 +3552,26 @@ const app = {
     selectMask(sliceId, maskId) {
         const slice = this.slices.find(s => s.id === sliceId);
         if (slice && slice.masks) {
-    this.selectedSlice = slice.masks.find(m => m.id === maskId) || null;
-    this.updateUI();
-    this.render();
+            // Keep the parent slice selected (for adding more masks)
+            this.selectedSlice = slice;
+            // Track which mask is highlighted
+            this.selectedMask = slice.masks.find(m => m.id === maskId) || null;
+            this.updateUI();
+            this.render();
         }
     },
 
     deleteMask(sliceId, maskId) {
         const slice = this.slices.find(s => s.id === sliceId);
         if (slice && slice.masks) {
-    slice.masks = slice.masks.filter(m => m.id !== maskId);
-    if (this.selectedSlice && this.selectedSlice.id === maskId) {
-        this.selectedSlice = null;
-    }
-    this.updateUI();
-    this.render();
-    this.showToast('Mask deleted');
+            slice.masks = slice.masks.filter(m => m.id !== maskId);
+            // Clear mask selection if deleting the selected mask
+            if (this.selectedMask && this.selectedMask.id === maskId) {
+                this.selectedMask = null;
+            }
+            this.updateUI();
+            this.render();
+            this.showToast('Mask deleted');
         }
     },
 
@@ -3214,6 +3660,53 @@ const app = {
 		this.saveSliceToBackend(slice);
 	    }
 	}
+        }
+    },
+
+    updateProperty(id, property, value) {
+        const slice = this.slices.find(s => s.id === id);
+        if (!slice) return;
+        
+        if (property === 'label') {
+            slice[property] = value;
+        } else if (!isNaN(value)) {
+            slice[property] = value;
+        }
+        
+        this.updateUI();
+        this.render();
+        
+        // Save to backend
+        if (slice.id) {
+            this.saveSliceToBackend(slice);
+        }
+    },
+
+    updateSoftEdgeWidth(sliceId, edge, value) {
+        const slice = this.slices.find(s => s.id === sliceId);
+        if (!slice || !slice.softEdge || !slice.softEdge.width) return;
+        
+        slice.softEdge.width[edge] = value;
+        this.updateUI();
+        this.render();
+        
+        // Save to backend
+        if (slice.id) {
+            this.saveSliceToBackend(slice);
+        }
+    },
+
+    updateSoftEdgeProperty(sliceId, property, value) {
+        const slice = this.slices.find(s => s.id === sliceId);
+        if (!slice || !slice.softEdge) return;
+        
+        slice.softEdge[property] = value;
+        this.updateUI();
+        this.render();
+        
+        // Save to backend
+        if (slice.id) {
+            this.saveSliceToBackend(slice);
         }
     },
 
@@ -3365,9 +3858,15 @@ const app = {
                     soft_edge: slice.softEdge || null,
                     description: slice.name || '',
                     points: slice.points || null,
+                    masks: slice.masks || [],
                     outputs: slice.outputs || [],
                     source: slice.source || 'canvas'
                 };
+                
+                // Debug log mask saving
+                if (this.debug && slice.masks && slice.masks.length > 0) {
+                    console.log(`💾 Saving slice ${sliceId} with ${slice.masks.length} masks:`, slice.masks);
+                }
             });
             
             const slicesConfig = {
@@ -3465,6 +3964,23 @@ const app = {
                 Object.entries(data.slices).forEach(([sliceId, sliceData]) => {
                     if (sliceId === 'full') return;
                     
+                    // Process masks - ensure they have all required properties
+                    const masks = (sliceData.masks || []).map((maskData, idx) => {
+                        return {
+                            ...maskData,
+                            type: maskData.type || 'mask',
+                            visible: maskData.visible !== false,
+                            label: maskData.label || `Mask ${idx + 1}`,
+                            color: maskData.color || '#ff0000',
+                            inverted: maskData.inverted || false
+                        };
+                    });
+                    
+                    // Debug log mask loading
+                    if (this.debug && masks.length > 0) {
+                        console.log(`📥 Loading slice ${sliceId} with ${masks.length} masks:`, masks);
+                    }
+                    
                     this.slices.push({
                         id: sliceId,
                         x: sliceData.x,
@@ -3480,7 +3996,7 @@ const app = {
                         outputs: sliceData.outputs || [],
                         source: sliceData.source || 'canvas',
                         color: this.colors[this.colorIndex % this.colors.length],
-                        masks: [],
+                        masks: masks,
                         type: 'slice'
                     });
                     this.colorIndex++;
@@ -3612,18 +4128,52 @@ const app = {
         e.preventDefault();
         
         const pos = this.getMousePos(e);
-        const slice = this.getSliceAt(pos);
+        const clickedItem = this.getSliceAt(pos);
         
-        // Only show context menu for slices (not masks)
-        if (!slice || slice.type !== 'slice') {
-    this.closeContextMenu();
-    return;
+        if (!clickedItem) {
+            this.closeContextMenu();
+            return;
         }
         
-        this.contextMenuTarget = slice;
-        this.selectedSlice = slice;
+        // Check if clicked item is a mask
+        let isMask = false;
+        let parentSlice = null;
+        for (let slice of this.slices) {
+            if (slice.masks && slice.masks.includes(clickedItem)) {
+                isMask = true;
+                parentSlice = slice;
+                break;
+            }
+        }
         
         const menu = document.getElementById('contextMenu');
+        
+        // Show/hide menu sections based on context
+        const videoItems = menu.querySelector('.video-context-items');
+        const maskItems = menu.querySelector('.mask-context-items');
+        
+        if (isMask) {
+            // Show mask menu, hide slice menu
+            this.contextMenuTarget = clickedItem;
+            this.contextMenuType = 'mask';
+            this.contextMenuParentSlice = parentSlice;
+            this.selectedSlice = parentSlice;
+            this.selectedMask = clickedItem;
+            
+            if (videoItems) videoItems.style.display = 'none';
+            if (maskItems) maskItems.style.display = 'block';
+        } else if (clickedItem.type === 'slice') {
+            // Show slice menu, hide mask menu
+            this.contextMenuTarget = clickedItem;
+            this.contextMenuType = 'slice';
+            this.selectedSlice = clickedItem;
+            
+            if (videoItems) videoItems.style.display = 'block';
+            if (maskItems) maskItems.style.display = 'none';
+        } else {
+            this.closeContextMenu();
+            return;
+        }
         
         // Position menu initially to measure size
         menu.style.left = e.clientX + 'px';
@@ -3768,6 +4318,27 @@ const app = {
         this.deleteSliceById(slice.id);
         this.contextMenuTarget = null;
         this.selectedSlice = null;
+        break;
+        
+    case 'invertMask':
+        if (this.contextMenuType === 'mask' && this.contextMenuTarget) {
+            const mask = this.contextMenuTarget;
+            mask.inverted = !mask.inverted;
+            this.showToast(mask.inverted ? 'Mask inverted' : 'Mask normal');
+        }
+        break;
+        
+    case 'deleteMask':
+        if (this.contextMenuType === 'mask' && this.contextMenuParentSlice) {
+            const parentSlice = this.contextMenuParentSlice;
+            const mask = this.contextMenuTarget;
+            const index = parentSlice.masks.indexOf(mask);
+            if (index > -1) {
+                parentSlice.masks.splice(index, 1);
+                this.showToast('Mask deleted');
+                this.selectedMask = null;
+            }
+        }
         break;
         }
         
@@ -4168,7 +4739,7 @@ const app = {
             ctx.fillStyle = slice.color + '40';  // Semi-transparent
             ctx.fillRect(compSlice.x, compSlice.y, compSlice.width, compSlice.height);
             
-            ctx.strokeStyle = isSelected ? '#fff' : slice.color;
+            ctx.strokeStyle = isSelected ? '#ff00ff' : slice.color;
             ctx.lineWidth = isSelected ? 3 : 2;
             ctx.strokeRect(compSlice.x, compSlice.y, compSlice.width, compSlice.height);
             
@@ -5374,6 +5945,12 @@ app.addArtNetOutput = function() {
     // Clear edit ID (this is a new output)
     document.getElementById('editOutputId').value = '';
     
+    // Remove any lingering Bootstrap modal backdrops (prevents blocking)
+    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+    document.body.classList.remove('modal-open');
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+    
     // Update modal UI for create mode
     document.getElementById('outputModalTitle').textContent = '➕ Add ArtNet Output';
     document.getElementById('outputModalSaveBtn').textContent = 'Create Output';
@@ -5400,6 +5977,12 @@ app.editArtNetOutput = function(outputId) {
         this.showToast('❌ Output not found', 'error');
         return;
     }
+    
+    // Remove any lingering Bootstrap modal backdrops (prevents blocking)
+    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+    document.body.classList.remove('modal-open');
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
     
     // Set edit ID
     document.getElementById('editOutputId').value = outputId;
@@ -5805,6 +6388,12 @@ app.outputContextMenuAction = function(action, event) {
  * Open DMX monitor modal
  */
 app.openDmxMonitor = function(output) {
+    // Remove any lingering Bootstrap modal backdrops (prevents blocking)
+    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+    document.body.classList.remove('modal-open');
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+    
     const modal = document.getElementById('dmxMonitorModal');
     modal.style.display = 'flex';
     

@@ -268,6 +268,13 @@ class EffectProcessor:
         Returns:
             numpy array: Processed frame
         """
+        # FAST PATH: Skip processing if no effects (zero overhead)
+        effect_chain = self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain
+        has_clip_effects = player and current_clip_id and hasattr(player, 'layers')
+        
+        if not effect_chain and not has_clip_effects:
+            return frame  # No effects to apply at all
+        
         processed_frame = frame
         
         # DEBUG: Log effect application details (throttled)
@@ -276,10 +283,9 @@ class EffectProcessor:
         self._apply_debug_counter += 1
         
         if self._apply_debug_counter % 120 == 1:  # Log every 2 seconds at 60fps
-            logger.debug(f"🎨 [{player_name}] apply_effects: chain={chain_type}, player_fx={len(self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain)}, clip_id={current_clip_id is not None}, has_player={player is not None}")
+            logger.debug(f"🎨 [{player_name}] apply_effects: chain={chain_type}, player_fx={len(effect_chain)}, clip_id={current_clip_id is not None}, has_player={player is not None}")
         
         # 1. Apply player-level effects FIRST (base layer)
-        effect_chain = self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain
         
         if effect_chain:
             if self._apply_debug_counter % 120 == 1:
@@ -374,6 +380,35 @@ class EffectProcessor:
                 logger.warning(f"⚠️ [{player_name}] No clip effects found for clip_id {current_clip_id}")
         
         return processed_frame
+    
+    def is_chain_noop(self, chain_type='video'):
+        """Check if effect chain consists only of no-op effects.
+        
+        Args:
+            chain_type: 'video' or 'artnet'
+            
+        Returns:
+            bool: True if all effects in chain are no-ops or chain is empty
+        """
+        effect_chain = self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain
+        
+        if not effect_chain:
+            return True  # Empty chain is a no-op
+        
+        for effect in effect_chain:
+            # Skip disabled effects
+            if not effect.get('enabled', True):
+                continue
+                
+            plugin_instance = effect.get('instance')
+            if plugin_instance and hasattr(plugin_instance, 'is_noop'):
+                if not plugin_instance.is_noop():
+                    return False  # Found an effect that will modify the frame
+            else:
+                # Effect doesn't have is_noop() method, assume it will modify
+                return False
+        
+        return True  # All effects are no-ops
     
     def clear_clip_cache(self):
         """Clear clip effect cache."""

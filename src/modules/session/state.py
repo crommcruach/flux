@@ -66,7 +66,7 @@ class SessionStateManager:
     
     def _save_worker(self):
         """Background thread for async file I/O with debouncing."""
-        debounce_interval = 1.0  # Wait 1 second after last change before writing
+        debounce_interval = 0.1  # Wait 100ms after last change before writing (fast enough for deletes)
         
         while not self._shutdown:
             try:

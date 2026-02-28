@@ -363,13 +363,18 @@ def register_output_routes(app, player_manager):
             
             # Required fields
             output_id = data.get('output_id')
-            output_type = data.get('type', 'virtual')
+            
+            # Config can be at top level or in 'config' object
+            config = data.get('config', {})
+            output_type = config.get('type') or data.get('type', 'virtual')
             
             if not output_id:
                 return jsonify({
                     'success': False,
                     'error': 'Missing output_id'
                 }), 400
+            
+            logger.info(f"📦 Creating output '{output_id}' of type '{output_type}' with config: {config}")
             
             player_obj = player_manager.get_player(player)
             if not player_obj:
@@ -395,7 +400,7 @@ def register_output_routes(app, player_manager):
             
             # VALIDATION: Check for duplicate monitor usage (display outputs only)
             if output_type == 'display':
-                monitor_index = data.get('monitor_index')
+                monitor_index = config.get('monitor_index')
                 if monitor_index is not None:
                     # Check if any existing output is using this monitor
                     for existing_id, existing_output in player_obj.output_manager.outputs.items():
@@ -406,26 +411,29 @@ def register_output_routes(app, player_manager):
                                     'error': f'Monitor {monitor_index} is already in use by output "{existing_id}"'
                                 }), 400
             
-            # Create output config
+            # Build output config from request config
             output_config = {
                 'type': output_type,
-                'source': data.get('source', 'canvas'),
-                'slice': data.get('slice', 'full'),
-                'resolution': data.get('resolution', [1920, 1080]),
-                'fps': data.get('fps', 30),
-                'enabled': data.get('enabled', False)
+                'source': config.get('source', 'canvas'),
+                'slice': config.get('slice', 'full'),
+                'resolution': config.get('resolution', [1920, 1080]),
+                'fps': config.get('fps', 30),
+                'enabled': config.get('enabled', False)
             }
             
             # Add type-specific fields
             if output_type == 'virtual':
-                output_config['name'] = data.get('name', f'Virtual Output {output_id}')
+                output_config['name'] = config.get('name', f'Virtual Output {output_id}')
             elif output_type == 'display':
-                output_config['monitor_index'] = data.get('monitor_index', 0)
-                output_config['fullscreen'] = data.get('fullscreen', True)
-                output_config['window_title'] = data.get('window_title', f'Flux {output_id}')
+                output_config['monitor_index'] = config.get('monitor_index', 0)
+                output_config['fullscreen'] = config.get('fullscreen', True)
+                output_config['window_title'] = config.get('window_title', f'Flux {output_id}')
+                logger.info(f"🖥️ Display output config: monitor={output_config['monitor_index']}, fullscreen={output_config['fullscreen']}, title='{output_config['window_title']}'")
             
             # Create and register output
-            from .outputs.plugins import DisplayOutput, VirtualOutput
+            from ...player.outputs.plugins import DisplayOutput, VirtualOutput
+            
+            logger.info(f"🏗️ Creating {output_type} output '{output_id}' with config: {output_config}")
             
             if output_type == 'virtual':
                 output = VirtualOutput(output_id, output_config)
@@ -437,11 +445,23 @@ def register_output_routes(app, player_manager):
                     'error': f'Unsupported output type: {output_type}'
                 }), 400
             
+            logger.info(f"📝 Registering output '{output_id}'...")
             player_obj.output_manager.register_output(output_id, output)
             
-            # Auto-enable if requested
-            if output_config['enabled']:
-                player_obj.output_manager.enable_output(output_id)
+            # Auto-enable display outputs to show window immediately
+            if output_type == 'display' or output_config.get('enabled'):
+                logger.info(f"⚡ Enabling output '{output_id}'...")
+                success = player_obj.output_manager.enable_output(output_id)
+                if not success:
+                    logger.error(f"❌ Failed to enable output {output_id}")
+                    return jsonify({
+                        'success': False,
+                        'error': f'Output created but failed to enable'
+                    }), 500
+                else:
+                    logger.info(f"✅ Output {output_id} enabled and window opened")
+            
+            logger.info(f"🎉 Output '{output_id}' created successfully!")
             
             return jsonify({
                 'success': True,

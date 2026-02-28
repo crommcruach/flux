@@ -601,6 +601,9 @@ class LayerManager:
         if not self.layers or len(self.layers) == 0:
             return None, 0
         
+        # Get profiler (if available)
+        profiler = getattr(self, 'profiler', None)
+        
         # OPTIMIZATION: Single-layer fast path (skip all compositing logic)
         if len(self.layers) == 1:
             # Only one layer - no blending needed, process directly (saves 5-8ms)
@@ -610,9 +613,18 @@ class LayerManager:
             preprocess_transport_callback(layer)
             
             # Fetch and process single layer
-            frame, source_delay = layer.source.get_next_frame()
+            if profiler:
+                with profiler.profile_stage('source_decode'):
+                    frame, source_delay = layer.source.get_next_frame()
+            else:
+                frame, source_delay = layer.source.get_next_frame()
+            
             if frame is not None:
-                frame = self.apply_layer_effects(layer, frame, player_name)
+                if profiler:
+                    with profiler.profile_stage('clip_effects'):
+                        frame = self.apply_layer_effects(layer, frame, player_name)
+                else:
+                    frame = self.apply_layer_effects(layer, frame, player_name)
             
             return frame, source_delay
         
@@ -623,13 +635,21 @@ class LayerManager:
         preprocess_transport_callback(self.layers[0])
         
         # Master Frame (Layer 0 determines timing and length)
-        frame, source_delay = self.layers[0].source.get_next_frame()
+        if profiler:
+            with profiler.profile_stage('source_decode'):
+                frame, source_delay = self.layers[0].source.get_next_frame()
+        else:
+            frame, source_delay = self.layers[0].source.get_next_frame()
         
         if frame is None:
             return None, source_delay
         
         # Apply Layer 0 effects (Transport controls playback here)
-        frame = self.apply_layer_effects(self.layers[0], frame, player_name)
+        if profiler:
+            with profiler.profile_stage('clip_effects'):
+                frame = self.apply_layer_effects(self.layers[0], frame, player_name)
+        else:
+            frame = self.apply_layer_effects(self.layers[0], frame, player_name)
         
         # Composite Slave Layers (1-N)
         for layer in self.layers[1:]:
@@ -641,13 +661,21 @@ class LayerManager:
             # This ensures each layer respects its own transport settings
             preprocess_transport_callback(layer)
             
-            overlay_frame, _ = layer.source.get_next_frame()
+            if profiler:
+                with profiler.profile_stage('source_decode'):
+                    overlay_frame, _ = layer.source.get_next_frame()
+            else:
+                overlay_frame, _ = layer.source.get_next_frame()
             
             # Auto-Reset when slave layer ends (Looping!)
             if overlay_frame is None:
                 debug_layers(logger, f"🔁 Layer {layer.layer_id} reached end, auto-reset (slave loop)")
                 layer.source.reset()
-                overlay_frame, _ = layer.source.get_next_frame()
+                if profiler:
+                    with profiler.profile_stage('source_decode'):
+                        overlay_frame, _ = layer.source.get_next_frame()
+                else:
+                    overlay_frame, _ = layer.source.get_next_frame()
             
             # If still None (e.g., broken source) - skip layer
             if overlay_frame is None:
@@ -661,14 +689,22 @@ class LayerManager:
                 continue
             
             # Apply layer effects
-            overlay_frame = self.apply_layer_effects(layer, overlay_frame, player_name)
+            if profiler:
+                with profiler.profile_stage('clip_effects'):
+                    overlay_frame = self.apply_layer_effects(layer, overlay_frame, player_name)
+            else:
+                overlay_frame = self.apply_layer_effects(layer, overlay_frame, player_name)
             
             # OPTIMIZATION: Get blend plugin (cached, only updates opacity)
             blend_plugin = self.get_blend_plugin(layer.blend_mode, layer.opacity)
             
             # PERFORMANCE CRITICAL: Composite with BlendEffect
             # This is the most expensive operation (float32 conversion + blending)
-            frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
+            if profiler:
+                with profiler.profile_stage('layer_composition'):
+                    frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
+            else:
+                frame = blend_plugin.process_frame(frame, overlay=overlay_frame)
         
         return frame, source_delay
     

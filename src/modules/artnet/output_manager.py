@@ -67,6 +67,10 @@ class OutputManager:
         Returns:
             Dictionary of output_id → DMX bytes ready for transmission
         """
+        # FAST PATH: No objects configured = no work to do
+        if not objects:
+            return {}
+        
         rendered_outputs = {}
         
         for output_id, output in outputs.items():

@@ -23,7 +23,8 @@ class SliceDefinition:
     rotation: float = 0  # Degrees
     shape: str = 'rectangle'  # 'rectangle', 'polygon', 'circle'
     soft_edge: Optional[int] = None  # Soft edge blur radius
-    mask: Optional[np.ndarray] = None  # Custom mask
+    mask: Optional[np.ndarray] = None  # Custom mask (compiled numpy array)
+    masks: Optional[List[Dict]] = None  # Raw mask geometries for UI editing
     description: str = ''
     points: Optional[List[Tuple[int, int]]] = None  # For polygon shape
 
@@ -51,6 +52,7 @@ class SliceManager:
         self.canvas_width = canvas_width
         self.canvas_height = canvas_height
         self.slices: Dict[str, SliceDefinition] = {}
+        self._logged_warnings = set()  # Track which warnings we've already logged
         
         # Add default "full" slice
         self.add_slice(
@@ -66,6 +68,7 @@ class SliceManager:
     def add_slice(self, slice_id: str, x: int, y: int, width: int, height: int,
                   rotation: float = 0, shape: str = 'rectangle',
                   soft_edge: Optional[int] = None, mask: Optional[np.ndarray] = None,
+                  masks: Optional[List[Dict]] = None,
                   description: str = '', points: Optional[List[Tuple[int, int]]] = None):
         """
         Add or update a slice definition
@@ -77,7 +80,8 @@ class SliceManager:
             rotation: Rotation in degrees
             shape: 'rectangle', 'polygon', or 'circle'
             soft_edge: Soft edge blur radius (pixels)
-            mask: Custom mask (numpy array)
+            mask: Custom mask (numpy array, compiled)
+            masks: Raw mask geometries for UI editing
             description: Human-readable description
             points: Polygon points (for polygon shape)
         """
@@ -89,11 +93,14 @@ class SliceManager:
             shape=shape,
             soft_edge=soft_edge,
             mask=mask,
+            masks=masks,
             description=description,
             points=points
         )
         
         self.slices[slice_id] = slice_def
+        # Clear warning flag when slice is added (in case it was previously missing)
+        self._logged_warnings.discard(slice_id)
         logger.debug(f"Slice '{slice_id}' added/updated: {width}x{height} at ({x},{y})")
     
     def remove_slice(self, slice_id: str) -> bool:
@@ -129,7 +136,10 @@ class SliceManager:
             np.ndarray: Extracted and processed slice
         """
         if slice_id not in self.slices:
-            logger.warning(f"Slice '{slice_id}' not found, returning full frame")
+            # Only log warning once per missing slice_id to avoid spam
+            if slice_id not in self._logged_warnings:
+                logger.warning(f"Slice '{slice_id}' not found, returning full frame")
+                self._logged_warnings.add(slice_id)
             return frame
         
         slice_def = self.slices[slice_id]
@@ -155,7 +165,11 @@ class SliceManager:
         
         # Apply custom mask if provided
         if slice_def.mask is not None:
+            logger.debug(f"🎭 Applying mask to slice '{slice_id}': mask shape={slice_def.mask.shape}, slice shape={sliced.shape[:2]}")
             sliced = self._apply_mask(sliced, slice_def.mask)
+            logger.debug(f"✅ Mask applied to slice '{slice_id}'")
+        else:
+            logger.debug(f"No mask to apply for slice '{slice_id}'")
         
         return sliced
     
@@ -297,16 +311,27 @@ class SliceManager:
     
     def _apply_mask(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Apply custom mask to frame"""
+        logger.debug(f"_apply_mask: frame shape={frame.shape}, mask shape={mask.shape}")
+        
         # Resize mask if needed
         if mask.shape[:2] != frame.shape[:2]:
+            logger.debug(f"Resizing mask from {mask.shape[:2]} to {frame.shape[:2]}")
             mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]))
         
         # Convert to single channel if needed
         if len(mask.shape) == 3:
+            logger.debug("Converting mask to grayscale")
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         
+        # Count black pixels (masked regions)
+        black_pixels = np.sum(mask == 0)
+        total_pixels = mask.shape[0] * mask.shape[1]
+        logger.debug(f"Mask has {black_pixels}/{total_pixels} black pixels ({black_pixels/total_pixels*100:.1f}%)")
+        
         # Apply mask
-        return cv2.bitwise_and(frame, frame, mask=mask)
+        result = cv2.bitwise_and(frame, frame, mask=mask)
+        logger.debug(f"✅ Mask applied via bitwise_and")
+        return result
     
     def get_slice_list(self) -> List[Dict]:
         """
@@ -327,6 +352,7 @@ class SliceManager:
                 'soft_edge': slice_def.soft_edge,
                 'description': slice_def.description,
                 'has_mask': slice_def.mask is not None,
+                'masks': slice_def.masks or [],
                 'points': slice_def.points
             }
             for slice_def in self.slices.values()
@@ -344,6 +370,7 @@ class SliceManager:
                 'shape': slice_def.shape,
                 'soft_edge': slice_def.soft_edge,
                 'description': slice_def.description,
+                'masks': slice_def.masks or [],
                 'points': slice_def.points
             }
             for slice_id, slice_def in self.slices.items()
@@ -362,6 +389,7 @@ class SliceManager:
                 rotation=slice_data.get('rotation', 0),
                 shape=slice_data.get('shape', 'rectangle'),
                 soft_edge=slice_data.get('soft_edge'),
+                masks=slice_data.get('masks', []),
                 description=slice_data.get('description', ''),
                 points=slice_data.get('points')
             )

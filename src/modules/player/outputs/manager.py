@@ -239,16 +239,20 @@ class OutputManager:
             self.layer_manager = layer_manager
             self.current_clip_id = current_clip_id
         
-        # Debug: Log first few frames
+        # Debug: Log first few frames and enabled outputs
         if not hasattr(self, '_frame_count'):
             self._frame_count = 0
         self._frame_count += 1
         if self._frame_count <= 5:
-            logger.debug(f"[{self.player_name}] update_frame called (frame #{self._frame_count}), outputs: {len(self.outputs)}, enabled: {sum(1 for o in self.outputs.values() if o.enabled)}")
+            enabled_outputs = [(oid, o.config.get('type', 'unknown')) for oid, o in self.outputs.items() if o.enabled]
+            logger.debug(f"[{self.player_name}] update_frame called (frame #{self._frame_count}), total outputs: {len(self.outputs)}, enabled: {len(enabled_outputs)}")
+            logger.debug(f"[{self.player_name}] Enabled outputs: {enabled_outputs}")
         
         # Distribute to all enabled outputs (use list() to avoid RuntimeError if outputs dict changes during iteration)
         for output_id, output in list(self.outputs.items()):
             if not output.enabled:
+                if self._frame_count <= 5:
+                    logger.debug(f"[{self.player_name}] Skipping disabled output: {output_id}")
                 continue
             
             try:
@@ -257,7 +261,11 @@ class OutputManager:
                 
                 if frame is not None:
                     # Queue frame for output
+                    # OPTIMIZATION: Frame copy only happens if output.needs_frame_copy=True
+                    # or if frame was modified by slicing/masking
                     output.queue_frame(frame)
+                elif self._frame_count <= 5:
+                    logger.debug(f"[{self.player_name}] No frame for output {output_id}")
             
             except Exception as e:
                 logger.error(f"[{self.player_name}] Error distributing to '{output_id}': {e}", exc_info=True)
@@ -282,7 +290,7 @@ class OutputManager:
         
         # Get source frame
         if source == 'canvas':
-            # Full composited canvas
+            # Full composited canvas (reference, no copy)
             frame = self.composite_frame
         
         elif source.startswith('clip:'):
@@ -455,7 +463,8 @@ class OutputManager:
                     logger.debug(f"Applying {len(masks)} mask(s) to slice")
                     for mask in masks:
                         if mask.get('visible', True):
-                            sliced = self._apply_mask_to_frame(sliced, mask)
+                            # Pass slice origin for coordinate translation
+                            sliced = self._apply_mask_to_frame(sliced, mask, slice_x=x, slice_y=y)
                 
                 return sliced
             
@@ -477,13 +486,124 @@ class OutputManager:
             logger.error(f"Failed to apply inline slice: {e}", exc_info=True)
             return frame  # Return original frame on error
     
-    def _apply_mask_to_frame(self, frame: np.ndarray, mask_config: dict) -> np.ndarray:
+    def _masks_to_numpy(self, masks: list, width: int, height: int, slice_x: int, slice_y: int) -> Optional[np.ndarray]:
+        """
+        Convert masks array from frontend to a single numpy mask array
+        
+        Args:
+            masks: List of mask configs from frontend
+            width: Slice width
+            height: Slice height
+            slice_x: Slice X position on canvas
+            slice_y: Slice Y position on canvas
+        
+        Returns:
+            np.ndarray: Combined mask (255=keep, 0=remove) or None if no masks
+        """
+        try:
+            import cv2
+            import numpy as np
+            
+            if not masks:
+                logger.debug("No masks provided, returning None")
+                return None
+            
+            logger.debug(f"Converting {len(masks)} masks to numpy for slice {width}x{height} at ({slice_x},{slice_y})")
+            
+            # Create mask image (white = keep, black = remove)
+            combined_mask = np.ones((height, width), dtype=np.uint8) * 255
+            masks_drawn = 0
+            
+            for i, mask_config in enumerate(masks):
+                if not mask_config.get('visible', True):
+                    logger.debug(f"  Mask {i}: invisible, skipping")
+                    continue
+                
+                is_inverted = mask_config.get('inverted', False)
+                mask_shape = mask_config.get('shape', 'circle')
+                # Normal mask (not inverted): remove masked area (draw black on white background)
+                # Inverted mask: keep only masked area (fill black, draw white in masked area)
+                logger.debug(f"  Mask {i}: shape={mask_shape}, inverted={is_inverted}, config={mask_config}")
+                
+                if mask_shape == 'rectangle':
+                    # Translate mask coordinates from canvas to slice-relative
+                    x = int(mask_config.get('x', 0)) - slice_x
+                    y = int(mask_config.get('y', 0)) - slice_y
+                    mask_width = int(mask_config.get('width', 0))
+                    mask_height = int(mask_config.get('height', 0))
+                    
+                    logger.debug(f"    Rectangle: ({x},{y}) size {mask_width}x{mask_height}")
+                    
+                    # Only draw if mask intersects with slice
+                    if x < width and y < height and x + mask_width > 0 and y + mask_height > 0:
+                        # Normal mask: remove the masked area (draw black rectangle on white background)
+                        # Inverted mask: keep only the masked area (fill black, then draw white rectangle)
+                        if is_inverted:
+                            combined_mask[:] = 0  # Fill entire mask with black (remove all)
+                            cv2.rectangle(combined_mask, (x, y), (x + mask_width, y + mask_height), 255, -1)  # Keep this area
+                        else:
+                            cv2.rectangle(combined_mask, (x, y), (x + mask_width, y + mask_height), 0, -1)  # Remove this area
+                        masks_drawn += 1
+                        logger.debug(f"    ✅ Rectangle drawn (inverted={is_inverted})")
+                    else:
+                        logger.debug(f"    ❌ Rectangle outside slice bounds")
+                    
+                elif mask_shape == 'circle':
+                    centerX = int(mask_config.get('centerX', 0)) - slice_x
+                    centerY = int(mask_config.get('centerY', 0)) - slice_y
+                    radius = int(mask_config.get('radius', 0))
+                    
+                    logger.debug(f"    Circle: center ({centerX},{centerY}) radius {radius}")
+                    
+                    # Only draw if circle intersects with slice
+                    if (centerX + radius > 0 and centerX - radius < width and 
+                        centerY + radius > 0 and centerY - radius < height):
+                        # Normal mask: remove the masked area (draw black circle on white background)
+                        # Inverted mask: keep only the masked area (fill black, then draw white circle)
+                        if is_inverted:
+                            combined_mask[:] = 0  # Fill entire mask with black (remove all)
+                            cv2.circle(combined_mask, (centerX, centerY), radius, 255, -1)  # Keep this area
+                        else:
+                            cv2.circle(combined_mask, (centerX, centerY), radius, 0, -1)  # Remove this area
+                        masks_drawn += 1
+                        logger.debug(f"    ✅ Circle drawn (inverted={is_inverted})")
+                    else:
+                        logger.debug(f"    ❌ Circle outside slice bounds")
+                    
+                elif mask_shape in ['polygon', 'triangle', 'freehand']:
+                    points = mask_config.get('points', [])
+                    if points and len(points) >= 3:
+                        # Translate all points from canvas to slice-relative
+                        pts = np.array([
+                            [int(p.get('x', 0)) - slice_x, int(p.get('y', 0)) - slice_y] 
+                            for p in points
+                        ], dtype=np.int32)
+                        # Normal mask: remove the masked area (draw black polygon on white background)
+                        # Inverted mask: keep only the masked area (fill black, then draw white polygon)
+                        if is_inverted:
+                            combined_mask[:] = 0  # Fill entire mask with black (remove all)
+                            cv2.fillPoly(combined_mask, [pts], 255)  # Keep this area
+                        else:
+                            cv2.fillPoly(combined_mask, [pts], 0)  # Remove this area
+                        masks_drawn += 1
+                        logger.debug(f"    ✅ Polygon drawn with {len(points)} points (inverted={is_inverted})")
+            
+            logger.debug(f"✅ Created mask with {masks_drawn} shapes drawn")
+            return combined_mask
+            
+        except Exception as e:
+            logger.error(f"Failed to convert masks to numpy: {e}", exc_info=True)
+            return None
+    
+    def _apply_mask_to_frame(self, frame: np.ndarray, mask_config: dict, slice_x: int = 0, slice_y: int = 0) -> np.ndarray:
         """
         Apply a mask to frame (make masked region black)
         
         Args:
-            frame: Input frame
-            mask_config: Mask definition with shape, position, etc.
+            frame: Input frame (extracted slice)
+            mask_config: Mask definition with shape, position, etc. (in canvas coordinates)
+            slice_x: X position of the slice on canvas (for coordinate translation)
+            slice_y: Y position of the slice on canvas (for coordinate translation)
         
         Returns:
             np.ndarray: Frame with mask applied
@@ -499,22 +619,35 @@ class OutputManager:
             mask = np.ones((h, w), dtype=np.uint8) * 255
             
             if mask_shape == 'rectangle':
-                x = int(mask_config.get('x', 0))
-                y = int(mask_config.get('y', 0))
+                # Translate mask coordinates from canvas to slice-relative coordinates
+                x = int(mask_config.get('x', 0)) - slice_x
+                y = int(mask_config.get('y', 0)) - slice_y
                 mask_width = int(mask_config.get('width', w))
                 mask_height = int(mask_config.get('height', h))
-                cv2.rectangle(mask, (x, y), (x + mask_width, y + mask_height), 0, -1)
+                
+                # Only draw if mask intersects with slice
+                if x < w and y < h and x + mask_width > 0 and y + mask_height > 0:
+                    cv2.rectangle(mask, (x, y), (x + mask_width, y + mask_height), 0, -1)
                 
             elif mask_shape == 'circle':
-                centerX = int(mask_config.get('centerX', w // 2))
-                centerY = int(mask_config.get('centerY', h // 2))
+                # Translate mask coordinates from canvas to slice-relative coordinates
+                centerX = int(mask_config.get('centerX', w // 2)) - slice_x
+                centerY = int(mask_config.get('centerY', h // 2)) - slice_y
                 radius = int(mask_config.get('radius', min(w, h) // 4))
-                cv2.circle(mask, (centerX, centerY), radius, 0, -1)
+                
+                # Only draw if circle intersects with slice
+                if (centerX + radius > 0 and centerX - radius < w and 
+                    centerY + radius > 0 and centerY - radius < h):
+                    cv2.circle(mask, (centerX, centerY), radius, 0, -1)
                 
             elif mask_shape in ['polygon', 'triangle', 'freehand']:
                 points = mask_config.get('points', [])
                 if points and len(points) >= 3:
-                    pts = np.array([[int(p.get('x', 0)), int(p.get('y', 0))] for p in points], dtype=np.int32)
+                    # Translate all points from canvas to slice-relative coordinates
+                    pts = np.array([
+                        [int(p.get('x', 0)) - slice_x, int(p.get('y', 0)) - slice_y] 
+                        for p in points
+                    ], dtype=np.int32)
                     cv2.fillPoly(mask, [pts], 0)
             
             # Apply mask
@@ -834,90 +967,15 @@ class OutputManager:
             # Ignore complex soft_edge for now (SliceDefinition only supports int)
             soft_edge = None
             
-            self.slice_manager.add_slice(
-                slice_id=slice_id,
-                x=x, y=y,
-                width=width, height=height,
-                rotation=rotation,
-                shape=slice_data.get('shape', 'rectangle'),
-                soft_edge=soft_edge,
-                description=slice_data.get('description', ''),
-                points=slice_data.get('points')
-            )
-            self._save_state()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to add slice '{slice_id}': {e}", exc_info=True)
-            return False
-    
-    def remove_slice(self, slice_id: str) -> bool:
-        """
-        Remove a slice definition
-        
-        Args:
-            slice_id: Slice to remove
+            # Convert masks array to numpy mask
+            masks = slice_data.get('masks', [])
+            logger.debug(f"🔍 add_slice '{slice_id}': received {len(masks)} masks")
+            mask_numpy = self._masks_to_numpy(masks, width, height, x, y) if masks else None
             
-        Returns:
-            bool: True if removed
-        """
-        if self.slice_manager.remove_slice(slice_id):
-            self._save_state()
-            return True
-        return False
-    
-    def update_slice(self, slice_id: str, slice_data: dict) -> bool:
-        """
-        Update an existing slice definition
-        
-        Args:
-            slice_id: Slice to update
-            slice_data: New slice configuration
-            
-        Returns:
-            bool: True if updated
-        """
-        return self.add_slice(slice_id, slice_data)
-    
-    def set_state_save_callback(self, callback):
-        """
-        Set callback function for automatic state persistence
-        
-        Args:
-            callback: Function to call when state changes (receives player_name and state dict)
-        """
-        self._state_save_callback = callback
-        logger.debug(f"[{self.player_name}] State save callback registered")
-    
-    def _save_state(self):
-        """Internal method to trigger state save if callback is set"""
-        if self._state_save_callback:
-            try:
-                state = self.get_state()
-                self._state_save_callback(self.player_name, state)
-            except Exception as e:
-                logger.error(f"Failed to save output state: {e}")
-    
-    def add_slice(self, slice_id: str, slice_data: dict) -> bool:
-        """
-        Add or update a slice definition
-        
-        Args:
-            slice_id: Unique slice identifier
-            slice_data: Slice configuration dict
-            
-        Returns:
-            bool: True if added
-        """
-        try:
-            # Ensure coordinates are integers (convert if needed)
-            x = int(slice_data.get('x', 0))
-            y = int(slice_data.get('y', 0))
-            width = int(slice_data.get('width', self.canvas_width))
-            height = int(slice_data.get('height', self.canvas_height))
-            rotation = float(slice_data.get('rotation', 0))
-            
-            # Ignore complex soft_edge for now (SliceDefinition only supports int)
-            soft_edge = None
+            if mask_numpy is not None:
+                logger.debug(f"✅ Mask created for slice '{slice_id}': shape={mask_numpy.shape}")
+            else:
+                logger.debug(f"No mask for slice '{slice_id}'")
             
             self.slice_manager.add_slice(
                 slice_id=slice_id,
@@ -926,6 +984,8 @@ class OutputManager:
                 rotation=rotation,
                 shape=slice_data.get('shape', 'rectangle'),
                 soft_edge=soft_edge,
+                mask=mask_numpy,
+                masks=masks,  # Store raw mask geometries for UI
                 description=slice_data.get('description', ''),
                 points=slice_data.get('points')
             )

@@ -16,6 +16,7 @@ from .transitions.manager import TransitionManager
 from .effects.processor import EffectProcessor
 from .playlists.manager import PlaylistManager
 from .layers.manager import LayerManager
+from ..performance.profiler import get_profiler
 from ..core.constants import (
     DEFAULT_SPEED,
     UNLIMITED_LOOPS,
@@ -98,6 +99,9 @@ class Player:
             self.canvas_height = 1080
             logger.warning(f"Canvas size not provided or detected, using default: {self.canvas_width}x{self.canvas_height}")
         
+        # Performance profiler (tracks processing times through pipeline)
+        self.profiler = get_profiler(self.player_name)
+        
         # Layer Manager (Multi-Layer System)
         self.layer_manager = LayerManager(
             player_id=self.player_id,
@@ -109,6 +113,8 @@ class Player:
         )
         # Give layer_manager access to player for WebSocket context
         self.layer_manager.player = self
+        # Give layer_manager access to profiler for granular timing
+        self.layer_manager.profiler = self.profiler
         
         # Playback State
         self.is_running = False
@@ -1060,6 +1066,8 @@ class Player:
             # ========== MULTI-LAYER COMPOSITING ==========
             if not should_autoadvance and self.layers and len(self.layers) > 0:
                 # Delegate all layer compositing to LayerManager
+                # PROFILING: Now done inside composite_layers() for granular breakdown
+                # (source_decode, clip_effects, layer_composition measured separately)
                 frame, source_delay = self.layer_manager.composite_layers(
                     preprocess_transport_callback=self._preprocess_layer_transport,
                     player_name=self.player_name
@@ -1330,7 +1338,8 @@ class Player:
                 continue
             
             # Apply transition if active
-            frame = self.transition_manager.apply(frame, self.player_name)
+            with self.profiler.profile_stage('transitions'):
+                frame = self.transition_manager.apply(frame, self.player_name)
             
             # Store frame for next transition
             self.transition_manager.store_frame(frame)
@@ -1344,56 +1353,66 @@ class Player:
             
             # Hue Shift in-place anwenden wenn aktiviert (OPTIMIZATION: Lazy conversion)
             if self.hue_shift != 0:
-                frame_hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+                frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                 frame_hsv[:, :, 0] = (frame_hsv[:, :, 0].astype(np.int16) + self.hue_shift // 2) % 180
-                cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2RGB, dst=frame)
+                cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2BGR, dst=frame)
             # Note: When hue_shift == 0, skip entire HSV conversion (saves 2-3ms)
             
             # Wende Effect Chains an - nur kopieren wenn beide Chains unterschiedlich sind
-            if self.effect_processor.video_effect_chain and self.effect_processor.artnet_effect_chain:
-                # Beide Chains aktiv: Kopie nötig für separate Processing
-                frame_for_video_preview = self.effect_processor.apply_effects(
-                    frame.copy(), 
-                    chain_type='video',
-                    current_clip_id=self.current_clip_id,
-                    source=self.source,
-                    player=self,
-                    player_name=self.player_name
-                )
-                frame_for_artnet = self.effect_processor.apply_effects(
-                    frame, 
-                    chain_type='artnet',
-                    current_clip_id=self.current_clip_id,
-                    source=self.source,
-                    player=self,
-                    player_name=self.player_name
-                )
-            elif self.effect_processor.video_effect_chain:
-                # Nur Video-Chain: Art-Net nutzt Original
-                frame_for_video_preview = self.effect_processor.apply_effects(
-                    frame.copy(), 
-                    chain_type='video',
-                    current_clip_id=self.current_clip_id,
-                    source=self.source,
-                    player=self,
-                    player_name=self.player_name
-                )
-                frame_for_artnet = frame
-            elif self.effect_processor.artnet_effect_chain:
-                # Nur Art-Net-Chain: Video nutzt Original
-                frame_for_artnet = self.effect_processor.apply_effects(
-                    frame, 
-                    chain_type='artnet',
-                    current_clip_id=self.current_clip_id,
-                    source=self.source,
-                    player=self,
-                    player_name=self.player_name
-                )
-                frame_for_video_preview = frame
-            else:
-                # Keine Effects: Beide nutzen Original (View, keine Kopie!)
-                frame_for_video_preview = frame
-                frame_for_artnet = frame
+            with self.profiler.profile_stage('player_effects'):
+                if self.effect_processor.video_effect_chain and self.effect_processor.artnet_effect_chain:
+                    # Check if both chains are no-ops to avoid expensive frame copy
+                    video_is_noop = self.effect_processor.is_chain_noop('video')
+                    artnet_is_noop = self.effect_processor.is_chain_noop('artnet')
+                    
+                    if video_is_noop and artnet_is_noop:
+                        # Both chains are no-ops: skip copy and processing (FAST PATH)
+                        frame_for_video_preview = frame
+                        frame_for_artnet = frame
+                    else:
+                        # At least one chain will modify: Kopie nötig für separate Processing
+                        frame_for_video_preview = self.effect_processor.apply_effects(
+                            frame.copy(), 
+                            chain_type='video',
+                            current_clip_id=self.current_clip_id,
+                            source=self.source,
+                            player=self,
+                            player_name=self.player_name
+                        )
+                        frame_for_artnet = self.effect_processor.apply_effects(
+                            frame, 
+                            chain_type='artnet',
+                            current_clip_id=self.current_clip_id,
+                            source=self.source,
+                            player=self,
+                            player_name=self.player_name
+                        )
+                elif self.effect_processor.video_effect_chain:
+                    # Nur Video-Chain: Art-Net nutzt Original
+                    frame_for_video_preview = self.effect_processor.apply_effects(
+                        frame.copy(), 
+                        chain_type='video',
+                        current_clip_id=self.current_clip_id,
+                        source=self.source,
+                        player=self,
+                        player_name=self.player_name
+                    )
+                    frame_for_artnet = frame
+                elif self.effect_processor.artnet_effect_chain:
+                    # Nur Art-Net-Chain: Video nutzt Original
+                    frame_for_artnet = self.effect_processor.apply_effects(
+                        frame, 
+                        chain_type='artnet',
+                        current_clip_id=self.current_clip_id,
+                        source=self.source,
+                        player=self,
+                        player_name=self.player_name
+                    )
+                    frame_for_video_preview = frame
+                else:
+                    # Keine Effects: Beide nutzen Original (View, keine Kopie!)
+                    frame_for_video_preview = frame
+                    frame_for_artnet = frame
             
             # Alpha-Compositing für Preview (wenn RGBA vorhanden)
             if frame_for_video_preview.shape[2] == 4:
@@ -1403,21 +1422,19 @@ class Player:
             if frame_for_artnet.shape[2] == 4:
                 frame_for_artnet = self._alpha_composite_to_black(frame_for_artnet)
             
-            # Speichere komplettes Frame für Video-Preview (BGR-Conversion mit Buffer-Reuse)
+            # Speichere komplettes Frame für Video-Preview (already in BGR format)
             # CRITICAL: Art-Net Player uses frame_for_artnet for preview, Video Player uses frame_for_video_preview
             preview_frame = frame_for_artnet if self.enable_artnet else frame_for_video_preview
             
-            if not hasattr(self, '_bgr_buffer') or self._bgr_buffer.shape != preview_frame.shape[:2]:
-                self._bgr_buffer = np.empty((preview_frame.shape[0], preview_frame.shape[1], 3), dtype=np.uint8)
-            cv2.cvtColor(preview_frame, cv2.COLOR_RGB2BGR, dst=self._bgr_buffer)
-            self.last_video_frame = self._bgr_buffer
+            # Frame is already in BGR format (native OpenCV), no conversion needed
+            self.last_video_frame = preview_frame
             
             # Distribute frame to output routing system (if enabled)
             if self.output_manager:
                 try:
-                    # Pass BGR frame (cv2 windows expect BGR)
+                    # Pass BGR frame (cv2 windows expect BGR, already native format)
                     self.output_manager.update_frame(
-                        composite_frame=self._bgr_buffer,  # BGR format for cv2
+                        composite_frame=preview_frame,  # BGR format for cv2, no conversion needed
                         layer_manager=self.layer_manager,
                         current_clip_id=self.current_clip_id
                     )
@@ -1430,9 +1447,13 @@ class Player:
                 try:
                     # Use the OUTPUT frame (after effects but before DMX extraction)
                     # This ensures routing system gets same frame as old ArtNet system
-                    self.routing_bridge.process_frame(frame_for_artnet)
+                    with self.profiler.profile_stage('output_routing'):
+                        self.routing_bridge.process_frame(frame_for_artnet)
                 except Exception as e:
                     logger.error(f"Routing bridge error: {e}", exc_info=True)
+            
+            # Mark frame processing complete for profiler
+            self.profiler.record_frame_complete()
             
             # Beende wenn gestoppt
             if not self.is_running:

@@ -189,6 +189,12 @@ class TransformEffect(PluginBase):
         Returns:
             Transformiertes Frame
         """
+        # FAST PATH: Check for no-op BEFORE any debug overhead (saves ~1-2μs)
+        if (self.position_x == 0 and self.position_y == 0 and 
+            self.scale_xy == 100.0 and self.scale_x == 100.0 and self.scale_y == 100.0 and
+            self.rotation_x == 0 and self.rotation_y == 0 and self.rotation_z == 0):
+            return frame
+        
         # Debug logging for scale (throttled) - log every 120 frames
         if not hasattr(self, '_process_counter'):
             self._process_counter = 0
@@ -199,12 +205,6 @@ class TransformEffect(PluginBase):
             logger.debug(f"🖼️ [Transform {id(self)}] frame #{self._process_counter}: scale_xy={self.scale_xy:.1f}")
         
         h, w = frame.shape[:2]
-        
-        # Wenn keine Transformation nötig, return original
-        if (self.position_x == 0 and self.position_y == 0 and 
-            self.scale_xy == 100.0 and self.scale_x == 100.0 and self.scale_y == 100.0 and
-            self.rotation_x == 0 and self.rotation_y == 0 and self.rotation_z == 0):
-            return frame
         
         # Berechne finale Skalierungsfaktoren (kombiniere symmetrisch + individuell)
         scale_factor_xy = self.scale_xy / 100.0
@@ -423,6 +423,16 @@ class TransformEffect(PluginBase):
             self.anchor_z = float(value)
             return True
         return False
+    
+    def is_noop(self):
+        """Check if effect is a no-op (default parameters that don't modify the frame).
+        
+        Returns:
+            bool: True if effect will not modify the frame
+        """
+        return (self.position_x == 0 and self.position_y == 0 and 
+                self.scale_xy == 100.0 and self.scale_x == 100.0 and self.scale_y == 100.0 and
+                self.rotation_x == 0 and self.rotation_y == 0 and self.rotation_z == 0)
     
     def get_parameters(self):
         """Gibt aktuelle Parameter zurück."""

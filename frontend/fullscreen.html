@@ -69,6 +69,53 @@
             background: rgba(255, 255, 255, 0.1);
             margin-left: auto;
         }
+        
+        /* Reconnection Overlay Styles */
+        .reconnect-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            backdrop-filter: blur(10px);
+        }
+        
+        .reconnect-content {
+            text-align: center;
+            color: #fff;
+        }
+        
+        .reconnect-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-top: 4px solid #4285f4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .reconnect-text {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #ff5252;
+        }
+        
+        .reconnect-status {
+            font-size: 16px;
+            color: #aaa;
+        }
     </style>
 </head>
 <body class="fullscreen-body">
@@ -78,6 +125,13 @@
             <div class="fullscreen-fps-content">
                 <div class="fullscreen-fps-label">FPS</div>
                 <div id="fpsValue" class="fullscreen-fps-value">0</div>
+            </div>
+        </div>
+        <div id="reconnectOverlay" class="reconnect-overlay" style="display: none;">
+            <div class="reconnect-content">
+                <div class="reconnect-spinner"></div>
+                <div class="reconnect-text">Connection Lost</div>
+                <div id="reconnectStatus" class="reconnect-status">Reconnecting...</div>
             </div>
         </div>
     </div>
@@ -97,21 +151,119 @@
         let currentOutput = null;
         let outputs = [];
         
+        // Reconnection state
+        let isConnected = true;
+        let reconnectAttempts = 0;
+        let reconnectTimer = null;
+        let lastSuccessfulLoad = Date.now();
+        const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
+        const INITIAL_RECONNECT_DELAY = 1000; // 1 second initial
+        const CONNECTION_TIMEOUT = 5000; // 5 seconds without successful load = disconnected
+        
         const streamImg = document.getElementById('previewStream');
         const fpsOverlay = document.getElementById('fpsOverlay');
         const fpsValue = document.getElementById('fpsValue');
         const contextMenu = document.getElementById('contextMenu');
         const contextMenuItems = document.getElementById('contextMenuItems');
+        const reconnectOverlay = document.getElementById('reconnectOverlay');
+        const reconnectStatus = document.getElementById('reconnectStatus');
         
         // Get player parameter from URL (video or artnet)
         const urlParams = new URLSearchParams(window.location.search);
         const playerType = urlParams.get('player') || 'video';
         
+        // Calculate exponential backoff delay
+        function getReconnectDelay() {
+            const delay = Math.min(
+                INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts),
+                MAX_RECONNECT_DELAY
+            );
+            return delay;
+        }
+        
+        // Show reconnection overlay
+        function showReconnecting() {
+            if (!isConnected) return; // Already showing
+            
+            isConnected = false;
+            reconnectOverlay.style.display = 'flex';
+            console.log('🔴 Connection lost - attempting to reconnect...');
+        }
+        
+        // Hide reconnection overlay and reset counters
+        function hideReconnecting() {
+            if (isConnected) return; // Already hidden
+            
+            isConnected = true;
+            reconnectAttempts = 0;
+            reconnectOverlay.style.display = 'none';
+            console.log('✅ Connection restored');
+        }
+        
+        // Attempt to reconnect
+        function attemptReconnect() {
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            
+            reconnectAttempts++;
+            const delay = getReconnectDelay();
+            const delaySeconds = (delay / 1000).toFixed(1);
+            
+            reconnectStatus.textContent = `Reconnecting in ${delaySeconds}s (attempt ${reconnectAttempts})...`;
+            console.log(`🔄 Reconnect attempt ${reconnectAttempts} in ${delaySeconds}s`);
+            
+            reconnectTimer = setTimeout(() => {
+                updateStream();
+            }, delay);
+        }
+        
         // Update stream URL directly (no outputs, direct player stream)
         function updateStream() {
             const timestamp = Date.now();
-            streamImg.src = `/api/fullscreen/stream?player=${playerType}&t=${timestamp}`;
+            const newSrc = `/api/fullscreen/stream?player=${playerType}&t=${timestamp}`;
+            
+            // Only update if src actually changed (prevent unnecessary reloads)
+            if (streamImg.src !== newSrc) {
+                streamImg.src = newSrc;
+            }
         }
+        
+        // Handle successful image load
+        streamImg.addEventListener('load', () => {
+            lastSuccessfulLoad = Date.now();
+            
+            // If we were disconnected, mark as reconnected
+            if (!isConnected) {
+                hideReconnecting();
+            }
+        });
+        
+        // Handle image load error
+        streamImg.addEventListener('error', () => {
+            console.warn('⚠️ Stream load error detected');
+            
+            // Show reconnecting overlay
+            if (isConnected) {
+                showReconnecting();
+            }
+            
+            // Attempt reconnection
+            attemptReconnect();
+        });
+        
+        // Periodic connection health check
+        setInterval(() => {
+            const timeSinceLastLoad = Date.now() - lastSuccessfulLoad;
+            
+            // If no successful load in CONNECTION_TIMEOUT ms, assume disconnected
+            if (timeSinceLastLoad > CONNECTION_TIMEOUT && isConnected) {
+                console.warn(`⚠️ No successful load in ${CONNECTION_TIMEOUT}ms - assuming disconnected`);
+                showReconnecting();
+                attemptReconnect();
+            }
+        }, 1000);
         
         // Load available outputs (kept for potential future use with context menu)
         async function loadOutputs() {
@@ -151,13 +303,6 @@
             const url = new URL(window.location);
             url.searchParams.set('output', outputId);
             window.history.pushState({}, '', url);
-        }
-        
-        // Update stream URL
-        function updateStream() {
-            const timestamp = Date.now();
-            // Use direct player stream (not outputs)
-            streamImg.src = `/api/fullscreen/stream?player=${playerType}&t=${timestamp}`;
         }
         
         // Show context menu
