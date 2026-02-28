@@ -27,7 +27,7 @@
     }
     header{
       display:flex; align-items:center; gap:12px;
-      padding:12px 16px; background:var(--panel); border-bottom:1px solid #263047; position:sticky; top:0; z-index:10;
+      padding:12px 16px; background:var(--panel); border-bottom:1px solid #263047; position:sticky; top:45px; z-index:10;
     }
     header h1{margin:0; font-size:16px; color:var(--muted)}
     .spacer{flex:1}
@@ -38,7 +38,10 @@
     button.danger{border-color:var(--danger); color:#ffdede}
     button.small{padding:2px 6px; font-size:12px; line-height:1; border-radius:6px}
 
-    main{display:grid; grid-template-columns:320px 1fr; min-height:calc(100vh - 56px)}
+    .tab-container{min-height:calc(100vh - 100px)}
+    .tab-content{display:none}
+    .tab-content.active{display:block}
+    .setup-main{display:grid; grid-template-columns:320px 1fr}
     aside{background:var(--panel); border-right:1px solid #263047; padding:12px; display:flex; flex-direction:column; gap:12px}
     .palette h2{font-size:14px; color:var(--muted); margin:6px 0 10px}
     .device{
@@ -205,25 +208,341 @@
 
     /* QR Modal */
     #qrModal{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:#0008; z-index:9999}
+
+    /* Tabs */
+    .tabs{
+      display:flex; gap:4px; padding:0 16px; background:var(--panel); border-bottom:1px solid #263047; position:sticky; top:0; z-index:11;
+    }
+    .tabs .spacer{flex:1}
+    .tabs-right{display:flex; align-items:center; gap:8px}
+    .toggle-switch{display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px}
+    .switch{
+      position:relative; width:42px; height:22px; display:inline-block;
+    }
+    .switch input{opacity:0; width:0; height:0}
+    .slider{
+      position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0;
+      background:#1d2330; transition:.2s; border-radius:999px; border:1px solid #2b354a;
+    }
+    .slider:before{
+      position:absolute; content:""; height:16px; width:16px; left:3px; top:2px;
+      background:#9fb1c9; transition:.2s; border-radius:50%;
+    }
+    .switch input:checked + .slider{background:#223a52}
+    .switch input:checked + .slider:before{transform:translateX(18px); background:#4cc2ff}
+    .edit-toggle{display:none}
+    .edit-toggle.active{display:flex}
+    .tab{
+      padding:12px 24px; background:transparent; color:var(--muted); border:none; border-bottom:2px solid transparent;
+      cursor:pointer; font-size:14px; font-weight:500; transition:all 0.2s;
+    }
+    .tab:hover{color:var(--text); background:rgba(255,255,255,0.05)}
+    .tab.active{color:var(--accent); border-bottom-color:var(--accent)}
+    .tab-page{padding:24px; color:var(--muted); min-height:calc(100vh - 145px)}
+    .tab-page h2{color:var(--text); margin:0 0 8px}
+    .control-wrap{padding:5px; color:var(--muted); min-height:calc(100vh - 120px)}
+    .control-grid{
+      display:grid;
+      gap:10px;
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr;
+      height: calc(100vh - 48px);
+      width: 100%;
+    }
+    .control-cell.hidden{display:none}
+    .scene-drawer{
+      position:fixed;
+      top:48px;
+      right:-360px;
+      width:360px;
+      height:calc(100vh - 48px);
+      background:var(--panel);
+      border-left:1px solid #263047;
+      box-shadow:-8px 0 24px #0008;
+      transition:right 0.25s ease;
+      z-index:20;
+      display:flex;
+      flex-direction:column;
+    }
+    .scene-drawer.open{right:0}
+    .scene-drawer.front{z-index:30}
+    .scene-drawer-header{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:12px 16px;
+      border-bottom:1px solid #263047;
+      color:var(--text);
+      font-weight:600;
+    }
+    .scene-drawer-close{
+      margin-left:auto;
+      background:#0f141e; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 8px; font-size:12px;
+    }
+    .edit-panel{
+      position:fixed;
+      left:0;
+      right:0;
+      bottom:-66vh;
+      height:66vh;
+      background:var(--panel);
+      border-top:1px solid #263047;
+      box-shadow:0 -8px 24px #0008;
+      transition:bottom 0.25s ease;
+      z-index:25;
+      display:flex;
+      flex-direction:column;
+    }
+    .edit-panel.open{bottom:0}
+    .edit-panel.front{z-index:31}
+    .edit-panel-body{flex:1; min-height:0; padding:8px}
+    .edit-split{
+      --leftW: 50%;
+      display:grid;
+      grid-template-columns: minmax(200px, var(--leftW)) 6px minmax(200px, 1fr);
+      gap:0;
+      height:100%;
+      min-height:0;
+    }
+    .edit-left-split{
+      display:grid;
+      grid-template-columns: minmax(0, 1fr) 150px;
+      gap:8px;
+      height:100%;
+      min-width:0;
+    }
+    .edit-left-split.collapsed{
+      grid-template-columns: 1fr;
+      gap:0;
+    }
+    .edit-left-split.collapsed .edit-col.side{display:none}
+    .edit-main-header{
+      display:flex; align-items:center; justify-content:space-between; gap:8px;
+      margin-bottom:8px; color:#e9eef7; font-size:12px;
+    }
+    .edit-right-header{
+      display:flex; align-items:center; justify-content:space-between; gap:8px;
+      margin-bottom:8px; color:#e9eef7; font-size:12px;
+    }
+    .edit-dummy-btn{
+      background:#161a22; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 8px; font-size:12px;
+    }
+    .edit-right-col{display:flex; flex-direction:column; height:100%}
+    .edit-right-body{flex:1; min-height:0; display:flex}
+    .fader-card{
+      display:grid;
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto auto 1fr auto;
+      gap:8px;
+      padding:2px;
+      background:#0f141e; border:1px solid #2b354a; border-radius:8px;
+      color:#e9eef7; font-size:12px;
+      width:50px;
+      align-items:center;
+      justify-items:center;
+      height:100%;
+    }
+    .fader-status{font-size:16px; line-height:1}
+    .fader-channel{font-weight:700}
+    .fader-symbol{
+      width:40px; height:40px; border:1px solid #2b354a; border-radius:6px; background:#12161e;
+    }
+    .fader-slider{
+      writing-mode: bt-lr;
+      -webkit-appearance: slider-vertical;
+      appearance: slider-vertical;
+      width:24px; height:100%;
+    }
+    .fader-value{font-variant-numeric: tabular-nums}
+    .fx-modal{
+      position:fixed; inset:0; background:#0008; display:none; align-items:center; justify-content:center; z-index:40;
+    }
+    .fx-modal.open{display:flex}
+    .fx-modal-card{
+      background:#161a22; border:1px solid #2b354a; border-radius:10px; padding:16px; min-width:240px;
+      color:#e9eef7;
+    }
+    .fx-modal-header{display:flex; align-items:center; gap:8px; margin-bottom:12px}
+    .fx-modal-close{margin-left:auto; background:#0f141e; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 8px; font-size:12px}
+    .edit-main-col{display:flex; flex-direction:column; height:100%; min-height:0}
+    .edit-main-left{display:flex; align-items:center; gap:8px}
+    .edit-tools{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+    .edit-tool{
+      background:#0f141e; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 8px; font-size:12px;
+    }
+    .edit-canvas-wrap{position:relative; height:100%; min-height:0}
+    .edit-canvas{
+      width:100%; height:100%; display:block; background:#0b0e13; border:1px solid #2b354a; border-radius:8px;
+    }
+    .edit-zoom{
+      position:absolute; right:8px; top:8px; display:flex; align-items:center; gap:6px; flex-direction:column;
+      background:#0f141e; border:1px solid #2b354a; border-radius:6px; padding:2px; color:#e9eef7; font-size:10px;
+    }
+    .edit-zoom input[type="range"]{
+      width:30px; height:180px;
+      writing-mode: bt-lr;
+      -webkit-appearance: slider-vertical;
+      appearance: slider-vertical;
+    }
+    .edit-zoom .zoom-label,
+    .edit-zoom .zoom-value{line-height:1}
+    .edit-zoom .zoom-value{transform:none}
+    .edit-main-toggle{
+      background:#161a22; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 8px; font-size:12px;
+    }
+    .edit-col{
+      background:#12161e; border:1px solid #2b354a; border-radius:8px; padding:12px; overflow:auto;
+      color:var(--muted);
+      min-width:0;
+      min-height:0;
+    }
+    .edit-collapsible{display:flex; flex-direction:column; gap:8px}
+    .edit-collapse{
+      background:#0f141e; border:1px solid #2b354a; border-radius:8px; overflow:hidden;
+    }
+    .edit-collapse-header{
+      display:flex; align-items:center; justify-content:space-between; gap:8px;
+      padding:8px 10px; color:#e9eef7; font-size:12px; cursor:pointer;
+      background:#161a22;
+    }
+    .edit-collapse-body{padding:8px 10px; color:var(--muted); font-size:12px; display:none}
+    .edit-collapse.open .edit-collapse-body{display:block}
+    .edit-collapse-toggle{font-size:12px}
+    .edit-list{display:flex; flex-direction:column; gap:6px}
+    .edit-item{background:#0f141e; border:1px solid #2b354a; border-radius:6px; padding:6px; color:#e9eef7; font-size:12px}
+    .edit-add{
+      margin-top:8px; width:100%; background:#161a22; color:#e9eef7; border:1px solid #2b354a; border-radius:6px;
+      padding:6px; font-size:12px; cursor:pointer;
+    }
+    .edit-resizer{
+      cursor:col-resize;
+      background:#1a2230;
+      border-left:1px solid #2b354a;
+      border-right:1px solid #2b354a;
+      user-select:none;
+      touch-action:none;
+    }
+    body.resizing *{cursor:col-resize !important; user-select:none !important;}
+    .control-cell{
+      background:var(--panel-2);
+      border:1px solid #2b354a;
+      border-radius:8px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#cfe0fb;
+      font-size:14px;
+      min-height:40px;
+    }
+    .control-cell.span-2{grid-column:1 / -1}
+    .control-cell.has-content{
+      align-items:stretch;
+      justify-content:stretch;
+      padding:8px;
+    }
+    .bank-panel{display:flex; flex-direction:column; gap:8px; width:100%; height:100%}
+    .bank-header{display:flex; align-items:center; gap:8px}
+    .bank-tabs{display:flex; gap:6px; flex-wrap:wrap}
+    .bank-tab{
+      background:#0f141e; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:6px 10px; font-size:12px;
+    }
+    .bank-add{
+      background:#0f141e; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:6px 10px; font-size:14px;
+    }
+    .bank-table{
+      display:grid;
+      grid-auto-flow:column;
+      grid-auto-columns:150px;
+      gap:8px;
+      overflow:auto;
+      flex:1;
+      min-height:0;
+    }
+    .bank-col{
+      display:grid;
+      grid-template-rows:auto 1fr;
+      gap:8px;
+      min-width:150px;
+    }
+    .bank-col-head{
+      background:#0f141e; border:1px solid #2b354a; border-radius:8px; padding:8px;
+      display:flex; flex-direction:column; gap:8px;
+    }
+    .bank-col-title-row{display:flex; align-items:center; justify-content:space-between; gap:8px}
+    .bank-col-title{font-weight:700; color:#e9eef7; font-size:13px; flex:1}
+    .bank-actions{display:flex; gap:6px; flex-wrap:wrap}
+    .bank-actions button{
+      background:#161a22; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 8px; font-size:12px;
+    }
+    .bank-collapse{
+      background:#161a22; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 8px; font-size:12px;
+    }
+    .bank-remove{
+      background:#161a22; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 8px; font-size:12px;
+    }
+    .bank-tab[data-bank-color]{
+      color: var(--bankColor, #e9eef7);
+      border-color: var(--bankColor, #2b354a);
+    }
+    .bank-col-title[data-bank-color]{
+      color: var(--bankColor, #e9eef7);
+    }
+    .bank-col-body{background:#12161e; border:1px dashed #2b354a; border-radius:8px; padding:6px; overflow:auto; flex:1; min-height:0; display:flex}
+    .bank-rows{display:flex; flex-direction:column; gap:6px; height:100%; width:100%}
+    .bank-row{
+      background:#0f141e; border:1px solid var(--bankColor, #2b354a); border-radius:6px; padding:6px;
+      color: var(--bankColor, #cfe0fb); font-size:12px;
+      height:70px;
+      display:flex; flex-direction:column; gap:6px;
+    }
+    .bank-row-header{display:flex; align-items:center; justify-content:space-between; gap:6px}
+    .bank-row-label{flex:1}
+    .bank-row-controls{display:flex; align-items:center; gap:6px}
+    .bank-row-remove{
+      background:#161a22; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:2px 6px; font-size:12px;
+      line-height:1; cursor:pointer;
+    }
+    .bank-row.collapsed{height:auto}
+    .inline-edit{
+      background:#0f141e; color:#e9eef7; border:1px solid #2b354a; border-radius:6px; padding:4px 6px; font-size:12px;
+      width:100%;
+    }
   </style>
   <!-- QR library via CDN (online). For offline, include local file instead. -->
-  https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js</script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
   <!-- Offline alternative:
-  ./lib/qrcode.min.js</script>
+  <script src="./lib/qrcode.min.js"></script>
   -->
 </head>
 <body>
-  <header>
-    <h1>DMX Patch</h1>
+  <nav class="tabs">
+    <button class="tab active" data-tab="setup">Setup</button>
+    <button class="tab" data-tab="control">Control</button>
+    <button class="tab" data-tab="touch">Touch</button>
     <div class="spacer"></div>
-    <label for="universe">Universum:</label>
-    <select id="universe"></select>
-    <button id="toggleView" class="toggle">Matrix ↔︎ Liste</button>
-    <button id="exportQR">Export → QR</button>
-    <button id="resetUniverse" class="danger">Universum leeren</button>
-  </header>
+    <div class="tabs-right edit-toggle" id="editToggle">
+      <label class="toggle-switch">Edit Mode
+        <span class="switch">
+          <input type="checkbox" id="editModeSwitch" />
+          <span class="slider"></span>
+        </span>
+        <span id="editModeState">Off</span>
+      </label>
+    </div>
+  </nav>
 
-  <main>
+  <div class="tab-container">
+    <div class="tab-content active" id="tab-setup">
+      <header>
+        <h1>DMX Patch</h1>
+        <div class="spacer"></div>
+        <label for="universe">Universum:</label>
+        <select id="universe"></select>
+        <button id="toggleView" class="toggle">Matrix ↔︎ Liste</button>
+        <button id="exportQR">Export → QR</button>
+        <button id="resetUniverse" class="danger">Universum leeren</button>
+      </header>
+      <div class="setup-main">
     <aside>
       <div class="palette">
         <h2>Geräte-Palette (Drag & Drop)</h2>
@@ -333,7 +652,138 @@
         </div>
       </div>
     </div>
-  </main>
+    </div>
+    </div>
+
+    <div class="tab-content" id="tab-control">
+      <div class="control-wrap">
+        <div class="control-grid" id="controlGrid">
+          <div class="control-cell has-content">
+            <div class="bank-panel">
+              <div class="bank-header">
+                <div class="bank-tabs" id="bankTabs"></div>
+                <button class="bank-add" id="bankAddBtn">+</button>
+              </div>
+              <div class="bank-table" id="bankTable"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scene-drawer" id="sceneDrawer">
+      <div class="scene-drawer-header">
+        <span id="sceneDrawerTitle">Scene</span>
+        <button class="scene-drawer-close" id="sceneDrawerClose">Close</button>
+      </div>
+      <div style="padding:12px 16px; color:var(--muted)">
+        Scene details
+      </div>
+    </div>
+
+    <div class="fx-modal" id="fxModal">
+      <div class="fx-modal-card">
+        <div class="fx-modal-header">
+          <strong>FX</strong>
+          <button class="fx-modal-close" id="fxModalClose">Close</button>
+        </div>
+        <div style="color:var(--muted)">FX content</div>
+      </div>
+    </div>
+
+    <div class="edit-panel" id="editPanel">
+      <div class="edit-panel-body">
+        <div class="edit-split" id="editSplit">
+          <div class="edit-left-split">
+            <div class="edit-col edit-main-col">
+              <div class="edit-main-header">
+                <div class="edit-main-left">
+                  <span>Selection</span>
+                  <div class="edit-tools">
+                    <button class="edit-tool">Rectangle</button>
+                    <button class="edit-tool">Lasso</button>
+                    <button class="edit-tool">Freehand</button>
+                    <button class="edit-tool">Select All</button>
+                    <button class="edit-tool">Invert Selection</button>
+                  </div>
+                </div>
+                <button class="edit-main-toggle" id="toggleGroupsSelections">Hide groups/selections</button>
+              </div>
+              <div class="edit-canvas-wrap" style="flex:1;">
+                <canvas class="edit-canvas" id="editCanvas"></canvas>
+                <div class="edit-zoom">
+                  <span class="zoom-label">Zoom</span>
+                  <input type="range" id="editZoom" min="0.5" max="2" step="0.1" value="1" />
+                  <span class="zoom-value" id="editZoomValue">100%</span>
+                </div>
+              </div>
+            </div>
+            <div class="edit-col side">
+              <div class="edit-collapsible">
+                <div class="edit-collapse open" data-collapse>
+                  <div class="edit-collapse-header">
+                    <span>Groups</span>
+                    <span class="edit-collapse-toggle">▾</span>
+                  </div>
+                  <div class="edit-collapse-body">
+                    <div class="edit-list" id="groupList"></div>
+                    <button class="edit-add" id="groupAdd">+</button>
+                  </div>
+                </div>
+                <div class="edit-collapse" data-collapse>
+                  <div class="edit-collapse-header">
+                    <span>Selections</span>
+                    <span class="edit-collapse-toggle">▾</span>
+                  </div>
+                  <div class="edit-collapse-body">
+                    <div class="edit-list" id="selectionList"></div>
+                    <button class="edit-add" id="selectionAdd">+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="edit-resizer" id="editResizer"></div>
+          <div class="edit-col edit-right-col">
+            <div class="edit-right-header">
+              <span>Right column</span>
+              <button class="edit-dummy-btn">Dummy</button>
+            </div>
+            <div class="edit-right-body">
+                <div class="fader-card" id="faderCard">
+                <div class="fader-status">○</div>
+                <div class="fader-channel">1</div>
+                <div class="fader-symbol"></div>
+                <input class="fader-slider" id="faderSlider" type="range" min="0" max="255" value="128" />
+                <div class="fader-value" id="faderValue">128</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-touch">
+      <div class="tab-page">
+        <h2>Touch</h2>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const faderDefinitions = [
+      {
+        type: "pan",
+        group: "move",
+        channel: 1,
+        symbolRanges: [
+          { min: 0, max: 100, symbol: "A" },
+          { min: 101, max: 255, symbol: "B" }
+        ],
+        value: 128
+      }
+    ];
+  </script>
 
   <script>
     /************* Datenmodell *************/
@@ -378,6 +828,31 @@
     const lvGroupAddBtn = document.getElementById('lv_group_add');
     const sideListContainerEl = document.getElementById('sideListContainer');
     const listPanelEl = document.getElementById('listPanel');
+    const bankTabsEl = document.getElementById('bankTabs');
+    const bankAddBtnEl = document.getElementById('bankAddBtn');
+    const bankTableEl = document.getElementById('bankTable');
+    const sceneDrawerEl = document.getElementById('sceneDrawer');
+    const sceneDrawerTitleEl = document.getElementById('sceneDrawerTitle');
+    const sceneDrawerCloseEl = document.getElementById('sceneDrawerClose');
+    const editToggleEl = document.getElementById('editToggle');
+    const editModeSwitchEl = document.getElementById('editModeSwitch');
+    const editModeStateEl = document.getElementById('editModeState');
+    const editPanelEl = document.getElementById('editPanel');
+    const editSplitEl = document.getElementById('editSplit');
+    const editResizerEl = document.getElementById('editResizer');
+    const groupListEl = document.getElementById('groupList');
+    const groupAddEl = document.getElementById('groupAdd');
+    const selectionListEl = document.getElementById('selectionList');
+    const selectionAddEl = document.getElementById('selectionAdd');
+    const toggleGroupsSelectionsEl = document.getElementById('toggleGroupsSelections');
+    const editCanvasEl = document.getElementById('editCanvas');
+    const editZoomEl = document.getElementById('editZoom');
+    const editZoomValueEl = document.getElementById('editZoomValue');
+    const faderSliderEl = document.getElementById('faderSlider');
+    const faderValueEl = document.getElementById('faderValue');
+    const faderCardEl = document.getElementById('faderCard');
+    const fxModalEl = document.getElementById('fxModal');
+    const fxModalCloseEl = document.getElementById('fxModalClose');
 
     /************* DnD Ghost (multi-row) *************/
     let dropLock = false;
@@ -1212,6 +1687,504 @@ for(const [s,n] of rows){const tr=document.createElement("tr");const td1=documen
     overlayEl.addEventListener('click', ()=>{ selectedUid=null; renderAll(); });
     gridEl.addEventListener('click', ()=>{ selectedUid=null; renderAll(); });
 
+    /************* Tab System *************/
+    function initTabs(){
+      const tabs = document.querySelectorAll('.tab');
+      const contents = document.querySelectorAll('.tab-content');
+      
+      tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          const targetId = 'tab-' + tab.dataset.tab;
+          
+          tabs.forEach(t => t.classList.remove('active'));
+          contents.forEach(c => c.classList.remove('active'));
+          
+          tab.classList.add('active');
+          document.getElementById(targetId).classList.add('active');
+
+          if (editToggleEl) {
+            if (tab.dataset.tab === 'control') editToggleEl.classList.add('active');
+            else editToggleEl.classList.remove('active');
+          }
+        });
+      });
+    }
+
+    function initBankLayout(){
+      if (!bankTabsEl || !bankAddBtnEl || !bankTableEl) return;
+      let bankCount = 1;
+      let bankNames = ['Bank 1'];
+      let bankColors = ['#7ad7ff'];
+      let rowsByBank = [[]];
+      let collapsedBanks = [false];
+
+      const renderBanks = () => {
+        bankTabsEl.innerHTML = '';
+        bankTableEl.innerHTML = '';
+
+        for (let i = 1; i <= bankCount; i += 1) {
+          const bankName = bankNames[i - 1] ?? `Bank ${i}`;
+          const color = bankColors[i - 1] ?? '#cfe0fb';
+
+          const tab = document.createElement('button');
+          tab.className = 'bank-tab';
+          tab.textContent = bankName;
+          tab.dataset.bank = String(i);
+          tab.style.setProperty('--bankColor', color);
+          tab.setAttribute('data-bank-color', '');
+          bankTabsEl.appendChild(tab);
+
+          const col = document.createElement('div');
+          col.className = 'bank-col';
+
+          const head = document.createElement('div');
+          head.className = 'bank-col-head';
+
+          const titleRow = document.createElement('div');
+          titleRow.className = 'bank-col-title-row';
+
+          const title = document.createElement('div');
+          title.className = 'bank-col-title';
+          title.textContent = bankName;
+          title.dataset.bank = String(i);
+          title.style.setProperty('--bankColor', color);
+          title.setAttribute('data-bank-color', '');
+
+          const btnCollapse = document.createElement('button');
+          btnCollapse.className = 'bank-collapse';
+          btnCollapse.textContent = collapsedBanks[i - 1] ? '▸' : '▾';
+          btnCollapse.title = 'Collapse scenes';
+          btnCollapse.dataset.action = 'toggle-bank';
+          btnCollapse.dataset.bank = String(i);
+
+          const btnRemoveBank = document.createElement('button');
+          btnRemoveBank.className = 'bank-remove';
+          btnRemoveBank.textContent = '×';
+          btnRemoveBank.title = 'Remove bank';
+          btnRemoveBank.dataset.action = 'remove-bank';
+          btnRemoveBank.dataset.bank = String(i);
+
+          titleRow.appendChild(title);
+          titleRow.appendChild(btnCollapse);
+          titleRow.appendChild(btnRemoveBank);
+
+          const actions = document.createElement('div');
+          actions.className = 'bank-actions';
+
+          const btnPause = document.createElement('button');
+          btnPause.textContent = '⏸';
+          btnPause.title = 'Pause';
+          const btnPrev = document.createElement('button');
+          btnPrev.textContent = '⏮';
+          btnPrev.title = 'Previous';
+          const btnNext = document.createElement('button');
+          btnNext.textContent = '⏭';
+          btnNext.title = 'Next';
+          const btnAdd = document.createElement('button');
+          btnAdd.textContent = '+';
+          btnAdd.dataset.action = 'add-row';
+          btnAdd.dataset.bank = String(i);
+
+          actions.appendChild(btnPause);
+          actions.appendChild(btnPrev);
+          actions.appendChild(btnNext);
+          actions.appendChild(btnAdd);
+
+          head.appendChild(titleRow);
+          head.appendChild(actions);
+
+          const body = document.createElement('div');
+          body.className = 'bank-col-body';
+          const rowsWrap = document.createElement('div');
+          rowsWrap.className = 'bank-rows';
+
+          const rows = rowsByBank[i - 1] ?? [];
+          rows.forEach((rowName, index) => {
+            const row = document.createElement('div');
+            row.className = 'bank-row';
+            row.style.setProperty('--bankColor', color);
+            row.setAttribute('data-bank-color', '');
+
+            const label = document.createElement('div');
+            label.className = 'bank-row-label';
+            label.textContent = rowName;
+            label.dataset.bank = String(i);
+            label.dataset.row = String(index + 1);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'bank-row-remove';
+            removeBtn.textContent = '×';
+            removeBtn.title = 'Remove row';
+            removeBtn.dataset.action = 'remove-row';
+            removeBtn.dataset.bank = String(i);
+            removeBtn.dataset.row = String(index + 1);
+
+            const header = document.createElement('div');
+            header.className = 'bank-row-header';
+
+            const controls = document.createElement('div');
+            controls.className = 'bank-row-controls';
+
+            controls.appendChild(removeBtn);
+            header.appendChild(label);
+            header.appendChild(controls);
+            row.appendChild(header);
+
+            if (collapsedBanks[i - 1]) row.classList.add('collapsed');
+            rowsWrap.appendChild(row);
+          });
+
+          body.appendChild(rowsWrap);
+
+          col.appendChild(head);
+          col.appendChild(body);
+          bankTableEl.appendChild(col);
+        }
+      };
+
+      const colorPalette = ['#7ad7ff', '#ffd166', '#a3e635', '#f472b6', '#fb923c', '#c084fc', '#34d399', '#60a5fa'];
+      const addBank = () => {
+        bankCount += 1;
+        bankNames.push(`Bank ${bankCount}`);
+        bankColors.push(colorPalette[(bankCount - 1) % colorPalette.length]);
+        rowsByBank.push([]);
+        collapsedBanks.push(false);
+        renderBanks();
+      };
+
+      const removeBank = (bankIndex) => {
+        if (bankIndex < 0 || bankIndex >= bankCount) return;
+        bankNames.splice(bankIndex, 1);
+        bankColors.splice(bankIndex, 1);
+        rowsByBank.splice(bankIndex, 1);
+        collapsedBanks.splice(bankIndex, 1);
+        bankCount = bankNames.length;
+        renderBanks();
+      };
+
+      const addRow = (bankIndex) => {
+        const rows = rowsByBank[bankIndex] ?? (rowsByBank[bankIndex] = []);
+        rows.push(`Scene ${rows.length + 1}`);
+        renderBanks();
+      };
+
+      const removeRow = (bankIndex, rowIndex) => {
+        const rows = rowsByBank[bankIndex] ?? [];
+        if (!rows[rowIndex]) return;
+        rows.splice(rowIndex, 1);
+        renderBanks();
+      };
+
+      const renameRow = (bankIndex, rowIndex, name) => {
+        const rows = rowsByBank[bankIndex] ?? [];
+        if (!rows[rowIndex]) return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        rows[rowIndex] = trimmed;
+        renderBanks();
+      };
+
+      const renameBank = (bankIndex, name) => {
+        if (!bankNames[bankIndex]) return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        bankNames[bankIndex] = trimmed;
+        renderBanks();
+      };
+
+      const startInlineEdit = (el, initialValue, onCommit) => {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'inline-edit';
+        input.value = initialValue;
+        el.replaceWith(input);
+        input.focus();
+        input.select();
+
+        const commit = () => {
+          const next = input.value;
+          onCommit(next);
+        };
+        const cancel = () => {
+          renderBanks();
+        };
+
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') cancel();
+        });
+        input.addEventListener('blur', commit);
+      };
+
+      bankAddBtnEl.addEventListener('click', addBank);
+      bankTableEl.addEventListener('click', (ev) => {
+        const target = ev.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.dataset.action === 'add-row') {
+          const bankIndex = Number(target.dataset.bank) - 1;
+          if (bankIndex >= 0) addRow(bankIndex);
+        }
+        if (target.dataset.action === 'remove-row') {
+          const bankIndex = Number(target.dataset.bank) - 1;
+          const rowIndex = Number(target.dataset.row) - 1;
+          if (bankIndex >= 0 && rowIndex >= 0) removeRow(bankIndex, rowIndex);
+        }
+        if (target.dataset.action === 'toggle-bank') {
+          const bankIndex = Number(target.dataset.bank) - 1;
+          if (bankIndex < 0) return;
+          collapsedBanks[bankIndex] = !collapsedBanks[bankIndex];
+          renderBanks();
+        }
+        if (target.dataset.action === 'remove-bank') {
+          const bankIndex = Number(target.dataset.bank) - 1;
+          removeBank(bankIndex);
+        }
+        const rowEl = target.closest('.bank-row');
+        if (rowEl) {
+          const labelEl = rowEl.querySelector('.bank-row-label');
+          const sceneName = labelEl ? labelEl.textContent : 'Scene';
+          if (sceneDrawerTitleEl) sceneDrawerTitleEl.textContent = sceneName || 'Scene';
+          if (sceneDrawerEl) sceneDrawerEl.classList.add('open');
+        }
+      });
+
+      if (sceneDrawerCloseEl && sceneDrawerEl) {
+        sceneDrawerCloseEl.addEventListener('click', () => {
+          sceneDrawerEl.classList.remove('open');
+        });
+      }
+
+      if (sceneDrawerEl) {
+        sceneDrawerEl.addEventListener('mousedown', () => {
+          sceneDrawerEl.classList.add('front');
+          if (editPanelEl) editPanelEl.classList.remove('front');
+        });
+      }
+
+      bankTableEl.addEventListener('dblclick', (ev) => {
+        const target = ev.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.classList.contains('bank-row-label')) {
+          const bankIndex = Number(target.dataset.bank) - 1;
+          const rowIndex = Number(target.dataset.row) - 1;
+          const current = target.textContent || '';
+          startInlineEdit(target, current, (next) => renameRow(bankIndex, rowIndex, next));
+        }
+        if (target.classList.contains('bank-col-title')) {
+          const bankIndex = Number(target.dataset.bank) - 1;
+          const current = target.textContent || '';
+          startInlineEdit(target, current, (next) => renameBank(bankIndex, next));
+        }
+      });
+
+      bankTabsEl.addEventListener('dblclick', (ev) => {
+        const target = ev.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (!target.classList.contains('bank-tab')) return;
+        const bankIndex = Number(target.dataset.bank) - 1;
+        const current = target.textContent || '';
+        startInlineEdit(target, current, (next) => renameBank(bankIndex, next));
+      });
+
+      renderBanks();
+    }
+
+    if (editModeSwitchEl && editModeStateEl) {
+      editModeSwitchEl.addEventListener('change', () => {
+        editModeStateEl.textContent = editModeSwitchEl.checked ? 'On' : 'Off';
+        if (editPanelEl) {
+          if (editModeSwitchEl.checked) {
+            editPanelEl.classList.add('open');
+            editPanelEl.classList.add('front');
+            if (sceneDrawerEl) sceneDrawerEl.classList.remove('front');
+          }
+          else editPanelEl.classList.remove('open');
+        }
+      });
+    }
+
+
+    if (editSplitEl && editResizerEl) {
+      let resizing = false;
+      const onMove = (ev) => {
+        if (!resizing) return;
+        const rect = editSplitEl.getBoundingClientRect();
+        const offset = ev.clientX - rect.left;
+        const min = 120;
+        const max = rect.width - 120;
+        const next = Math.min(max, Math.max(min, offset));
+        editSplitEl.style.setProperty('--leftW', `${next}px`);
+      };
+      const onUp = () => {
+        if (!resizing) return;
+        resizing = false;
+        document.body.classList.remove('resizing');
+      };
+      editResizerEl.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        resizing = true;
+        document.body.classList.add('resizing');
+      });
+      editResizerEl.addEventListener('dragstart', (ev) => {
+        ev.preventDefault();
+      });
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
+    if (editPanelEl) {
+      editPanelEl.addEventListener('mousedown', () => {
+        editPanelEl.classList.add('front');
+        if (sceneDrawerEl) sceneDrawerEl.classList.remove('front');
+      });
+    }
+
+    if (toggleGroupsSelectionsEl && editSplitEl) {
+      const leftSplitEl = editSplitEl.querySelector('.edit-left-split');
+      toggleGroupsSelectionsEl.addEventListener('click', () => {
+        if (!leftSplitEl) return;
+        leftSplitEl.classList.toggle('collapsed');
+        toggleGroupsSelectionsEl.textContent = leftSplitEl.classList.contains('collapsed')
+          ? 'Show groups/selections'
+          : 'Hide groups/selections';
+      });
+    }
+
+    const drawEditGrid = (zoom = 1) => {
+      if (!editCanvasEl) return;
+      const rect = editCanvasEl.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.floor(rect.width));
+      const height = Math.max(1, Math.floor(rect.height));
+      editCanvasEl.width = width * dpr;
+      editCanvasEl.height = height * dpr;
+      const ctx = editCanvasEl.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const base = 24;
+      const step = Math.max(8, Math.round(base * zoom));
+      ctx.strokeStyle = '#1d2330';
+      ctx.lineWidth = 1;
+
+      for (let x = 0; x <= width; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, height);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= height; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(width, y + 0.5);
+        ctx.stroke();
+      }
+    };
+
+    const updateEditZoom = () => {
+      if (!editZoomEl) return;
+      const zoom = Number(editZoomEl.value) || 1;
+      if (editZoomValueEl) editZoomValueEl.textContent = `${Math.round(zoom * 100)}%`;
+      drawEditGrid(zoom);
+    };
+
+    if (editZoomEl) {
+      editZoomEl.addEventListener('input', updateEditZoom);
+    }
+    window.addEventListener('resize', updateEditZoom);
+    updateEditZoom();
+
+    if (faderSliderEl && faderValueEl) {
+      const updateFaderValue = () => {
+        faderValueEl.textContent = faderSliderEl.value;
+      };
+      faderSliderEl.addEventListener('input', updateFaderValue);
+      updateFaderValue();
+    }
+
+    if (faderCardEl) {
+      faderCardEl.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        if (fxModalEl) fxModalEl.classList.add('open');
+      });
+    }
+
+    if (fxModalCloseEl && fxModalEl) {
+      fxModalCloseEl.addEventListener('click', () => {
+        fxModalEl.classList.remove('open');
+      });
+      fxModalEl.addEventListener('click', (ev) => {
+        if (ev.target === fxModalEl) fxModalEl.classList.remove('open');
+      });
+    }
+
+    const renderEditList = (el, items, type) => {
+      if (!el) return;
+      el.innerHTML = '';
+      items.forEach((name, index) => {
+        const item = document.createElement('div');
+        item.className = 'edit-item';
+        item.textContent = name;
+        item.dataset.type = type;
+        item.dataset.index = String(index);
+        el.appendChild(item);
+      });
+    };
+
+    const editGroups = [];
+    const editSelections = [];
+
+    const addItem = (arr, label) => {
+      arr.push(`${label} ${arr.length + 1}`);
+    };
+
+    if (groupAddEl) {
+      groupAddEl.addEventListener('click', () => {
+        addItem(editGroups, 'Group');
+        renderEditList(groupListEl, editGroups, 'group');
+      });
+    }
+    if (selectionAddEl) {
+      selectionAddEl.addEventListener('click', () => {
+        addItem(editSelections, 'Selection');
+        renderEditList(selectionListEl, editSelections, 'selection');
+      });
+    }
+
+    const handleItemRename = (target) => {
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.classList.contains('edit-item')) return;
+      const type = target.dataset.type;
+      const index = Number(target.dataset.index);
+      const current = target.textContent || '';
+      startInlineEdit(target, current, (next) => {
+        const trimmed = next.trim();
+        if (!trimmed) return;
+        if (type === 'group' && editGroups[index]) editGroups[index] = trimmed;
+        if (type === 'selection' && editSelections[index]) editSelections[index] = trimmed;
+        renderEditList(groupListEl, editGroups, 'group');
+        renderEditList(selectionListEl, editSelections, 'selection');
+      });
+    };
+
+    if (groupListEl) groupListEl.addEventListener('dblclick', (ev) => handleItemRename(ev.target));
+    if (selectionListEl) selectionListEl.addEventListener('dblclick', (ev) => handleItemRename(ev.target));
+
+    renderEditList(groupListEl, editGroups, 'group');
+    renderEditList(selectionListEl, editSelections, 'selection');
+
+    document.querySelectorAll('[data-collapse] .edit-collapse-header').forEach((header) => {
+      header.addEventListener('click', () => {
+        const wrapper = header.closest('[data-collapse]');
+        if (!wrapper) return;
+        wrapper.classList.toggle('open');
+        const toggle = header.querySelector('.edit-collapse-toggle');
+        if (toggle) toggle.textContent = wrapper.classList.contains('open') ? '▾' : '▸';
+      });
+    });
+
+
     /************* Bootstrap *************/
     function defaultFixture(type, start){
       return {
@@ -1238,6 +2211,8 @@ for(const [s,n] of rows){const tr=document.createElement("tr");const td1=documen
       );
 
       initQRExportUI();
+      initTabs();
+      initBankLayout();
       renderAll();
     }
     bootstrap();

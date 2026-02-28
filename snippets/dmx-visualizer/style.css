@@ -216,6 +216,7 @@ input[type="color"] {
     cursor: pointer;
     transition: all 0.2s;
     border: 2px solid transparent;
+    position: relative;
 }
 
 .fixture-item:hover {
@@ -227,6 +228,32 @@ input[type="color"] {
     background: #004466;
     border-color: #00aaff;
     box-shadow: 0 0 10px rgba(0, 170, 255, 0.3);
+}
+
+.delete-fixture-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: rgba(255, 68, 68, 0.9);
+    color: white;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    padding: 0;
+    z-index: 10;
+}
+
+.delete-fixture-btn:hover {
+    background: rgba(255, 68, 68, 1);
+    transform: scale(1.15);
 }
 
 .fixture-item .fixture-name {

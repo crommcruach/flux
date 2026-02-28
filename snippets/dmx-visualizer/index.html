@@ -41,6 +41,7 @@
                     <option value="par">LED PAR</option>
                     <option value="strobe">Strobe</option>
                     <option value="led_strip">LED Strip</option>
+                    <option value="led_matrix">LED Matrix</option>
                     <option value="display">Display/Screen</option>
                 </select>
                 <button onclick="visualizer.addFixture()">Add Fixture</button>
@@ -105,6 +106,39 @@
             </div>
 
             <div class="section">
+                <h3>Beam Parameters</h3>
+                <p style="font-size: 11px; color: #888; margin-bottom: 10px;">
+                    Select a fixture to adjust its beam
+                </p>
+                <div id="beam-controls" style="opacity: 0.5; pointer-events: none;">
+                    <label>
+                        Length (m): <input type="number" id="beamLength" min="1" max="30" step="0.5" value="8" 
+                                    oninput="visualizer.updateBeamParameter('length', this.value)">
+                    </label>
+                    <label>
+                        Tip Diameter (cm): <input type="number" id="beamTipDiameter" min="1" max="50" step="0.5" value="10" 
+                                    oninput="visualizer.updateBeamParameter('tipDiameterCm', this.value)">
+                    </label>
+                    <label>
+                        Beam Angle (°): <input type="number" id="beamAngle" min="1" max="90" step="1" value="10" 
+                                    oninput="visualizer.updateBeamParameter('angle', this.value)">
+                    </label>
+                    <label>
+                        Gobo Rotation: <input type="range" id="beamGoboRotation" min="-100" max="100" step="1" value="0"
+                                    oninput="visualizer.updateBeamParameter('goboRotation', this.value)">
+                    </label>
+                    <label>
+                        3-Facet Prism: <input type="checkbox" id="beamPrismEnabled"
+                                    onchange="visualizer.updateBeamParameter('prismEnabled', this.checked)">
+                    </label>
+                    <label>
+                        Prism Spread (cm): <input type="number" id="beamPrismSpread" min="1" max="200" step="1" value="15"
+                                    oninput="visualizer.updateBeamParameter('prismSpreadCm', this.value)">
+                    </label>
+                </div>
+            </div>
+
+            <div class="section">
                 <h3>Performance Stats</h3>
                 <div id="stats">
                     <div>FPS: <span id="fps">60</span></div>
@@ -147,11 +181,19 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
         
         // Make THREE and controls available globally
         window.THREE = THREE;
         window.OrbitControls = OrbitControls;
         window.TransformControls = TransformControls;
+        window.EffectComposer = EffectComposer;
+        window.RenderPass = RenderPass;
+        window.UnrealBloomPass = UnrealBloomPass;
+        window.ShaderPass = ShaderPass;
         
         // Load other scripts dynamically
         const loadScript = (src) => {
