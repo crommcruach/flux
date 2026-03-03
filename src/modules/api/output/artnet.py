@@ -1,51 +1,29 @@
 """
 API Routes - Playback, Settings, Art-Net Endpoints
+
+⚠️⚠️⚠️ DEPRECATED FILE - SCHEDULED FOR REMOVAL ⚠️⚠️⚠️
+   
+   DO NOT ADD ANY NEW ROUTES OR FUNCTIONS TO THIS FILE!
+   
+   This file contains legacy routes that are being migrated to their proper locations:
+   - Playback routes → api/player/playback.py (Unified Player API)
+   - Settings routes → api/player/settings.py
+   - Background routes → api/content/backgrounds.py
+   - Cache routes → api/system/cache.py
+   - Console routes → api/system/console.py
+   
+   This file will be completely removed once migration is complete.
+   Any new functionality should be added to the appropriate module above.
 """
 from flask import jsonify, request
 from ...core.logger import get_logger
+from ...core.image_utils import apply_mask_to_frame, apply_inline_slice
 
 logger = get_logger(__name__)
 
 
-def register_playback_routes(app, player_manager):
-    """Registriert Playback-Control Endpunkte."""
-    
-    @app.route('/api/play', methods=['POST'])
-    def play():
-        """Startet oder setzt Video-Wiedergabe fort."""
-        player = player_manager.get_video_player()
-        if not player.source:
-            return jsonify({"status": "error", "message": "Kein Video geladen"}), 400
-        player.play()
-        return jsonify({"status": "success", "message": "Video play"})
-    
-    @app.route('/api/stop', methods=['POST'])
-    def stop():
-        """Stoppt Video-Wiedergabe."""
-        player = player_manager.get_video_player()
-        player.stop()
-        return jsonify({"status": "success", "message": "Video gestoppt"})
-    
-    @app.route('/api/pause', methods=['POST'])
-    def pause():
-        """Pausiert Wiedergabe."""
-        player = player_manager.get_video_player()
-        player.pause()
-        return jsonify({"status": "success", "message": "Video pausiert"})
-    
-    @app.route('/api/resume', methods=['POST'])
-    def resume():
-        """Setzt Wiedergabe fort."""
-        player = player_manager.get_video_player()
-        player.resume()
-        return jsonify({"status": "success", "message": "Wiedergabe fortgesetzt"})
-    
-    @app.route('/api/restart', methods=['POST'])
-    def restart():
-        """Startet Video neu."""
-        player = player_manager.get_video_player()
-        player.restart()
-        return jsonify({"status": "success", "message": "Video neu gestartet"})
+def register_reload_route(app):
+    """Registriert Application Reload Endpunkt."""
     
     @app.route('/api/reload', methods=['POST'])
     def reload_application():
@@ -128,11 +106,6 @@ def register_settings_routes(app, player_manager):
         player.set_hue_shift(value)
         return jsonify({"status": "success", "hue_shift": player.hue_shift})
     
-    @app.route('/api/fps', methods=['POST'])
-    def set_fps():
-        """Setzt Art-Net FPS (DEPRECATED - old system removed)."""
-        return jsonify({"status": "error", "message": "Old Art-Net system removed. Use routing system instead."}), 410
-    
     @app.route('/api/loop', methods=['POST'])
     def set_loop():
         """Setzt Loop-Limit."""
@@ -144,19 +117,7 @@ def register_settings_routes(app, player_manager):
 
 
 def register_artnet_routes(app, player_manager):
-    """Registriert Art-Net Endpunkte."""
-    
-    @app.route('/api/blackout', methods=['POST'])
-    def blackout():
-        """Aktiviert Blackout (DEPRECATED - old system removed)."""
-        # TODO: Reimplement with routing_bridge
-        return jsonify({"status": "error", "message": "Blackout feature needs reimplementation with routing system"}), 501
-    
-    @app.route('/api/test', methods=['POST'])
-    def test_pattern():
-        """Sendet Testmuster (DEPRECATED - old system removed)."""
-        # TODO: Reimplement with routing_bridge
-        return jsonify({"status": "error", "message": "Test pattern feature needs reimplementation with routing system"}), 501
+    """Registriert Art-Net Endpunkte (aktive Routen)."""
     
     @app.route('/api/ip', methods=['POST'])
     def set_ip():
@@ -203,33 +164,6 @@ def register_artnet_routes(app, player_manager):
             return jsonify({"status": "success", "universe": player.start_universe})
         except Exception as e:
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
-    
-    @app.route('/api/artnet/info', methods=['GET'])
-    def artnet_info():
-        """Gibt Art-Net Informationen und Statistiken zurück (DEPRECATED)."""
-        # Old Art-Net system removed - return minimal info
-        try:
-            player = player_manager.player
-            brightness = int(player.brightness * 100) if hasattr(player, 'brightness') else 100
-            
-            return jsonify({
-                "status": "success",
-                "message": "Old Art-Net system removed. Use routing API instead.",
-                "artnet_brightness": brightness,
-                "active_mode": "Video"
-            })
-        except Exception as e:
-            logger.error(f"Fehler in /api/artnet/info: {str(e)}")
-            return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
-    
-    @app.route('/api/artnet/delta-encoding', methods=['POST'])
-    def set_delta_encoding():
-        """Aktiviert/Deaktiviert Delta-Encoding (DEPRECATED - old system removed)."""
-        # Delta encoding needs to be reimplemented in new routing system
-        return jsonify({
-            "status": "error",
-            "message": "Delta-Encoding removed with old Art-Net system. Needs reimplementation in routing system."
-        }), 410
 
 
 def register_info_routes(app, player_manager, api=None, config=None):
@@ -324,161 +258,6 @@ def register_info_routes(app, player_manager, api=None, config=None):
                 'mbps': round(preview_mbps + fullscreen_mbps, 2)
             }
         })
-    
-    def apply_mask_to_frame(frame, mask_config, slice_x=0, slice_y=0):
-        """
-        Apply a mask to frame (make masked region black)
-        
-        Args:
-            frame: Input frame (extracted slice)
-            mask_config: Mask definition with shape, position, etc. (in canvas coordinates)
-            slice_x: X position of the slice on canvas (for coordinate translation)
-            slice_y: Y position of the slice on canvas (for coordinate translation)
-        
-        Returns:
-            np.ndarray: Frame with mask applied
-        """
-        try:
-            import cv2
-            import numpy as np
-            
-            h, w = frame.shape[:2]
-            mask_shape = mask_config.get('shape', 'circle')
-            
-            # Create mask image (white = keep, black = remove)
-            mask = np.ones((h, w), dtype=np.uint8) * 255
-            
-            if mask_shape == 'rectangle':
-                # Translate mask coordinates from canvas to slice-relative coordinates
-                x = int(mask_config.get('x', 0)) - slice_x
-                y = int(mask_config.get('y', 0)) - slice_y
-                mask_width = int(mask_config.get('width', w))
-                mask_height = int(mask_config.get('height', h))
-                
-                # Only draw if mask intersects with slice
-                if x < w and y < h and x + mask_width > 0 and y + mask_height > 0:
-                    cv2.rectangle(mask, (x, y), (x + mask_width, y + mask_height), 0, -1)
-                
-            elif mask_shape == 'circle':
-                # Translate mask coordinates from canvas to slice-relative coordinates
-                centerX = int(mask_config.get('centerX', w // 2)) - slice_x
-                centerY = int(mask_config.get('centerY', h // 2)) - slice_y
-                radius = int(mask_config.get('radius', min(w, h) // 4))
-                
-                # Only draw if circle intersects with slice
-                if (centerX + radius > 0 and centerX - radius < w and 
-                    centerY + radius > 0 and centerY - radius < h):
-                    cv2.circle(mask, (centerX, centerY), radius, 0, -1)
-                
-            elif mask_shape in ['polygon', 'triangle', 'freehand']:
-                points = mask_config.get('points', [])
-                if points and len(points) >= 3:
-                    # Translate all points from canvas to slice-relative coordinates
-                    pts = np.array([
-                        [int(p.get('x', 0)) - slice_x, int(p.get('y', 0)) - slice_y] 
-                        for p in points
-                    ], dtype=np.int32)
-                    cv2.fillPoly(mask, [pts], 0)
-            
-            # Apply mask
-            frame_masked = cv2.bitwise_and(frame, frame, mask=mask)
-            return frame_masked
-            
-        except Exception as e:
-            logger.error(f"Failed to apply mask: {e}")
-            return frame
-    
-    def apply_inline_slice(frame, slice_config):
-        """
-        Helper function to apply inline slice definition to frame
-        
-        Args:
-            frame: Source frame (numpy array, BGR)
-            slice_config: Dict with slice parameters
-            
-        Returns:
-            np.ndarray: Sliced frame
-        """
-        try:
-            import cv2
-            import numpy as np
-            
-            shape = slice_config.get('shape', 'rectangle')
-            x = int(slice_config.get('x', 0))
-            y = int(slice_config.get('y', 0))
-            width = int(slice_config.get('width', frame.shape[1]))
-            height = int(slice_config.get('height', frame.shape[0]))
-            rotation = slice_config.get('rotation', 0)
-            transform_corners = slice_config.get('transformCorners', None)
-            
-            h, w = frame.shape[:2]
-            
-            # Check if perspective transform is needed
-            if transform_corners and len(transform_corners) == 4:
-                logger.debug(f"Applying perspective transform with corners: {transform_corners}")
-                try:
-                    # Convert transform corners to numpy array
-                    src_points = np.float32([
-                        [transform_corners[0]['x'], transform_corners[0]['y']],  # top-left
-                        [transform_corners[1]['x'], transform_corners[1]['y']],  # top-right
-                        [transform_corners[2]['x'], transform_corners[2]['y']],  # bottom-right
-                        [transform_corners[3]['x'], transform_corners[3]['y']]   # bottom-left
-                    ])
-                    
-                    # Define destination rectangle (output size)
-                    dst_points = np.float32([
-                        [0, 0],              # top-left
-                        [width, 0],          # top-right
-                        [width, height],     # bottom-right
-                        [0, height]          # bottom-left
-                    ])
-                    
-                    # Calculate perspective transform matrix
-                    matrix = cv2.getPerspectiveTransform(src_points, dst_points)
-                    
-                    # Apply perspective warp
-                    sliced = cv2.warpPerspective(frame, matrix, (width, height))
-                    logger.debug(f"Perspective transform applied successfully")
-                    
-                    return sliced
-                except Exception as e:
-                    logger.error(f"Failed to apply perspective transform: {e}")
-                    # Fall through to normal slice extraction
-            
-            # Normal rectangular extraction
-            # Clamp coordinates to frame bounds
-            x1 = max(0, min(x, w))
-            y1 = max(0, min(y, h))
-            x2 = max(0, min(x + width, w))
-            y2 = max(0, min(y + height, h))
-            
-            # Extract region
-            sliced = frame[y1:y2, x1:x2].copy()
-            
-            # Resize to target dimensions if needed
-            if sliced.shape[1] != width or sliced.shape[0] != height:
-                sliced = cv2.resize(sliced, (width, height))
-            
-            # Apply rotation if specified
-            if rotation != 0:
-                center = (width // 2, height // 2)
-                matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
-                sliced = cv2.warpAffine(sliced, matrix, (width, height))
-            
-            # Apply masks if present
-            masks = slice_config.get('masks', [])
-            if masks and len(masks) > 0:
-                logger.debug(f"Applying {len(masks)} mask(s) to slice")
-                for mask in masks:
-                    if mask.get('visible', True):
-                        # Pass slice origin for coordinate translation
-                        sliced = apply_mask_to_frame(sliced, mask, slice_x=x, slice_y=y)
-            
-            return sliced
-            
-        except Exception as e:
-            # Return original frame on error
-            return frame
     
     @app.route('/api/outputs/<player_id>/stream/<output_id>')
     def stream_output(player_id, output_id):
@@ -1030,10 +809,6 @@ def register_info_routes(app, player_manager, api=None, config=None):
                        mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-# REMOVED: register_recording_routes - Recording system removed
-# Will be reimplemented with new routing system later
-
-
 def register_cache_routes(app):
     """Registriert Cache-Management Endpunkte."""
     
@@ -1086,51 +861,8 @@ def register_cache_routes(app):
         })
 
 
-def register_script_routes(app, player_manager, config):
-    """Registriert Script-Management Endpunkte."""
-    
-    @app.route('/api/scripts', methods=['GET'])
-    def list_scripts():
-        """Listet alle verfügbaren Scripts."""
-        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system
-        return jsonify({'scripts': [], 'error': 'Script system deprecated, use generators plugin'})
-        
-        return jsonify({
-            "status": "success",
-            "scripts": scripts,
-            "count": len(scripts)
-        })
-    
-    # ScriptSource removed - use GeneratorSource with generator plugins instead
-    
-    @app.route('/api/load_generator', methods=['POST'])
-    def load_generator():
-        """Lädt und startet einen Generator."""
-        from ...core.logger import get_logger
-        
-        logger = get_logger(__name__)
-        
-        data = request.get_json()
-        generator_id = data.get('generator_id')
-        
-        if not generator_id:
-            return jsonify({
-                "status": "error",
-                "message": "Kein Generator-ID angegeben"
-            }), 400
-        
-        # TODO: Implement generator loading via GeneratorSource
-        logger.warning(f"Generator loading not yet implemented: {generator_id}")
-        
-        return jsonify({
-            "status": "error",
-            "message": "Generator loading not yet implemented - use web UI Sources tab"
-        }), 501
-
-
-def register_console_command_routes(app, player, dmx_controller, rest_api, video_dir, data_dir, config):
+def register_console_command_routes(app, player, rest_api, video_dir, data_dir, config):
     """Registriert Console Command Endpunkte."""
-    # Note: dmx_controller parameter deprecated - DMX input removed
     
     @app.route('/api/console', methods=['POST'])
     def execute_console_command():
@@ -1305,3 +1037,42 @@ def register_background_routes(app):
         except Exception as e:
             logger.error(f"Error serving background: {e}")
             return jsonify({'error': 'File not found'}), 404
+
+
+# =============================================================================
+# REMOVED/DEPRECATED ROUTES - HISTORY & DOCUMENTATION
+# =============================================================================
+#
+# The following routes have been removed as no external tools depend on them.
+# Frontend has been migrated to the new unified player API.
+#
+# REMOVED LEGACY PLAYBACK ROUTES (Replaced by Unified Player API):
+#   /api/play        → Use /api/player/<player_id>/play
+#   /api/stop        → Use /api/player/<player_id>/stop  
+#   /api/pause       → Use /api/player/<player_id>/pause
+#   /api/resume      → Use /api/player/<player_id>/resume
+#   /api/restart     → Use /api/player/<player_id>/restart
+#   Location: New routes in api/player/playback.py
+#   Removed: 2026-03-03
+#
+# REMOVED OLD ART-NET ROUTES (Replaced by Routing System):
+#   /api/fps                      → Use routing configuration
+#   /api/blackout                 → Use routing system blackout
+#   /api/test                     → Use routing system test patterns  
+#   /api/artnet/info              → Use /api/status or routing API
+#   /api/artnet/delta-encoding    → Needs reimplementation in routing
+#   Location: New routes in api/output/routing.py
+#   Removed: 2026-03-03
+#
+# REMOVED SCRIPT ROUTES (Replaced by Plugin System):
+#   /api/scripts                  → Use generator plugins
+#   /api/load_generator           → Use web UI Sources tab
+#   Location: Plugin system in api/content/plugins.py
+#   Removed: 2026-03-03
+#
+# REMOVED FEATURES (Complete Removal):
+#   - Recording System: Will be reimplemented with routing system
+#   - DMX Input Controller: Replaced by other control mechanisms
+#   - Benchmark Module: Removed completely
+#
+# =============================================================================

@@ -168,12 +168,11 @@ class RestAPI:
         
         # Lade externe API Route-Module
         from .output.artnet import (
-            register_playback_routes, 
+            register_reload_route,
             register_settings_routes,
             register_artnet_routes,
             register_info_routes,
             register_cache_routes,
-            register_script_routes,
             register_background_routes
         )
         from .output.points import register_points_routes
@@ -190,13 +189,11 @@ class RestAPI:
         from ..player.clips.registry import get_clip_registry
         
         # Registriere alle Routen
-        register_playback_routes(self.app, self.player_manager)
+        register_reload_route(self.app)
         register_settings_routes(self.app, self.player_manager)
         register_artnet_routes(self.app, self.player_manager)
         register_info_routes(self.app, self.player_manager, self, self.config)
-        # REMOVED: register_recording_routes - Recording system removed
         register_cache_routes(self.app)
-        register_script_routes(self.app, self.player_manager, self.config)
         register_points_routes(self.app, self.player_manager, self.data_dir)
         register_console_routes(self.app, self)
         register_project_routes(self.app, self.logger)

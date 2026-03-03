@@ -987,7 +987,14 @@ class OutputManager:
                 mask=mask_numpy,
                 masks=masks,  # Store raw mask geometries for UI
                 description=slice_data.get('description', ''),
-                points=slice_data.get('points')
+                points=slice_data.get('points'),
+                brightness=int(slice_data.get('brightness', 0)),
+                contrast=int(slice_data.get('contrast', 0)),
+                red=int(slice_data.get('red', 0)),
+                green=int(slice_data.get('green', 0)),
+                blue=int(slice_data.get('blue', 0)),
+                mirror=slice_data.get('mirror', 'none'),
+                transformCorners=slice_data.get('transformCorners')
             )
             self._save_state()
             return True

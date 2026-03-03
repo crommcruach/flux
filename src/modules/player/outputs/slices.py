@@ -6,7 +6,7 @@ Supports rectangles, polygons, circles with masks, soft edges, and rotation
 import logging
 import cv2
 import numpy as np
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Union
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -22,11 +22,18 @@ class SliceDefinition:
     height: int
     rotation: float = 0  # Degrees
     shape: str = 'rectangle'  # 'rectangle', 'polygon', 'circle'
-    soft_edge: Optional[int] = None  # Soft edge blur radius
+    soft_edge: Optional[Union[int, Dict]] = None  # Soft edge config (int for legacy, dict for full control)
     mask: Optional[np.ndarray] = None  # Custom mask (compiled numpy array)
     masks: Optional[List[Dict]] = None  # Raw mask geometries for UI editing
     description: str = ''
     points: Optional[List[Tuple[int, int]]] = None  # For polygon shape
+    brightness: int = 0  # Brightness adjustment (-255 to 255)
+    contrast: int = 0  # Contrast adjustment (-100 to 100)
+    red: int = 0  # Red channel adjustment (-255 to 255)
+    green: int = 0  # Green channel adjustment (-255 to 255)
+    blue: int = 0  # Blue channel adjustment (-255 to 255)
+    mirror: str = 'none'  # Mirror mode: 'none', 'horizontal', 'vertical', 'both'
+    transformCorners: Optional[List[Dict]] = None  # Transform corner positions for perspective transform
 
 
 class SliceManager:
@@ -67,9 +74,12 @@ class SliceManager:
     
     def add_slice(self, slice_id: str, x: int, y: int, width: int, height: int,
                   rotation: float = 0, shape: str = 'rectangle',
-                  soft_edge: Optional[int] = None, mask: Optional[np.ndarray] = None,
+                  soft_edge: Optional[Union[int, Dict]] = None, mask: Optional[np.ndarray] = None,
                   masks: Optional[List[Dict]] = None,
-                  description: str = '', points: Optional[List[Tuple[int, int]]] = None):
+                  description: str = '', points: Optional[List[Tuple[int, int]]] = None,
+                  brightness: int = 0, contrast: int = 0,
+                  red: int = 0, green: int = 0, blue: int = 0,
+                  mirror: str = 'none', transformCorners: Optional[List[Dict]] = None):
         """
         Add or update a slice definition
         
@@ -95,7 +105,14 @@ class SliceManager:
             mask=mask,
             masks=masks,
             description=description,
-            points=points
+            points=points,
+            brightness=brightness,
+            contrast=contrast,
+            red=red,
+            green=green,
+            blue=blue,
+            mirror=mirror,
+            transformCorners=transformCorners
         )
         
         self.slices[slice_id] = slice_def
@@ -170,6 +187,14 @@ class SliceManager:
             logger.debug(f"✅ Mask applied to slice '{slice_id}'")
         else:
             logger.debug(f"No mask to apply for slice '{slice_id}'")
+        
+        # Apply color adjustments (brightness, contrast, RGB)
+        if slice_def.brightness != 0 or slice_def.contrast != 0 or slice_def.red != 0 or slice_def.green != 0 or slice_def.blue != 0:
+            sliced = self._apply_color_adjustments(sliced, slice_def)
+        
+        # Apply mirror/flip
+        if slice_def.mirror != 'none':
+            sliced = self._apply_mirror(sliced, slice_def.mirror)
         
         return sliced
     
@@ -333,6 +358,43 @@ class SliceManager:
         logger.debug(f"✅ Mask applied via bitwise_and")
         return result
     
+    def _apply_color_adjustments(self, frame: np.ndarray, slice_def: SliceDefinition) -> np.ndarray:
+        """Apply brightness, contrast, and RGB adjustments"""
+        result = frame.astype(np.float32)
+        
+        # Apply contrast first (multiplicative)
+        if slice_def.contrast != 0:
+            # Contrast formula: output = (input - 127.5) * factor + 127.5
+            # factor = (100 + contrast) / 100, range roughly 0.0 to 2.0
+            factor = (100 + slice_def.contrast) / 100.0
+            result = (result - 127.5) * factor + 127.5
+        
+        # Apply brightness (additive)
+        if slice_def.brightness != 0:
+            result = result + slice_def.brightness
+        
+        # Apply RGB channel adjustments
+        if slice_def.blue != 0:
+            result[:, :, 0] = result[:, :, 0] + slice_def.blue  # B channel
+        if slice_def.green != 0:
+            result[:, :, 1] = result[:, :, 1] + slice_def.green  # G channel
+        if slice_def.red != 0:
+            result[:, :, 2] = result[:, :, 2] + slice_def.red  # R channel
+        
+        # Clip to valid range and convert back to uint8
+        result = np.clip(result, 0, 255).astype(np.uint8)
+        return result
+    
+    def _apply_mirror(self, frame: np.ndarray, mirror_mode: str) -> np.ndarray:
+        """Apply mirror/flip transformation"""
+        if mirror_mode == 'horizontal':
+            return cv2.flip(frame, 1)  # Flip horizontally
+        elif mirror_mode == 'vertical':
+            return cv2.flip(frame, 0)  # Flip vertically
+        elif mirror_mode == 'both':
+            return cv2.flip(frame, -1)  # Flip both axes
+        return frame
+    
     def get_slice_list(self) -> List[Dict]:
         """
         Get list of all slice definitions
@@ -353,7 +415,14 @@ class SliceManager:
                 'description': slice_def.description,
                 'has_mask': slice_def.mask is not None,
                 'masks': slice_def.masks or [],
-                'points': slice_def.points
+                'points': slice_def.points,
+                'brightness': slice_def.brightness,
+                'contrast': slice_def.contrast,
+                'red': slice_def.red,
+                'green': slice_def.green,
+                'blue': slice_def.blue,
+                'mirror': slice_def.mirror,
+                'transformCorners': slice_def.transformCorners
             }
             for slice_def in self.slices.values()
         ]
@@ -371,7 +440,14 @@ class SliceManager:
                 'soft_edge': slice_def.soft_edge,
                 'description': slice_def.description,
                 'masks': slice_def.masks or [],
-                'points': slice_def.points
+                'points': slice_def.points,
+                'brightness': slice_def.brightness,
+                'contrast': slice_def.contrast,
+                'red': slice_def.red,
+                'green': slice_def.green,
+                'blue': slice_def.blue,
+                'mirror': slice_def.mirror,
+                'transformCorners': slice_def.transformCorners
             }
             for slice_id, slice_def in self.slices.items()
         }
@@ -391,6 +467,13 @@ class SliceManager:
                 soft_edge=slice_data.get('soft_edge'),
                 masks=slice_data.get('masks', []),
                 description=slice_data.get('description', ''),
-                points=slice_data.get('points')
+                points=slice_data.get('points'),
+                brightness=slice_data.get('brightness', 0),
+                contrast=slice_data.get('contrast', 0),
+                red=slice_data.get('red', 0),
+                green=slice_data.get('green', 0),
+                blue=slice_data.get('blue', 0),
+                mirror=slice_data.get('mirror', 'none'),
+                transformCorners=slice_data.get('transformCorners')
             )
         logger.debug(f"Restored {len(self.slices)} slices from session")

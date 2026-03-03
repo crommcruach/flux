@@ -121,27 +121,11 @@ const app = {
     outputContextMenuTarget: null,
 
     // ========================================
-    // DEBOUNCE UTILITY
+    // TARGETED DOM UPDATES
     // ========================================
-    // Debouncing prevents HTML regeneration during user interactions (clicks, etc.)
-    // Without debouncing, innerHTML updates destroy DOM elements before click events can fire
-    // With 50ms debounce delay, click events complete before HTML is regenerated
-    // This allows standard onclick handlers to work reliably instead of complex event delegation
-    
-    _debounceTimers: {},
-    
-    debounce(func, key, delay = 200) {
-        // Clear existing timer for this key
-        if (this._debounceTimers[key]) {
-            clearTimeout(this._debounceTimers[key]);
-        }
-        
-        // Set new timer
-        this._debounceTimers[key] = setTimeout(() => {
-            func.call(this);
-            delete this._debounceTimers[key];
-        }, delay);
-    },
+    // Instead of regenerating entire HTML (which causes flicker and performance issues),
+    // we update only the specific elements that changed. This is faster, smoother,
+    // and doesn't require debouncing to work around destroyed DOM elements.
     
     // ========================================
     // INITIALIZATION
@@ -229,16 +213,18 @@ const app = {
         // Then load slices (which will restore output assignments)
         await this.loadFromBackend();
         
+        // Load ArtNet routing state (objects + outputs)
+        await this.loadArtNetState();
+        
         this.setType('slice'); // Set default to slice mode with correct UI state
         
         // Apply the restored mode (this will set up UI visibility), silent = true to avoid toast on init
         this.setMode(this.currentMode, true);
         
-        // Initial UI update (immediate, not debounced)
-        this.updateScreenButtonsImmediate();
-        this.updateUIImmediate();
+        // Initial UI update
+        this.updateScreenButtons();
+        this.updateUI();
         this.updateToggleButtonStates();
-        this.updateZoomControlsPosition(); // Set initial zoom controls position
         this.render();
         
         // Periodic check for lingering modal backdrops (every 2 seconds)
@@ -636,9 +622,16 @@ const app = {
         }
 
         // Check click on shape
+        console.log('🔍 Mouse position:', Math.round(pos.x), Math.round(pos.y));
+        console.log('🔍 Total slices:', this.slices.length);
+        console.log('🔍 Visible slices:', this.slices.filter(s => s.visible !== false).length);
+        
         const clickedItem = this.getSliceAt(pos);
+        console.log('🔍 getSliceAt returned:', clickedItem ? clickedItem.id : 'null');
+        
         if (clickedItem) {
-            console.log('🖱️ Clicked on shape:', clickedItem.shape, clickedItem.type || 'slice');
+            console.log('🖱️ Clicked on shape:', clickedItem.shape, clickedItem.type || 'slice', 'ID:', clickedItem.id);
+            console.log('   Shape bounds:', clickedItem.x, clickedItem.y, clickedItem.width, clickedItem.height);
             
             // Check if clicked item is a mask
             let isMask = false;
@@ -660,15 +653,19 @@ const app = {
                 // Clicked on a slice
                 this.selectedSlice = clickedItem;
                 this.selectedMask = null;
+                console.log('✅ Selected slice:', clickedItem.id, clickedItem.label);
             }
             
             this.isDragging = true;
             this.dragStart = pos;
         } else {
+            console.log('❌ No shape found at click position', Math.round(pos.x), Math.round(pos.y));
+            console.log('   Available slices:', this.slices.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.width, h: s.height })));
             this.selectedSlice = null;
             this.selectedMask = null;
         }
 
+        console.log('📊 Final selectedSlice:', this.selectedSlice ? this.selectedSlice.id : 'none');
         this.updateUI();
         this.render();
     },
@@ -763,6 +760,15 @@ const app = {
     },
 
     onMouseUp(e) {
+        // Ignore mouseUp on UI panels - let them handle their own events
+        // This prevents updateUI() from destroying panel elements mid-click
+        if (e.target.closest('.right-panel') || 
+            e.target.closest('.left-panel') || 
+            e.target.closest('#slicesList') ||
+            e.target.closest('#artnetObjectsList')) {
+            return;
+        }
+        
         // Stop panning
         if (this.isPanning) {
             this.stopPanning();
@@ -948,7 +954,8 @@ const app = {
         if (slice.shape !== 'rectangle') return false;
         const centerX = slice.x + slice.width / 2;
         const centerY = slice.y + slice.height / 2;
-        const rotation = (slice.rotation || 0) * Math.PI / 180;
+        // Negate rotation to match visual (we store clockwise-positive, canvas uses counter-clockwise-positive)
+        const rotation = -(slice.rotation || 0) * Math.PI / 180;
         
         // Rotation handle position (unrotated)
         const handleX = centerX;
@@ -1108,7 +1115,12 @@ const app = {
         const centerX = shape.x + shape.width / 2;
         const centerY = shape.y + shape.height / 2;
         let angle = Math.atan2(pos.y - centerY, pos.x - centerX) * 180 / Math.PI + 90;
-        angle = angle % 360;
+        
+        // Normalize angle to 0-360 range (JS modulo keeps negative numbers negative)
+        angle = ((angle % 360) + 360) % 360;
+        
+        // Invert angle direction so clockwise rotation = positive values
+        angle = (360 - angle) % 360;
         
         // Snap to 0, 90, 180, 270 degrees if within 3 degrees
         const snapAngles = [0, 90, 180, 270, 360];
@@ -1389,7 +1401,8 @@ const app = {
         if (slice.shape === 'rectangle') {
             const centerX = slice.x + slice.width / 2;
             const centerY = slice.y + slice.height / 2;
-            const rotation = (slice.rotation || 0) * Math.PI / 180;
+            // Negate rotation to match visual (we store clockwise-positive, canvas uses counter-clockwise-positive)
+            const rotation = -(slice.rotation || 0) * Math.PI / 180;
             
             // Helper function to rotate a point around center
             const rotatePoint = (x, y) => {
@@ -1695,7 +1708,8 @@ const app = {
         const centerX = slice.x + slice.width / 2;
         const centerY = slice.y + slice.height / 2;
         this.ctx.translate(centerX, centerY);
-        this.ctx.rotate(slice.rotation * Math.PI / 180);
+        // Negate rotation because we store clockwise-positive, but canvas uses counter-clockwise-positive
+        this.ctx.rotate(-slice.rotation * Math.PI / 180);
         this.ctx.translate(-centerX, -centerY);
     }
 
@@ -1741,7 +1755,8 @@ const app = {
         const centerX = mask.x + mask.width / 2;
         const centerY = mask.y + mask.height / 2;
         this.ctx.translate(centerX, centerY);
-        this.ctx.rotate(mask.rotation * Math.PI / 180);
+        // Negate rotation because we store clockwise-positive, but canvas uses counter-clockwise-positive
+        this.ctx.rotate(-mask.rotation * Math.PI / 180);
         this.ctx.translate(-centerX, -centerY);
     }
             
@@ -1883,7 +1898,8 @@ const app = {
             // Rectangle: existing logic with rotation
             const centerX = slice.x + slice.width / 2;
             const centerY = slice.y + slice.height / 2;
-            const rotation = (slice.rotation || 0) * Math.PI / 180;
+            // Negate rotation to match visual (we store clockwise-positive, canvas uses counter-clockwise-positive)
+            const rotation = -(slice.rotation || 0) * Math.PI / 180;
             
             // Helper function to rotate a point around center
             const rotatePoint = (x, y) => {
@@ -2022,7 +2038,8 @@ const app = {
     drawRotationHandle(slice) {
         const centerX = slice.x + slice.width / 2;
         const centerY = slice.y + slice.height / 2;
-        const rotation = (slice.rotation || 0) * Math.PI / 180;
+        // Negate rotation to match visual (we store clockwise-positive, canvas uses counter-clockwise-positive)
+        const rotation = -(slice.rotation || 0) * Math.PI / 180;
         
         // Rotation handle position (unrotated)
         const handleX = centerX;
@@ -2389,40 +2406,8 @@ const app = {
     }
         }
         
-        this.saveState();
-        this.updateSliceList();
-        this.render();
-    },
-
-    updateSoftEdgeProperty(sliceId, property, value) {
-        const slice = this.slices.find(s => s.id === sliceId);
-        if (!slice || !slice.softEdge) return;
-        
-        slice.softEdge[property] = value;
-        
-        // If auto-detect was toggled, recalculate
-        if (property === 'autoDetect' && value === true) {
-    this.updateSoftEdgeFromOverlap(slice);
-        }
-        
-        this.saveState();
-        this.updateSliceList();
-        this.render();
-    },
-
-    updateSoftEdgeWidth(sliceId, edge, value) {
-        const slice = this.slices.find(s => s.id === sliceId);
-        if (!slice || !slice.softEdge || !slice.softEdge.width) return;
-        
-        slice.softEdge.width[edge] = value;
-        
-        // Disable auto-detect when manually changing values
-        if (slice.softEdge.autoDetect) {
-    slice.softEdge.autoDetect = false;
-        }
-        
-        this.saveState();
-        this.updateSliceList();
+        this.saveToBackend();
+        this.updateUI(); // Update UI to show soft edge controls
         this.render();
     },
 
@@ -2436,7 +2421,7 @@ const app = {
     // Reset rotation to 0° when entering transform mode
     if (this.selectedSlice && this.selectedSlice.rotation) {
         this.selectedSlice.rotation = 0;
-        this.saveState();
+        this.saveToBackend();
     }
     btn.style.background = '#2a4a2a';
     btn.style.borderColor = '#4CAF50';
@@ -2476,7 +2461,7 @@ const app = {
         }
         
         this.showToast('Transform reset to default rectangle');
-        this.saveState();
+        this.saveToBackend();
         this.render();
     },
 
@@ -2951,7 +2936,35 @@ const app = {
     },
 
     // Immediate screen buttons update
-    updateScreenButtonsImmediate() {
+    // Update only checkbox states (targeted update - fast!)
+    updateScreenButtonsStates() {
+        const selectedSlice = this.selectedSlice && this.selectedSlice.type === 'slice' ? this.selectedSlice : null;
+        
+        if (!this.existingOutputs) return;
+        
+        // Update each checkbox state without regenerating HTML
+        Object.entries(this.existingOutputs).forEach(([outputId, output]) => {
+            const checkbox = document.getElementById(`output_${outputId}`);
+            if (checkbox) {
+                const shouldBeChecked = selectedSlice && output.slice === (selectedSlice.id || selectedSlice.label);
+                checkbox.checked = shouldBeChecked;
+                checkbox.disabled = !selectedSlice;
+                
+                // Update parent container disabled class
+                const container = checkbox.closest('.screen-checkbox-item');
+                if (container) {
+                    if (selectedSlice) {
+                        container.classList.remove('disabled');
+                    } else {
+                        container.classList.add('disabled');
+                    }
+                }
+            }
+        });
+    },
+    
+    // Full rebuild (use when structure changes - new outputs, etc.)
+    updateScreenButtons() {
         const container = document.getElementById('screenButtonsContainer');
         
         if (!container) {
@@ -3011,11 +3024,6 @@ const app = {
         }
         
         container.innerHTML = html;
-    },
-    
-    // Debounced screen buttons update (use this for most cases)
-    updateScreenButtons() {
-        this.debounce(this.updateScreenButtonsImmediate, 'updateScreenButtons');
     },
     
     async toggleOutputForSlice(outputId) {
@@ -3241,7 +3249,7 @@ const app = {
         }
         // selectedSlice element removed in ArtNet canvas info redesign
 
-        this.updateScreenButtons();
+        this.updateScreenButtonsStates();
 
         // Build grouped slices list (by outputs and compositions)
         let listHtml = '';
@@ -3452,7 +3460,7 @@ const app = {
                     const isMaskActive = mask === this.selectedMask ? 'active' : '';
                     listHtml += `
                         <div style="padding-left: 20px; margin-top: 4px;">
-                            <div class="slice-item ${isMaskActive}" style="background: #1a1a1a; border-color: #f44336;" onclick="app.selectMask('${slice.id}', '${mask.id}'); event.stopPropagation();">
+                            <div class="slice-item ${isMaskActive}" data-slice-id="${slice.id}" data-mask-id="${mask.id}" style="background: #1a1a1a; border-color: #f44336; cursor: pointer;">
                                 <div class="slice-item-header">
                                     <div style="display: flex; align-items: center; gap: 5px;">
                                         <span style="color: #f44336">↳ ✕</span>
@@ -3473,12 +3481,47 @@ const app = {
     }
         });
 
-        document.getElementById('slicesList').innerHTML = listHtml;
+        const slicesListElement = document.getElementById('slicesList');
+        if (!slicesListElement) {
+            console.error('❌ slicesList element NOT FOUND!');
+            return;
+        }
+        
+        slicesListElement.innerHTML = listHtml;
+        
+        // Remove old listener if exists
+        if (this._slicesListClickHandler) {
+            slicesListElement.removeEventListener('click', this._slicesListClickHandler);
+        }
+        
+        // Add new listener with event delegation
+        this._slicesListClickHandler = (e) => {
+            // Find the clicked slice-item
+            const sliceItem = e.target.closest('.slice-item');
+            if (!sliceItem) return;
+            
+            // Don't handle if clicking on a button or input (they have their own handlers)
+            if (e.target.closest('button') || e.target.closest('input')) return;
+            
+            // Check if this is a mask or a slice
+            const maskId = sliceItem.dataset.maskId;
+            const sliceId = sliceItem.dataset.sliceId;
+            
+            if (maskId && sliceId) {
+                // This is a mask
+                this.selectMask(sliceId, maskId);
+            } else if (sliceId) {
+                // This is a slice
+                this.selectSlice(sliceId);
+            }
+        };
+        
+        slicesListElement.addEventListener('click', this._slicesListClickHandler);
     },
     
-    // Debounced UI update (use this for most cases - prevents HTML regeneration during clicks)
+    // Full UI update - use when slice structure changes
     updateUI() {
-        this.debounce(this.updateUIImmediate, 'updateUI');
+        this.updateUIImmediate();
     },
 
     renderSliceItem(slice, isActive, isAssigned = false) {
@@ -3491,7 +3534,7 @@ const app = {
             `<button class="small" onclick="app.unassignSlice('${slice.id}'); event.stopPropagation();" style="padding: 4px 8px; font-size: 10px; background: #FF9800; border-color: #F57C00;" title="Unassign from all outputs">⊗</button>` : '';
         
         return `
-            <div class="slice-item ${isActive}" onclick="app.selectSlice('${slice.id}')" style="margin-bottom: 4px;">
+            <div class="slice-item ${isActive}" data-slice-id="${slice.id}" style="margin-bottom: 4px; cursor: pointer;">
                 <div class="slice-item-header">
                     <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
                         <span class="slice-color-indicator" style="background: ${slice.color}"></span>
@@ -3534,19 +3577,26 @@ const app = {
     },
 
     selectSlice(id) {
+        console.log('📋 selectSlice called with ID:', id);
         const slice = this.slices.find(s => s.id === id);
+        console.log('   Found slice:', slice ? slice.label : 'null');
+        console.log('   Current selectedSlice:', this.selectedSlice ? this.selectedSlice.id : 'none');
         
-        // Toggle selection if clicking the same slice
-        if (this.selectedSlice === slice) {
-            this.selectedSlice = null;
-        } else {
-            this.selectedSlice = slice || null;
-        }
+        // Always select the clicked slice (no toggle)
+        this.selectedSlice = slice || null;
+        console.log('   ✅ Selected slice:', this.selectedSlice ? this.selectedSlice.id : 'none');
+        
         // Clear mask selection when selecting a slice
         this.selectedMask = null;
         
-        this.updateUI();
+        // Fast targeted updates
+        this.updateScreenButtonsStates();
         this.render();
+        
+        // Defer full UI update to next frame (allows click event to complete)
+        requestAnimationFrame(() => {
+            this.updateUI();
+        });
     },
 
     selectMask(sliceId, maskId) {
@@ -3556,8 +3606,15 @@ const app = {
             this.selectedSlice = slice;
             // Track which mask is highlighted
             this.selectedMask = slice.masks.find(m => m.id === maskId) || null;
-            this.updateUI();
+            
+            // Fast targeted updates
+            this.updateScreenButtonsStates();
             this.render();
+            
+            // Defer full UI update to next frame (allows click event to complete)
+            requestAnimationFrame(() => {
+                this.updateUI();
+            });
         }
     },
 
@@ -3667,13 +3724,16 @@ const app = {
         const slice = this.slices.find(s => s.id === id);
         if (!slice) return;
         
-        if (property === 'label') {
+        if (property === 'label' || property === 'mirror') {
+            // String properties
             slice[property] = value;
         } else if (!isNaN(value)) {
+            // Numeric properties
             slice[property] = value;
         }
         
-        this.updateUI();
+        // Don't call updateUI() - it would regenerate HTML and destroy the input field!
+        // Just rerender the canvas with the updated value
         this.render();
         
         // Save to backend
@@ -3687,7 +3747,7 @@ const app = {
         if (!slice || !slice.softEdge || !slice.softEdge.width) return;
         
         slice.softEdge.width[edge] = value;
-        this.updateUI();
+        // Don't regenerate HTML - just rerender canvas
         this.render();
         
         // Save to backend
@@ -3701,7 +3761,7 @@ const app = {
         if (!slice || !slice.softEdge) return;
         
         slice.softEdge[property] = value;
-        this.updateUI();
+        // Don't regenerate HTML - just rerender canvas
         this.render();
         
         // Save to backend
@@ -3860,7 +3920,14 @@ const app = {
                     points: slice.points || null,
                     masks: slice.masks || [],
                     outputs: slice.outputs || [],
-                    source: slice.source || 'canvas'
+                    source: slice.source || 'canvas',
+                    brightness: slice.brightness || 0,
+                    contrast: slice.contrast || 0,
+                    red: slice.red || 0,
+                    green: slice.green || 0,
+                    blue: slice.blue || 0,
+                    mirror: slice.mirror || 'none',
+                    transformCorners: slice.transformCorners || null
                 };
                 
                 // Debug log mask saving
@@ -3997,7 +4064,14 @@ const app = {
                         source: sliceData.source || 'canvas',
                         color: this.colors[this.colorIndex % this.colors.length],
                         masks: masks,
-                        type: 'slice'
+                        type: 'slice',
+                        brightness: sliceData.brightness || 0,
+                        contrast: sliceData.contrast || 0,
+                        red: sliceData.red || 0,
+                        green: sliceData.green || 0,
+                        blue: sliceData.blue || 0,
+                        mirror: sliceData.mirror || 'none',
+                        transformCorners: sliceData.transformCorners || null
                     });
                     this.colorIndex++;
                 });
@@ -4061,30 +4135,6 @@ const app = {
         });
         
         console.log('✅ Restored slice output assignments from backend');
-    },
-
-    togglePanel(side) {
-        const panel = document.getElementById(side === 'left' ? 'rightPanel' : 'leftPanel');
-        const toggle = panel.querySelector('.panel-toggle');
-        panel.classList.toggle('collapsed');
-        
-        if (side === 'left') {
-    toggle.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
-        } else {
-    toggle.textContent = panel.classList.contains('collapsed') ? '◀' : '▶';
-        }
-        
-        // Update zoom controls position based on right panel state
-        this.updateZoomControlsPosition();
-    },
-
-    updateZoomControlsPosition() {
-        const rightPanel = document.getElementById('rightPanel');
-        const zoomControls = document.querySelector('.zoom-controls');
-        if (zoomControls) {
-    const isCollapsed = rightPanel.classList.contains('collapsed');
-    zoomControls.style.right = isCollapsed ? '70px' : '370px';
-        }
     },
 
     // ========================================
@@ -4371,7 +4421,13 @@ const app = {
             width: Math.round(slice.width),
             height: Math.round(slice.height),
             shape: slice.shape || 'rectangle',
-            rotation: slice.rotation || 0
+            rotation: slice.rotation || 0,
+            brightness: slice.brightness || 0,
+            contrast: slice.contrast || 0,
+            red: slice.red || 0,
+            green: slice.green || 0,
+            blue: slice.blue || 0,
+            mirror: slice.mirror || 'none'
         };
         
         // Add transform corners if slice has perspective transform
