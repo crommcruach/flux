@@ -137,7 +137,8 @@ async function initializeTabComponents() {
     // Initialize Files Tab with 'list' mode (options: 'list', 'tree', 'button')
     // 'list' shows only flat file list without toggle button
     // enableThumbnails = true activates thumbnail display and preview modal
-    filesTab = new FilesTab('fileBrowser', 'filesSearchContainer', 'list', false, true);
+    // Default: show only converted clip folders; toggle button lets user show all files
+    filesTab = new FilesTab('fileBrowser', 'filesSearchContainer', 'list', false, true, '?converted_only=true');
     await filesTab.init();
     
     debug.log('✅ Tab components initialized');
@@ -2779,7 +2780,12 @@ window.refreshVideoPlaylist = async function() {
 
 window.removeFromVideoPlaylist = async function(index) {
     const video = playerConfigs.video.files[index];
-    const wasCurrentlyPlaying = (playerConfigs.video.currentFile === video.path);
+    // Normalize paths to handle Windows backslashes vs forward slashes
+    const _normP = (p) => p ? p.replace(/\\/g, '/').replace(/^\/+/, '') : '';
+    const wasCurrentlyPlaying =
+        (playerConfigs.video.currentItemId && video.id && playerConfigs.video.currentItemId === video.id) ||
+        (playerConfigs.video.currentClipIndex >= 0 && playerConfigs.video.currentClipIndex === index) ||
+        (_normP(playerConfigs.video.currentFile) !== '' && _normP(playerConfigs.video.currentFile) === _normP(video.path));
     
     // Cleanup audio sequences for this clip
     if (video.id && window.sequenceManager) {
@@ -3380,7 +3386,12 @@ window.refreshArtnetPlaylist = async function() {
 
 window.removeFromArtnetPlaylist = async function(index) {
     const video = playerConfigs.artnet.files[index];
-    const wasCurrentlyPlaying = (playerConfigs.artnet.currentFile === video.path);
+    // Normalize paths to handle Windows backslashes vs forward slashes
+    const _normP = (p) => p ? p.replace(/\\/g, '/').replace(/^\/+/, '') : '';
+    const wasCurrentlyPlaying =
+        (playerConfigs.artnet.currentItemId && video.id && playerConfigs.artnet.currentItemId === video.id) ||
+        (playerConfigs.artnet.currentClipIndex >= 0 && playerConfigs.artnet.currentClipIndex === index) ||
+        (_normP(playerConfigs.artnet.currentFile) !== '' && _normP(playerConfigs.artnet.currentFile) === _normP(video.path));
     
     // Cleanup audio sequences for this clip
     if (video.id && window.sequenceManager) {
@@ -4605,11 +4616,37 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                 const containerInDOM = document.getElementById(controlId);
                 
                 if (existingSlider && containerInDOM && existingSlider.container === containerInDOM) {
+                    // DEBUG: Log slider update values
+                    if (controlId.includes('transport_position')) {
+                        console.log('🔄 UPDATING TRANSPORT SLIDER:', {
+                            controlId,
+                            intActualValue,
+                            intSavedRangeMin,
+                            intSavedRangeMax,
+                            totalFrames,
+                            'existingSlider.config.max (before)': existingSlider.config.max,
+                            'existingSlider.contentMax': existingSlider.contentMax
+                        });
+                    }
+                    
                     // Slider exists with valid DOM reference - update it
+                    // FIX: Use totalFrames - 1 as max since frames are 0-indexed (0 to totalFrames-1)
+                    // For 16 frames (0-15), slider should go from 0 to 15, not 0 to 16
                     existingSlider.updateValues(intActualValue, intSavedRangeMin, intSavedRangeMax);
                     existingSlider.config.displayFormat = displayFormat;
                     existingSlider.config.fps = fps;
-                    existingSlider.config.max = totalFrames;
+                    existingSlider.config.max = totalFrames - 1;
+                    existingSlider.contentMax = totalFrames - 1;
+                    
+                    // DEBUG: Log after update
+                    if (controlId.includes('transport_position')) {
+                        console.log('✅ AFTER UPDATE:', {
+                            'config.max': existingSlider.config.max,
+                            'contentMax': existingSlider.contentMax,
+                            'rangeMax': existingSlider.config.rangeMax
+                        });
+                    }
+                    
                     existingSlider.updateUI();
                     // Update external display
                     updateDisplayValue(intActualValue);
@@ -4620,10 +4657,27 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                         existingSlider.destroy();
                     }
                     
+                    // DEBUG: Log slider creation values
+                    if (controlId.includes('transport_position')) {
+                        console.log('🎯 CREATING TRANSPORT SLIDER:', {
+                            controlId,
+                            intMin,
+                            totalFrames,
+                            'sliderMax': totalFrames - 1,
+                            intActualValue,
+                            intSavedRangeMin,
+                            intSavedRangeMax,
+                            intMax,
+                            'paramValue': currentValue
+                        });
+                    }
+                    
                     // Create new slider
+                    // FIX: Use totalFrames - 1 as max since frames are 0-indexed (0 to totalFrames-1)
+                    // For 16 frames (0-15), slider should go from 0 to 15, not 0 to 16
                     initTripleSlider(controlId, {
                         min: intMin,
-                        max: totalFrames,
+                        max: totalFrames - 1,
                         value: intActualValue,
                         step: intStep,
                         showRangeHandles: true,

@@ -68,6 +68,8 @@ class VideoSource(FrameSource):
     
     def __init__(self, video_path, canvas_width, canvas_height, config=None, clip_id=None, player_name='video'):
         super().__init__(canvas_width, canvas_height, config)
+        # Resolve clip folders to the best resolution variant (Phase 1 multi-res)
+        video_path = self._find_best_resolution(video_path)
         self.video_path = video_path
         self.source_path = video_path  # Generischer Pfad für load_points()
         self.source_type = 'video'  # Marker für Transport-Effekt
@@ -112,6 +114,40 @@ class VideoSource(FrameSource):
             'area': cv2.INTER_AREA         # ~15-30ms - slowest, best for downscaling
         }.get(scaling_quality.lower(), cv2.INTER_LINEAR)
     
+    def _find_best_resolution(self, path: str) -> str:
+        """If path is a clip folder, return the best-matching resolution .mov file.
+
+        Selection logic:
+        - Finds the smallest preset whose dimensions cover canvas_width × canvas_height.
+        - Falls back to the next-larger preset, then original.mov.
+        - Legacy single-file paths are returned unchanged.
+        """
+        if not os.path.isdir(path):
+            return path  # Legacy single-file clip — use as-is
+
+        # Lazy import to avoid circular dependency at module load time
+        from ..content.converter import ALL_PRESETS, RESOLUTION_PRESETS, get_target_preset
+
+        target = get_target_preset(self.canvas_width, self.canvas_height)
+        start_idx = ALL_PRESETS.index(target)
+
+        # Try target preset and upward (larger), then any smaller as last-resort
+        ordered = ALL_PRESETS[start_idx:] + ALL_PRESETS[:start_idx][::-1]
+        for preset in ordered:
+            candidate = os.path.join(path, f"{preset}.mov")
+            if os.path.exists(candidate):
+                logger.debug(f"[MultiRes] {os.path.basename(path)} → {preset}.mov (canvas {self.canvas_width}×{self.canvas_height})")
+                return candidate
+
+        # Fallback to original
+        original = os.path.join(path, 'original.mov')
+        if os.path.exists(original):
+            logger.debug(f"[MultiRes] {os.path.basename(path)} → original.mov (no preset match)")
+            return original
+
+        logger.warning(f"[MultiRes] No usable .mov found in clip folder: {path}")
+        return path
+
     def _is_gif_file(self, path):
         """Prüft ob Datei ein GIF ist."""
         return path and path.lower().endswith('.gif')
@@ -422,9 +458,11 @@ class GeneratorSource(FrameSource):
                 duration_value = 10
         self.duration = min(60, max(1, duration_value))
         self.is_infinite = False  # Generators have fixed duration
+        # Calculate total_frames: for 10s @ 30fps = 300 frames (0-299)
+        # Match VideoSource behavior (CAP_PROP_FRAME_COUNT returns total, not last index)
         self.total_frames = int(self.duration * self.fps)
         
-        logger.debug(f"GeneratorSource: duration={self.duration}s, total_frames={self.total_frames}")
+        logger.debug(f"GeneratorSource: duration={self.duration}s, total_frames={self.total_frames} (frames 0-{self.total_frames-1})")
         
         # Simple time tracking for generators (transport plugin handles playback control)
         self.start_time = 0

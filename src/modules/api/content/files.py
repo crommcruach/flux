@@ -44,6 +44,10 @@ def register_files_api(app, video_dir, config=None):
                     "error": "No video directories found"
                 }), 404
             
+            def is_clip_folder(dir_path):
+                """A folder is a multi-resolution clip folder when it contains original.mov."""
+                return os.path.exists(os.path.join(dir_path, 'original.mov'))
+
             def build_tree(path, relative_path=""):
                 """Rekursiv Ordnerstruktur erstellen."""
                 items = []
@@ -62,13 +66,31 @@ def register_files_api(app, video_dir, config=None):
                     rel_path = os.path.join(relative_path, entry) if relative_path else entry
                     
                     if os.path.isdir(full_path):
-                        folder_info = {
-                            "type": "folder",
-                            "name": entry,
-                            "path": rel_path.replace("\\", "/"),
-                            "children": build_tree(full_path, rel_path)
-                        }
-                        folders.append(folder_info)
+                        # Clip folder? → show as a single video-like entry (no children)
+                        if is_clip_folder(full_path):
+                            original = os.path.join(full_path, 'original.mov')
+                            meta = _get_video_metadata(original) or {}
+                            total_size = sum(
+                                os.path.getsize(os.path.join(full_path, f))
+                                for f in os.listdir(full_path)
+                                if os.path.isfile(os.path.join(full_path, f))
+                            )
+                            files.append({
+                                "type": "clip_folder",
+                                "name": entry,
+                                "path": rel_path.replace("\\", "/"),
+                                "size": total_size,
+                                "size_human": _format_size(total_size),
+                                "has_thumbnail": True,
+                                **meta,
+                            })
+                        else:
+                            folders.append({
+                                "type": "folder",
+                                "name": entry,
+                                "path": rel_path.replace("\\", "/"),
+                                "children": build_tree(full_path, rel_path)
+                            })
                     
                     elif os.path.isfile(full_path):
                         file_lower = entry.lower()
@@ -140,6 +162,8 @@ def register_files_api(app, video_dir, config=None):
         """Gibt flache Liste aller Videos und Bilder zurück (für Drag & Drop)."""
         try:
             files_list = []
+            unconverted_only = request.args.get('unconverted_only', 'false').lower() == 'true'
+            converted_only = request.args.get('converted_only', 'false').lower() == 'true'
             sources = get_video_sources()
             
             for source_path in sources:
@@ -147,6 +171,43 @@ def register_files_api(app, video_dir, config=None):
                     source_name = os.path.basename(source_path) or source_path
                     
                     for root, dirs, files in os.walk(source_path):
+                        # Detect clip-folder children of current root before recursing.
+                        # Remove them from dirs so os.walk doesn't step inside them.
+                        clip_folder_names = [
+                            d for d in list(dirs)
+                            if os.path.exists(os.path.join(root, d, 'original.mov'))
+                        ]
+                        dirs[:] = [d for d in dirs if d not in clip_folder_names]
+
+                        # Add each clip folder as a single entry
+                        for cf_name in sorted(clip_folder_names):
+                            if unconverted_only:
+                                continue  # Skip already-converted folders
+                            cf_path = os.path.join(root, cf_name)
+                            rel_path = os.path.relpath(cf_path, source_path)
+                            original = os.path.join(cf_path, 'original.mov')
+                            meta = _get_video_metadata(original) or {}
+                            total_size = sum(
+                                os.path.getsize(os.path.join(cf_path, f))
+                                for f in os.listdir(cf_path)
+                                if os.path.isfile(os.path.join(cf_path, f))
+                            )
+                            files_list.append({
+                                "filename": cf_name,
+                                "path": rel_path.replace("\\", "/"),
+                                "full_path": cf_path,
+                                "source": source_name,
+                                "source_path": source_path,
+                                "folder": os.path.dirname(rel_path) or "root",
+                                "size": total_size,
+                                "size_human": _format_size(total_size),
+                                "type": "clip_folder",
+                                "has_thumbnail": True,
+                                **meta,
+                            })
+
+                        # Normal file enumeration (skip files inside clip folders
+                        # since those dirs were already removed from dirs[:]).
                         for filename in files:
                             file_lower = filename.lower()
                             
@@ -157,7 +218,16 @@ def register_files_api(app, video_dir, config=None):
                                 file_type = "image"
                             else:
                                 continue  # Überspringe andere Dateitypen
-                            
+
+                            # converted_only: hide raw video files (keep images, clip_folders shown above)
+                            if converted_only and file_type == "video":
+                                continue
+
+                            # Skip video files already converted to multi-resolution format
+                            if unconverted_only and file_type == "video":
+                                if os.path.splitext(filename)[0] in clip_folder_names:
+                                    continue
+
                             filepath = os.path.join(root, filename)
                             rel_path = os.path.relpath(filepath, source_path)
                             file_size = os.path.getsize(filepath)
@@ -258,6 +328,14 @@ def register_files_api(app, video_dir, config=None):
                     'success': False,
                     'error': 'File not found'
                 }), 404
+
+            # Clip folder → use original.mov for thumbnail
+            if os.path.isdir(full_path):
+                original = os.path.join(full_path, 'original.mov')
+                if os.path.exists(original):
+                    full_path = original
+                else:
+                    return jsonify({'success': False, 'error': 'No original.mov in clip folder'}), 404
                 
             # Prüfe ob generieren gewünscht
             should_generate = request.args.get('generate', 'false').lower() == 'true'

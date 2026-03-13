@@ -649,6 +649,12 @@ class TransportEffect(PluginBase):
         # Ensure _totalFrames is valid
         total_frames = self._total_frames if self._total_frames is not None else max(self.out_point + 1, 100)
         
+        # DEBUG: Log values to help diagnose trim issues
+        from modules.core.logger import debug_transport
+        import logging
+        logger = logging.getLogger(__name__)
+        debug_transport(logger, f"🔍 get_parameters: total_frames={total_frames}, out_point={self.out_point}, in_point={self.in_point}")
+        
         return {
             'transport_position': {
                 '_value': self.current_position,

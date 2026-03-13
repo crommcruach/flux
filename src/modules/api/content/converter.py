@@ -4,10 +4,11 @@ REST API für Video Converter
 
 from flask import Blueprint, request, jsonify
 from ...content.converter import (
-    get_converter, 
-    OutputFormat, 
-    ResizeMode, 
-    ConversionJob
+    get_converter,
+    OutputFormat,
+    ResizeMode,
+    ConversionJob,
+    ALL_PRESETS,
 )
 import os
 from pathlib import Path
@@ -77,13 +78,14 @@ def converter_status():
 @converter_bp.route('/api/converter/formats', methods=['GET'])
 def list_formats():
     """Liste aller unterstützten Output-Formate"""
+    hap_formats = [OutputFormat.HAP, OutputFormat.HAP_ALPHA, OutputFormat.HAP_Q]
     formats = [
         {
             "id": fmt.value,
             "name": fmt.name,
             "description": _get_format_description(fmt)
         }
-        for fmt in OutputFormat
+        for fmt in hap_formats
     ]
     return jsonify({"formats": formats})
 
@@ -312,42 +314,141 @@ def batch_convert():
 
 @converter_bp.route('/api/converter/upload', methods=['POST'])
 def upload_file():
-    """Upload a local file to the server for conversion"""
+    """Upload a video file and automatically convert it to all resolution presets."""
     try:
-        # Check if file was uploaded
         if 'file' not in request.files:
-            return jsonify({"error": "No file provided"}), 400
-        
+            return jsonify({'error': 'No file provided'}), 400
+
         file = request.files['file']
-        
         if file.filename == '':
-            return jsonify({"error": "No file selected"}), 400
-        
-        # Create upload directory if it doesn't exist
+            return jsonify({'error': 'No file selected'}), 400
+
+        # Save to video/uploads/
+        import re
         upload_dir = Path.cwd() / 'video' / 'uploads'
         upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Sanitize filename
-        import re
         safe_filename = re.sub(r'[^\w\-_\. ]', '_', file.filename)
-        
-        # Save file
         file_path = upload_dir / safe_filename
         file.save(str(file_path))
-        
-        # Return relative path (from video directory)
-        relative_path = f"uploads/{safe_filename}"
-        
+
+        # Derive clip folder location: video/<basename>/
+        video_root = str(Path.cwd() / 'video')
+
+        # Start background conversion (all presets, auto-resume safe)
+        try:
+            converter = get_converter()
+            thread = threading.Thread(
+                target=converter.convert_multi_resolution,
+                args=(str(file_path), ALL_PRESETS, OutputFormat.HAP_ALPHA, video_root),
+                daemon=True,
+            )
+            thread.start()
+            converting = True
+        except Exception as conv_err:
+            # FFmpeg not available — still return success for the upload
+            print(f'Auto-conversion skipped (FFmpeg unavailable): {conv_err}')
+            converting = False
+
+        import os
+        base_name = os.path.splitext(safe_filename)[0]
+        clip_folder = str(Path(video_root) / base_name)
+
         return jsonify({
-            "success": True,
-            "path": relative_path,
-            "filename": safe_filename
+            'success': True,
+            'filename': safe_filename,
+            'upload_path': str(file_path),
+            'clip_folder': clip_folder,
+            'presets': ALL_PRESETS,
+            'converting': converting,
+            'message': 'Upload successful. Converting to all resolutions in background.' if converting else 'Upload successful (conversion skipped).'
         })
     except Exception as e:
         import traceback
-        error_details = traceback.format_exc()
-        print(f"Upload error: {error_details}")
-        return jsonify({"error": str(e)}), 500
+        print(f'Upload error: {traceback.format_exc()}')
+        return jsonify({'error': str(e)}), 500
+
+
+@converter_bp.route('/api/converter/convert/status', methods=['GET'])
+def get_multi_res_status():
+    """Poll conversion status for a clip folder."""
+    clip_folder = request.args.get('clip_folder')
+    if not clip_folder:
+        return jsonify({'error': 'Missing clip_folder parameter'}), 400
+
+    try:
+        converter = get_converter()
+        status = converter.get_conversion_status(clip_folder)
+        return jsonify({'success': True, **status})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@converter_bp.route('/api/converter/convert/resume', methods=['POST'])
+def resume_multi_res():
+    """Resume incomplete conversions for a clip folder."""
+    data = request.json or {}
+    clip_folder = data.get('clip_folder')
+    presets = data.get('presets', ALL_PRESETS)
+
+    if not clip_folder:
+        return jsonify({'error': 'Missing clip_folder'}), 400
+
+    original = os.path.join(clip_folder, 'original.mov')
+    if not os.path.exists(original):
+        return jsonify({'error': f'original.mov not found in {clip_folder}'}), 404
+
+    try:
+        converter = get_converter()
+        status = converter.get_conversion_status(clip_folder)
+        pending = [p for p in presets if status['presets'].get(p) != 'done']
+
+        if not pending:
+            return jsonify({'message': 'All presets already completed', 'status': status})
+
+        thread = threading.Thread(
+            target=converter.convert_multi_resolution,
+            args=(original, pending, OutputFormat.HAP_ALPHA, os.path.dirname(clip_folder)),
+            daemon=True,
+        )
+        thread.start()
+        return jsonify({'success': True, 'resuming': pending})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@converter_bp.route('/api/converter/convert/start', methods=['POST'])
+def start_multi_res_conversion():
+    """Start multi-resolution conversion for an existing file already on the server."""
+    data = request.json or {}
+    source_path_str = data.get('source_path')
+    if not source_path_str:
+        return jsonify({'error': 'Missing source_path parameter'}), 400
+
+    abs_path = _resolve_path(source_path_str, try_video_dir=True)
+    if not os.path.exists(abs_path):
+        return jsonify({'error': f'File not found: {abs_path}'}), 404
+
+    base_name = os.path.splitext(os.path.basename(abs_path))[0]
+    clip_folder = str(Path(os.path.dirname(abs_path)) / base_name)
+
+    try:
+        converter = get_converter()
+        thread = threading.Thread(
+            target=converter.convert_multi_resolution,
+            args=(abs_path, ALL_PRESETS, OutputFormat.HAP_ALPHA, os.path.dirname(abs_path)),
+            daemon=True,
+        )
+        thread.start()
+        return jsonify({
+            'success': True,
+            'source_path': abs_path,
+            'clip_folder': clip_folder,
+            'presets': ALL_PRESETS,
+            'converting': True,
+            'message': 'Multi-resolution conversion started in background.',
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @converter_bp.route('/api/converter/canvas-size', methods=['GET'])
@@ -389,7 +490,5 @@ def _get_format_description(fmt: OutputFormat) -> str:
         OutputFormat.HAP: "HAP (DXT1) - Fast decoding, lower quality",
         OutputFormat.HAP_ALPHA: "HAP Alpha (DXT5) - Fast decoding with alpha channel",
         OutputFormat.HAP_Q: "HAP Q (BC7) - Highest quality HAP variant",
-        OutputFormat.H264: "H.264 (libx264) - Software encoding, universal compatibility",
-        OutputFormat.H264_NVENC: "H.264 (NVENC) - Hardware encoding (NVIDIA GPU required)"
     }
     return descriptions.get(fmt, "")

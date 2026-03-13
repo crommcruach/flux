@@ -16,9 +16,12 @@
 import { debug } from '../logger.js';
 
 export class FilesTab {
-    constructor(containerId, searchContainerId, viewMode = 'list', enableMultiselect = false, enableThumbnails = false) {
+    constructor(containerId, searchContainerId, viewMode = 'list', enableMultiselect = false, enableThumbnails = false, filterParams = '') {
         this.containerId = containerId;
         this.searchContainerId = searchContainerId;
+        this.filterParams = filterParams;
+        this.convertedFilterActive = filterParams.includes('converted_only=true');
+        this.showNonConverted = false; // when convertedFilterActive, tracks whether toggle is on
         this.files = [];
         this.filteredFiles = [];
         this.searchTerm = '';
@@ -132,16 +135,17 @@ export class FilesTab {
         const searchContainer = document.getElementById(this.searchContainerId);
         if (!searchContainer) return;
         
-        // Show toggle button only in 'button' mode
-        const showButton = this.viewMode === 'button';
+        // Show view toggle button only in 'button' mode
+        const showViewToggle = this.viewMode === 'button';
+        const hasButtons = showViewToggle;
         
         searchContainer.innerHTML = `
-            <div class="search-box ${showButton ? 'd-flex gap-2' : ''}">
+            <div class="search-box ${hasButtons ? 'd-flex gap-2' : ''}">
                 <input type="text" 
-                       class="form-control form-control-sm ${showButton ? 'flex-grow-1' : ''}" 
+                       class="form-control form-control-sm ${hasButtons ? 'flex-grow-1' : ''}" 
                        placeholder="🔍 Search files..." 
                        id="${this.searchContainerId}-input">
-                ${showButton ? `
+                ${showViewToggle ? `
                 <button class="btn btn-sm btn-outline-secondary" 
                         id="${this.searchContainerId}-viewToggle"
                         title="Toggle view mode">
@@ -197,6 +201,13 @@ export class FilesTab {
         // Create context menu element
         this.contextMenu = document.createElement('div');
         this.contextMenu.className = 'file-context-menu';
+        
+        const filterItem = this.convertedFilterActive ? `
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="toggleConvertedFilter">
+                <i class="bi bi-funnel"></i> <span id="${this.containerId}-filterLabel">Show non-converted files</span>
+            </div>` : '';
+        
         this.contextMenu.innerHTML = `
             <div class="context-menu-item" data-action="preview">
                 <i class="bi bi-play-circle"></i> Preview
@@ -211,6 +222,7 @@ export class FilesTab {
             <div class="context-menu-item context-menu-item-danger" data-action="delete">
                 <i class="bi bi-trash"></i> Delete File
             </div>
+            ${filterItem}
         `;
         document.body.appendChild(this.contextMenu);
         
@@ -305,6 +317,15 @@ export class FilesTab {
                 break;
             case 'delete':
                 await this.deleteFile(filePath);
+                break;
+            case 'toggleConvertedFilter':
+                if (!this.convertedFilterActive) break;
+                this.showNonConverted = !this.showNonConverted;
+                this.filterParams = this.showNonConverted ? '' : '?converted_only=true';
+                // Update label for next open
+                const label = document.getElementById(`${this.containerId}-filterLabel`);
+                if (label) label.textContent = this.showNonConverted ? 'Show converted files only' : 'Show non-converted files';
+                await this.loadFiles();
                 break;
         }
     }
@@ -425,7 +446,7 @@ export class FilesTab {
      * Load flat file list
      */
     async loadFileList() {
-        const response = await fetch('/api/files/videos');
+        const response = await fetch('/api/files/videos' + this.filterParams);
         const data = await response.json();
         
         debug.log('📁 Files API response:', data);
@@ -441,6 +462,13 @@ export class FilesTab {
         }
     }
     
+    /**
+     * Reload file list from server
+     */
+    async refresh() {
+        return this.loadFiles();
+    }
+
     /**
      * Filter files based on search term
      */

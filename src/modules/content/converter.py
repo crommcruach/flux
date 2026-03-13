@@ -1,15 +1,50 @@
 """
 Video Converter Module - Universal Video Converter mit HAP Codec Support
-Unterstützt Batch-Processing, Auto-Resize, Loop-Optimierung
+Unterstützt Batch-Processing, Auto-Resize, Loop-Optimierung, Multi-Resolution
 """
 
 import os
 import subprocess
 import json
+import shutil
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+
+
+# ---------------------------------------------------------------------------
+# Multi-Resolution Constants
+# ---------------------------------------------------------------------------
+
+RESOLUTION_PRESETS: Dict[str, Tuple[int, int]] = {
+    '720p':  (1280, 720),
+    '1080p': (1920, 1080),
+    '1440p': (2560, 1440),
+    '2160p': (3840, 2160),
+}
+
+ALL_PRESETS = ['720p', '1080p', '1440p', '2160p']
+
+# State file name stored inside each clip folder
+JOB_STATE_FILE = 'conversion_state.json'
+
+# Maximum seconds per FFmpeg subprocess per resolution
+CONVERSION_TIMEOUTS = {
+    '720p':  1800,   # 30 min
+    '1080p': 3600,   # 1 hour
+    '1440p': 5400,   # 1.5 hours
+    '2160p': 7200,   # 2 hours
+}
+
+
+def get_target_preset(player_width: int, player_height: int) -> str:
+    """Return the smallest preset whose dimensions cover the player resolution."""
+    for preset in ALL_PRESETS:
+        w, h = RESOLUTION_PRESETS[preset]
+        if w >= player_width and h >= player_height:
+            return preset
+    return '2160p'
 
 
 class OutputFormat(Enum):
@@ -210,16 +245,6 @@ class VideoConverter:
             
         elif job.format == OutputFormat.HAP_Q:
             cmd.extend(["-c:v", "hap", "-format", "hap_q"])
-            
-        elif job.format == OutputFormat.H264:
-            cmd.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "23"])
-            if job.bitrate:
-                cmd.extend(["-b:v", job.bitrate])
-                
-        elif job.format == OutputFormat.H264_NVENC:
-            cmd.extend(["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr"])
-            if job.bitrate:
-                cmd.extend(["-b:v", job.bitrate])
         
         # Audio (copy or remove)
         cmd.extend(["-an"])  # No audio for LED content
@@ -320,6 +345,194 @@ class VideoConverter:
                 error=str(e)
             )
     
+    # -----------------------------------------------------------------------
+    # Multi-Resolution Conversion (Phase 1)
+    # -----------------------------------------------------------------------
+
+    def convert_multi_resolution(
+        self,
+        input_path: str,
+        presets: List[str] = None,
+        output_format: OutputFormat = OutputFormat.HAP,
+        output_dir: str = None,
+    ) -> Tuple[str, Dict]:
+        """Convert a video to multiple resolution presets inside a clip folder.
+
+        Supports resume: calling this again on an existing clip folder skips
+        presets already marked 'done' in conversion_state.json.
+
+        Args:
+            input_path:    Path to the source video file.
+            presets:       List of preset names to convert.  Defaults to ALL_PRESETS.
+            output_format: Output codec / container format.
+            output_dir:    Directory where the clip folder is created.
+                           Defaults to the same directory as input_path.
+
+        Returns:
+            (clip_folder, results) where results is a dict mapping preset → info.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if presets is None:
+            presets = ALL_PRESETS
+
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        target_dir = output_dir if output_dir else os.path.dirname(input_path)
+        clip_folder = os.path.join(target_dir, base_name)
+        os.makedirs(clip_folder, exist_ok=True)
+
+        # Load existing state (resume support)
+        state = self._load_job_state(clip_folder)
+
+        # Copy original once
+        original_dest = os.path.join(clip_folder, 'original.mov')
+        if not os.path.exists(original_dest):
+            shutil.copy2(input_path, original_dest)
+            logger.info(f"[MultiRes] Copied original → {original_dest}")
+
+        results = {}
+        for preset in presets:
+            output_path = os.path.join(clip_folder, f"{preset}.mov")
+
+            # Skip already-completed presets
+            if state.get(preset) == 'done' and os.path.exists(output_path):
+                logger.info(f"[MultiRes] {preset}: already done, skipping")
+                results[preset] = {'success': True, 'skipped': True, 'output_path': output_path}
+                continue
+
+            # Clean up partial file from a previous crashed run
+            if state.get(preset) == 'in_progress' and os.path.exists(output_path):
+                os.remove(output_path)
+                logger.warning(f"[MultiRes] {preset}: removed partial file from previous run")
+
+            # Mark in-progress before starting
+            state[preset] = 'in_progress'
+            self._save_job_state(clip_folder, state)
+
+            try:
+                result = self._convert_with_timeout(
+                    original_dest, output_path, preset, output_format
+                )
+                if result.success:
+                    state[preset] = 'done'
+                    results[preset] = {
+                        'success': True,
+                        'output_path': output_path,
+                        'size_mb': result.output_size_mb,
+                    }
+                    logger.info(f"[MultiRes] {preset}: done ({result.output_size_mb:.1f} MB, {result.duration:.0f}s)")
+                else:
+                    state[preset] = f"failed: {result.error}"
+                    results[preset] = {'success': False, 'error': result.error}
+                    logger.error(f"[MultiRes] {preset}: failed — {result.error}")
+            except Exception as e:
+                msg = str(e)
+                state[preset] = 'timeout' if 'timeout' in msg.lower() else f"failed: {msg}"
+                results[preset] = {'success': False, 'error': msg}
+                logger.error(f"[MultiRes] {preset}: exception — {e}")
+
+            self._save_job_state(clip_folder, state)
+
+        return clip_folder, results
+
+    def _convert_with_timeout(
+        self,
+        input_path: str,
+        output_path: str,
+        preset: str,
+        output_format: OutputFormat,
+    ) -> ConversionResult:
+        """Run a single-preset conversion with a per-resolution subprocess timeout."""
+        import time
+        import logging
+        logger = logging.getLogger(__name__)
+
+        width, height = RESOLUTION_PRESETS[preset]
+        timeout = CONVERSION_TIMEOUTS.get(preset, 3600)
+
+        job = ConversionJob(
+            input_path=input_path,
+            output_path=output_path,
+            format=output_format,
+            target_size=(width, height),
+            resize_mode=ResizeMode.FIT,
+        )
+
+        cmd = self._build_ffmpeg_command(job)
+        start_time = time.time()
+
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+
+        try:
+            _, stderr_out = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise TimeoutError(f"Conversion of {preset} exceeded {timeout}s timeout")
+
+        duration = time.time() - start_time
+
+        if process.returncode != 0:
+            error_lines = stderr_out.strip().splitlines()
+            return ConversionResult(
+                success=False,
+                input_path=input_path,
+                output_path=output_path,
+                error="\n".join(error_lines[-10:]),
+            )
+
+        output_size_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0
+        input_size_mb = os.path.getsize(input_path) / (1024 * 1024) if os.path.exists(input_path) else 0
+
+        return ConversionResult(
+            success=True,
+            input_path=input_path,
+            output_path=output_path,
+            duration=duration,
+            input_size_mb=input_size_mb,
+            output_size_mb=output_size_mb,
+            compression_ratio=output_size_mb / input_size_mb if input_size_mb > 0 else 0,
+        )
+
+    def _load_job_state(self, clip_folder: str) -> Dict:
+        """Load per-preset conversion state from clip folder."""
+        state_path = os.path.join(clip_folder, JOB_STATE_FILE)
+        if os.path.exists(state_path):
+            try:
+                with open(state_path, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_job_state(self, clip_folder: str, state: Dict) -> None:
+        """Persist per-preset conversion state to clip folder."""
+        state_path = os.path.join(clip_folder, JOB_STATE_FILE)
+        with open(state_path, 'w') as f:
+            json.dump(state, f, indent=2)
+
+    def get_conversion_status(self, clip_folder: str) -> Dict:
+        """Return current conversion status for a clip folder (for frontend polling)."""
+        state = self._load_job_state(clip_folder)
+        return {
+            'clip': os.path.basename(clip_folder),
+            'clip_folder': clip_folder,
+            'presets': state,
+            'done': [p for p, s in state.items() if s == 'done'],
+            'pending': [p for p, s in state.items() if s != 'done'],
+            'in_progress': [p for p, s in state.items() if s == 'in_progress'],
+            'failed': [p for p, s in state.items() if isinstance(s, str) and s.startswith('failed')],
+            'timeout': [p for p, s in state.items() if s == 'timeout'],
+        }
+
+    # -----------------------------------------------------------------------
+
     def batch_convert(
         self,
         input_pattern: str,

@@ -43,8 +43,20 @@ function renderTransportControls(effect, index, player, clipId = null) {
     const currentPosition = transportPosValue?._value || 0;
     const inPoint = transportPosValue?._rangeMin || 0;
     const outPoint = transportPosValue?._rangeMax || 100;
+    const totalFrames = transportPosValue?._totalFrames || 100;
     const durationFrames = (outPoint - inPoint) + 1;  // +1 because range is inclusive [inPoint, outPoint]
     const currentTime = formatTime(currentPosition, fps);
+    
+    // DEBUG: Log transport values for artnet trim debugging
+    if (player === 'artnet' || clipId) {
+        console.log(`🎬 [${player}${clipId ? ` clip:${clipId}` : ''}] Transport values:`, {
+            totalFrames,
+            inPoint,
+            outPoint,
+            durationFrames,
+            note: `Frames are 0-indexed, so last frame = ${totalFrames - 1}`
+        });
+    }
     
     // Calculate effective playback duration (adjusted for speed)
     // At 2x speed, a 5-second clip plays in 2.5 seconds

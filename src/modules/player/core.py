@@ -862,13 +862,30 @@ class Player:
     
     def clear_frame(self):
         """Löscht den aktuellen Frame und zeigt schwarzen Bildschirm (für leere Playlist)."""
-        if hasattr(self, 'last_video_frame'):
-            # Create black frame with same dimensions as last frame
+        # Determine canvas dimensions for the black frame
+        canvas_width = getattr(self, 'canvas_width', 320)
+        canvas_height = getattr(self, 'canvas_height', 180)
+
+        # Build black frame matching previous frame dimensions (or canvas defaults)
+        if hasattr(self, 'last_video_frame') and self.last_video_frame is not None and isinstance(self.last_video_frame, np.ndarray):
             black_frame = np.zeros_like(self.last_video_frame)
-            self.last_video_frame = black_frame
-            logger.debug(f"🖤 {self.player_name}: Cleared video preview (black screen)")
         else:
-            logger.debug(f"🖤 {self.player_name}: No frame to clear")
+            black_frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+
+        self.last_video_frame = black_frame
+
+        # Also push black frame into the output manager so the preview stream goes dark
+        if self.output_manager:
+            try:
+                self.output_manager.update_frame(
+                    composite_frame=black_frame,
+                    layer_manager=None,
+                    current_clip_id=None
+                )
+            except Exception as e:
+                logger.debug(f"🖤 {self.player_name}: Output manager clear error: {e}")
+
+        logger.debug(f"🖤 {self.player_name}: Cleared video preview (black screen)")
     
     def pause(self):
         """Pausiert die Wiedergabe."""

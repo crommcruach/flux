@@ -5,12 +5,13 @@
 import { FilesTab } from '/js/components/files-tab.js';
 
 // State
-let selectedFormat = 'hap';
+let selectedFormat = 'hap_alpha';
 let availableFormats = [];
 let canvasSize = {width: 60, height: 300};
 let filesTab = null;
 let selectedFiles = new Set(); // Track selected files
 let usePatternMode = false; // Toggle between browser and pattern mode
+let pollTimers = {}; // Active conversion status poll timers
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
@@ -24,9 +25,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load formats
     await loadFormats();
     
-    // Load canvas size
-    await loadCanvasSize();
-    
     // Initialize file browser
     await initializeFileBrowser();
     
@@ -35,7 +33,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Event listeners
     document.getElementById('start-conversion-btn').addEventListener('click', startConversion);
-    document.getElementById('use-canvas-size-btn').addEventListener('click', useCanvasSize);
     document.getElementById('clear-selection-btn').addEventListener('click', clearSelection);
     document.getElementById('use-pattern-btn').addEventListener('click', togglePatternMode);
     document.getElementById('use-browser-btn')?.addEventListener('click', togglePatternMode);
@@ -43,19 +40,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('file-upload-input').click();
     });
     document.getElementById('file-upload-input').addEventListener('change', handleLocalFileSelect);
+    document.getElementById('refresh-files-btn').addEventListener('click', () => {
+        if (filesTab) filesTab.refresh();
+    });
 });
 
 // Initialize file browser with FilesTab component
 async function initializeFileBrowser() {
     try {
-        // Enable multiselect mode for converter
-        filesTab = new FilesTab('converter-files-container', 'converter-search-container', 'button', true);
+        // Enable multiselect mode, filter to unconverted files only
+        filesTab = new FilesTab('converter-files-container', 'converter-search-container', 'button', true, false, '?unconverted_only=true');
         await filesTab.init();
         
         // Listen for selection events from FilesTab
         const container = document.getElementById('converter-files-container');
         container.addEventListener('filesSelected', (e) => {
-            console.log('Files selected in browser:', e.detail.selectedFiles);
+            // Sync FilesTab selection into the converter's selectedFiles set
+            selectedFiles.clear();
+            (e.detail.selectedFiles || []).forEach(f => selectedFiles.add(f.path || f));
+            updateSelectedFilesList();
         });
     } catch (error) {
         console.error('Error initializing file browser:', error);
@@ -162,9 +165,15 @@ async function handleLocalFiles(files) {
     
     for (const file of fileArray) {
         try {
-            // Upload file to server
-            const uploadedPath = await uploadFile(file);
-            addFileToSelection(uploadedPath);
+            // Upload file to server (auto-conversion starts in background)
+            const result = await uploadFile(file);
+            addFileToSelection(result.upload_path || result.path || file.name);
+            
+            // Show per-preset conversion progress
+            if (result.clip_folder && result.converting) {
+                showUploadConversionStatus(file.name, result);
+                startPollingConversionStatus(file.name, result.clip_folder);
+            }
         } catch (error) {
             console.error('Error uploading file:', error);
             showToast(`Failed to upload ${file.name}: ${error.message}`, 'danger');
@@ -188,9 +197,78 @@ async function uploadFile(file) {
         throw new Error(data.error || 'Upload failed');
     }
     
-    const data = await response.json();
-    return data.path;
+    return await response.json(); // Returns full response with clip_folder, presets, converting
 }
+
+// ---- Conversion Status UI ----
+
+function showUploadConversionStatus(filename, data) {
+    const section = document.getElementById('upload-conversion-status');
+    const list = document.getElementById('conversion-status-list');
+    section.classList.remove('d-none');
+
+    const itemId = `conv-status-${filename.replace(/[^a-z0-9]/gi, '_')}`;
+    let item = document.getElementById(itemId);
+    if (!item) {
+        item = document.createElement('div');
+        item.id = itemId;
+        item.className = 'mb-2 p-2 border rounded';
+        list.appendChild(item);
+    }
+
+    const presets = data.presets || [];
+    const presetStatuses = presets.reduce((acc, p) => { acc[p] = 'pending'; return acc; }, {});
+    renderConversionStatusItem(item, filename, presetStatuses);
+}
+
+function renderConversionStatusItem(item, filename, presetStatuses) {
+    const badges = Object.entries(presetStatuses).map(([preset, status]) => {
+        let cls, icon;
+        switch (status) {
+            case 'done':        cls = 'bg-success';          icon = '✓'; break;
+            case 'in_progress': cls = 'bg-warning text-dark'; icon = '⏳'; break;
+            case 'failed':      cls = 'bg-danger';           icon = '✗'; break;
+            case 'timeout':     cls = 'bg-secondary';        icon = '⚠'; break;
+            default:            cls = 'bg-secondary';        icon = '⏸'; break;
+        }
+        return `<span class="badge ${cls} me-1">${icon} ${preset}</span>`;
+    }).join('');
+
+    item.innerHTML = `
+        <div class="d-flex align-items-center justify-content-between">
+            <span class="fw-bold small">${filename}</span>
+            <div>${badges}</div>
+        </div>
+    `;
+}
+
+function startPollingConversionStatus(filename, clipFolder) {
+    const itemId = `conv-status-${filename.replace(/[^a-z0-9]/gi, '_')}`;
+
+    const poll = async () => {
+        try {
+            const response = await fetch(`/api/converter/convert/status?clip_folder=${encodeURIComponent(clipFolder)}`);
+            if (!response.ok) return;
+            const data = await response.json();
+            const item = document.getElementById(itemId);
+            if (item && data.presets) {
+                renderConversionStatusItem(item, filename, data.presets);
+                if ((data.in_progress?.length ?? 0) > 0 || (data.pending?.length ?? 0) > 0) {
+                    pollTimers[itemId] = setTimeout(poll, 2000);
+                } else {
+                    // All done — refresh file browser so converted files disappear
+                    if (filesTab) filesTab.refresh();
+                }
+            }
+        } catch (err) {
+            console.error('Error polling conversion status:', err);
+        }
+    };
+
+    pollTimers[itemId] = setTimeout(poll, 2000);
+}
+
+// ---- End Conversion Status UI ----
 
 function addFileToSelection(filePath) {
     if (selectedFiles.has(filePath)) {
@@ -347,29 +425,8 @@ async function loadFormats() {
     }
 }
 
-async function loadCanvasSize() {
-    try {
-        const response = await fetch('/api/converter/canvas-size');
-        const data = await response.json();
-        if (data.success) {
-            canvasSize = data.canvas;
-        }
-    } catch (error) {
-        console.error('Error loading canvas size:', error);
-    }
-}
-
-function useCanvasSize() {
-    document.getElementById('target-width').value = canvasSize.width;
-    document.getElementById('target-height').value = canvasSize.height;
-    document.getElementById('resize-mode').value = 'fit';
-}
 
 async function startConversion() {
-    const outputDir = document.getElementById('output-dir').value.trim();
-    const resizeMode = document.getElementById('resize-mode').value;
-    const optimizeLoop = document.getElementById('optimize-loop').checked;
-    
     // Determine input: use selected files or pattern
     let inputPattern;
     let filesToConvert = [];
@@ -380,27 +437,29 @@ async function startConversion() {
         
         // If input doesn't contain wildcards and doesn't start with a path, add video/ prefix
         if (!inputPattern.includes('*') && !inputPattern.includes('\\') && !inputPattern.includes('/')) {
-            // Single filename without path - check common video directories
             inputPattern = `video/**/${inputPattern}`;
             showToast('Searching in video folders for: ' + inputPattern, 'info');
         }
     } else {
-        // Use selected files from browser
-        if (selectedFiles.size === 0) {
+        // Use selected files from browser or FilesTab selection
+        const browserSelected = filesTab ? Array.from(filesTab.selectedFiles || []) : [];
+        if (selectedFiles.size === 0 && browserSelected.length === 0) {
             showToast('Please select files to convert or switch to pattern mode', 'warning');
             return;
         }
         
-        filesToConvert = Array.from(selectedFiles);
+        // Merge FilesTab selection into selectedFiles if drop zone is empty
+        if (selectedFiles.size === 0 && browserSelected.length > 0) {
+            browserSelected.forEach(f => selectedFiles.add(f));
+            updateSelectedFilesList();
+        }
         
-        // For browser mode, always use convertMultipleFiles which handles direct paths
-        await convertMultipleFiles(filesToConvert, outputDir, resizeMode, optimizeLoop);
+        filesToConvert = Array.from(selectedFiles);
+        await convertMultipleFiles(filesToConvert);
         return;
     }
     
-    const width = document.getElementById('target-width').value;
-    const height = document.getElementById('target-height').value;
-    const targetSize = (width && height) ? [parseInt(width), parseInt(height)] : null;
+    const outputDir = document.getElementById('output-dir').value.trim();
     
     // Show progress section
     document.getElementById('progress-section').classList.add('active');
@@ -417,9 +476,6 @@ async function startConversion() {
             input_pattern: inputPattern,
             output_dir: outputDir,
             format: selectedFormat,
-            target_size: targetSize,
-            resize_mode: resizeMode,
-            optimize_loop: optimizeLoop
         };
         
         console.log('Sending conversion request:', requestBody);
@@ -434,12 +490,10 @@ async function startConversion() {
         console.log('Conversion response:', data);
         
         if (response.ok && data.success) {
-            // Show results
             showResults(data);
         } else {
             const errorMsg = data.error || 'Unknown error';
             
-            // Show helpful message for "no files found" error
             if (errorMsg.includes('No files found')) {
                 showToast(
                     `${errorMsg}\n\nTip: Check if the file exists and the path is correct.\n` +
@@ -465,11 +519,7 @@ async function startConversion() {
     }
 }
 
-async function convertMultipleFiles(files, outputDir, resizeMode, optimizeLoop) {
-    const width = document.getElementById('target-width').value;
-    const height = document.getElementById('target-height').value;
-    const targetSize = (width && height) ? [parseInt(width), parseInt(height)] : null;
-    
+async function convertMultipleFiles(files) {
     // Show progress section
     document.getElementById('progress-section').classList.add('active');
     document.getElementById('results-summary').classList.add('d-none');
@@ -477,87 +527,57 @@ async function convertMultipleFiles(files, outputDir, resizeMode, optimizeLoop) 
     document.getElementById('stop-conversion-btn').classList.remove('d-none');
     
     // Reset progress
-    updateProgress(0, 'Starting batch conversion...');
+    updateProgress(0, 'Starting multi-resolution conversion...');
     document.getElementById('conversion-queue').innerHTML = '';
     
-    const results = [];
     let successful = 0;
     let failed = 0;
-    let totalInputSize = 0;
-    let totalOutputSize = 0;
     
     try {
         for (let i = 0; i < files.length; i++) {
             const filePath = files[i];
-            // Handle both forward and backslashes
             const fileName = filePath.split(/[/\\]/).pop();
-            const progress = ((i) / files.length) * 100;
+            const progress = (i / files.length) * 100;
             
-            updateProgress(progress, `Converting ${i + 1}/${files.length}: ${fileName}...`);
+            updateProgress(progress, `Starting conversion ${i + 1}/${files.length}: ${fileName}...`);
             
             try {
-                // Generate output path with correct extension based on format
-                const fileNameNoExt = fileName.substring(0, fileName.lastIndexOf('.'));
-                let outputExt = '.mov'; // Default for HAP formats
-                
-                if (selectedFormat === 'h264' || selectedFormat === 'h264_nvenc') {
-                    outputExt = '.mp4';
-                }
-                
-                const outputPath = `${outputDir}/${fileNameNoExt}_converted${outputExt}`;
-                
-                console.log('Converting file:', filePath, '-> Output:', outputPath);
-                
-                const requestBody = {
-                    input_path: filePath,
-                    output_path: outputPath,
-                    format: selectedFormat,
-                    target_size: targetSize,
-                    resize_mode: resizeMode,
-                    optimize_loop: optimizeLoop
-                };
-                
-                const response = await fetch('/api/converter/convert', {
+                const response = await fetch('/api/converter/convert/start', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(requestBody)
+                    body: JSON.stringify({ source_path: filePath })
                 });
                 
                 const data = await response.json();
                 
                 if (response.ok && data.success) {
-                    const result = data.result;
-                    results.push(result);
                     successful++;
-                    totalInputSize += result.input_size_mb || 0;
-                    totalOutputSize += result.output_size_mb || 0;
-                    addQueueItem(fileName, true, `${result.output_size_mb.toFixed(2)} MB (${(result.compression_ratio * 100).toFixed(1)}% of original)`);
+                    addQueueItem(fileName, true, 'Converting in background...');
+                    if (data.clip_folder) {
+                        showUploadConversionStatus(fileName, data);
+                        startPollingConversionStatus(fileName, data.clip_folder);
+                    }
                 } else {
                     failed++;
-                    const errorMsg = data.error || 'Unknown error';
-                    results.push({ success: false, input_path: filePath, error: errorMsg });
-                    addQueueItem(fileName, false, errorMsg);
+                    addQueueItem(fileName, false, data.error || 'Unknown error');
                 }
             } catch (error) {
                 failed++;
                 console.error(`Error converting ${fileName}:`, error);
-                results.push({ success: false, input_path: filePath, error: error.message });
                 addQueueItem(fileName, false, error.message);
             }
         }
         
-        updateProgress(100, 'Batch conversion complete!');
+        updateProgress(100, 'Batch conversion started!');
+        showToast(`${successful} file(s) queued for conversion, ${failed} failed`, successful > 0 ? 'success' : 'warning');
         
-        // Show summary
+        // Show minimal summary
         document.getElementById('success-count').textContent = successful;
         document.getElementById('failed-count').textContent = failed;
-        document.getElementById('total-input-size').textContent = totalInputSize.toFixed(2);
-        document.getElementById('total-output-size').textContent = totalOutputSize.toFixed(2);
-        const compressionRatio = totalInputSize > 0 ? (totalOutputSize / totalInputSize * 100) : 0;
-        document.getElementById('compression-ratio').textContent = compressionRatio.toFixed(1);
+        document.getElementById('total-input-size').textContent = '—';
+        document.getElementById('total-output-size').textContent = '—';
+        document.getElementById('compression-ratio').textContent = '—';
         document.getElementById('results-summary').classList.remove('d-none');
-        
-        showToast(`Conversion complete: ${successful} successful, ${failed} failed`, successful > 0 ? 'success' : 'warning');
     } catch (error) {
         console.error('Batch conversion error:', error);
         showToast('Batch conversion error: ' + error.message, 'danger');

@@ -26,7 +26,12 @@
 
                 <!-- Step 2: File Selection -->
                 <div class="mb-4">
-                    <h5>2. Select Files</h5>
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <h5 class="mb-0">2. Select Files</h5>
+                        <button class="btn btn-sm btn-outline-secondary" id="refresh-files-btn" title="Reload file list">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                    </div>
                     
                     <!-- Two Column Layout -->
                     <div class="row">
@@ -107,48 +112,15 @@
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Step 3: Conversion Options -->
-                <div class="mb-4">
-                    <h5>3. Conversion Options</h5>
-                    <div class="row">
-                        <div class="col-md-4">
-                            <label class="form-label">Resize Mode</label>
-                            <select class="form-select" id="resize-mode">
-                                <option value="none">No Resize</option>
-                                <option value="fit">Fit (keep aspect ratio)</option>
-                                <option value="fill">Fill (crop if needed)</option>
-                                <option value="stretch">Stretch</option>
-                                <option value="auto">Auto (canvas size)</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Target Size (optional)</label>
-                            <div class="input-group">
-                                <input type="number" class="form-control" id="target-width" 
-                                       placeholder="Width" min="1">
-                                <span class="input-group-text">×</span>
-                                <input type="number" class="form-control" id="target-height" 
-                                       placeholder="Height" min="1">
-                            </div>
-                            <button class="btn btn-sm btn-link" id="use-canvas-size-btn">
-                                Use Canvas Size
-                            </button>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Options</label>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="optimize-loop">
-                                <label class="form-check-label" for="optimize-loop">
-                                    Optimize for Seamless Loop
-                                </label>
-                            </div>
-                        </div>
+                    <!-- Upload Conversion Status (shown after uploading local files) -->
+                    <div class="mt-3 d-none" id="upload-conversion-status">
+                        <h6><i class="bi bi-gear-fill"></i> Background Conversion Status</h6>
+                        <div id="conversion-status-list"></div>
                     </div>
                 </div>
 
-                <!-- Step 4: Convert -->
+                <!-- Step 3: Convert -->
                 <div class="mb-4">
                     <button class="btn btn-primary btn-lg" id="start-conversion-btn">
                         <i class="bi bi-play-circle"></i> Start Conversion

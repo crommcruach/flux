@@ -111,8 +111,8 @@ class LayerManager:
         # Get video extensions from config
         video_extensions = tuple(self.config.get('extensions', ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.gif']))
         
-        # Detect source type from path
-        if abs_path.endswith(video_extensions):
+        # Detect source type from path - handle both video files AND clip folders
+        if abs_path.endswith(video_extensions) or os.path.isdir(abs_path):
             player_name = self.player.player_name if self.player and hasattr(self.player, 'player_name') else 'video'
             base_source = VideoSource(abs_path, canvas_width=self.canvas_width, canvas_height=self.canvas_height, config=self.config, clip_id=clip_id, player_name=player_name)
         elif abs_path.startswith('generator:'):

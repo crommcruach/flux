@@ -520,28 +520,21 @@ class RestAPI:
                             effect['parameters'][param_name] = param_value_to_store
                             logger.debug(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value}")
                         
-                        # Update LIVE effect instance in player layers (critical for transport trim!)
-                        if player.layers and len(player.layers) > 0:
-                            logger.debug(f"🔍 Searching {len(player.layers)} layers for clip_id={clip_id}, effect_index={effect_index}")
-                            for layer_idx, layer in enumerate(player.layers):
-                                logger.debug(f"  Layer {layer_idx}: clip_id={layer.clip_id}, effects={len(layer.effects)}")
-                                if layer.clip_id == clip_id and effect_index < len(layer.effects):
-                                    live_effect = layer.effects[effect_index]
-                                    # Layer effects use 'plugin_id' key (not 'id')
-                                    live_plugin_id = live_effect.get('plugin_id')
-                                    registry_plugin_id = effect.get('plugin_id')
-                                    logger.debug(f"  ✓ Found matching layer! live_effect.plugin_id={live_plugin_id}, registry.plugin_id={registry_plugin_id}")
-                                    if live_plugin_id == registry_plugin_id:
-                                        live_instance = live_effect.get('instance')
-                                        logger.debug(f"  ✓ IDs match! instance={type(live_instance).__name__ if live_instance else None}")
-                                        if live_instance and hasattr(live_instance, 'update_parameter'):
-                                            result = live_instance.update_parameter(param_name, param_value_to_store)
-                                            logger.debug(f"🔄 Updated LIVE instance: {registry_plugin_id}.{param_name} = {value} (result={result})")
-                                        else:
-                                            logger.warning(f"⚠️ Live instance missing or no update_parameter method!")
-                                        break
-                                    else:
-                                        logger.warning(f"⚠️ Effect ID mismatch: live={live_plugin_id} vs registry={registry_plugin_id}")
+                        # Update LIVE effect instance in player layers (via command queue to player process)
+                        # MULTI-PROCESS: Send command to player process to update live layers
+                        if hasattr(player, 'update_layer_effect_parameter'):
+                            update_success = player.update_layer_effect_parameter(
+                                clip_id=clip_id,
+                                effect_index=effect_index,
+                                param_name=param_name,
+                                param_value=param_value_to_store
+                            )
+                            if update_success:
+                                logger.debug(f"🔄 Sent layer effect update command to player process")
+                            else:
+                                logger.warning(f"⚠️ Failed to send layer effect update command")
+                        else:
+                            logger.debug(f"⚠️ Player has no update_layer_effect_parameter (no clip loaded, skipping live update)")
                         
                         # Invalidate cache so changes are picked up
                         registry._invalidate_cache(clip_id)
@@ -909,16 +902,8 @@ class RestAPI:
                     if os.path.exists(video_path):
                         from ..player.sources import VideoSource
                         
-                        # Erstelle VideoSource
-                        video_source = VideoSource(
-                            video_path,
-                            self.player.canvas_width,
-                            self.player.canvas_height,
-                            self.config
-                        )
-                        
-                        # Wechsle Source (unified Player bleibt bestehen)
-                        success = self.player.switch_source(video_source)
+                        # Load clip (multi-process compatible)
+                        success = self.player.load_clip(video_path)
                         
                         if success:
                             return f"Video geladen: {target}"
@@ -938,6 +923,8 @@ class RestAPI:
                     if not script_name.endswith('.py'):
                         script_name += '.py'
                     
+                    # TODO: Update to use load_clip() for multi-process compatibility
+                    # Scripts are not yet handled by load_clip method
                     # Erstelle ScriptSource
                     script_source = ScriptSource(
                         script_name,

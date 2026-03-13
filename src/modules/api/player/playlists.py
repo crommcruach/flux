@@ -473,6 +473,21 @@ def register_playlist_routes(app, player_manager, config, socketio=None):
                     player.autoplay = autoplay
                     player.loop_playlist = loop
                     logger.debug(f"[UPDATE DEBUG] Updated live {player_id} player (active playlist)")
+                    
+                    # Safety: if the playlist is now empty and the player is still running,
+                    # stop it immediately so it doesn't loop the last deleted clip endlessly.
+                    if not clips and player.is_playing:
+                        player.stop()
+                        player.clear_frame()
+                        logger.debug(f"🛑 [{player_id}] Stopped player - playlist became empty after clip removal")
+                    
+                    # Safety: if the currently-playing clip was removed from the playlist,
+                    # stop playback so the next frontend action (loadFile / stop) takes over.
+                    elif clips and player.is_playing:
+                        current_clip_id = getattr(player, 'current_clip_id', None)
+                        if current_clip_id and current_clip_id not in clip_ids:
+                            player.stop()
+                            logger.debug(f"🛑 [{player_id}] Stopped player - current clip {current_clip_id[:8]}... was removed from playlist")
             
             # Save to session state WITHOUT capturing active playlist
             # (we just explicitly updated the playlist state above)
