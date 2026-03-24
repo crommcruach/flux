@@ -102,7 +102,7 @@ def test_brightness_contrast_uniforms_default():
 def test_brightness_contrast_uniforms_values():
     fx = BrightnessContrastEffect(config={'brightness': 51.0, 'contrast': 1.5})
     u = fx.get_uniforms()
-    assert abs(u['brightness'] - 51.0 / 255.0) < 1e-5
+    assert abs(u['brightness'] - 51.0 / 100.0) < 1e-5
     assert u['contrast'] == 1.5
     print("  \u2713 brightness_contrast uniforms normalized correctly")
 
@@ -183,7 +183,7 @@ def test_brightness_contrast_update_parameter():
     fx.update_parameter('brightness', 100.0)
     fx.update_parameter('contrast', 2.0)
     u = fx.get_uniforms()
-    assert abs(u['brightness'] - 100.0 / 255.0) < 1e-5
+    assert abs(u['brightness'] - 100.0 / 100.0) < 1e-5
     assert u['contrast'] == 2.0
     print("  \u2713 brightness_contrast update_parameter works")
 

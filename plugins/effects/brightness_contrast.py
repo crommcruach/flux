@@ -1,8 +1,10 @@
 """
 Brightness/Contrast Effect Plugin - Basic brightness and contrast control
 """
-import numpy as np
+import os
 from plugins import PluginBase, PluginType, ParameterType
+
+_SHADER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'brightness_contrast.frag')
 
 
 class BrightnessContrastEffect(PluginBase):
@@ -49,22 +51,20 @@ class BrightnessContrastEffect(PluginBase):
         self.contrast = config.get('contrast', 1.0)
     
     def process_frame(self, frame, **kwargs):
-        """
-        Wendet Brightness/Contrast auf Frame an.
-        
-        Formula: output = clip(alpha * input + beta, 0, 255)
-        alpha = contrast, beta = brightness
-        
-        Args:
-            frame: Input Frame (NumPy Array, BGR)
-            **kwargs: Unused
-            
-        Returns:
-            Modifiziertes Frame
-        """
-        result = frame.astype(np.float32) * self.contrast + self.brightness
-        return np.clip(result, 0, 255).astype(np.uint8)
+        """GPU-native plugin — rendered via GLSL shader. This stub is never called on live frames."""
+        return frame
     
+    # ── GPU shader interface ────────────────────────────────────────────
+    def get_shader(self):
+        with open(_SHADER_PATH) as f:
+            return f.read()
+
+    def get_uniforms(self, **kwargs):
+        return {
+            'brightness': self.brightness / 100.0,
+            'contrast': float(self.contrast),
+        }
+
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""
         if name == 'brightness':
