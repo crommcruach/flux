@@ -8,7 +8,7 @@ from ...core.logger import get_logger, debug_layers, debug_transport
 from ..sources import VideoSource, GeneratorSource
 import cv2
 import numpy as np
-from ...gpu import get_context, get_texture_pool, get_renderer, load_shader, BLEND_MODES
+from ...gpu import get_context, get_texture_pool, get_renderer, load_shader, BLEND_MODES, probe_gpu_readback, GPU_READBACK_VIABLE
 from .layer import Layer
 
 logger = get_logger(__name__)
@@ -50,6 +50,13 @@ class LayerManager:
         # Parallel slave-layer decode + effects (GIL released in cv2/numpy)
         self._render_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='LayerRenderer')
         logger.info("🧵 LayerManager thread pools ready (load=8 workers, render=4 workers)")
+
+        # ─── GPU readback viability probe (informational) ─────────────────────
+        # Measures upload+readback latency at canvas resolution and logs it.
+        # Result is stored but no longer gates any code path: with the
+        # single-download architecture (GPU-chained effects + GPU compositor)
+        # one readback per frame is unavoidable and acceptable.
+        self._use_gpu = probe_gpu_readback(canvas_width, canvas_height)
         
     def _set_websocket_context_on_transport(self, clip_id, player_name=""):
         """Set WebSocket context on all transport effects in layers."""
@@ -477,8 +484,6 @@ class LayerManager:
         Returns:
             Processed frame
         """
-        # Phase 1: Effects disabled — will be rewritten as GLSL shaders in Phase 2.
-        return frame
         # Layer effects logging removed for performance
         
         # REMOVED: Don't restore parameters from registry every frame!
@@ -502,20 +507,69 @@ class LayerManager:
         #                     param_value = param_value['_value']
         #                 setattr(instance, param_name, param_value)
         
-        for effect in layer.effects:
-            # Skip disabled effects
-            if not effect.get('enabled', True):
-                continue
-            
-            try:
+        h, w = frame.shape[:2]
+        enabled_effects = [e for e in layer.effects if e.get('enabled', True)]
+        if not enabled_effects:
+            return frame
+
+        # Fast check: does any enabled effect provide a GPU shader?
+        has_gpu_effect = any(e['instance'].get_shader() is not None for e in enabled_effects)
+
+        if not has_gpu_effect:
+            # ── Pure CPU path — no GPU allocation needed ──────────────────────
+            for effect in enabled_effects:
                 instance = effect['instance']
-                # PERFORMANCE: Remove debug logging (costs 0.1-0.5ms per layer per frame)
-                # Pass layer's source and player context
-                frame = instance.process_frame(frame, source=layer.source, player=None)
-            except Exception as e:
-                plugin_id = effect.get('id', 'unknown')
-                logger.error(f"❌ [{player_name}] Layer {layer.layer_id} effect {plugin_id} error: {e}")
-        
+                try:
+                    frame = instance.process_frame(frame, source=layer.source, player=None)
+                except Exception as e:
+                    plugin_id = effect.get('id', 'unknown')
+                    logger.error(f"❌ [{player_name}] Layer {layer.layer_id} effect {plugin_id} error: {e}")
+            return frame
+
+        # ── GPU chaining path ─────────────────────────────────────────────────
+        # Upload once → texture-to-texture ping-pong for every GPU effect →
+        # single download at the end.  CPU effects force a one-off
+        # download+process+re-upload for that step only; the chain resumes after.
+        pool = get_texture_pool()
+        renderer = get_renderer()
+        current_gpu = None
+        try:
+            current_gpu = pool.acquire(w, h)
+            current_gpu.upload(frame)
+
+            for effect in enabled_effects:
+                instance = effect['instance']
+                try:
+                    shader_src = instance.get_shader()
+                    if shader_src is not None:
+                        dst_gpu = pool.acquire(w, h)
+                        try:
+                            renderer.render(
+                                frag_source=shader_src,
+                                target_fbo=dst_gpu.fbo,
+                                uniforms=instance.get_uniforms(frame_w=w, frame_h=h),
+                                textures={'inputTexture': (0, current_gpu)},
+                            )
+                            pool.release(current_gpu)
+                            current_gpu = dst_gpu  # ping-pong: no download
+                        except Exception:
+                            pool.release(dst_gpu)
+                            raise
+                        continue
+                    # CPU effect: download into numpy, process, re-upload
+                    frame = current_gpu.download()
+                    frame = instance.process_frame(frame, source=layer.source, player=None)
+                    current_gpu.upload(frame)
+                except Exception as e:
+                    plugin_id = effect.get('id', 'unknown')
+                    logger.error(f"❌ [{player_name}] Layer {layer.layer_id} effect {plugin_id} error: {e}")
+
+            # Single download — all GPU effects have already been applied
+            frame = current_gpu.download()
+        finally:
+            if current_gpu is not None:
+                pool.release(current_gpu)
+
         return frame
     
     def update_layer_effect_parameter(self, clip_id, effect_index, param_name, value, player_name=""):
@@ -829,20 +883,24 @@ class LayerManager:
             logger.error(
                 "⚠️ Slave layer rendering timed out (0.5s) — compositing available frames only")
 
-        # ─── CPU Compositing ──────────────────────────────────────────────────
-        # cv2.addWeighted at 1080p costs ~5-8ms vs ~130ms for GPU upload+readback
-        # on AMD (synchronous glGetTexImage pipeline stall).
-        # GPU path is preserved for Phase 2 when non-normal blend modes are needed.
-        # For now all layers use 'normal' (opacity) blend which maps directly to
-        # cv2.addWeighted(base, 1-alpha, overlay, alpha, 0).
-
         if profiler:
             stage_cm = profiler.profile_stage('layer_composition')
             stage_cm.__enter__()
 
         try:
-            # Start with a writable copy of master (memmap views are read-only)
-            result = np.array(master_frame, dtype=np.uint8)
+            # ── GPU compositing path ──────────────────────────────────────────
+            # blend.frag shader chain on GPU — single download at the very end.
+            # No longer gated on self._use_gpu: with GPU-chained effects the
+            # per-frame readback is already paid once per layer; the compositor
+            # blend shaders themselves cost only microseconds.
+            ctx = get_context()
+            pool = get_texture_pool()
+            renderer = get_renderer()
+            blend_src = load_shader('blend.frag')
+            canvas_w, canvas_h = self.canvas_width, self.canvas_height
+
+            composite = pool.acquire(canvas_w, canvas_h)
+            composite.upload(np.ascontiguousarray(master_frame[:, :, :3] if master_frame.shape[2] == 4 else master_frame))
 
             for layer in layers_snap[1:]:
                 if not layer.enabled or layer.opacity <= 0:
@@ -850,14 +908,24 @@ class LayerManager:
                 overlay = slave_frames.get(layer.layer_id)
                 if overlay is None:
                     continue
-
-                alpha = layer.opacity / 100.0
-                # Ensure overlay is 3-channel BGR (drop alpha channel if present)
                 ov3 = overlay[:, :, :3] if overlay.shape[2] == 4 else overlay
-                # Resize if overlay doesn't match canvas (safety guard)
-                if ov3.shape[:2] != result.shape[:2]:
-                    ov3 = cv2.resize(ov3, (result.shape[1], result.shape[0]))
-                result = cv2.addWeighted(result, 1.0 - alpha, ov3, alpha, 0)
+                if ov3.shape[:2] != (canvas_h, canvas_w):
+                    ov3 = cv2.resize(ov3, (canvas_w, canvas_h))
+                layer_tex = pool.acquire(canvas_w, canvas_h)
+                try:
+                    layer_tex.upload(np.ascontiguousarray(ov3))
+                    blend_mode = BLEND_MODES.get(getattr(layer, 'blend_mode', 'normal'), 0)
+                    renderer.render(
+                        frag_source=blend_src,
+                        target_fbo=composite.fbo,
+                        uniforms={'opacity': layer.opacity / 100.0, 'mode': blend_mode},
+                        textures={'base': (0, composite), 'overlay': (1, layer_tex)},
+                    )
+                finally:
+                    pool.release(layer_tex)
+
+            result = composite.download()
+            pool.release(composite)
 
         finally:
             if profiler:
