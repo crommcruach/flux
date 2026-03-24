@@ -57,6 +57,13 @@ class LayerManager:
         # single-download architecture (GPU-chained effects + GPU compositor)
         # one readback per frame is unavoidable and acceptable.
         self._use_gpu = probe_gpu_readback(canvas_width, canvas_height)
+
+        # ─── ArtNet GPU sampling hook ─────────────────────────────────────────
+        # Optional callback fired inside composite_layers() while the final
+        # composite GPUFrame is still live on the GPU.  ArtNetGPUSampler uses
+        # a compute shader to sample only the N LED positions without a full
+        # frame download.  Set via set_artnet_gpu_hook().
+        self._artnet_gpu_hook = None
         
     def _set_websocket_context_on_transport(self, clip_id, player_name=""):
         """Set WebSocket context on all transport effects in layers."""
@@ -924,6 +931,13 @@ class LayerManager:
                 finally:
                     pool.release(layer_tex)
 
+            # ── ArtNet GPU hook: sample LEDs while texture is still on GPU ──
+            if self._artnet_gpu_hook is not None:
+                try:
+                    self._artnet_gpu_hook(composite)
+                except Exception as e:
+                    logger.error(f"ArtNet GPU hook error: {e}")
+
             result = composite.download()
             pool.release(composite)
 
@@ -932,6 +946,16 @@ class LayerManager:
                 stage_cm.__exit__(None, None, None)
 
         return result, source_delay
+
+    def set_artnet_gpu_hook(self, callback) -> None:
+        """
+        Register a callback that receives the final composite GPUFrame before
+        it is downloaded to CPU.  Used by ArtNetGPUSampler to sample LED pixel
+        positions directly from GPU texture via a compute shader.
+
+        Pass None to disable.
+        """
+        self._artnet_gpu_hook = callback
     
     def clear(self):
         """Clear all layers (thread-safe)."""

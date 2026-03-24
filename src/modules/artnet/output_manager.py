@@ -54,7 +54,8 @@ class OutputManager:
         self,
         frame: np.ndarray,
         objects: Dict[str, ArtNetObject],
-        outputs: Dict[str, ArtNetOutput]
+        outputs: Dict[str, ArtNetOutput],
+        gpu_pixel_buffer: Optional[Dict[str, np.ndarray]] = None,
     ) -> Dict[str, bytes]:
         """
         Render a single video frame to all active outputs.
@@ -63,6 +64,9 @@ class OutputManager:
             frame: Video frame as RGB numpy array (H, W, 3) uint8
             objects: Dictionary of object_id → ArtNetObject
             outputs: Dictionary of output_id → ArtNetOutput
+            gpu_pixel_buffer: Optional pre-sampled pixel data from GPU compute
+                              shader {obj_id: (N,3) uint8 RGB}.  When present,
+                              skips per-object numpy frame sampling.
         
         Returns:
             Dictionary of output_id → DMX bytes ready for transmission
@@ -83,7 +87,7 @@ class OutputManager:
                 continue
             
             # Render DMX data for this output
-            dmx_data = self._render_output(frame, output, objects)
+            dmx_data = self._render_output(frame, output, objects, gpu_pixel_buffer)
             
             # Apply delay buffer
             dmx_data = self._apply_delay(output_id, output.delay, output.fps, dmx_data)
@@ -99,16 +103,18 @@ class OutputManager:
         self,
         frame: np.ndarray,
         output: ArtNetOutput,
-        objects: Dict[str, ArtNetObject]
+        objects: Dict[str, ArtNetObject],
+        gpu_pixel_buffer: Optional[Dict[str, np.ndarray]] = None,
     ) -> bytes:
         """
         Render DMX data for a single output.
-        
+
         Args:
-            frame: Video frame RGB array
+            frame: Video frame RGB array (fallback if gpu_pixel_buffer absent)
             output: Target output configuration
             objects: All available objects
-        
+            gpu_pixel_buffer: Optional pre-sampled {obj_id: (N,3) uint8 RGB}
+
         Returns:
             DMX bytes for this output
         """
@@ -117,24 +123,24 @@ class OutputManager:
             obj for obj_id, obj in objects.items()
             if obj_id in output.assigned_objects
         ]
-        
+
         if not assigned_objs:
             # No objects assigned, return black
             return bytes()
-        
+
         # Process each object
         all_channels = []
-        
+
         for obj in assigned_objs:
             if len(obj.points) == 0:
                 continue
-            
-            # Sample pixels at object coordinates
-            rgb_pixels = self.sampler.sample_object(obj, frame)
-            
-            if len(rgb_pixels) == 0:
-                continue
-            
+
+            # Sample pixels — prefer GPU pre-sampled buffer, fall back to CPU
+            obj_id = str(obj.id) if hasattr(obj, 'id') else None
+            if gpu_pixel_buffer and obj_id and obj_id in gpu_pixel_buffer:
+                rgb_pixels = gpu_pixel_buffer[obj_id]
+            else:
+                rgb_pixels = self.sampler.sample_object(obj, frame)
             # Apply per-object color correction
             rgb_pixels = self.corrector.apply(
                 rgb_pixels,

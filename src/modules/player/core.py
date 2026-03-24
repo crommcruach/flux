@@ -806,6 +806,13 @@ class Player:
             try:
                 self.routing_bridge.start()
                 logger.debug("ArtNet Routing Bridge started")
+                # Wire GPU compute sampler: fires after each composite while
+                # the final texture is still resident on the GPU.
+                if hasattr(self, 'layer_manager') and self.layer_manager is not None:
+                    self.layer_manager.set_artnet_gpu_hook(
+                        self.routing_bridge.on_gpu_composite
+                    )
+                    logger.debug("ArtNet GPU compute sampler hook registered")
             except Exception as e:
                 logger.error(f"Failed to start routing bridge: {e}")
         
@@ -838,6 +845,12 @@ class Player:
                 logger.debug("ArtNet Routing Bridge stopped")
             except Exception as e:
                 logger.error(f"Failed to stop routing bridge: {e}")
+            # Detach GPU hook so composite_layers() doesn't call into a stopped bridge
+            if hasattr(self, 'layer_manager') and self.layer_manager is not None:
+                try:
+                    self.layer_manager.set_artnet_gpu_hook(None)
+                except Exception:
+                    pass
         
         # Warte auf Thread-Ende
         if self.thread and self.thread.is_alive():

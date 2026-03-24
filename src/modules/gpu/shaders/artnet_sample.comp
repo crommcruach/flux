@@ -1,0 +1,40 @@
+#version 430
+// ArtNet GPU Pixel Sampler — compute shader.
+//
+// Reads N LED UV positions from an SSBO, samples the final composite float32
+// texture at each position, and writes packed RGB uint32 values to an output SSBO.
+//
+// Only ~N×4 bytes are read back to CPU (vs 24 MB for full frame download).
+//
+// UV convention (matches renderer quad and PixelSampler):
+//   (0, 0) = top-left of canvas  [OpenGL texture bottom = numpy row 0 = top of image]
+//   (1, 1) = bottom-right of canvas
+//
+// Dispatch: ceil(n_leds / 256) groups of 256 threads.
+
+layout(local_size_x = 256) in;
+
+uniform sampler2D finalTexture;  // float32 RGB composite texture
+uniform int n_leds;              // total number of LED positions
+
+layout(std430, binding = 0) readonly buffer LedPositions {
+    vec2 positions[];   // UV coords (u, v) per LED — normalized 0..1
+};
+
+layout(std430, binding = 1) writeonly buffer LedColors {
+    uint colors[];      // packed: R | (G << 8) | (B << 16)
+};
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (int(i) >= n_leds) return;
+
+    vec2 uv = positions[i];
+    vec4 c = texture(finalTexture, uv);
+
+    // Clamp and pack RGB into a single uint32
+    uint r = uint(clamp(c.r * 255.0, 0.0, 255.0));
+    uint g = uint(clamp(c.g * 255.0, 0.0, 255.0));
+    uint b = uint(clamp(c.b * 255.0, 0.0, 255.0));
+    colors[i] = r | (g << 8u) | (b << 16u);
+}

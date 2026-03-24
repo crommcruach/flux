@@ -14,6 +14,19 @@ from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 
+# GPU sampler imported lazily so the artnet module can load without a GPU context
+_ArtNetGPUSampler = None
+
+def _get_gpu_sampler_class():
+    global _ArtNetGPUSampler
+    if _ArtNetGPUSampler is None:
+        try:
+            from ..gpu.artnet_sampler import ArtNetGPUSampler as _cls
+            _ArtNetGPUSampler = _cls
+        except Exception as e:
+            logger.warning(f"ArtNetGPUSampler unavailable (compute shaders not supported?): {e}")
+    return _ArtNetGPUSampler
+
 
 class RoutingBridge:
     """Bridges routing system with player and network"""
@@ -38,6 +51,10 @@ class RoutingBridge:
         
         self.enabled = False
         self.initialized = False
+
+        # GPU compute shader sampler (optional — lazy init on first GPU hook call)
+        self._gpu_sampler = None
+        self._gpu_pixel_buffer: dict = {}  # {obj_id: (N,3) uint8 RGB}, updated each frame
         
     def initialize(self):
         """Initialize ArtNet senders from routing configuration"""
@@ -88,11 +105,15 @@ class RoutingBridge:
             # Get current objects from routing manager
             objects = self.routing_manager.get_all_objects()
             
+            # Convert BGR (OpenCV native) → RGB (expected by pixel sampler)
+            rgb_frame = frame[:, :, ::-1]
+            
             # Render frame to DMX data per output
             rendered_outputs = self.output_manager.render_frame(
-                frame=frame,
+                frame=rgb_frame,
                 objects=objects,
-                outputs=outputs
+                outputs=outputs,
+                gpu_pixel_buffer=self._gpu_pixel_buffer,
             )
             
             # Send each output's DMX data via ArtNet
@@ -112,7 +133,49 @@ class RoutingBridge:
         
         except Exception as e:
             logger.error(f"Frame processing error in routing bridge: {e}", exc_info=True)
-    
+
+    def on_gpu_composite(self, gpu_frame) -> None:
+        """
+        GPU hook: called inside composite_layers() while the final composite
+        GPUFrame is still resident on the GPU.
+
+        Lazily creates ArtNetGPUSampler on first call, then dispatches the
+        compute shader to sample all LED pixel positions without a full frame
+        download.  Results land in self._gpu_pixel_buffer for use by the next
+        process_frame() call.
+
+        Args:
+            gpu_frame: GPUFrame containing the final composite texture.
+        """
+        if not self.enabled:
+            return
+
+        cls = _get_gpu_sampler_class()
+        if cls is None:
+            return
+
+        # Lazy initialise sampler (needs GL context — must run on GL thread)
+        if self._gpu_sampler is None:
+            try:
+                from ..gpu import get_context
+                ctx = get_context()
+                self._gpu_sampler = cls(ctx)
+                logger.info("ArtNetGPUSampler: initialised")
+            except Exception as e:
+                logger.error(f"ArtNetGPUSampler: could not initialise: {e}")
+                return
+
+        objects = self.routing_manager.get_all_objects()
+        if not objects:
+            return
+
+        canvas_w = self.output_manager.canvas_width
+        canvas_h = self.output_manager.canvas_height
+
+        self._gpu_sampler.build_positions(objects, canvas_w, canvas_h)
+        self._gpu_sampler.sample(gpu_frame)
+        self._gpu_pixel_buffer = self._gpu_sampler.get_pixel_buffer()
+
     def start(self):
         """Enable routing system"""
         if not self.initialized:
@@ -197,4 +260,10 @@ class RoutingBridge:
         self.stop()
         self.sender.cleanup()
         self.output_manager.reset_all()
+        if self._gpu_sampler is not None:
+            try:
+                self._gpu_sampler.release()
+            except Exception:
+                pass
+            self._gpu_sampler = None
         logger.debug("Routing bridge cleaned up")
