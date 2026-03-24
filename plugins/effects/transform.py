@@ -2,11 +2,14 @@
 Transform Effect Plugin - 2D transformations (position, scale, rotation)
 """
 import math
+import os
 import cv2
 import numpy as np
 import logging
 from plugins import PluginBase, PluginType, ParameterType
 from src.modules.gpu.accelerator import get_gpu_accelerator
+
+_SHADER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'transform.frag')
 
 logger = logging.getLogger(__name__)
 
@@ -180,116 +183,9 @@ class TransformEffect(PluginBase):
         self._canvas_shape = None
 
     def process_frame(self, frame, **kwargs):
-        """
-        Wendet 2D-Transformationen auf Frame an.
-        
-        Alle 2D-Transforms (Scale + Rotation Z + Translation) werden zu einer einzigen
-        Affine-Matrix kombiniert → ein einziger warpAffine-Call auf Original-Größe.
-        Kein Resize → np.zeros → Copy-Dance mehr (war 3× so teuer).
-        
-        3D-Rotation (X/Y) wird davor als Perspektiv-Transform angewandt.
-        """
-        # FAST PATH: identity — no-op
-        if (self.position_x == 0 and self.position_y == 0 and
-                self.scale_xy == 100.0 and self.scale_x == 100.0 and self.scale_y == 100.0 and
-                self.rotation_x == 0 and self.rotation_y == 0 and self.rotation_z == 0):
-            return frame
-
-        h, w = frame.shape[:2]
-
-        # Anchor point in pixels
-        ax = w * (self.anchor_x / 100.0)
-        ay = h * (self.anchor_y / 100.0)
-
-        # === 3D Rotation (Perspektive) — muss zuerst angewandt werden ===
-        if self.rotation_x != 0 or self.rotation_y != 0:
-            frame = self._apply_3d_rotation(frame, self.rotation_x, self.rotation_y, ax, ay)
-
-        scale_xy = self.scale_xy / 100.0
-        sx = (self.scale_x / 100.0) * scale_xy
-        sy = (self.scale_y / 100.0) * scale_xy
-
-        # FAST PATH: scale-only (no rotation_z) → crop-then-resize + canvas placement.
-        # warpAffine does per-pixel inverse mapping over the full output buffer which
-        # is 3-5× slower than a dedicated resize for the scale case.
-        if self.rotation_z == 0:
-            new_w = max(1, round(w * sx))
-            new_h = max(1, round(h * sy))
-
-            # Top-left corner of scaled frame in canvas coordinates:
-            # The anchor point stays fixed → x0 = ax - ax*sx + px, y0 = ay - ay*sy + py
-            x0 = int(round(ax * (1.0 - sx) + self.position_x))
-            y0 = int(round(ay * (1.0 - sy) + self.position_y))
-
-            # Clip source and destination to canvas bounds
-            src_x0 = max(0, -x0)
-            src_y0 = max(0, -y0)
-            dst_x0 = max(0, x0)
-            dst_y0 = max(0, y0)
-            copy_w = min(new_w - src_x0, w - dst_x0)
-            copy_h = min(new_h - src_y0, h - dst_y0)
-
-            if copy_w <= 0 or copy_h <= 0:
-                nc = frame.shape[2] if frame.ndim == 3 else 1
-                return np.zeros((h, w, nc), dtype=np.uint8)
-
-            # cv2.resize only READS its input — writeable flag is irrelevant.
-            # Only copy when memory layout is non-contiguous (e.g. transposed slice).
-            # Memmap views are always read-only but C_CONTIGUOUS, so this is a no-op
-            # for the common case, saving the previous 6 MB copy on every frame.
-            if not frame.flags['C_CONTIGUOUS']:
-                frame = np.ascontiguousarray(frame)
-
-            # Always crop-then-resize: only process the source pixels that map to the
-            # visible canvas region. For zoom-in this avoids a large intermediate;
-            # for partial off-canvas content it halves or more the resize work.
-            orig_x0 = int(src_x0 / sx)
-            orig_y0 = int(src_y0 / sy)
-            orig_x1 = min(w, math.ceil((src_x0 + copy_w) / sx))
-            orig_y1 = min(h, math.ceil((src_y0 + copy_h) / sy))
-            result = cv2.resize(frame[orig_y0:orig_y1, orig_x0:orig_x1],
-                                (copy_w, copy_h), interpolation=cv2.INTER_LINEAR)
-
-            # Full-canvas fast exit — result already fills the entire output.
-            if dst_x0 == 0 and dst_y0 == 0 and copy_w == w and copy_h == h:
-                return result
-
-            # Compose into reused canvas (avoids fresh 6 MB alloc every frame).
-            nc = frame.shape[2] if frame.ndim == 3 else 1
-            target_shape = (h, w, nc)
-            if self._canvas is None or self._canvas_shape != target_shape:
-                self._canvas = np.empty(target_shape, dtype=np.uint8)
-                self._canvas_shape = target_shape
-            self._canvas[:] = 0
-            self._canvas[dst_y0:dst_y0 + copy_h, dst_x0:dst_x0 + copy_w] = result
-            return self._canvas
-
-        # === Slow path: rotation_z present → combined affine matrix ===
-        # Kombiniert (α = cos θ, β = sin θ, sx/sy = Scale-Faktoren):
-        #   M = [[α·sx,  β·sy,  ax·(1 - α·sx) - ay·β·sy  + px],
-        #        [-β·sx, α·sy,  ax·β·sx       + ay·(1 - α·sy) + py]]
-        angle_rad = np.radians(self.rotation_z)
-        cos_a = np.cos(angle_rad)
-        sin_a = np.sin(angle_rad)
-
-        m00 = cos_a * sx
-        m01 = sin_a * sy
-        m10 = -sin_a * sx
-        m11 = cos_a * sy
-
-        M = np.float32([
-            [m00, m01, ax * (1.0 - m00) - ay * m01 + self.position_x],
-            [m10, m11, ax * (-m10) + ay * (1.0 - m11) + self.position_y],
-        ])
-
-        nc = frame.shape[2] if frame.ndim == 3 else 1
-        border_val = (0,) * nc
-        frame = self.gpu.warpAffine(frame, M, (w, h),
-                                    flags=cv2.INTER_LINEAR,
-                                    borderMode=cv2.BORDER_CONSTANT,
-                                    borderValue=border_val)
+        """GPU-native plugin — rendered via GLSL shader. This stub is never called on live frames."""
         return frame
-    
+
     def _apply_2d_rotation(self, frame, angle, anchor_x, anchor_y):
         """
         Wendet 2D-Rotation (um Z-Achse) an.
@@ -399,6 +295,27 @@ class TransformEffect(PluginBase):
         
         return result
     
+    # ─── GPU shader interface ────────────────────────────────────────────────
+    def get_shader(self):
+        # NOTE: rotation_x / rotation_y (3D perspective) are not yet implemented
+        # in the GLSL shader — those parameters are ignored on the GPU path.
+        # This is intentional: 100% GPU pipeline, no CPU fallback.
+        with open(_SHADER_PATH) as f:
+            return f.read()
+
+    def get_uniforms(self, **kwargs):
+        frame_w = kwargs.get('frame_w', 1920)
+        frame_h = kwargs.get('frame_h', 1080)
+        scale_xy = self.scale_xy / 100.0
+        sx = (self.scale_x / 100.0) * scale_xy
+        sy = (self.scale_y / 100.0) * scale_xy
+        return {
+            'anchor':    (self.anchor_x / 100.0, self.anchor_y / 100.0),
+            'scale':     (sx, sy),
+            'translate': (self.position_x / frame_w, self.position_y / frame_h),
+            'rotation':  math.radians(self.rotation_z),
+        }
+
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""
         # Extract actual value if it's a range metadata dict
