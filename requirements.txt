@@ -18,3 +18,7 @@ sounddevice>=0.4.0  # Audio input/output for parameter sequences & sequencer
 screeninfo>=0.8.0  # Multi-monitor detection
 # NDIlib-python>=1.0.0  # NDI network video output (optional - install separately if needed)
 # SpoutGL>=0.2.0  # Spout GPU texture sharing (optional, Windows only)
+
+# GPU compositing pipeline (Phase 1)
+moderngl>=5.8.0      # OpenGL wrapper for GPU blend/effect shaders
+glcontext>=2.5.0     # Headless OpenGL context (WGL on Windows)
