@@ -62,28 +62,6 @@
         }
     }
     
-    // Global Active Mode Display Update Function
-    window.updateActiveModeDisplay = function(mode) {
-        const displayDiv = document.getElementById('menuActiveModeDisplay');
-        const textSpan = document.getElementById('menuActiveModeText');
-        
-        if (!displayDiv || !textSpan) return;
-        
-        textSpan.textContent = mode;
-        
-        // Farben basierend auf Modus
-        if (mode === 'Test') {
-            displayDiv.style.borderColor = '#ffc107'; // Gelb
-            displayDiv.style.background = 'rgba(255, 193, 7, 0.15)';
-        } else if (mode === 'Replay') {
-            displayDiv.style.borderColor = '#17a2b8'; // Cyan
-            displayDiv.style.background = 'rgba(23, 162, 184, 0.15)';
-        } else { // Video
-            displayDiv.style.borderColor = '#28a745'; // Grün
-            displayDiv.style.background = 'rgba(40, 167, 69, 0.15)';
-        }
-    };
-    
     // Global Auto-Save Status Update Function
     window.updateGlobalAutoSaveStatus = function(status) {
         const statusDiv = document.getElementById('globalAutoSaveStatus');

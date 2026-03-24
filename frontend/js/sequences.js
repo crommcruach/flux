@@ -461,11 +461,11 @@ class SequenceManager {
     /**
      * Show context menu for parameter
      */
-    showContextMenu(parameterId, parameterLabel, currentValue, event, paramUid, controlId) {
+    showContextMenu(parameterId, parameterLabel, currentValue, event, paramUid, controlId, paramType) {
         event.preventDefault();
         event.stopPropagation();
         
-        console.log('📝 Context menu for:', { parameterId, parameterLabel, currentValue, paramUid, controlId });
+        console.log('📝 Context menu for:', { parameterId, parameterLabel, currentValue, paramUid, controlId, paramType });
         
         // Store current parameter for context menu actions
         this.contextParameter = {
@@ -473,7 +473,8 @@ class SequenceManager {
             label: parameterLabel,
             value: currentValue,
             uid: paramUid,
-            controlId: controlId
+            controlId: controlId,
+            paramType: paramType || ''
         };
         
         const menu = document.getElementById('sequenceContextMenu');
@@ -688,7 +689,7 @@ class SequenceManager {
         
         console.log('🎛️ Attack/Release value from knob:', attackRelease);
         
-        // Get min/max from triple slider
+        // Get min/max from triple slider (BOOL params always use 0/1 range)
         const tripleSlider = getTripleSlider(controlId);
         let minValue = 0;
         let maxValue = 100;
@@ -696,7 +697,11 @@ class SequenceManager {
         console.log('🔍 Looking for triple slider:', controlId);
         console.log('🔍 Slider instance:', tripleSlider);
         
-        if (tripleSlider) {
+        if (this.contextParameter?.paramType === 'bool') {
+            minValue = 0;
+            maxValue = 1;
+            console.log('📊 BOOL param: using fixed range 0-1');
+        } else if (tripleSlider) {
             const range = tripleSlider.getRange();
             minValue = range.min;
             maxValue = range.max;
@@ -1019,7 +1024,7 @@ class SequenceManager {
         const durationInput = document.getElementById(`${controlId}_timeline_controls`)?.querySelector('.timeline-duration-input-inline');
         const duration = durationInput ? parseFloat(durationInput.value) || 5.0 : (updates.duration || 5.0);
         
-        // Get min/max from triple slider
+        // Get min/max from triple slider (BOOL params always use 0/1 range)
         const tripleSlider = getTripleSlider(controlId);
         let minValue = 0;
         let maxValue = 100;
@@ -1027,7 +1032,11 @@ class SequenceManager {
         console.log('🔍 Looking for triple slider:', controlId);
         console.log('🔍 Slider instance:', tripleSlider);
         
-        if (tripleSlider) {
+        if (this.contextParameter?.paramType === 'bool') {
+            minValue = 0;
+            maxValue = 1;
+            console.log('📊 BOOL param: using fixed range 0-1');
+        } else if (tripleSlider) {
             const range = tripleSlider.getRange();
             minValue = range.min;
             maxValue = range.max;
@@ -1306,12 +1315,16 @@ class SequenceManager {
         const speedInput = document.getElementById(`${controlId}_bpm_controls`)?.querySelector('.bpm-speed-input-inline');
         const speed = updates.speed !== undefined ? updates.speed : (speedInput ? parseFloat(speedInput.value) : 1.0);
         
-        // Get min/max from triple slider
+        // Get min/max from triple slider (BOOL params always use 0/1 range)
         const tripleSlider = getTripleSlider(controlId);
         let minValue = 0;
         let maxValue = 100;
         
-        if (tripleSlider) {
+        if (this.contextParameter?.paramType === 'bool') {
+            minValue = 0;
+            maxValue = 1;
+            console.log('📊 BOOL param: using fixed range 0-1');
+        } else if (tripleSlider) {
             const range = tripleSlider.getRange();
             minValue = range.min;
             maxValue = range.max;

@@ -765,21 +765,25 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             
             logger.debug(f"Clip effect {clip_id}[{index}] toggled: {'enabled' if new_state else 'disabled'}")
             
-            # Reload effects on ALL players that have this clip loaded
+            # Update live effect state on ALL players that have this clip loaded
+            # IMPORTANT: Do NOT call reload_all_layer_effects() — that recreates all plugin
+            # instances, losing the transport plugin's current play position (causes video reset).
+            # Instead, directly toggle the 'enabled' flag on the live effect at the given index.
             reloaded_on_players = []
             for check_player_id, check_player in player_manager.players.items():
                 if check_player and hasattr(check_player, 'layers') and check_player.layers:
-                    clip_is_loaded = any(layer.clip_id == clip_id for layer in check_player.layers)
-                    if clip_is_loaded:
-                        logger.debug(f"Reloading effects for clip {clip_id} on {check_player_id} player")
-                        if hasattr(check_player, 'reload_all_layer_effects'):
-                            check_player.reload_all_layer_effects()
-                            reloaded_on_players.append(check_player_id)
+                    for layer in check_player.layers:
+                        if layer.clip_id == clip_id:
+                            if hasattr(layer, 'effects') and layer.effects and index < len(layer.effects):
+                                layer.effects[index]['enabled'] = new_state
+                                reloaded_on_players.append(check_player_id)
+                                logger.debug(f"✅ Toggled live effect {index} on {check_player_id} to {'enabled' if new_state else 'disabled'}")
+                            break
             
             if reloaded_on_players:
-                logger.debug(f"✅ Clip effects reloaded on players: {', '.join(reloaded_on_players)}")
+                logger.debug(f"✅ Clip effect toggle applied on players: {', '.join(reloaded_on_players)}")
             else:
-                logger.debug(f"Clip {clip_id} not currently loaded in any player, skipping effect reload")
+                logger.debug(f"Clip {clip_id} not currently loaded in any player, effect toggle applied to registry only")
             
             # Auto-save session state
             session_state = get_session_state()

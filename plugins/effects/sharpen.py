@@ -4,6 +4,7 @@ Sharpen Effect Plugin - Image Sharpening Effect
 import cv2
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
+from src.modules.gpu.accelerator import get_gpu_accelerator
 
 
 class SharpenEffect(PluginBase):
@@ -35,6 +36,7 @@ class SharpenEffect(PluginBase):
     ]
     
     def initialize(self, config):
+        self.gpu = get_gpu_accelerator(config)
         """Initialisiert Plugin mit Sharpen-Stärke."""
         self.strength = float(config.get('strength', 1.0))
     
@@ -56,7 +58,7 @@ class SharpenEffect(PluginBase):
         # Original + (Original - Blur) * strength = Geschärftes Bild
         
         # Berechne Blur mit kleinem Kernel
-        blurred = cv2.GaussianBlur(frame, (0, 0), 3)
+        blurred = self.gpu.gaussian_blur(frame, 0, 3)
         
         # Berechne geschärftes Bild
         sharpened = cv2.addWeighted(frame, 1.0 + self.strength, blurred, -self.strength, 0)

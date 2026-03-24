@@ -51,6 +51,13 @@ export async function loadConfig() {
             window.PREVIEW_FPS = config.video.preview_fps || 25;
         }
         
+        // Load named color palettes (shared across all ColorPicker instances)
+        // Merge order: config defaults < localStorage user saves
+        if (config.color_palettes) {
+            const stored = JSON.parse(localStorage.getItem('colorPalettes') || '{}');
+            window._colorPalettes = { ...config.color_palettes, ...stored };
+        }
+        
         debug.log('Config loaded:', { 
             API_BASE, 
             WEBSOCKET_URL, 

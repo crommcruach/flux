@@ -4,6 +4,7 @@ Keystone Effect Plugin - Perspective Correction
 import cv2
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
+from src.modules.gpu.accelerator import get_gpu_accelerator
 
 
 class KeystoneEffect(PluginBase):
@@ -48,6 +49,7 @@ class KeystoneEffect(PluginBase):
         """Initialisiert Plugin mit Keystone-Parametern."""
         self.horizontal = float(config.get('horizontal', 0.0))
         self.vertical = float(config.get('vertical', 0.0))
+        self.gpu = get_gpu_accelerator(config)
     
     def process_frame(self, frame, **kwargs):
         """
@@ -89,10 +91,10 @@ class KeystoneEffect(PluginBase):
         matrix = cv2.getPerspectiveTransform(src_points, dst_points)
         
         # Wende Perspektiv-Transformation an
-        warped = cv2.warpPerspective(frame, matrix, (w, h), 
-                                     flags=cv2.INTER_LINEAR,
-                                     borderMode=cv2.BORDER_CONSTANT,
-                                     borderValue=(0, 0, 0))
+        warped = self.gpu.warpPerspective(frame, matrix, (w, h),
+                                          flags=cv2.INTER_LINEAR,
+                                          borderMode=cv2.BORDER_CONSTANT,
+                                          borderValue=(0, 0, 0))
         
         return warped
     

@@ -4,13 +4,10 @@ Frame Sources - Abstrakte Basisklasse und Implementierungen für verschiedene Fr
 import os
 import time
 import random
-import cv2
 import numpy as np
-import threading
 from abc import ABC, abstractmethod
 from ..core.logger import get_logger
 from ..core.constants import DEFAULT_FPS
-
 logger = get_logger(__name__)
 
 
@@ -64,375 +61,91 @@ class FrameSource(ABC):
 
 
 class VideoSource(FrameSource):
-    """Video-Datei als Frame-Quelle (mit Cache-Support)."""
-    
+    """Video file as frame source via memory-mapped .npy arrays."""
+
     def __init__(self, video_path, canvas_width, canvas_height, config=None, clip_id=None, player_name='video'):
         super().__init__(canvas_width, canvas_height, config)
-        # Resolve clip folders to the best resolution variant (Phase 1 multi-res)
-        video_path = self._find_best_resolution(video_path)
-        self.video_path = video_path
-        self.source_path = video_path  # Generischer Pfad für load_points()
-        self.source_type = 'video'  # Marker für Transport-Effekt
-        self.cap = None
-        self._lock = threading.Lock()  # Thread-Safety für FFmpeg
+        self.video_path = self._find_best_resolution(video_path)
+        self.source_path = self.video_path
+        self.source_type = 'video'
         self.clip_id = clip_id
-        self.player_name = player_name  # Store player name for config access
-        
-        # GIF Support
-        self.is_gif = self._is_gif_file(video_path)
-        self.gif_frame_delays = None
-        self.gif_transparency_bg = tuple(config.get('video', {}).get('gif_transparency_bg', [0, 0, 0]) if config else [0, 0, 0])
-        self.gif_respect_timing = config.get('video', {}).get('gif_respect_frame_timing', True) if config else True
-        
-        # Autosize mode (stretch, fill, fit, off) - read from player-specific config
-        if config:
-            # Try player-specific config first, fall back to video config for backward compatibility
-            player_config = config.get(player_name, {})
-            video_config = config.get('video', {})
-            self.autosize_mode = player_config.get('player_resolution', {}).get('autosize') or \
-                                 video_config.get('player_resolution', {}).get('autosize', 'off')
-        else:
-            self.autosize_mode = 'off'
-        
-        # OPTIMIZATION: Loop frame caching (keep decoded frames for short loops)
-        self.enable_loop_cache = config.get('performance', {}).get('enable_loop_cache', True) if config else True
-        self.loop_cache_max_duration = config.get('performance', {}).get('loop_cache_max_duration', 10.0) if config else 10.0  # seconds
-        self.loop_frame_cache = None  # Will store list of decoded frames
-        self.loop_cache_active = False
-        self.loop_number = 0
-        
-        # OPTIMIZATION: Cache whether scaling is needed (set during initialize())
-        self._needs_scaling = True  # Assume true until we check video resolution
-        
-        # Scaling interpolation quality (configurable for performance vs quality trade-off)
-        # Options: 'nearest' (fastest, blocky), 'linear' (fast, smooth), 'area' (slow, best quality)
-        scaling_quality = config.get('performance', {}).get('video_scaling_quality', 'linear') if config else 'linear'
-        self.scaling_interpolation = {
-            'nearest': cv2.INTER_NEAREST,  # ~1-2ms - fastest, pixelated/blocky
-            'linear': cv2.INTER_LINEAR,    # ~3-5ms - fast, good quality (default)
-            'cubic': cv2.INTER_CUBIC,      # ~8-12ms - slower, high quality
-            'area': cv2.INTER_AREA         # ~15-30ms - slowest, best for downscaling
-        }.get(scaling_quality.lower(), cv2.INTER_LINEAR)
-    
+        self.player_name = player_name
+        self.frames = None  # np.memmap loaded in initialize()
+
     def _find_best_resolution(self, path: str) -> str:
-        """If path is a clip folder, return the best-matching resolution .mov file.
-
-        Selection logic:
-        - Finds the smallest preset whose dimensions cover canvas_width × canvas_height.
-        - Falls back to the next-larger preset, then original.mov.
-        - Legacy single-file paths are returned unchanged.
-        """
+        """Resolve clip folder to the best-matching .npy file."""
         if not os.path.isdir(path):
-            return path  # Legacy single-file clip — use as-is
+            return path
 
-        # Lazy import to avoid circular dependency at module load time
-        from ..content.converter import ALL_PRESETS, RESOLUTION_PRESETS, get_target_preset
-
+        from ..content.converter import ALL_PRESETS, get_target_preset
         target = get_target_preset(self.canvas_width, self.canvas_height)
         start_idx = ALL_PRESETS.index(target)
-
-        # Try target preset and upward (larger), then any smaller as last-resort
         ordered = ALL_PRESETS[start_idx:] + ALL_PRESETS[:start_idx][::-1]
+
         for preset in ordered:
-            candidate = os.path.join(path, f"{preset}.mov")
+            candidate = os.path.join(path, f"{preset}.npy")
             if os.path.exists(candidate):
-                logger.debug(f"[MultiRes] {os.path.basename(path)} → {preset}.mov (canvas {self.canvas_width}×{self.canvas_height})")
+                logger.debug(f"[NpySource] {os.path.basename(path)} -> {preset}.npy")
                 return candidate
 
-        # Fallback to original
-        original = os.path.join(path, 'original.mov')
-        if os.path.exists(original):
-            logger.debug(f"[MultiRes] {os.path.basename(path)} → original.mov (no preset match)")
-            return original
-
-        logger.warning(f"[MultiRes] No usable .mov found in clip folder: {path}")
+        logger.error(f"[NpySource] No .npy found in clip folder: {path}")
         return path
 
-    def _is_gif_file(self, path):
-        """Prüft ob Datei ein GIF ist."""
-        return path and path.lower().endswith('.gif')
-    
-    def _load_gif_frame_delays(self):
-        """Lädt Frame-Delays aus GIF mit Pillow."""
-        try:
-            from PIL import Image
-            img = Image.open(self.video_path)
-            delays = []
-            try:
-                frame_idx = 0
-                while True:
-                    duration = img.info.get('duration', 100)
-                    delays.append(duration / 1000.0)
-                    frame_idx += 1
-                    img.seek(frame_idx)
-            except EOFError:
-                pass
-            
-            logger.debug(f"GIF Frame-Delays geladen: {len(delays)} Frames")
-            return delays
-        except ImportError:
-            logger.warning("Pillow nicht verfügbar - GIF Frame-Timing wird ignoriert")
-            return None
-        except Exception as e:
-            logger.warning(f"Fehler beim Laden der GIF Frame-Delays: {e}")
-            return None
-    
-    def _apply_autosize_scaling(self, frame):
-        """Apply autosize scaling based on mode (off/stretch/fill/fit)
-        
-        Args:
-            frame: Input frame (numpy array)
-            
-        Returns:
-            Scaled frame matching canvas dimensions
-        """
-        frame_h, frame_w = frame.shape[:2]
-        canvas_w, canvas_h = self.canvas_width, self.canvas_height
-        
-        # If frame already matches canvas, no scaling needed
-        if frame_w == canvas_w and frame_h == canvas_h:
-            return frame
-        
-        if self.autosize_mode == 'stretch':
-            # Stretch - distort to fit canvas (ignores aspect ratio)
-            return cv2.resize(frame, (canvas_w, canvas_h), interpolation=self.scaling_interpolation)
-        
-        elif self.autosize_mode == 'fill':
-            # Fill - crop to fill canvas (preserves aspect ratio)
-            frame_aspect = frame_w / frame_h
-            canvas_aspect = canvas_w / canvas_h
-            
-            if frame_aspect > canvas_aspect:
-                # Frame is wider - scale by height and crop width
-                new_h = canvas_h
-                new_w = int(frame_w * (canvas_h / frame_h))
-            else:
-                # Frame is taller - scale by width and crop height
-                new_w = canvas_w
-                new_h = int(frame_h * (canvas_w / frame_w))
-            
-            # Resize to larger dimension
-            scaled = cv2.resize(frame, (new_w, new_h), interpolation=self.scaling_interpolation)
-            
-            # Crop to canvas size (center crop)
-            x_offset = (new_w - canvas_w) // 2
-            y_offset = (new_h - canvas_h) // 2
-            return scaled[y_offset:y_offset + canvas_h, x_offset:x_offset + canvas_w]
-        
-        elif self.autosize_mode == 'fit':
-            # Fit - letterbox to fit canvas (preserves aspect ratio)
-            frame_aspect = frame_w / frame_h
-            canvas_aspect = canvas_w / canvas_h
-            
-            if frame_aspect > canvas_aspect:
-                # Frame is wider - fit to width with letterbox top/bottom
-                new_w = canvas_w
-                new_h = int(frame_h * (canvas_w / frame_w))
-            else:
-                # Frame is taller - fit to height with letterbox left/right
-                new_h = canvas_h
-                new_w = int(frame_w * (canvas_h / frame_h))
-            
-            # Resize to fit
-            scaled = cv2.resize(frame, (new_w, new_h), interpolation=self.scaling_interpolation)
-            
-            # Create black canvas and paste scaled frame
-            result = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
-            x_offset = (canvas_w - new_w) // 2
-            y_offset = (canvas_h - new_h) // 2
-            result[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = scaled
-            return result
-        
-        else:  # 'off' or unknown mode - letterbox (same as fit)
-            frame_aspect = frame_w / frame_h
-            canvas_aspect = canvas_w / canvas_h
-            
-            if frame_aspect > canvas_aspect:
-                new_w = canvas_w
-                new_h = int(frame_h * (canvas_w / frame_w))
-            else:
-                new_h = canvas_h
-                new_w = int(frame_w * (canvas_h / frame_h))
-            
-            scaled = cv2.resize(frame, (new_w, new_h), interpolation=self.scaling_interpolation)
-            result = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
-            x_offset = (canvas_w - new_w) // 2
-            y_offset = (canvas_h - new_h) // 2
-            result[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = scaled
-            return result
-    
-    def _process_frame_transparency(self, frame):
-        """Verarbeitet Transparenz in Frames (für GIFs mit Alpha-Channel)."""
-        if frame.shape[2] == 4:  # RGBA
-            # OPTIMIZED: Use integer math to avoid float conversion
-            alpha = frame[:, :, 3:4].astype(np.uint16)
-            rgb = frame[:, :, :3].astype(np.uint16)
-            bg = np.array(self.gif_transparency_bg, dtype=np.uint16).reshape(1, 1, 3)
-            # Integer alpha blending: (rgb * alpha + bg * (255 - alpha)) / 255
-            frame = ((rgb * alpha + bg * (255 - alpha)) / 255).astype(np.uint8)
-        
-        return frame[:, :, :3]
-    
-    def _load_cache(self, points_json_path):
-        """Lädt gecachte RGB-Daten wenn verfügbar."""
-        # Check if RGB cache is enabled in config
-        enable_rgb_cache = self.config.get('performance', {}).get('enable_rgb_cache', True) if self.config else True
-        if not enable_rgb_cache:
-            return False
-        
-        if not self.cache_manager:
-            return False
-        
-        cache_path = self.cache_manager.get_cache_path(
-            self.video_path, 
-            points_json_path, 
-            self.canvas_width, 
-            self.canvas_height
-        )
-        
-        if not cache_path:
-            return False
-        
-        cache_data = self.cache_manager.load_cache(cache_path)
-        if not cache_data:
-            return False
-        
-        self.cached_rgb_data = cache_data['frames']
-        self.total_frames = len(self.cached_rgb_data)
-        self.fps = cache_data.get('video_fps', DEFAULT_FPS)
-        self.is_gif = cache_data.get('is_gif', False)
-        self.gif_frame_delays = cache_data.get('gif_frame_delays', None)
-        
-        logger.debug(f"  ✓ Cache geladen: {self.total_frames} Frames, {self.fps} FPS")
-        return True
-    
     def initialize(self):
-        """Initialisiert Video-Capture."""
-        # NOTE: Cache-Loading wird im Player behandelt (benötigt points_json_path für Cache-Key)
-        
-        # Schließe alte Capture falls vorhanden
-        if self.cap and self.cap.isOpened():
-            # Already initialized - but ensure ClipRegistry has total_frames
-            if self.clip_id and self.total_frames > 0:
-                from .clips.registry import get_clip_registry
-                clip_registry = get_clip_registry()
-                clip = clip_registry.get_clip(self.clip_id)
-                if clip and clip.get('total_frames') is None:
-                    clip['total_frames'] = self.total_frames
-                    logger.debug(f"  ✓ Updated ClipRegistry (already init): clip_id={self.clip_id}, total_frames={self.total_frames}")
-            return True  # Bereits initialisiert
-        
+        if self.frames is not None:
+            return True
+
         if not os.path.exists(self.video_path):
-            logger.error(f"Video nicht gefunden: {self.video_path}")
+            logger.error(f"[NpySource] File not found: {self.video_path}")
             return False
-        
-        # Force FFmpeg backend for HAP codec support
-        # MSMF doesn't support HAP, so we must use FFmpeg
-        logger.debug(f"Opening video with FFmpeg backend: {self.video_path}")
-        self.cap = cv2.VideoCapture(self.video_path, cv2.CAP_FFMPEG)
-        
-        if not self.cap.isOpened():
-            logger.error(f"Video konnte nicht geöffnet werden: {self.video_path}")
-            logger.error(f"  Path: {self.video_path}")
-            logger.error(f"  File exists: {os.path.exists(self.video_path)}")
-            logger.error(f"  Tried backend: CAP_FFMPEG")
+
+        try:
+            self.frames = np.load(self.video_path, mmap_mode='r')
+            self.total_frames = self.frames.shape[0]
+
+            meta_path = self.video_path[:-4] + '.json'
+            if os.path.exists(meta_path):
+                import json as _json
+                with open(meta_path) as f:
+                    meta = _json.load(f)
+                self.fps = float(meta.get('fps', DEFAULT_FPS))
+            else:
+                self.fps = DEFAULT_FPS
+
+            if self.clip_id:
+                from .clips.registry import get_clip_registry
+                clip = get_clip_registry().get_clip(self.clip_id)
+                if clip:
+                    clip['total_frames'] = self.total_frames
+
+            logger.info(
+                f"[NpySource] {os.path.basename(self.video_path)} "
+                f"{self.total_frames} frames @ {self.fps:.1f}fps"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"[NpySource] Failed to load {self.video_path}: {e}")
             return False
-        
-        logger.debug(f"  ✓ Video opened successfully with FFmpeg backend")
-        
-        # Video-Informationen
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        original_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        original_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        # OPTIMIZATION: Cache whether scaling is needed (checked once vs every frame)
-        self._needs_scaling = (original_width != self.canvas_width or original_height != self.canvas_height)
-        if self._needs_scaling:
-            logger.debug(f"  ⚠️ Video resolution mismatch: {original_width}x{original_height} → {self.canvas_width}x{self.canvas_height} (scaling will apply ~15-25ms overhead per frame)")
-        else:
-            logger.debug(f"  ✅ Video resolution matches canvas: {original_width}x{original_height} (no scaling needed)")
-        
-        # Update ClipRegistry with total_frames if clip_id is set
-        if self.clip_id:
-            from .clips.registry import get_clip_registry
-            clip_registry = get_clip_registry()
-            clip = clip_registry.get_clip(self.clip_id)
-            if clip:
-                clip['total_frames'] = self.total_frames
-                logger.debug(f"  ✓ Updated ClipRegistry: clip_id={self.clip_id}, total_frames={self.total_frames}")
-        
-        # GIF Frame-Delays laden
-        if self.is_gif and self.gif_respect_timing:
-            self.gif_frame_delays = self._load_gif_frame_delays()
-        
-        logger.debug(f"VideoSource initialisiert:")
-        logger.debug(f"  Video: {os.path.basename(self.video_path)}")
-        logger.debug(f"  Auflösung: {original_width}x{original_height} → {self.canvas_width}x{self.canvas_height}")
-        logger.debug(f"  FPS: {self.fps}, Frames: {self.total_frames}")
-        
-        return True
-    
+
     def get_next_frame(self):
-        """Gibt nächstes Video-Frame zurück."""
-        if not self.cap or not self.cap.isOpened():
+        if self.frames is None or self.current_frame >= self.total_frames:
             return None, 0
-        
-        # CRITICAL: Lock BOTH seek and read for HAP codec thread-safety
-        # HAP codec has internal threading that can cause race conditions
-        with self._lock:
-            # Double-check cap is still valid after acquiring lock (race condition)
-            if not self.cap:
-                return None, 0
-            
-            # FAST PATH: Only seek if frame position is not sequential
-            # Sequential reading is 10-30x faster than seeking
-            current_pos = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
-            if current_pos != self.current_frame:
-                # Non-sequential: need to seek (transport jumped, loop wrapped, etc.)
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-            
-            ret, frame = self.cap.read()
-        
-        if not ret:
-            return None, 0  # End of video
-        
-        # Keep frame in native BGR format (no conversion needed)
-        # New output routing system handles format conversions internally
-        # Effects work on numpy arrays regardless of channel order
-        
-        # Transparenz verarbeiten (GIF)
-        if self.is_gif:
-            frame = self._process_frame_transparency(frame)
-        
-        # Auf Canvas-Größe skalieren mit Autosize-Modus (FAST PATH: cached check)
-        if self._needs_scaling:
-            frame = self._apply_autosize_scaling(frame)
-        
-        # Frame-Delay berechnen
-        delay = self.gif_frame_delays[self.current_frame] if (self.is_gif and self.gif_frame_delays and self.current_frame < len(self.gif_frame_delays)) else (1.0 / self.fps)
-        
+        # Return a read-only view directly from the memmap — no upfront 6 MB copy.
+        # Effects that create a new output array (transform, resize, etc.) benefit
+        # immediately: they only read the pixels they actually need.
+        # The core play-loop ensures writability before any in-place mutation.
+        frame = self.frames[self.current_frame]
         self.current_frame += 1
-        return frame, delay
-    
+        return frame, 1.0 / self.fps
+
     def reset(self):
-        """Setzt Video auf Anfang zurück."""
         self.current_frame = 0
-        
-        with self._lock:  # Lock für seek-Operation (non-sequential access)
-            if self.cap and self.cap.isOpened():
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    
+
     def cleanup(self):
-        """Gibt Video-Ressourcen frei."""
-        with self._lock:  # Lock für VideoCapture.release() (kritische Operation)
-            if self.cap:
-                self.cap.release()
-                self.cap = None
-    
+        self.frames = None
+
     def get_source_name(self):
-        """Gibt Video-Dateinamen zurück."""
-        return os.path.basename(self.video_path) if self.video_path else "Unknown Video"
+        return os.path.basename(self.video_path) if self.video_path else "Unknown"
 
 
 class GeneratorSource(FrameSource):
@@ -549,7 +262,8 @@ class GeneratorSource(FrameSource):
         
         # Ensure correct size
         if frame.shape[:2] != (self.canvas_height, self.canvas_width):
-            frame = cv2.resize(frame, (self.canvas_width, self.canvas_height))
+            from ..gpu.accelerator import get_gpu_accelerator
+            frame = get_gpu_accelerator(self.config).resize(frame, (self.canvas_width, self.canvas_height))
         
         delay = 1.0 / self.fps
         self.current_frame += 1

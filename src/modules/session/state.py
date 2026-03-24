@@ -639,7 +639,7 @@ class SessionStateManager:
             Dictionary with artnet routing state (objects + outputs)
         """
         return self._state.get('artnet_routing', {}).copy()
-    
+
     def get_state_file_path(self) -> str:
         """
         Get the path to the session state file.

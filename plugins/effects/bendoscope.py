@@ -6,6 +6,7 @@ Kombiniert Kaleidoskop mit kreisförmiger Biegung für psychedelische Effekte.
 import cv2
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
+from src.modules.gpu.accelerator import get_gpu_accelerator
 
 class BendoscopeEffect(PluginBase):
     """Bendoscope - Circular kaleidoscope with bending distortion."""
@@ -101,71 +102,57 @@ class BendoscopeEffect(PluginBase):
         self.center_y = float(config.get('center_y', 0.5))
         self.zoom = float(config.get('zoom', 1.0))
         self.twist = float(config.get('twist', 0.0))
-    
-    def process_frame(self, frame, **kwargs):
-        """Verarbeitet ein Frame mit Bendoscope."""
-        h, w = frame.shape[:2]
-        
-        # Center-Position in Pixeln
+        self.gpu = get_gpu_accelerator(config)
+        self._map_x = None
+        self._umat_x = None
+        self._map_h = -1
+        self._map_w = -1
+
+    def _compute_maps(self, h, w):
+        """Recompute bendoscope coordinate maps. Called once per parameter/size change."""
         center_x_px = self.center_x * w
         center_y_px = self.center_y * h
-        
-        # Erstelle Koordinaten-Grid
         y, x = np.mgrid[0:h, 0:w].astype(np.float32)
-        
-        # Verschiebe zum Zentrum
         x = x - center_x_px
         y = y - center_y_px
-        
-        # Konvertiere zu Polar-Koordinaten
         r = np.sqrt(x**2 + y**2)
         theta = np.arctan2(y, x)
-        
-        # Normalisiere Radius
-        max_radius = np.sqrt((w/2)**2 + (h/2)**2)
+        max_radius = np.sqrt((w / 2)**2 + (h / 2)**2)
         r_norm = r / max_radius
-        
-        # Wende Bending an (Barrel/Pincushion Distortion)
-        if self.bend_strength != 0:
-            r_bent = r * (1 + self.bend_strength * r_norm**2)
-        else:
-            r_bent = r
-        
-        # Wende Twist an (Radial Rotation basierend auf Distanz)
+        r_bent = r * (1 + self.bend_strength * r_norm**2) if self.bend_strength != 0 else r
         theta_twisted = theta + (self.twist * r_norm * np.pi)
-        
-        # Kaleidoskop-Effekt
         angle_per_segment = 360.0 / self.segments
         theta_deg = np.degrees(theta_twisted) + self.rotation
         theta_deg = theta_deg % 360
-        
-        # Mappe auf erstes Segment mit Spiegelung
         segment_angle = theta_deg % angle_per_segment
         segment_idx = (theta_deg / angle_per_segment).astype(int)
         mirror = segment_idx % 2 == 1
         segment_angle = np.where(mirror, angle_per_segment - segment_angle, segment_angle)
-        
-        # Konvertiere zurück zu Radianten
         theta_final = np.radians(segment_angle)
-        
-        # Wende Zoom an
         r_final = r_bent / self.zoom
-        
-        # Konvertiere zurück zu Kartesischen Koordinaten
-        x_new = r_final * np.cos(theta_final) + center_x_px
-        y_new = r_final * np.sin(theta_final) + center_y_px
-        
-        # Mappe Koordinaten
-        map_x = x_new.astype(np.float32)
-        map_y = y_new.astype(np.float32)
-        
-        # Remap Frame
-        result = cv2.remap(frame, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
-        
-        return result
+        self._map_x = (r_final * np.cos(theta_final) + center_x_px).astype(np.float32)
+        self._map_y = (r_final * np.sin(theta_final) + center_y_px).astype(np.float32)
+        self._map_h = h
+        self._map_w = w
+        if self.gpu.enabled:
+            self._umat_x = cv2.UMat(self._map_x)
+            self._umat_y = cv2.UMat(self._map_y)
+
+    def process_frame(self, frame, **kwargs):
+        """Verarbeitet ein Frame mit Bendoscope."""
+        h, w = frame.shape[:2]
+        if self._map_x is None or self._map_h != h or self._map_w != w:
+            self._compute_maps(h, w)
+        if self.gpu.enabled:
+            result = cv2.remap(cv2.UMat(frame), self._umat_x, self._umat_y,
+                               cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+            return result.get()
+        return cv2.remap(frame, self._map_x, self._map_y,
+                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
     
     def update_parameter(self, name, value):
         """Aktualisiert einen Parameter zur Laufzeit."""
+        self._map_x = None  # Invalidate coordinate maps
         if name == 'segments':
             self.segments = int(value)
             return True

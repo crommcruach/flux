@@ -90,8 +90,12 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # CRITICAL: Set FFmpeg options BEFORE any cv2 imports
-# This prevents HAP codec threading assertion errors
-os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'threads;1'
+# Allow FFmpeg to use multiple CPU threads for HAP DXT block decode.
+# NOTE: 'threads;1' was used historically to prevent crashes, but those are
+# external concurrency issues (now handled by VideoSource._lock). FFmpeg's
+# *internal* per-frame threading is separate and safe — HAP needs it to avoid
+# 30-50ms decode times. Set to 0 = auto-detect (uses all available cores).
+os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'threads;0'
 
 from modules import RestAPI, PlayerManager
 from modules.player.core import Player
@@ -552,6 +556,11 @@ def main():
     player.start()
     artnet_player.start()
     logger.debug("Players started for preview generation")
+
+    # ─── Eager GPU + system status banner ────────────────────────────────────
+    from modules.gpu.accelerator import get_gpu_accelerator
+    _gpu = get_gpu_accelerator(config)
+    logger.info(f"🖥️  Startup status → GPU: {_gpu.backend}  |  Threads: load=8, render=4  |  Compositor: GPUCompositor")
     
     # Register cleanup for outputs (first to close display windows)
     register_cleanup_resource('outputs', lambda: _cleanup_outputs(player_manager))

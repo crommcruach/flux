@@ -23,31 +23,44 @@ class ColorizeEffect(PluginBase):
     
     PARAMETERS = [
         {
-            'name': 'hue',
-            'label': 'Hue',
-            'type': ParameterType.FLOAT,
-            'default': 0.0,
-            'min': 0.0,
-            'max': 180.0,
-            'step': 1.0,
-            'description': 'Ziel-Farbton (0-180 in OpenCV)'
+            'name': 'color',
+            'label': 'Color',
+            'type': ParameterType.COLOR,
+            'default': '#ff0000',
+            'description': 'Zielfarbe (Hue + Saturation werden aus Hex-Farbe extrahiert)'
         },
         {
-            'name': 'saturation',
-            'label': 'Saturation',
-            'type': ParameterType.FLOAT,
-            'default': 255.0,
-            'min': 0.0,
-            'max': 255.0,
-            'step': 1.0,
-            'description': 'Sättigung (0 = Graustufen, 255 = voll gesättigt)'
+            'name': 'invert',
+            'label': 'Invert Colors',
+            'type': ParameterType.BOOL,
+            'default': False,
+            'description': 'Farben invertieren (nach dem Colorize-Schritt)'
         }
     ]
-    
+
+    def _hex_to_opencv_hs(self, hex_color):
+        """Konvertiert Hex-Farbe (#rrggbb oder #rrggbbaa) zu OpenCV HSV H (0-180) und S (0-255)."""
+        hex_color = str(hex_color).lstrip('#')
+        # Strip optional alpha byte (#rrggbbaa -> #rrggbb)
+        if len(hex_color) == 8:
+            hex_color = hex_color[:6]
+        if len(hex_color) != 6:
+            return 0, 255
+        try:
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            pixel = np.array([[[b, g, r]]], dtype=np.uint8)  # BGR for OpenCV
+            hsv = cv2.cvtColor(pixel, cv2.COLOR_BGR2HSV)
+            return int(hsv[0, 0, 0]), int(hsv[0, 0, 1])
+        except Exception:
+            return 0, 255
+
     def initialize(self, config):
-        """Initialisiert Plugin mit Hue/Saturation-Werten."""
-        self.hue = config.get('hue', 0.0)
-        self.saturation = config.get('saturation', 255.0)
+        """Initialisiert Plugin mit einer Hex-Farbe."""
+        self.color = config.get('color', '#ff0000')
+        self.invert = bool(config.get('invert', False))
+        self.hue, self.saturation = self._hex_to_opencv_hs(self.color)
     
     def process_frame(self, frame, **kwargs):
         """
@@ -63,24 +76,31 @@ class ColorizeEffect(PluginBase):
         # Convert to HSV
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
-        # Replace Hue and Saturation, keep Value (Luminance)
-        hsv[:, :, 0] = int(self.hue)  # Set hue
-        hsv[:, :, 1] = int(self.saturation)  # Set saturation
-        # hsv[:, :, 2] stays unchanged (keeps luminance)
+        # Replace Hue and Saturation (derived from color), keep Value (Luminance)
+        hsv[:, :, 0] = self.hue
+        hsv[:, :, 1] = self.saturation
+        
+        # Invert only the V (brightness) channel so dark→bright and bright→dark
+        # while the chosen hue stays intact
+        if self.invert:
+            hsv[:, :, 2] = 255 - hsv[:, :, 2]
         
         # Convert back to BGR
         return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
     
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""
-        if name == 'hue':
-            self.hue = float(value)
-        elif name == 'saturation':
-            self.saturation = float(value)
+        if isinstance(value, dict) and '_value' in value:
+            value = value['_value']
+        if name == 'color':
+            self.color = str(value)
+            self.hue, self.saturation = self._hex_to_opencv_hs(self.color)
+        elif name == 'invert':
+            self.invert = bool(value)
     
     def get_parameters(self):
         """Gibt aktuelle Parameter zurück."""
         return {
-            'hue': self.hue,
-            'saturation': self.saturation
+            'color': self.color,
+            'invert': self.invert
         }

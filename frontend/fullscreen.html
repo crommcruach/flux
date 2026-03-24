@@ -158,7 +158,7 @@
         let lastSuccessfulLoad = Date.now();
         const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
         const INITIAL_RECONNECT_DELAY = 1000; // 1 second initial
-        const CONNECTION_TIMEOUT = 5000; // 5 seconds without successful load = disconnected
+        const CONNECTION_TIMEOUT = 15000; // 15 seconds without successful load = disconnected
         
         const streamImg = document.getElementById('previewStream');
         const fpsOverlay = document.getElementById('fpsOverlay');
@@ -253,17 +253,15 @@
             attemptReconnect();
         });
         
-        // Periodic connection health check
-        setInterval(() => {
-            const timeSinceLastLoad = Date.now() - lastSuccessfulLoad;
-            
-            // If no successful load in CONNECTION_TIMEOUT ms, assume disconnected
-            if (timeSinceLastLoad > CONNECTION_TIMEOUT && isConnected) {
-                console.warn(`⚠️ No successful load in ${CONNECTION_TIMEOUT}ms - assuming disconnected`);
-                showReconnecting();
-                attemptReconnect();
-            }
-        }, 1000);
+        // Periodic connection health check (DISABLED — too many false positives)
+        // setInterval(() => {
+        //     const timeSinceLastLoad = Date.now() - lastSuccessfulLoad;
+        //     if (timeSinceLastLoad > CONNECTION_TIMEOUT && isConnected) {
+        //         console.warn(`⚠️ No successful load in ${CONNECTION_TIMEOUT}ms - assuming disconnected`);
+        //         showReconnecting();
+        //         attemptReconnect();
+        //     }
+        // }, 1000);
         
         // Load available outputs (kept for potential future use with context menu)
         async function loadOutputs() {

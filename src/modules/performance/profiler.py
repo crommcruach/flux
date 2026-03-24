@@ -115,14 +115,25 @@ class PerformanceProfiler:
                 self._timings[stage_name].append(elapsed_ms)
                 self._current_frame_times[stage_name] = elapsed_ms
     
-    def record_frame_complete(self):
-        """Mark end of frame processing and record total time."""
+    def record_frame_complete(self, frame_start_perf: float = None):
+        """Mark end of frame processing and record total time.
+
+        Args:
+            frame_start_perf: time.perf_counter() value captured at the very start
+                of the frame loop iteration.  When provided, the true wall-clock
+                elapsed time is stored as total_frame_time.  When omitted, falls
+                back to summing profiled stages (old behaviour — always too low
+                because it ignores unprofiled gaps like MJPEG encoding).
+        """
         with self._lock:
-            # Calculate total frame time (sum of all stages)
-            total_time = sum(self._current_frame_times.values())
+            if frame_start_perf is not None:
+                total_time = (time.perf_counter() - frame_start_perf) * 1000
+            else:
+                # Fallback: sum of measured stages only (underestimates real cost)
+                total_time = sum(self._current_frame_times.values())
             self._total_frame_times.append(total_time)
             self._frame_count += 1
-            
+
             # Clear current frame times for next frame
             self._current_frame_times = {}
     

@@ -12,6 +12,7 @@ class ColorPicker {
     constructor(containerId, initialColor = '#ff0000', onChange = null) {
         this.containerId = containerId;
         this.onChange = onChange;
+        this._initializing = true;
         
         // Color state
         this.hsb = { h: 0, s: 100, b: 100, a: 255 };
@@ -21,12 +22,13 @@ class ColorPicker {
         this.paletteColors = [];
         this.isAddingToPalette = false;
         
-        // Set initial color
+        // Set initial color state (DOM doesn't exist yet — updateColor will skip)
         this.setValue(initialColor);
         
-        // Render the picker
+        // Render the picker (uses already-set color state, calls updateColor once DOM exists)
         this.render();
         this.attachEventListeners();
+        this._initializing = false;
     }
     
     render() {
@@ -117,10 +119,30 @@ class ColorPicker {
                 
                 <!-- Palette Mode -->
                 <div class="mode-content" id="${this.containerId}_paletteMode">
+                    <div class="palette-named-row">
+                        <select class="palette-named-select" id="${this.containerId}_namedSelect">
+                            <option value="">-- Load saved palette --</option>
+                        </select>
+                        <button class="palette-btn" id="${this.containerId}_saveNamedBtn" title="Save current palette under a name">Save as…</button>
+                        <button class="palette-btn palette-btn-delete" id="${this.containerId}_deleteNamedBtn" title="Delete selected palette">🗑</button>
+                    </div>
                     <div class="palette-grid" id="${this.containerId}_paletteGrid"></div>
                     <div class="palette-actions">
                         <button class="palette-btn" id="${this.containerId}_addColorBtn">+ Add Color</button>
                         <button class="palette-btn" id="${this.containerId}_clearPalette">Clear</button>
+                    </div>
+                </div>
+                
+                <!-- Alpha (shared across all modes) -->
+                <div class="slider-group alpha-slider-group">
+                    <div class="slider-row">
+                        <span class="slider-label">Alpha</span>
+                        <div class="slider-container">
+                            <div class="color-slider alpha-slider" data-slider="alpha" id="${this.containerId}_alphaSlider">
+                                <div class="slider-thumb" id="${this.containerId}_alphaThumb"></div>
+                            </div>
+                        </div>
+                        <span class="slider-value" id="${this.containerId}_alphaValue">255</span>
                     </div>
                 </div>
             </div>
@@ -168,6 +190,12 @@ class ColorPicker {
             this.updateFromRgb();
         });
         
+        // Alpha slider (shared)
+        this.attachSlider('alpha', (value) => {
+            this.hsb.a = Math.round(value * 255);
+            this.updateColor();
+        });
+        
         // Add to palette buttons
         document.getElementById(`${this.containerId}_addToPaletteBtn`)?.addEventListener('click', () => {
             this.addToPalette();
@@ -180,12 +208,122 @@ class ColorPicker {
         document.getElementById(`${this.containerId}_addColorBtn`)?.addEventListener('click', () => {
             this.startAddingToPalette();
         });
-        document.getElementById(`${this.containerId}_clearPalette`)?.addEventListener('click', () => {
-            if (confirm('Clear all colors?')) {
+        document.getElementById(`${this.containerId}_clearPalette`)?.addEventListener('click', (e) => {
+            const btn = e.currentTarget;
+            if (btn.dataset.confirming === '1') return; // second click handled by onclick below
+            btn.dataset.confirming = '1';
+            const origText = btn.textContent;
+            btn.textContent = '✓ Confirm';
+            btn.classList.add('palette-btn-confirm');
+            const timer = setTimeout(() => {
+                btn.textContent = origText;
+                btn.classList.remove('palette-btn-confirm');
+                delete btn.dataset.confirming;
+                btn.onclick = null;
+            }, 3000);
+            btn.onclick = () => {
+                clearTimeout(timer);
+                btn.textContent = origText;
+                btn.classList.remove('palette-btn-confirm');
+                delete btn.dataset.confirming;
+                btn.onclick = null;
                 this.paletteColors = [];
+                this.renderPalette();
+            };
+        });
+        
+        // Named palette: auto-load on select change
+        document.getElementById(`${this.containerId}_namedSelect`)?.addEventListener('change', () => {
+            const sel = document.getElementById(`${this.containerId}_namedSelect`);
+            const name = sel?.value;
+            if (!name) return;
+            const colors = (window._colorPalettes || {})[name];
+            if (colors) {
+                this.paletteColors = [...colors];
                 this.renderPalette();
             }
         });
+        
+        // Named palette: save as
+        document.getElementById(`${this.containerId}_saveNamedBtn`)?.addEventListener('click', async () => {
+            const name = prompt('Palette name:');
+            if (!name || !name.trim()) return;
+            const trimmed = name.trim();
+            if (!window._colorPalettes) window._colorPalettes = {};
+            window._colorPalettes[trimmed] = [...this.paletteColors];
+            // Persist to localStorage
+            try {
+                const stored = JSON.parse(localStorage.getItem('colorPalettes') || '{}');
+                stored[trimmed] = [...this.paletteColors];
+                localStorage.setItem('colorPalettes', JSON.stringify(stored));
+            } catch (e) {
+                console.warn('ColorPicker: could not save palette to localStorage', e);
+            }
+            // Best-effort persist to config.json (may fail silently)
+            try {
+                const cfgResp = await fetch('/api/config');
+                if (cfgResp.ok) {
+                    const cfg = await cfgResp.json();
+                    cfg.color_palettes = { ...(cfg.color_palettes || {}), [trimmed]: [...this.paletteColors] };
+                    await fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(cfg)
+                    });
+                }
+            } catch (e) {
+                console.warn('ColorPicker: could not persist palette to config.json', e);
+            }
+            this._refreshNamedSelect();
+        });
+
+        // Named palette: delete
+        document.getElementById(`${this.containerId}_deleteNamedBtn`)?.addEventListener('click', async () => {
+            const sel = document.getElementById(`${this.containerId}_namedSelect`);
+            const name = sel?.value;
+            if (!name) return;
+            if (!confirm(`Delete palette "${name}"?`)) return;
+            // Remove from memory
+            if (window._colorPalettes) delete window._colorPalettes[name];
+            // Remove from localStorage
+            try {
+                const stored = JSON.parse(localStorage.getItem('colorPalettes') || '{}');
+                delete stored[name];
+                localStorage.setItem('colorPalettes', JSON.stringify(stored));
+            } catch (e) {
+                console.warn('ColorPicker: could not update localStorage', e);
+            }
+            // Best-effort persist to config.json
+            try {
+                const cfgResp = await fetch('/api/config');
+                if (cfgResp.ok) {
+                    const cfg = await cfgResp.json();
+                    if (cfg.color_palettes) delete cfg.color_palettes[name];
+                    await fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(cfg)
+                    });
+                }
+            } catch (e) {
+                console.warn('ColorPicker: could not remove palette from config.json', e);
+            }
+            this._refreshNamedSelect();
+        });
+
+        // Populate dropdown with any palettes already in window._colorPalettes
+        this._refreshNamedSelect();
+    }
+    
+    _refreshNamedSelect() {
+        const sel = document.getElementById(`${this.containerId}_namedSelect`);
+        if (!sel) return;
+        const palettes = window._colorPalettes || {};
+        const current = sel.value;
+        sel.innerHTML = '<option value="">-- Load saved palette --</option>' +
+            Object.keys(palettes).map(n =>
+                `<option value="${n}" ${n === current ? 'selected' : ''}>${n}</option>`
+            ).join('');
     }
     
     attachSlider(name, callback) {
@@ -223,6 +361,7 @@ class ColorPicker {
         document.getElementById(`${this.containerId}_${mode}Mode`)?.classList.add('active');
         
         if (mode === 'palette') {
+            this._refreshNamedSelect();
             this.renderPalette();
         }
     }
@@ -240,11 +379,12 @@ class ColorPicker {
     }
     
     updateColor() {
-        const hex = this.rgbToHex(this.rgb.r, this.rgb.g, this.rgb.b);
-        
-        // Update swatch
+        // Bail out if DOM hasn't been rendered yet
         const swatch = document.getElementById(`${this.containerId}_swatch`);
-        if (swatch) swatch.style.background = hex;
+        if (!swatch) return;
+        
+        // Swatch shows current color with alpha
+        swatch.style.background = `rgba(${this.rgb.r}, ${this.rgb.g}, ${this.rgb.b}, ${(this.hsb.a / 255).toFixed(3)})`;
         
         // Update HSB values
         document.getElementById(`${this.containerId}_hueValue`).textContent = Math.round(this.hsb.h) + '°';
@@ -255,6 +395,12 @@ class ColorPicker {
         document.getElementById(`${this.containerId}_redValue`).textContent = this.rgb.r;
         document.getElementById(`${this.containerId}_greenValue`).textContent = this.rgb.g;
         document.getElementById(`${this.containerId}_blueValue`).textContent = this.rgb.b;
+        
+        // Update alpha display
+        const alphaValue = document.getElementById(`${this.containerId}_alphaValue`);
+        if (alphaValue) alphaValue.textContent = Math.round(this.hsb.a);
+        const alphaThumb = document.getElementById(`${this.containerId}_alphaThumb`);
+        if (alphaThumb) alphaThumb.style.left = (this.hsb.a / 255 * 100) + '%';
         
         // Update slider positions
         document.getElementById(`${this.containerId}_hueThumb`).style.left = (this.hsb.h / 360 * 100) + '%';
@@ -267,9 +413,9 @@ class ColorPicker {
         // Update slider backgrounds
         this.updateSliderBackgrounds();
         
-        // Trigger onChange callback
-        if (this.onChange) {
-            this.onChange(hex);
+        // Trigger onChange callback (suppressed during initialization)
+        if (this.onChange && !this._initializing) {
+            this.onChange(this.getValue());
         }
     }
     
@@ -308,6 +454,11 @@ class ColorPicker {
             const endColor = this.rgbToHex(this.rgb.r, this.rgb.g, 255);
             blueSlider.style.background = `linear-gradient(to right, ${startColor}, ${endColor})`;
         }
+        
+        const alphaSlider = document.getElementById(`${this.containerId}_alphaSlider`);
+        if (alphaSlider) {
+            alphaSlider.style.background = `linear-gradient(to right, rgba(${this.rgb.r},${this.rgb.g},${this.rgb.b},0), rgba(${this.rgb.r},${this.rgb.g},${this.rgb.b},1))`;
+        }
     }
     
     startAddingToPalette() {
@@ -318,7 +469,7 @@ class ColorPicker {
     }
     
     addToPalette() {
-        const hex = this.rgbToHex(this.rgb.r, this.rgb.g, this.rgb.b);
+        const hex = this.getValue();
         this.paletteColors.push(hex);
         
         this.isAddingToPalette = false;
@@ -340,7 +491,9 @@ class ColorPicker {
         grid.innerHTML = this.paletteColors.map((color, index) => `
             <div class="palette-color" style="background: ${color}" 
                  data-index="${index}" 
-                 title="${color}"></div>
+                 title="${color}">
+                <span class="palette-color-delete" data-index="${index}" title="Remove">&times;</span>
+            </div>
         `).join('');
         
         // Attach click handlers
@@ -351,21 +504,33 @@ class ColorPicker {
                 this.setValue(color);
             });
         });
+        
+        // Attach delete handlers (stop propagation so click-to-select doesn't fire)
+        grid.querySelectorAll('.palette-color-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const index = parseInt(btn.getAttribute('data-index'));
+                this.paletteColors.splice(index, 1);
+                this.renderPalette();
+            });
+        });
     }
     
     // Public API
     getValue() {
-        return this.rgbToHex(this.rgb.r, this.rgb.g, this.rgb.b);
+        const alphaHex = Math.round(this.hsb.a).toString(16).padStart(2, '0');
+        return this.rgbToHex(this.rgb.r, this.rgb.g, this.rgb.b) + alphaHex;
     }
     
     setValue(hexColor) {
-        const match = hexColor.match(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
+        const match = String(hexColor).match(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})?/i);
         if (match) {
             this.rgb.r = parseInt(match[1], 16);
             this.rgb.g = parseInt(match[2], 16);
             this.rgb.b = parseInt(match[3], 16);
+            const alpha = match[4] !== undefined ? parseInt(match[4], 16) : 255;
             const hsb = this.rgbToHsb(this.rgb.r, this.rgb.g, this.rgb.b);
-            this.hsb = { ...hsb, a: this.hsb.a };
+            this.hsb = { ...hsb, a: alpha };
             this.updateColor();
         }
     }

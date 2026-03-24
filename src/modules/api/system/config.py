@@ -26,8 +26,9 @@ def register_config_routes(app, config_path='config.json'):
     def get_config():
         """Gibt aktuelle Konfiguration zurück."""
         try:
-            # Finde config.json im Root-Verzeichnis (4 levels up from this file)
-            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            # Finde config.json im Root-Verzeichnis (5 levels up from this file:
+            # src/modules/api/system/config.py -> system -> api -> modules -> src -> root)
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
             config_file = os.path.join(base_path, 'config.json')
             
             if not os.path.exists(config_file):
@@ -70,8 +71,9 @@ def register_config_routes(app, config_path='config.json'):
                     "valid": False
                 }), 400
             
-            # Finde config.json im Root-Verzeichnis (4 levels up from this file)
-            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            # Finde config.json im Root-Verzeichnis (5 levels up from this file:
+            # src/modules/api/system/config.py -> system -> api -> modules -> src -> root)
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
             config_file = os.path.join(base_path, 'config.json')
             
             # Backup erstellen

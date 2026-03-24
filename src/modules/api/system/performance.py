@@ -41,7 +41,7 @@ def register_performance_routes(app, player_manager):
     def reset_performance_metrics():
         """Reset performance metrics for all players."""
         try:
-            data = request.get_json() or {}
+            data = request.get_json(silent=True) or {}
             player_name = data.get('player')
             
             profilers = get_all_profilers()
@@ -78,7 +78,7 @@ def register_performance_routes(app, player_manager):
     def toggle_performance_profiling():
         """Enable or disable performance profiling."""
         try:
-            data = request.get_json() or {}
+            data = request.get_json(silent=True) or {}
             enabled = data.get('enabled', True)
             player_name = data.get('player')
             

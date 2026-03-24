@@ -4,6 +4,7 @@ Blur Effect Plugin - Gaussian Blur Effect
 import cv2
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
+from src.modules.gpu.accelerator import get_gpu_accelerator
 
 
 class BlurEffect(PluginBase):
@@ -35,6 +36,7 @@ class BlurEffect(PluginBase):
     ]
     
     def initialize(self, config):
+        self.gpu = get_gpu_accelerator(config)
         """Initialisiert Plugin mit Blur-Stärke."""
         self.strength = config.get('strength', 5.0)
     
@@ -56,7 +58,7 @@ class BlurEffect(PluginBase):
         kernel_size = int(self.strength) * 2 + 1
         kernel_size = max(1, kernel_size)  # Mindestens 1
         
-        return cv2.GaussianBlur(frame, (kernel_size, kernel_size), 0)
+        return self.gpu.gaussian_blur(frame, kernel_size)
     
     def update_parameter(self, name, value):
         """Aktualisiert Blur-Stärke."""

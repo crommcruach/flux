@@ -132,6 +132,11 @@
       "#ffa500ff",
       "#ffcc00ff",
       "#ffe066ff"
+    ],
+    "trs": [
+      "#00efffff",
+      "#5800ffff",
+      "#ff2800ff"
     ]
   },
   "effects": {
@@ -248,10 +253,10 @@
   "performance": {
     "_comment": "Performance monitoring and optimization. profiling_enabled: enable performance profiler (set to false in production for zero overhead). enable_loop_cache: cache decoded frames for short loops. enable_rgb_cache: cache pre-computed RGB frames. enable_gpu: use GPU (OpenCL) for resize/warp operations (set false to force CPU).",
     "enable_gpu": true,
-    "enable_loop_cache": true,
+    "enable_loop_cache": false,
     "enable_rgb_cache": false,
     "loop_cache_max_duration": 10,
-    "profiling_enabled": true
+    "profiling_enabled": false
   },
   "video": {
     "_preview_fps_limit_comment": "FPS limit for preview players (null = use source FPS, number = limit to specific FPS)",

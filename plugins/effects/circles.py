@@ -6,6 +6,7 @@ Mappt das Bild auf konzentrische Kreise für Circular Warp-Effekt.
 import cv2
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
+from src.modules.gpu.accelerator import get_gpu_accelerator
 
 class CirclesEffect(PluginBase):
     """Circles - Concentric circle mapping with zoom and rotation."""
@@ -100,7 +101,42 @@ class CirclesEffect(PluginBase):
         self.center_y = float(config.get('center_y', 0.5))
         self.zoom = float(config.get('zoom', 1.0))
         self.mode = str(config.get('mode', 'radial_warp'))
-    
+        self.gpu = get_gpu_accelerator(config)
+        self._map_x = None
+        self._umat_x = None
+        self._map_h = -1
+        self._map_w = -1
+
+    def _compute_maps(self, h, w):
+        """Recompute circles coordinate maps. Called once per parameter/size change."""
+        center_x_px = self.center_x * w
+        center_y_px = self.center_y * h
+        y, x = np.mgrid[0:h, 0:w].astype(np.float32)
+        x = x - center_x_px
+        y = y - center_y_px
+        r = np.sqrt(x**2 + y**2)
+        theta = np.arctan2(y, x)
+        max_radius = np.sqrt((w / 2)**2 + (h / 2)**2)
+        r_norm = r / max_radius
+        if self.mode == 'radial_warp':
+            wave = np.sin(r_norm * self.frequency * 2 * np.pi)
+            r_new = r + wave * self.amplitude * max_radius
+            theta_new = theta + np.radians(self.rotation)
+        elif self.mode == 'circular_repeat':
+            r_new = (r_norm * self.frequency) % 1.0 * max_radius / self.zoom
+            theta_new = theta + np.radians(self.rotation)
+        else:  # spiral
+            spiral_offset = r_norm * self.frequency * 2 * np.pi
+            theta_new = theta + spiral_offset + np.radians(self.rotation)
+            r_new = r / self.zoom
+        self._map_x = (r_new * np.cos(theta_new) + center_x_px).astype(np.float32)
+        self._map_y = (r_new * np.sin(theta_new) + center_y_px).astype(np.float32)
+        self._map_h = h
+        self._map_w = w
+        if self.gpu.enabled:
+            self._umat_x = cv2.UMat(self._map_x)
+            self._umat_y = cv2.UMat(self._map_y)
+
     def process_frame(self, frame, **kwargs):
         """Verarbeitet ein Frame mit Circles."""
         h, w = frame.shape[:2]
@@ -156,6 +192,7 @@ class CirclesEffect(PluginBase):
     
     def update_parameter(self, name, value):
         """Aktualisiert einen Parameter zur Laufzeit."""
+        self._map_x = None  # Invalidate coordinate maps
         if name == 'frequency':
             self.frequency = float(value)
             return True

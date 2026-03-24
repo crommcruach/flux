@@ -598,10 +598,8 @@ class TransportEffect(PluginBase):
     
     def _emit_position_update(self):
         """Emit WebSocket update for transport position (rate-limited by config)."""
-        # DEBUG: Check if WebSocket context is available
+        # No WebSocket context available (e.g. no frontend connected) - silently skip
         if not self.socketio or not self.player_id or not self.clip_id:
-            if self._position_update_counter % 100 == 0:  # Log every 100 frames to avoid spam
-                logger.warning(f"⚠️ Transport WebSocket context not set: socketio={self.socketio is not None}, player_id={self.player_id}, clip_id={self.clip_id}")
             self._position_update_counter += 1
             return
         

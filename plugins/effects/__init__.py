@@ -47,6 +47,7 @@ from .bendoscope import BendoscopeEffect
 from .transport import TransportEffect
 from .ascii_art import AsciiArtEffect
 from .snow import SnowEffect
+from .motion_key import MotionKeyEffect
 
 __all__ = [
     'BlendEffect', 
@@ -95,5 +96,6 @@ __all__ = [
     'BendoscopeEffect',
     'TransportEffect',
     'AsciiArtEffect',
-    'SnowEffect'
+    'SnowEffect',
+    'MotionKeyEffect'
 ]

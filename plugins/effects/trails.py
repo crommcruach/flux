@@ -1,17 +1,29 @@
 """
 Trails Effect Plugin - Ghost-Trails with frame blending
+
+GPU path:  cv2.accumulateWeighted on UMat (OpenCL) — accumulator lives on GPU,
+           only one .get() download per frame needed for the uint8 output.
+CPU path:  same cv2.accumulateWeighted call on plain numpy arrays — still a
+           single optimised C++ op, no Python loop.
+
+Formula:  trail = decay * trail + (1-decay) * frame
+          cv2.accumulateWeighted(src, dst, alpha=1-decay)  ← identical
 """
 import cv2
 import numpy as np
-from collections import deque
 from plugins import PluginBase, PluginType, ParameterType
+from src.modules.gpu.accelerator import get_gpu_accelerator
 
 
 class TrailsEffect(PluginBase):
     """
-    Trails Effect - Erstellt Ghost-Trails durch Frame-Blending mit Historie.
+    Trails Effect - Erstellt Ghost-Trails durch Frame-Blending.
+
+    Single cv2.accumulateWeighted() call per frame.
+    When OpenCL is available the float32 accumulator is kept as a UMat on the
+    GPU — no round-trip upload every frame, only one .get() download per frame.
     """
-    
+
     METADATA = {
         'id': 'trails',
         'name': 'Trails',
@@ -21,18 +33,8 @@ class TrailsEffect(PluginBase):
         'type': PluginType.EFFECT,
         'category': 'Time & Motion'
     }
-    
+
     PARAMETERS = [
-        {
-            'name': 'length',
-            'label': 'Trail Length',
-            'type': ParameterType.INT,
-            'default': 5,
-            'min': 2,
-            'max': 30,
-            'step': 1,
-            'description': 'Anzahl der Frames für Trail-Historie'
-        },
         {
             'name': 'decay',
             'label': 'Decay',
@@ -41,77 +43,57 @@ class TrailsEffect(PluginBase):
             'min': 0.1,
             'max': 0.99,
             'step': 0.05,
-            'description': 'Decay-Faktor für ältere Frames (höher = länger sichtbar)'
+            'description': 'Decay-Faktor (höher = längerer / persistenterer Trail)'
         }
     ]
-    
+
     def initialize(self, config):
-        """Initialisiert Plugin mit Trail-Parametern."""
-        self.length = int(config.get('length', 5))
-        self.decay = config.get('decay', 0.7)
-        self.frame_history = deque(maxlen=self.length)
-    
+        """Initialisiert Plugin."""
+        self.decay = float(config.get('decay', 0.7))
+        self.gpu = get_gpu_accelerator(config)
+        # float32 accumulator — None until first frame (lazy init for correct shape)
+        self._trail = None   # cv2.UMat when GPU enabled, else np.ndarray
+
     def process_frame(self, frame, **kwargs):
         """
-        Erstellt Ghost-Trails durch Blending mit Frame-Historie.
-        
-        Args:
-            frame: Input Frame (NumPy Array, BGR)
-            **kwargs: Unused
-            
-        Returns:
-            Frame mit Trails
+        GPU:  cv2.accumulateWeighted(UMat(frame), UMat_trail, alpha)
+              accumulator stays on GPU; one .get() download per frame.
+        CPU:  cv2.accumulateWeighted(frame, np_trail, alpha) — single C++ call.
+
+        alpha = 1 - decay  (weight of the incoming frame)
         """
-        # Add current frame to history
-        self.frame_history.append(frame.copy())
-        
-        if len(self.frame_history) < 2:
-            return frame  # Not enough history yet
-        
-        # OPTIMIZED: Pre-convert all frames to float32 (avoid conversion in loop)
-        result = np.zeros_like(frame, dtype=np.float32)
-        total_weight = 0.0
-        
-        # Pre-convert current frame
-        frames_float = [f.astype(np.float32) for f in self.frame_history]
-        
-        # Blend from oldest to newest
-        for i, hist_frame in enumerate(frames_float):
-            # Calculate weight (exponential decay)
-            weight = self.decay ** (len(frames_float) - i - 1)
-            result += hist_frame * weight
-            total_weight += weight
-        
-        # Normalize by total weight
-        result /= total_weight
-        return np.clip(result, 0, 255).astype(np.uint8)
-    
+        alpha = 1.0 - self.decay  # weight given to the new frame
+
+        if self.gpu.enabled:
+            frame_umat = cv2.UMat(frame)
+            if self._trail is None:
+                # Initialise accumulator on GPU as float32
+                self._trail = cv2.UMat(frame.astype(np.float32))
+                return frame
+            cv2.accumulateWeighted(frame_umat, self._trail, alpha)
+            # Download only the final uint8 result
+            return cv2.convertScaleAbs(self._trail).get()
+        else:
+            if self._trail is None:
+                self._trail = frame.astype(np.float32)
+                return frame
+            cv2.accumulateWeighted(frame, self._trail, alpha)
+            return cv2.convertScaleAbs(self._trail)
+
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""
-        # Extract actual value if it's a range metadata dict
         if isinstance(value, dict) and '_value' in value:
             value = value['_value']
-        
-        if name == 'length':
-            new_length = int(value)
-            if new_length != self.length:
-                self.length = new_length
-                # Recreate deque with new maxlen
-                old_frames = list(self.frame_history)
-                self.frame_history = deque(old_frames, maxlen=self.length)
-            return True
-        elif name == 'decay':
+        if name == 'decay':
             self.decay = float(value)
             return True
+        if name == 'length':
+            # Legacy parameter — silently accepted
+            return True
         return False
-    
+
     def get_parameters(self):
-        """Gibt aktuelle Parameter zurück."""
-        return {
-            'length': self.length,
-            'decay': self.decay
-        }
-    
+        return {'decay': self.decay}
+
     def cleanup(self):
-        """Cleanup frame history."""
-        self.frame_history.clear()
+        self._trail = None

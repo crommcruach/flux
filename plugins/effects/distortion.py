@@ -4,6 +4,7 @@ Distortion Effect Plugin - Lens Distortion Effects
 import cv2
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
+from src.modules.gpu.accelerator import get_gpu_accelerator
 
 
 class DistortionEffect(PluginBase):
@@ -59,7 +60,32 @@ class DistortionEffect(PluginBase):
         self.strength = float(config.get('strength', 0.0))
         self.center_x = float(config.get('center_x', 0.5))
         self.center_y = float(config.get('center_y', 0.5))
-    
+        self.gpu = get_gpu_accelerator(config)
+        self._map_x = None
+        self._umat_x = None
+        self._map_h = -1
+        self._map_w = -1
+
+    def _compute_maps(self, h, w):
+        """Recompute barrel/pincushion distortion maps. Called once per parameter/size change."""
+        cx = self.center_x * w
+        cy = self.center_y * h
+        y_coords, x_coords = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+        dx = (x_coords - cx) / w
+        dy = (y_coords - cy) / h
+        r = np.sqrt(dx**2 + dy**2)
+        k = self.strength
+        r_distorted = r * (1 + k * r**2)
+        r_safe = np.where(r < 0.001, 0.001, r)
+        scale = r_distorted / r_safe
+        self._map_x = np.clip(cx + dx * w * scale, 0, w - 1).astype(np.float32)
+        self._map_y = np.clip(cy + dy * h * scale, 0, h - 1).astype(np.float32)
+        self._map_h = h
+        self._map_w = w
+        if self.gpu.enabled:
+            self._umat_x = cv2.UMat(self._map_x)
+            self._umat_y = cv2.UMat(self._map_y)
+
     def process_frame(self, frame, **kwargs):
         """
         Wendet Distortion auf Frame an.
@@ -75,49 +101,18 @@ class DistortionEffect(PluginBase):
             return frame
         
         h, w = frame.shape[:2]
-        
-        # Zentrum in Pixel-Koordinaten
-        cx = self.center_x * w
-        cy = self.center_y * h
-        
-        # Erstelle Koordinaten-Grids
-        y_coords, x_coords = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
-        
-        # Berechne Distanz vom Zentrum (normalisiert)
-        dx = (x_coords - cx) / w
-        dy = (y_coords - cy) / h
-        r = np.sqrt(dx**2 + dy**2)
-        
-        # Barrel/Pincushion Distortion Formula
-        # r' = r * (1 + k*r^2)
-        # k < 0: Barrel (Fisheye-like)
-        # k > 0: Pincushion
-        k = self.strength
-        r_distorted = r * (1 + k * r**2)
-        
-        # Berechne neue Koordinaten
-        # Vermeide Division durch Null
-        r_safe = np.where(r < 0.001, 0.001, r)
-        scale = r_distorted / r_safe
-        
-        x_new = cx + dx * w * scale
-        y_new = cy + dy * h * scale
-        
-        # Begrenze auf gültige Koordinaten
-        x_new = np.clip(x_new, 0, w - 1).astype(np.float32)
-        y_new = np.clip(y_new, 0, h - 1).astype(np.float32)
-        
-        # Remap
-        distorted = cv2.remap(frame, 
-                             x_new, 
-                             y_new,
-                             interpolation=cv2.INTER_LINEAR,
-                             borderMode=cv2.BORDER_REFLECT)
-        
-        return distorted
+        if self._map_x is None or self._map_h != h or self._map_w != w:
+            self._compute_maps(h, w)
+        if self.gpu.enabled:
+            result = cv2.remap(cv2.UMat(frame), self._umat_x, self._umat_y,
+                               cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+            return result.get()
+        return cv2.remap(frame, self._map_x, self._map_y,
+                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     
     def update_parameter(self, name, value):
         """Aktualisiert Parameter zur Laufzeit."""
+        self._map_x = None  # Invalidate coordinate maps
         if name == 'strength':
             self.strength = float(value)
             return True

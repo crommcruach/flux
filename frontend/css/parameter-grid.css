@@ -31,15 +31,29 @@
 .param-cogwheel {
     grid-area: cogwheel;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
+    align-self: start;
+    padding-top: 6px;
 }
 
 .param-name {
     grid-area: name;
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    align-self: start;
+    gap: 4px;
+    padding-top: 4px;
+}
+
+.param-name label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .param-name label {
@@ -53,6 +67,31 @@
     font-size: 11px;
     color: #999;
     font-family: 'Courier New', monospace;
+}
+
+/* ScrubInput inside param-name area */
+.param-name .scrub-input-wrapper {
+    display: flex;
+    align-items: center;
+}
+
+.param-name .param-value-scrub {
+    width: calc(5ch + 14px);
+    height: 22px;
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
+    color: #ccc;
+    background: rgba(0, 0, 0, 0.3);
+    border-color: #444;
+    padding: 1px 4px;
+}
+
+.param-name .scrub-input-btn {
+    width: 20px;
+    height: 22px;
+    font-size: 13px;
+    border-color: #444;
+    background: rgba(0, 0, 0, 0.2);
 }
 
 .param-slider {
@@ -201,6 +240,21 @@
     background: rgba(0, 0, 0, 0.15);
     position: relative;
     z-index: 20; /* Above group header */
+}
+
+/* COLOR parameter: picker spans full width below cogwheel */
+.parameter-grid-row.param-row-color {
+    grid-template-columns: 40px 1fr;
+    grid-template-areas:
+        "cogwheel name"
+        "empty slider"
+        "empty empty dynamic";
+}
+
+.parameter-grid-row.param-row-color .param-slider {
+    grid-area: slider;
+    grid-column: 2 / -1;
+    width: 100%;
 }
 
 .parameter-group-body .parameter-grid-row:hover {

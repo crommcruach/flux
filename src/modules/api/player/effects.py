@@ -105,7 +105,7 @@ def register_effect_routes(app, player_manager):
         if not player:
             return jsonify({'error': 'No active player'}), 404
         
-        success, message = player.clear_effects_chain(chain_type='video')
+        success, message = player.remove_effect_from_chain(index, chain_type='video')
         
         if success:
             # Auto-save session state

@@ -1,0 +1,64 @@
+/* ── Scrub Input Component ─────────────────────────────────────────────── */
+
+.scrub-input-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/* The number field */
+.scrub-input-field {
+    height: 28px;
+    padding: 2px 6px;
+    font-size: 12px;
+    border: 1px solid var(--border-color, #444);
+    border-radius: 4px;
+    background: var(--bg-secondary, #2a2a2a);
+    color: var(--text-primary, #fff);
+    text-align: center;
+    -moz-appearance: textfield;
+    width: calc(4ch + 14px);
+}
+
+.scrub-input-field::-webkit-outer-spin-button,
+.scrub-input-field::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.scrub-input-field:focus {
+    outline: none;
+    border-color: var(--primary-color, #4caf50);
+}
+
+/* Step buttons */
+.scrub-input-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 16px;
+    font-weight: bold;
+    border: 1px solid var(--border-color, #444);
+    border-radius: 4px;
+    background: var(--bg-secondary, #2a2a2a);
+    color: var(--text-secondary, #888);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.scrub-input-btn:hover {
+    background: var(--bg-hover, #3a3a3a);
+    border-color: var(--border-hover, #555);
+    color: var(--text-primary, #fff);
+}
+
+.scrub-input-btn.active {
+    background: var(--primary-color, #4caf50);
+    border-color: var(--primary-color, #4caf50);
+    color: #fff;
+}

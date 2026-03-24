@@ -143,7 +143,7 @@ export class FilesTab {
             <div class="search-box ${hasButtons ? 'd-flex gap-2' : ''}">
                 <input type="text" 
                        class="form-control form-control-sm ${hasButtons ? 'flex-grow-1' : ''}" 
-                       placeholder="🔍 Search files..." 
+                       placeholder="🔍 Search or tag:name..." 
                        id="${this.searchContainerId}-input">
                 ${showViewToggle ? `
                 <button class="btn btn-sm btn-outline-secondary" 
@@ -217,6 +217,10 @@ export class FilesTab {
             </div>
             <div class="context-menu-item" data-action="playlist2">
                 <i class="bi bi-collection-play"></i> Add to Art-Net Playlist
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="editMetadata">
+                <i class="bi bi-tag"></i> Edit Tags / Alias
             </div>
             <div class="context-menu-divider"></div>
             <div class="context-menu-item context-menu-item-danger" data-action="delete">
@@ -317,6 +321,9 @@ export class FilesTab {
                 break;
             case 'delete':
                 await this.deleteFile(filePath);
+                break;
+            case 'editMetadata':
+                await this.showEditMetadataModal(filePath);
                 break;
             case 'toggleConvertedFilter':
                 if (!this.convertedFilterActive) break;
@@ -470,29 +477,40 @@ export class FilesTab {
     }
 
     /**
-     * Filter files based on search term
+     * Filter files based on search term.
+     * Supports "tag:name" prefix to filter by tag only.
      */
     filterFiles() {
         const activeView = this.viewMode === 'button' ? this.currentView : this.viewMode;
-        
+
         if (activeView === 'list') {
-            // Filter list view
             if (!this.searchTerm) {
                 this.filteredFiles = [...this.files];
             } else {
-                this.filteredFiles = this.files.filter(file => {
-                    const filename = file.filename?.toLowerCase() || '';
-                    const path = file.path?.toLowerCase() || '';
-                    
-                    return filename.includes(this.searchTerm) || 
-                           path.includes(this.searchTerm);
-                });
+                const tagMatch = this.searchTerm.match(/^tag:(.*)$/);
+                if (tagMatch) {
+                    const tagFilter = tagMatch[1].trim();
+                    this.filteredFiles = this.files.filter(file => {
+                        const tags = (file.tags || []).map(t => t.toLowerCase());
+                        return !tagFilter || tags.some(t => t.includes(tagFilter));
+                    });
+                } else {
+                    this.filteredFiles = this.files.filter(file => {
+                        const filename = file.filename?.toLowerCase() || '';
+                        const alias = (file.alias || '').toLowerCase();
+                        const path = file.path?.toLowerCase() || '';
+                        const tags = (file.tags || []).map(t => t.toLowerCase());
+                        return filename.includes(this.searchTerm) ||
+                               path.includes(this.searchTerm) ||
+                               alias.includes(this.searchTerm) ||
+                               tags.some(t => t.includes(this.searchTerm));
+                    });
+                }
             }
         } else if (activeView === 'tree') {
             // For tree view, we'll filter during render
-            // Just trigger a re-render
         }
-        
+
         this.render();
     }
     
@@ -565,22 +583,35 @@ export class FilesTab {
     filterTreeNodes(nodes) {
         const filtered = [];
         
+        const tagMatch = this.searchTerm.match(/^tag:(.*)$/);
+        const tagFilter = tagMatch ? tagMatch[1].trim() : null;
+
         for (const node of nodes) {
-            if (node.type === 'file') {
-                // Check if file matches search
+            if (node.type === 'file' || node.type === 'clip_folder') {
                 const name = node.name?.toLowerCase() || '';
                 const path = node.path?.toLowerCase() || '';
-                
-                if (name.includes(this.searchTerm) || path.includes(this.searchTerm)) {
-                    filtered.push(node);
+                const alias = (node.alias || '').toLowerCase();
+                const tags = (node.tags || []).map(t => t.toLowerCase());
+
+                let matches;
+                if (tagFilter !== null) {
+                    matches = !tagFilter || tags.some(t => t.includes(tagFilter));
+                } else {
+                    matches = name.includes(this.searchTerm) ||
+                              path.includes(this.searchTerm) ||
+                              alias.includes(this.searchTerm) ||
+                              tags.some(t => t.includes(this.searchTerm));
                 }
+
+                if (matches) filtered.push(node);
             } else if (node.type === 'folder') {
                 // Recursively filter children
                 const filteredChildren = node.children ? this.filterTreeNodes(node.children) : [];
                 
                 // Include folder if it has matching children or matches itself
                 const name = node.name?.toLowerCase() || '';
-                if (filteredChildren.length > 0 || name.includes(this.searchTerm)) {
+                const folderMatches = tagFilter !== null ? false : name.includes(this.searchTerm);
+                if (filteredChildren.length > 0 || folderMatches) {
                     filtered.push({
                         ...node,
                         children: filteredChildren
@@ -655,6 +686,10 @@ export class FilesTab {
                 `;
             }
             
+            const displayName = node.alias || node.name;
+            const tags = node.tags || [];
+            const tagIndicator = tags.length ? `<span class="file-tag-indicator">🏷︎<span class="file-tag-popup">${tags.map(t => `<span class="file-tag-badge">${t}</span>`).join('')}</span></span>` : '';
+
             return `
                 <div class="tree-node file ${thumbnailClass} ${isSelected ? 'selected' : ''}" 
                      style="padding-left: ${indent}px" 
@@ -665,7 +700,9 @@ export class FilesTab {
                      title="${tooltip}"
                      draggable="true">
                     ${thumbnailHtml}
-                    <span class="tree-node-name">${node.name}</span>
+                    <div class="tree-node-info">
+                        <span class="tree-node-name">${displayName}</span>${tagIndicator}
+                    </div>
                     <span class="tree-node-size">${node.size_human || ''}</span>
                 </div>
             `;
@@ -728,6 +765,10 @@ export class FilesTab {
                 `;
             }
             
+            const displayName = file.alias || file.filename;
+            const tags = file.tags || [];
+            const tagIndicator = tags.length ? `<span class="file-tag-indicator">🏷︎<span class="file-tag-popup">${tags.map(t => `<span class="file-tag-badge">${t}</span>`).join('')}</span></span>` : '';
+
             html += `
                 <div class="file-item ${thumbnailClass} ${isSelected ? 'selected' : ''}" 
                      data-path="${file.path}"
@@ -739,7 +780,7 @@ export class FilesTab {
                      draggable="true">
                     ${thumbnailHtml}
                     <div class="file-info">
-                        <div class="file-name">${file.filename}</div>
+                        <div class="file-name">${displayName}${tagIndicator}</div>
                         <div class="file-path text-muted">${file.folder}</div>
                     </div>
                     <div class="file-size text-muted">${file.size_human}</div>
@@ -850,6 +891,13 @@ export class FilesTab {
         
         // File drag events
         container.querySelectorAll('.tree-node.file').forEach(file => {
+            // Context menu
+            file.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const path = file.getAttribute('data-path');
+                this.showContextMenu(e.clientX, e.clientY, path);
+            });
+
             file.addEventListener('dragstart', (e) => {
                 const path = file.getAttribute('data-path');
                 const type = file.getAttribute('data-type');
@@ -1215,5 +1263,107 @@ export class FilesTab {
         if (this.previewModal) {
             this.previewModal.classList.remove('show');
         }
+    }
+
+    /**
+     * Save file metadata (tags + alias) to the backend
+     */
+    async saveFileMetadata(filePath, alias, tags) {
+        const response = await fetch('/api/files/metadata', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: filePath, alias, tags })
+        });
+        const data = await response.json();
+        if (data.success) {
+            // Reload files to reflect updated alias/tags
+            await this.loadFiles();
+        } else {
+            console.error('Failed to save file metadata:', data.error);
+            alert(`Failed to save: ${data.error}`);
+        }
+    }
+
+    /**
+     * Show modal for editing alias and tags of a file
+     */
+    async showEditMetadataModal(filePath) {
+        // Find current metadata from loaded files
+        let currentAlias = '';
+        let currentTags = [];
+
+        const fileInfo = this.filteredFiles.find(f => f.path === filePath);
+        if (fileInfo) {
+            currentAlias = fileInfo.alias || '';
+            currentTags = fileInfo.tags || [];
+        } else {
+            // Search in tree
+            const findInTree = (nodes) => {
+                for (const n of nodes) {
+                    if (n.path === filePath) return n;
+                    if (n.children) {
+                        const found = findInTree(n.children);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            };
+            const treeNode = this.fileTree ? findInTree(this.fileTree) : null;
+            if (treeNode) {
+                currentAlias = treeNode.alias || '';
+                currentTags = treeNode.tags || [];
+            }
+        }
+
+        const displayName = filePath.split('/').pop();
+
+        // Remove any existing metadata modal
+        const existing = document.getElementById('fileMetadataModal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'fileMetadataModal';
+        modal.className = 'file-metadata-modal-overlay';
+        modal.innerHTML = `
+            <div class="file-metadata-modal">
+                <div class="file-metadata-modal-header">
+                    <span>🏷️ Tags &amp; Alias</span>
+                    <button class="file-metadata-modal-close" aria-label="Close">&times;</button>
+                </div>
+                <div class="file-metadata-modal-body">
+                    <div class="file-metadata-filename">${displayName}</div>
+                    <label class="file-metadata-label">Alias (display name)</label>
+                    <input type="text" id="fileMetaAlias" class="file-metadata-input"
+                           placeholder="Leave empty to use filename"
+                           value="${currentAlias}">
+                    <label class="file-metadata-label">Tags (comma-separated)</label>
+                    <input type="text" id="fileMetaTags" class="file-metadata-input"
+                           placeholder="e.g. loop, ambient, night"
+                           value="${currentTags.join(', ')}">
+                </div>
+                <div class="file-metadata-modal-footer">
+                    <button id="fileMetaSaveBtn" class="btn btn-sm btn-primary">Save</button>
+                    <button id="fileMetaCancelBtn" class="btn btn-sm btn-secondary">Cancel</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const close = () => modal.remove();
+
+        modal.querySelector('.file-metadata-modal-close').addEventListener('click', close);
+        document.getElementById('fileMetaCancelBtn').addEventListener('click', close);
+        modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+        document.getElementById('fileMetaSaveBtn').addEventListener('click', async () => {
+            const alias = document.getElementById('fileMetaAlias').value.trim();
+            const tagsRaw = document.getElementById('fileMetaTags').value;
+            const tags = tagsRaw.split(',').map(t => t.trim()).filter(t => t);
+            close();
+            await this.saveFileMetadata(filePath, alias, tags);
+        });
+
+        // Focus alias input
+        setTimeout(() => document.getElementById('fileMetaAlias')?.focus(), 50);
     }
 }

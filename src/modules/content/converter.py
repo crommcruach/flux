@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
+import cv2
+import numpy as np
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +47,24 @@ def get_target_preset(player_width: int, player_height: int) -> str:
         if w >= player_width and h >= player_height:
             return preset
     return '2160p'
+
+
+def _scale_frame_fit(frame: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
+    """Scale frame to fit target_w×target_h with letterbox (black bars, no crop)."""
+    fh, fw = frame.shape[:2]
+    if fw == target_w and fh == target_h:
+        return frame
+    scale = min(target_w / fw, target_h / fh)
+    new_w = int(fw * scale)
+    new_h = int(fh * scale)
+    scaled = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    if new_w == target_w and new_h == target_h:
+        return scaled
+    result = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    x = (target_w - new_w) // 2
+    y = (target_h - new_h) // 2
+    result[y:y + new_h, x:x + new_w] = scaled
+    return result
 
 
 class OutputFormat(Enum):
@@ -393,111 +413,123 @@ class VideoConverter:
 
         results = {}
         for preset in presets:
-            output_path = os.path.join(clip_folder, f"{preset}.mov")
+            output_npy = os.path.join(clip_folder, f"{preset}.npy")
+            output_meta = os.path.join(clip_folder, f"{preset}.json")
 
             # Skip already-completed presets
-            if state.get(preset) == 'done' and os.path.exists(output_path):
-                logger.info(f"[MultiRes] {preset}: already done, skipping")
-                results[preset] = {'success': True, 'skipped': True, 'output_path': output_path}
+            if state.get(preset) == 'done' and os.path.exists(output_npy):
+                logger.info(f"[NpyConvert] {preset}: already done, skipping")
+                results[preset] = {'success': True, 'skipped': True, 'output_path': output_npy}
                 continue
 
-            # Clean up partial file from a previous crashed run
-            if state.get(preset) == 'in_progress' and os.path.exists(output_path):
-                os.remove(output_path)
-                logger.warning(f"[MultiRes] {preset}: removed partial file from previous run")
+            # Clean up partial files from a previous crashed run
+            if state.get(preset) == 'in_progress':
+                for partial in [output_npy, output_meta]:
+                    if os.path.exists(partial):
+                        os.remove(partial)
+                logger.warning(f"[NpyConvert] {preset}: removed partial files from previous run")
 
             # Mark in-progress before starting
             state[preset] = 'in_progress'
             self._save_job_state(clip_folder, state)
 
             try:
-                result = self._convert_with_timeout(
-                    original_dest, output_path, preset, output_format
-                )
+                result = self._npy_convert_preset(original_dest, clip_folder, preset)
                 if result.success:
                     state[preset] = 'done'
                     results[preset] = {
                         'success': True,
-                        'output_path': output_path,
+                        'output_path': output_npy,
                         'size_mb': result.output_size_mb,
                     }
-                    logger.info(f"[MultiRes] {preset}: done ({result.output_size_mb:.1f} MB, {result.duration:.0f}s)")
+                    logger.info(f"[NpyConvert] {preset}: done ({result.output_size_mb:.0f} MB in {result.duration:.0f}s)")
                 else:
                     state[preset] = f"failed: {result.error}"
                     results[preset] = {'success': False, 'error': result.error}
-                    logger.error(f"[MultiRes] {preset}: failed — {result.error}")
+                    logger.error(f"[NpyConvert] {preset}: failed — {result.error}")
             except Exception as e:
                 msg = str(e)
-                state[preset] = 'timeout' if 'timeout' in msg.lower() else f"failed: {msg}"
+                state[preset] = f"failed: {msg}"
                 results[preset] = {'success': False, 'error': msg}
-                logger.error(f"[MultiRes] {preset}: exception — {e}")
+                logger.error(f"[NpyConvert] {preset}: exception — {e}")
 
             self._save_job_state(clip_folder, state)
 
         return clip_folder, results
 
-    def _convert_with_timeout(
+    def _npy_convert_preset(
         self,
         input_path: str,
-        output_path: str,
+        clip_folder: str,
         preset: str,
-        output_format: OutputFormat,
     ) -> ConversionResult:
-        """Run a single-preset conversion with a per-resolution subprocess timeout."""
+        """Decode all frames from input_path, scale to preset resolution, and save as .npy + .json."""
         import time
         import logging
         logger = logging.getLogger(__name__)
 
-        width, height = RESOLUTION_PRESETS[preset]
-        timeout = CONVERSION_TIMEOUTS.get(preset, 3600)
+        target_w, target_h = RESOLUTION_PRESETS[preset]
+        output_npy = os.path.join(clip_folder, f"{preset}.npy")
+        output_meta = os.path.join(clip_folder, f"{preset}.json")
 
-        job = ConversionJob(
-            input_path=input_path,
-            output_path=output_path,
-            format=output_format,
-            target_size=(width, height),
-            resize_mode=ResizeMode.FIT,
-        )
+        t0 = time.perf_counter()
 
-        cmd = self._build_ffmpeg_command(job)
-        start_time = time.time()
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-
-        try:
-            _, stderr_out = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.communicate()
-            raise TimeoutError(f"Conversion of {preset} exceeded {timeout}s timeout")
-
-        duration = time.time() - start_time
-
-        if process.returncode != 0:
-            error_lines = stderr_out.strip().splitlines()
+        cap = cv2.VideoCapture(input_path, cv2.CAP_FFMPEG)
+        if not cap.isOpened():
             return ConversionResult(
-                success=False,
-                input_path=input_path,
-                output_path=output_path,
-                error="\n".join(error_lines[-10:]),
+                success=False, input_path=input_path, output_path=output_npy,
+                error=f"Could not open video: {input_path}"
             )
 
-        output_size_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        frames = []
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(_scale_frame_fit(frame, target_w, target_h))
+        finally:
+            cap.release()
+
+        if not frames:
+            return ConversionResult(
+                success=False, input_path=input_path, output_path=output_npy,
+                error="No frames decoded from video"
+            )
+
+        arr = np.stack(frames)  # shape: (N, H, W, 3)
+        np.save(output_npy, arr)
+
+        meta = {
+            'fps': fps,
+            'total_frames': len(frames),
+            'width': target_w,
+            'height': target_h,
+            'original_width': orig_w,
+            'original_height': orig_h,
+            'preset': preset,
+        }
+        with open(output_meta, 'w') as f:
+            json.dump(meta, f, indent=2)
+
+        elapsed = time.perf_counter() - t0
+        size_mb = arr.nbytes / (1024 * 1024)
         input_size_mb = os.path.getsize(input_path) / (1024 * 1024) if os.path.exists(input_path) else 0
+
+        logger.info(f"[NpyConvert] {preset}: {len(frames)} frames @ {fps:.1f}fps → {size_mb:.0f} MB in {elapsed:.0f}s")
 
         return ConversionResult(
             success=True,
             input_path=input_path,
-            output_path=output_path,
-            duration=duration,
+            output_path=output_npy,
+            duration=elapsed,
             input_size_mb=input_size_mb,
-            output_size_mb=output_size_mb,
-            compression_ratio=output_size_mb / input_size_mb if input_size_mb > 0 else 0,
+            output_size_mb=size_mb,
+            compression_ratio=size_mb / input_size_mb if input_size_mb > 0 else 0,
         )
 
     def _load_job_state(self, clip_folder: str) -> Dict:

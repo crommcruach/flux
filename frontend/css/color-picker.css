@@ -105,6 +105,24 @@
         #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
 }
 
+.alpha-slider-group {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #333;
+}
+
+/* Checkerboard underlay so transparency is visible */
+.alpha-slider {
+    background-image:
+        linear-gradient(45deg, #555 25%, transparent 25%),
+        linear-gradient(-45deg, #555 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #555 75%),
+        linear-gradient(-45deg, transparent 75%, #555 75%);
+    background-size: 8px 8px;
+    background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+    background-color: #888;
+}
+
 .slider-thumb {
     position: absolute;
     top: -2px;
@@ -157,11 +175,31 @@
     border-radius: 3px;
     cursor: pointer;
     transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+    overflow: hidden;
 }
 
 .palette-color:hover {
     transform: scale(1.1);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.palette-color-delete {
+    display: none;
+    position: absolute;
+    top: 1px;
+    right: 2px;
+    font-size: 11px;
+    line-height: 1;
+    color: #fff;
+    text-shadow: 0 0 3px #000;
+    cursor: pointer;
+    pointer-events: auto;
+    user-select: none;
+}
+
+.palette-color:hover .palette-color-delete {
+    display: block;
 }
 
 .palette-empty {
@@ -170,6 +208,29 @@
     color: #888;
     font-size: 12px;
     grid-column: 1 / -1;
+}
+
+.palette-named-row {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.palette-named-select {
+    flex: 1;
+    padding: 4px 6px;
+    background: #2b2b2b;
+    border: 1px solid #3c3c3c;
+    color: #e0e0e0;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.palette-named-select:focus {
+    outline: none;
+    border-color: #555;
 }
 
 .palette-actions {
@@ -190,4 +251,29 @@
 
 .palette-btn:hover {
     background: #3c3c3c;
+}
+
+.palette-btn-delete {
+    background: #3a1a1a;
+    border-color: #6b2a2a;
+    color: #e07070;
+    padding: 6px 8px;
+}
+
+.palette-btn-delete:hover {
+    background: #5a1a1a;
+    border-color: #a03030;
+    color: #ff9090;
+}
+
+.palette-btn-confirm {
+    background: #3a3a00;
+    border-color: #7a7a00;
+    color: #ffff80;
+}
+
+.palette-btn-confirm:hover {
+    background: #5a5a00;
+    border-color: #aaaa00;
+    color: #ffff99;
 }

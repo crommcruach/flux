@@ -5,6 +5,7 @@ Provides endpoints for browsing video directory structure.
 """
 from flask import jsonify, send_file, request
 import os
+import json
 import urllib.parse
 import cv2
 from ...core.constants import VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
@@ -143,7 +144,35 @@ def register_files_api(app, video_dir, config=None):
                         "source": source_path,
                         "children": source_tree
                     })
-            
+
+            # Inject tags/alias into all file nodes
+            session_state = get_session_state()
+            file_meta_store = session_state.get_file_metadata() if session_state else {}
+
+            def _inject_meta(nodes, source_path):
+                for node in nodes:
+                    if node.get('type') == 'folder' and 'source' not in node:
+                        _inject_meta(node.get('children', []), source_path)
+                    elif node.get('type') != 'folder':
+                        rel = node.get('path', '')
+                        full = os.path.join(source_path, rel) if source_path else None
+                        if full and os.path.exists(full):
+                            meta = _read_meta(full)
+                        else:
+                            # try each source
+                            meta = {}
+                            for sp in get_video_sources():
+                                fp = os.path.join(sp, rel)
+                                if os.path.exists(fp):
+                                    meta = _read_meta(fp)
+                                    break
+                        node['alias'] = meta.get('alias', '')
+                        node['tags'] = meta.get('tags', [])
+
+            for item in all_items:
+                src = item.get('source', item.get('path', ''))
+                _inject_meta(item.get('children', []), src)
+
             return jsonify({
                 "success": True,
                 "tree": all_items,
@@ -258,7 +287,13 @@ def register_files_api(app, video_dir, config=None):
                                 "has_thumbnail": has_thumbnail,
                                 **metadata  # Füge fps, duration, frame_count hinzu
                             })
-            
+
+            # Inject tags/alias from sidecar files
+            for f in files_list:
+                meta = _read_meta(f['full_path'])
+                f['alias'] = meta.get('alias', '')
+                f['tags'] = meta.get('tags', [])
+
             return jsonify({
                 "success": True,
                 "files": sorted(files_list, key=lambda x: x['path']),
@@ -509,7 +544,115 @@ def register_files_api(app, video_dir, config=None):
                 'success': False,
                 'error': str(e)
             }), 500
-    
+
+    # ==================== FILE METADATA (TAGS + ALIASES) ====================
+
+    def _meta_path_for(full_path: str) -> str:
+        """
+        Return the sidecar metadata JSON path for a given file/clip-folder.
+
+        - Clip folder  → <clip_folder>/metadata.json
+        - Regular file → <dir>/<basename_no_ext>.meta.json
+        """
+        if os.path.isdir(full_path):          # clip folder
+            return os.path.join(full_path, 'metadata.json')
+        base, _ = os.path.splitext(full_path)
+        return base + '.meta.json'
+
+    def _read_meta(full_path: str) -> dict:
+        """Read sidecar metadata dict (alias, tags). Returns empty dict if absent."""
+        mp = _meta_path_for(full_path)
+        if not os.path.exists(mp):
+            return {}
+        try:
+            with open(mp, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return {'alias': data.get('alias', ''), 'tags': data.get('tags', [])}
+        except Exception:
+            return {}
+
+    def _write_meta(full_path: str, alias: str, tags: list) -> None:
+        """Write alias + tags to the sidecar metadata file."""
+        mp = _meta_path_for(full_path)
+        # Load existing content so we don't overwrite other keys (e.g. fps, preset)
+        existing = {}
+        if os.path.exists(mp):
+            try:
+                with open(mp, 'r', encoding='utf-8') as f:
+                    existing = json.load(f)
+            except Exception:
+                existing = {}
+        if alias:
+            existing['alias'] = alias
+        else:
+            existing.pop('alias', None)
+        if tags:
+            existing['tags'] = list(tags)
+        else:
+            existing.pop('tags', None)
+        with open(mp, 'w', encoding='utf-8') as f:
+            json.dump(existing, f, indent=2)
+
+    def _resolve_full_path(rel_path: str):
+        """Resolve a relative file path to its absolute path across all video sources."""
+        for source_path in get_video_sources():
+            candidate = os.path.join(source_path, rel_path)
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    @app.route('/api/files/metadata', methods=['GET'])
+    def get_file_metadata():
+        """Return metadata (alias + tags) for a single file. Query param: path="""
+        try:
+            rel_path = request.args.get('path', '').strip()
+            if not rel_path:
+                return jsonify({'success': False, 'error': 'path is required'}), 400
+            full_path = _resolve_full_path(rel_path)
+            if not full_path:
+                return jsonify({'success': False, 'error': 'File not found'}), 404
+            meta = _read_meta(full_path)
+            return jsonify({'success': True, 'path': rel_path, **meta})
+        except Exception as e:
+            logger.error(f"Error getting file metadata: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/files/metadata', methods=['POST'])
+    def set_file_metadata():
+        """
+        Save alias and tags for a file into a sidecar JSON next to the file.
+
+        Body: { "path": "relative/path.mp4", "alias": "My Name", "tags": ["tag1"] }
+        """
+        try:
+            data = request.get_json()
+            rel_path = (data.get('path') or '').strip()
+            alias = (data.get('alias') or '').strip()
+            tags = [t.strip() for t in data.get('tags', []) if isinstance(t, str) and t.strip()]
+
+            if not rel_path:
+                return jsonify({'success': False, 'error': 'path is required'}), 400
+
+            full_path = _resolve_full_path(rel_path)
+            if not full_path:
+                return jsonify({'success': False, 'error': 'File not found'}), 404
+
+            # Security: ensure resolved path is within allowed directories
+            real_path = os.path.realpath(full_path)
+            allowed = any(
+                real_path.startswith(os.path.realpath(s))
+                for s in get_video_sources()
+            )
+            if not allowed:
+                return jsonify({'success': False, 'error': 'Access denied'}), 403
+
+            _write_meta(full_path, alias, tags)
+            logger.info(f"🏷️  Metadata saved for {rel_path}: alias={alias!r}, tags={tags}")
+            return jsonify({'success': True, 'path': rel_path, 'alias': alias, 'tags': tags})
+        except Exception as e:
+            logger.error(f"Error setting file metadata: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     @app.route('/api/files/delete', methods=['DELETE'])
     def delete_file():
         """Delete a file from the video directory"""
@@ -556,7 +699,15 @@ def register_files_api(app, video_dir, config=None):
             # Delete the file
             os.remove(full_path)
             logger.info(f"File deleted: {full_path}")
-            
+
+            # Also delete sidecar metadata if exists
+            sidecar = _meta_path_for(full_path)
+            if os.path.exists(sidecar):
+                try:
+                    os.remove(sidecar)
+                except Exception as e:
+                    logger.warning(f"Failed to delete sidecar metadata: {e}")
+
             # Also delete thumbnail if exists
             if thumbnail_gen:
                 try:

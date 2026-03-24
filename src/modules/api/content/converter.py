@@ -77,17 +77,10 @@ def converter_status():
 
 @converter_bp.route('/api/converter/formats', methods=['GET'])
 def list_formats():
-    """Liste aller unterstützten Output-Formate"""
-    hap_formats = [OutputFormat.HAP, OutputFormat.HAP_ALPHA, OutputFormat.HAP_Q]
-    formats = [
-        {
-            "id": fmt.value,
-            "name": fmt.name,
-            "description": _get_format_description(fmt)
-        }
-        for fmt in hap_formats
-    ]
-    return jsonify({"formats": formats})
+    """Liste unterstützter Output-Formate"""
+    return jsonify({"formats": [
+        {"id": "npy", "name": "NumPy", "description": "Pre-decoded frames (.npy) — instant load, zero runtime decode"}
+    ]})
 
 
 @converter_bp.route('/api/converter/info', methods=['POST'])
@@ -339,7 +332,7 @@ def upload_file():
             converter = get_converter()
             thread = threading.Thread(
                 target=converter.convert_multi_resolution,
-                args=(str(file_path), ALL_PRESETS, OutputFormat.HAP_ALPHA, video_root),
+                args=(str(file_path), ALL_PRESETS, None, video_root),
                 daemon=True,
             )
             thread.start()
@@ -407,7 +400,7 @@ def resume_multi_res():
 
         thread = threading.Thread(
             target=converter.convert_multi_resolution,
-            args=(original, pending, OutputFormat.HAP_ALPHA, os.path.dirname(clip_folder)),
+            args=(original, pending, None, os.path.dirname(clip_folder)),
             daemon=True,
         )
         thread.start()
@@ -435,7 +428,7 @@ def start_multi_res_conversion():
         converter = get_converter()
         thread = threading.Thread(
             target=converter.convert_multi_resolution,
-            args=(abs_path, ALL_PRESETS, OutputFormat.HAP_ALPHA, os.path.dirname(abs_path)),
+            args=(abs_path, ALL_PRESETS, None, os.path.dirname(abs_path)),
             daemon=True,
         )
         thread.start()

@@ -723,8 +723,11 @@ class SequenceManager:
                 player, effect_instance, param_name = resolved
                 
                 # Audio sequences now use the correct range from triple slider (e.g., 0-500 for scale)
-                # No automatic scaling needed - use value as-is
+                # For BOOL params, coerce float to bool using >= 0.5 threshold for clean on/off toggling
                 scaled_value = value
+                param_def = next((p for p in getattr(effect_instance, 'PARAMETERS', []) if p.get('name') == param_name), None)
+                if param_def is not None and getattr(param_def.get('type'), 'value', None) == 'bool':
+                    scaled_value = scaled_value >= 0.5
                 
                 # Apply value to effect instance
                 if hasattr(effect_instance, 'update_parameter'):

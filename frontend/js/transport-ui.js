@@ -94,11 +94,16 @@ function renderTransportControls(effect, index, player, clipId = null) {
                         ${playbackModeParam.options.map(opt => `<option value="${opt.value}" ${playbackModeValue === opt.value ? 'selected' : ''} ${opt.tooltip ? `title="${opt.tooltip}"` : ''}>${opt.label || opt.value}</option>`).join('')}
                     </select>` : ''}
                     ${loopCountParam ? `<span class="transport-loop-label">Loop Count:</span>
-                    <input type="number" class="transport-loop-input" value="${loopCountValue}" 
-                        min="${loopCountParam.min || 0}" 
-                        max="${loopCountParam.max || 999}" 
-                        onchange="updateParameter('${player}', ${index}, 'loop_count', parseInt(this.value))"
-                        title="Number of loops (0 = infinite)">` : ''}
+                    ${ScrubInput.render({
+                        name: `transport-loop-${player}-${index}`,
+                        value: loopCountValue !== undefined ? loopCountValue : 0,
+                        min: loopCountParam.min || 0,
+                        max: loopCountParam.max || 999,
+                        step: 1,
+                        buttons: true,
+                        onInput: `updateParameter('${player}', ${index}, 'loop_count', parseInt(this.value))`,
+                        title: 'Number of loops (0 = infinite)',
+                    })}` : ''}
                 </div>
             </div>
             
@@ -108,20 +113,17 @@ function renderTransportControls(effect, index, player, clipId = null) {
                 <div class="param-name"></div>
                 <div class="param-slider transport-speed-control">
                     <span class="transport-speed-label">Speed:</span>
-                    <input type="number" class="transport-speed-input" 
-                        value="${speedValue !== undefined ? speedValue : 1.0}" 
-                        min="${speedParam?.min || 0.1}" 
-                        max="${speedParam?.max || 5.0}" 
-                        step="0.1"
-                        oninput="updateTransportSpeed('${player}', ${index}, this, 'input')"
-                        oncontextmenu="resetTransportSpeed('${player}', ${index}, this); return false;"
-                        title="Playback speed multiplier (right-click to reset to 1.0x)">
-                    <button class="transport-speed-btn" 
-                        onclick="adjustTransportSpeed('${player}', ${index}, 0.1, this)" 
-                        title="Increase speed by 0.1">+</button>
-                    <button class="transport-speed-btn" 
-                        onclick="adjustTransportSpeed('${player}', ${index}, -0.1, this)" 
-                        title="Decrease speed by 0.1">-</button>
+                    ${ScrubInput.render({
+                        name: `transport-speed-${player}-${index}`,
+                        value: speedValue !== undefined ? speedValue : 1.0,
+                        min: speedParam?.min || 0.1,
+                        max: speedParam?.max || 5.0,
+                        step: 0.1,
+                        buttons: true,
+                        onInput: `updateTransportSpeed('${player}', ${index}, this, 'input')`,
+                        onContextmenu: `resetTransportSpeed('${player}', ${index}, this); return false;`,
+                        title: 'Playback speed multiplier (drag to scrub, right-click to reset to 1.0x)',
+                    })}
                     <input type="range" class="slider transport-speed-slider" 
                         min="${speedParam?.min || 0.1}" 
                         max="${speedParam?.max || 5.0}" 
@@ -191,7 +193,7 @@ function toggleTransportPause(player, effectIndex, clickedButton) {
 function updateTransportSpeed(player, effectIndex, changedElement, sourceType) {
     // Find the speed input and slider in the same row
     const row = changedElement.closest('.transport-speed-control');
-    const speedInput = row.querySelector('.transport-speed-input');
+    const speedInput = row.querySelector('.scrub-input-field');
     const speedSlider = row.querySelector('.transport-speed-slider');
     
     // Get new value from the changed element
@@ -217,41 +219,11 @@ function updateTransportSpeed(player, effectIndex, changedElement, sourceType) {
 }
 
 /**
- * Adjust transport speed by increment (+/- buttons)
- * Updates UI immediately and syncs with backend
- */
-function adjustTransportSpeed(player, effectIndex, increment, clickedButton) {
-    // Find the speed input and slider in the same row
-    const row = clickedButton.closest('.transport-speed-control');
-    const speedInput = row.querySelector('.transport-speed-input');
-    const speedSlider = row.querySelector('.transport-speed-slider');
-    
-    // Get current value
-    const currentValue = parseFloat(speedInput.value);
-    const min = parseFloat(speedInput.min);
-    const max = parseFloat(speedInput.max);
-    
-    // Calculate new value (clamped to min/max)
-    let newValue = currentValue + increment;
-    newValue = Math.max(min, Math.min(max, newValue));
-    newValue = Math.round(newValue * 10) / 10; // Round to 1 decimal place
-    
-    // Update UI
-    speedInput.value = newValue;
-    speedSlider.value = newValue;
-    
-    // Update duration display dynamically
-    updateTransportDuration(clickedButton, newValue);
-    
-    // Update backend
-    updateParameter(player, effectIndex, 'speed', newValue);
-}
-
-/**
  * Update duration display based on new speed
  * Helper function to recalculate and update duration in real-time
  */
 function updateTransportDuration(speedElement, newSpeed) {
+    // Find duration display element (navigate up from speed control)
     // Find duration display element (navigate up from speed control)
     const transportLayout = speedElement.closest('.transport-custom-layout');
     if (!transportLayout) return;
@@ -286,7 +258,7 @@ function updateTransportDuration(speedElement, newSpeed) {
 function resetTransportSpeed(player, effectIndex, clickedElement) {
     // Find the speed input and slider in the same row
     const row = clickedElement.closest('.transport-speed-control');
-    const speedInput = row.querySelector('.transport-speed-input');
+    const speedInput = row.querySelector('.scrub-input-field');
     const speedSlider = row.querySelector('.transport-speed-slider');
     
     // Reset to default speed (1.0x)
@@ -307,8 +279,10 @@ function resetTransportSpeed(player, effectIndex, clickedElement) {
  * No custom event handlers needed - using existing parameter control handlers
  */
 function attachTransportEventHandlers() {
-    // Event handlers are already attached by renderParameterControl
-    // This function exists for compatibility but does nothing
+    // Init ScrubInput on all speed inputs that were just rendered into the DOM
+    if (typeof ScrubInput !== 'undefined') {
+        ScrubInput.initAll();
+    }
 }
 
 // Export to global scope
@@ -318,6 +292,6 @@ window.toggleTransportDirection = toggleTransportDirection;
 window.toggleTransportPause = toggleTransportPause;
 window.updateTransportSpeed = updateTransportSpeed;
 window.updateTransportDuration = updateTransportDuration;
-window.adjustTransportSpeed = adjustTransportSpeed;
+
 window.resetTransportSpeed = resetTransportSpeed;
 

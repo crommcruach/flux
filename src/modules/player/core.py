@@ -1034,14 +1034,16 @@ class Player:
                 continue
             
             loop_start = time.time()
-            
+            loop_start_perf = time.perf_counter()  # high-res start for profiler wall-clock
+
             # Update dynamic parameter sequences
             if self.player_manager and hasattr(self.player_manager, 'sequence_manager'):
                 dt = frame_time if frame_time > 0 else 1.0 / 30.0
                 if not hasattr(self, '_sequence_update_logged'):
                     logger.debug(f"🎵 Calling update_sequences(dt={dt:.3f})")
                     self._sequence_update_logged = True
-                self.player_manager.update_sequences(dt)
+                with self.profiler.profile_stage('audio_sequences'):
+                    self.player_manager.update_sequences(dt)
             elif not hasattr(self, '_no_sequence_manager_logged'):
                 logger.warning(f"⚠️ No sequence_manager on player_manager!")
                 self._no_sequence_manager_logged = True
@@ -1146,6 +1148,36 @@ class Player:
                         break
                     
                     try:
+                        # ── FAST PATH: same clip repeating ──────────────────────────────────
+                        # Check BEFORE creating/initializing a new source. If the next item is
+                        # the same clip that is already loaded, just reset the existing source
+                        # in-place. This avoids calling initialize() (which re-builds the HAP
+                        # loop cache = 300–500ms) on every single-clip loop.
+                        same_clip = (next_clip_id and next_clip_id == self._loaded_clip_id)
+                        if same_clip:
+                            # Reset existing source (cache-active reset is instant: just sets current_frame=0)
+                            current_source = self.layers[0].source if self.layers else self.source
+                            if current_source:
+                                current_source.reset()
+                            
+                            # Reset transport so it re-initializes from frame 0
+                            if self.layers:
+                                for layer in self.layers:
+                                    for effect in layer.effects:
+                                        if effect.get('id') == 'transport' and effect.get('instance'):
+                                            transport = effect['instance']
+                                            transport._current_loop_iteration = 0
+                                            transport.current_position = 0
+                                            transport._virtual_frame = 0.0
+                                            transport.loop_completed = False
+                                            transport._has_played_once = False
+                                            transport._frame_source = None  # Force re-initialization
+                            
+                            self.current_loop = 0
+                            debug_playback(logger, f"🔁 [{self.player_name}] Same-clip fast loop (no re-init)")
+                            continue
+                        # ────────────────────────────────────────────────────────────────────
+
                         from .sources import VideoSource, GeneratorSource
                         
                         # Check if it's a generator
@@ -1362,6 +1394,14 @@ class Player:
             self.transition_manager.store_frame(frame)
             
             # Helligkeit in-place anwenden (Performance-Optimierung: keine Kopie!)
+            if self.brightness != 1.0 or self.hue_shift != 0:
+                # Ensure writability — frame may be a read-only memmap view when no
+                # effect ran before this point (e.g. identity transform fast-path).
+                # When a transform/effect DID run, it already produced a fresh writable
+                # array so this check is free (just a flag test, no copy).
+                if not frame.flags['WRITEABLE']:
+                    frame = frame.copy()
+
             if self.brightness != 1.0:
                 # NumPy in-place multiplication (arbeitet direkt auf frame)
                 np.multiply(frame, self.brightness, out=frame, casting='unsafe')
@@ -1376,85 +1416,36 @@ class Player:
             # Note: When hue_shift == 0, skip entire HSV conversion (saves 2-3ms)
             
             # Wende Effect Chains an - nur kopieren wenn beide Chains unterschiedlich sind
+            # Each player instance uses a single chain: artnet player → 'artnet', video player → 'video'
+            # (The dual-chain design was legacy from a single-player architecture; now each player is
+            # a separate instance that only populates the chain matching its player_id.)
+            active_chain = 'artnet' if self.enable_artnet else 'video'
             with self.profiler.profile_stage('player_effects'):
-                if self.effect_processor.video_effect_chain and self.effect_processor.artnet_effect_chain:
-                    # Check if both chains are no-ops to avoid expensive frame copy
-                    video_is_noop = self.effect_processor.is_chain_noop('video')
-                    artnet_is_noop = self.effect_processor.is_chain_noop('artnet')
-                    
-                    if video_is_noop and artnet_is_noop:
-                        # Both chains are no-ops: skip copy and processing (FAST PATH)
-                        frame_for_video_preview = frame
-                        frame_for_artnet = frame
-                    else:
-                        # At least one chain will modify: Kopie nötig für separate Processing
-                        frame_for_video_preview = self.effect_processor.apply_effects(
-                            frame.copy(), 
-                            chain_type='video',
-                            current_clip_id=self.current_clip_id,
-                            source=self.source,
-                            player=self,
-                            player_name=self.player_name
-                        )
-                        frame_for_artnet = self.effect_processor.apply_effects(
-                            frame, 
-                            chain_type='artnet',
-                            current_clip_id=self.current_clip_id,
-                            source=self.source,
-                            player=self,
-                            player_name=self.player_name
-                        )
-                elif self.effect_processor.video_effect_chain:
-                    # Nur Video-Chain: Art-Net nutzt Original
-                    frame_for_video_preview = self.effect_processor.apply_effects(
-                        frame.copy(), 
-                        chain_type='video',
-                        current_clip_id=self.current_clip_id,
-                        source=self.source,
-                        player=self,
+                if not self.effect_processor.is_chain_noop(active_chain):
+                    # NOTE: clip effects are already applied by composite_layers → apply_layer_effects.
+                    frame = self.effect_processor.apply_effects(
+                        frame,
+                        chain_type=active_chain,
                         player_name=self.player_name
                     )
-                    frame_for_artnet = frame
-                elif self.effect_processor.artnet_effect_chain:
-                    # Nur Art-Net-Chain: Video nutzt Original
-                    frame_for_artnet = self.effect_processor.apply_effects(
-                        frame, 
-                        chain_type='artnet',
-                        current_clip_id=self.current_clip_id,
-                        source=self.source,
-                        player=self,
-                        player_name=self.player_name
-                    )
-                    frame_for_video_preview = frame
-                else:
-                    # Keine Effects: Beide nutzen Original (View, keine Kopie!)
-                    frame_for_video_preview = frame
-                    frame_for_artnet = frame
             
-            # Alpha-Compositing für Preview (wenn RGBA vorhanden)
-            if frame_for_video_preview.shape[2] == 4:
-                frame_for_video_preview = self._alpha_composite_to_black(frame_for_video_preview)
-            
-            # Alpha-Compositing für Art-Net (wenn RGBA vorhanden)
-            if frame_for_artnet.shape[2] == 4:
-                frame_for_artnet = self._alpha_composite_to_black(frame_for_artnet)
-            
-            # Speichere komplettes Frame für Video-Preview (already in BGR format)
-            # CRITICAL: Art-Net Player uses frame_for_artnet for preview, Video Player uses frame_for_video_preview
-            preview_frame = frame_for_artnet if self.enable_artnet else frame_for_video_preview
+            # Alpha-Compositing (wenn RGBA vorhanden)
+            if frame.shape[2] == 4:
+                frame = self._alpha_composite_to_black(frame)
             
             # Frame is already in BGR format (native OpenCV), no conversion needed
-            self.last_video_frame = preview_frame
+            self.last_video_frame = frame
             
             # Distribute frame to output routing system (if enabled)
             if self.output_manager:
                 try:
                     # Pass BGR frame (cv2 windows expect BGR, already native format)
-                    self.output_manager.update_frame(
-                        composite_frame=preview_frame,  # BGR format for cv2, no conversion needed
-                        layer_manager=self.layer_manager,
-                        current_clip_id=self.current_clip_id
-                    )
+                    with self.profiler.profile_stage('frame_delivery'):
+                        self.output_manager.update_frame(
+                            composite_frame=frame,  # BGR format for cv2, no conversion needed
+                            layer_manager=self.layer_manager,
+                            current_clip_id=self.current_clip_id
+                        )
                 except Exception as e:
                     logger.error(f"[OUTPUT] Frame update error: {e}", exc_info=True)
             
@@ -1465,12 +1456,14 @@ class Player:
                     # Use the OUTPUT frame (after effects but before DMX extraction)
                     # This ensures routing system gets same frame as old ArtNet system
                     with self.profiler.profile_stage('output_routing'):
-                        self.routing_bridge.process_frame(frame_for_artnet)
+                        self.routing_bridge.process_frame(frame)
                 except Exception as e:
                     logger.error(f"Routing bridge error: {e}", exc_info=True)
             
             # Mark frame processing complete for profiler
-            self.profiler.record_frame_complete()
+            # Pass loop_start_perf so total_frame_time reflects actual wall-clock
+            # elapsed (including MJPEG encoding, brightness, hue and other untracked gaps)
+            self.profiler.record_frame_complete(loop_start_perf)
             
             # Beende wenn gestoppt
             if not self.is_running:
@@ -1498,6 +1491,11 @@ class Player:
             elif sleep_time < -0.1:  # Zu langsam, Reset
                 next_frame_time = current_time + delay
         
+        # Always reset flags when loop exits (whether via break or normal end).
+        # Without this, is_playing stays True after a natural clip end, making
+        # play() believe the player is still running and silently skip restart.
+        self.is_running = False
+        self.is_playing = False
         debug_playback(logger, "Play-Loop beendet")
     
     def status(self):
@@ -1677,6 +1675,10 @@ class Player:
     def update_layer_config(self, layer_id, blend_mode=None, opacity=None, enabled=None):
         """Delegates to layer_manager.update_layer_config()."""
         return self.layer_manager.update_layer_config(layer_id, blend_mode, opacity, enabled, self.player_name)
+
+    def update_layer_effect_parameter(self, clip_id, effect_index, param_name, param_value):
+        """Delegates to layer_manager.update_layer_effect_parameter()."""
+        return self.layer_manager.update_layer_effect_parameter(clip_id, effect_index, param_name, param_value, self.player_name)
     
     def apply_layer_effects(self, layer, frame):
         """Delegates to layer_manager.apply_layer_effects()."""

@@ -1,7 +1,6 @@
 """
 Brightness/Contrast Effect Plugin - Basic brightness and contrast control
 """
-import cv2
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
 
@@ -53,7 +52,7 @@ class BrightnessContrastEffect(PluginBase):
         """
         Wendet Brightness/Contrast auf Frame an.
         
-        Formula: output = alpha * input + beta
+        Formula: output = clip(alpha * input + beta, 0, 255)
         alpha = contrast, beta = brightness
         
         Args:
@@ -63,7 +62,8 @@ class BrightnessContrastEffect(PluginBase):
         Returns:
             Modifiziertes Frame
         """
-        return cv2.convertScaleAbs(frame, alpha=self.contrast, beta=self.brightness)
+        result = frame.astype(np.float32) * self.contrast + self.brightness
+        return np.clip(result, 0, 255).astype(np.uint8)
     
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""

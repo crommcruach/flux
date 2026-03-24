@@ -130,7 +130,8 @@ def register_web_routes(app, config=None, player_manager=None):
             },
             "video": {
                 "preview_fps": video_config.get('preview_fps', 25)
-            }
+            },
+            "color_palettes": config.get('color_palettes', {})
         })
     
     # DEBUG: Log registered routes  

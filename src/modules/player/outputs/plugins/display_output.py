@@ -198,6 +198,10 @@ class DisplayOutput(OutputBase):
         self.window_created = False
         self.window_name = f'flux_output_{output_id}'
         
+        # send_frame() already does frame.copy() for the multiprocessing queue,
+        # so we don't need the base-class copy in the main play-loop thread.
+        self.needs_frame_copy = False
+        
         logger.info(f"🎬 [{self.output_id}] DisplayOutput initialized for monitor {self.monitor_index} (fullscreen: {self.fullscreen}, resolution: {self.resolution})")
     
     

@@ -3,7 +3,7 @@
  * Video + Art-Net players with FX control
  */
 
-import { showToast, executeCommand, WEBSOCKET_ENABLED, WEBSOCKET_DEBOUNCE_MS, initWebSocket, getPlayerSocket, getEffectsSocket } from './common.js';
+import { showToast, executeCommand, WEBSOCKET_ENABLED, WEBSOCKET_DEBOUNCE_MS, initWebSocket, getPlayerSocket, getEffectsSocket, loadConfig } from './common.js';
 import { EffectsTab } from './components/effects-tab.js';
 import { SourcesTab } from './components/sources-tab.js';
 import { FilesTab } from './components/files-tab.js';
@@ -148,6 +148,9 @@ async function init() {
     try {
         // Load debug configuration first
         await loadDebugConfig(API_BASE);
+        
+        // Load frontend config (populates window._colorPalettes, WebSocket settings, etc.)
+        await loadConfig();
         
         // Initialize Playlist Tabs Component
         if (typeof PlaylistTabsManager !== 'undefined') {
@@ -4178,7 +4181,6 @@ window.toggleEffectEnabledClick = async function(player, index, event) {
                 }
             }
             
-            showToast(`Effect ${data.enabled ? 'enabled' : 'disabled'}`, 'success');
         } else {
             // Revert checkbox on error
             checkbox.checked = !newState;
@@ -4412,7 +4414,8 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
         data-param-value="${actualValue}" 
         data-param-uid="${paramUid}" 
         data-control-id="${controlId}"
-        onclick="event.stopPropagation(); if(window.sequenceManager) { const btn = event.currentTarget; window.sequenceManager.showContextMenu(btn.dataset.paramPath, btn.dataset.paramLabel, parseFloat(btn.dataset.paramValue), event, btn.dataset.paramUid, btn.dataset.controlId); }" 
+        data-param-type="${(param.type || '').toLowerCase()}"
+        onclick="event.stopPropagation(); if(window.sequenceManager) { const btn = event.currentTarget; window.sequenceManager.showContextMenu(btn.dataset.paramPath, btn.dataset.paramLabel, parseFloat(btn.dataset.paramValue), event, btn.dataset.paramUid, btn.dataset.controlId, btn.dataset.paramType); }" 
         title="Dynamic Parameter Sequence">⚙️</button>`;
     
     const paramType = (param.type || '').toUpperCase();
@@ -4498,7 +4501,18 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                     </div>
                     <div class="param-name">
                         <label title="UID: ${paramUid}">${param.label || param.name}</label>
-                        <span class="parameter-value" id="${controlId}_value">${intDisplayValue}</span>
+                        ${ScrubInput.render({
+                            name: `${controlId}_value`,
+                            value: intDisplayValue,
+                            min: intSavedRangeMin,
+                            max: intSavedRangeMax,
+                            step: intStep,
+                            buttons: true,
+                            extraInputClasses: 'param-value-scrub',
+                            title: `UID: ${paramUid}`,
+                            onInput: `const v=parseFloat(this.value);const s=getTripleSlider('${controlId}');if(s){const r=s.getRange();s.updateValues(v,r.min,r.max);s.updateUI();}updateParameter('${player}',${effectIndex},'${param.name}',v,'${controlId}_value','${paramUid}')`,
+                            onContextmenu: `resetParameterToDefaultTriple(event,'${player}',${effectIndex},'${param.name}',${intDefaultValue},'${controlId}','${controlId}_value',${intDecimals});return false`,
+                        })}
                     </div>
                     <div class="param-slider">
                         <div id="${controlId}" class="triple-slider-container" 
@@ -4587,12 +4601,16 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             // Special handling for transport position - needs immediate init to avoid race condition
             const isTransportPosition = pluginId === 'transport' && param.name === 'transport_position';
             const initFunction = () => {
+                // Init scrub input for the value display
+                ScrubInput.initById(`${controlId}_value`);
+
                 // Use the same metadata extraction as above (already extracted)
                 
                 // Helper function to update display value
                 const updateDisplayValue = (val) => {
                     const displayElem = document.getElementById(`${controlId}_value`);
                     if (displayElem) {
+                        let formatted;
                         if (displayFormat === 'time') {
                             const totalSeconds = val / fps;
                             const hours = Math.floor(totalSeconds / 3600);
@@ -4600,13 +4618,15 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             const seconds = Math.floor(totalSeconds % 60);
                             const milliseconds = Math.floor((totalSeconds % 1) * 1000);
                             if (hours > 0) {
-                                displayElem.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+                                formatted = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
                             } else {
-                                displayElem.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+                                formatted = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
                             }
                         } else {
-                            displayElem.textContent = intDecimals === 0 ? Math.round(val) : val.toFixed(intDecimals);
+                            formatted = intDecimals === 0 ? String(Math.round(val)) : val.toFixed(intDecimals);
                         }
+                        if (displayElem.tagName === 'INPUT') { displayElem.value = formatted; }
+                        else { displayElem.textContent = formatted; }
                     }
                 };
                 
@@ -4630,13 +4650,14 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                     }
                     
                     // Slider exists with valid DOM reference - update it
-                    // FIX: Use totalFrames - 1 as max since frames are 0-indexed (0 to totalFrames-1)
-                    // For 16 frames (0-15), slider should go from 0 to 15, not 0 to 16
+                    // NOTE: totalFrames - 1 is only correct for transport_position (0-indexed frame count).
+                    // All other parameters use their declared max directly.
+                    const sliderMax = displayFormat === 'time' ? totalFrames - 1 : intMax;
                     existingSlider.updateValues(intActualValue, intSavedRangeMin, intSavedRangeMax);
                     existingSlider.config.displayFormat = displayFormat;
                     existingSlider.config.fps = fps;
-                    existingSlider.config.max = totalFrames - 1;
-                    existingSlider.contentMax = totalFrames - 1;
+                    existingSlider.config.max = sliderMax;
+                    existingSlider.contentMax = sliderMax;
                     
                     // DEBUG: Log after update
                     if (controlId.includes('transport_position')) {
@@ -4673,11 +4694,11 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                     }
                     
                     // Create new slider
-                    // FIX: Use totalFrames - 1 as max since frames are 0-indexed (0 to totalFrames-1)
-                    // For 16 frames (0-15), slider should go from 0 to 15, not 0 to 16
+                    // NOTE: totalFrames - 1 is only correct for transport_position (0-indexed frame count).
+                    // All other parameters use their declared max directly.
                     initTripleSlider(controlId, {
                         min: intMin,
-                        max: totalFrames - 1,
+                        max: displayFormat === 'time' ? totalFrames - 1 : intMax,
                         value: intActualValue,
                         step: intStep,
                         showRangeHandles: true,
@@ -4691,6 +4712,12 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
                         },
                         onRangeChange: (rangeMin, rangeMax) => {
+                            // Sync scrub input min/max to new range
+                            const scrubEl = document.getElementById(`${controlId}_value`);
+                            if (scrubEl && scrubEl.tagName === 'INPUT') {
+                                scrubEl.min = rangeMin;
+                                scrubEl.max = rangeMax;
+                            }
                             // Range changed - trigger update to save range
                             const slider = getTripleSlider(controlId);
                             if (slider) {
@@ -4773,6 +4800,73 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             >
                         </div>
                     </div>
+                    <!-- Audio Reactive Inline Controls (hidden by default) -->
+                    <div id="${controlId}_audio_controls" class="param-dynamic-settings audio-sequence" style="display: none;">
+                        <div class="dynamic-settings-content">
+                            <div class="audio-inline-bands">
+                                <button class="audio-band-btn-inline active" data-band="bass" data-param="${paramPath}" title="Bass">B</button>
+                                <button class="audio-band-btn-inline" data-band="mid" data-param="${paramPath}" title="Mid">M</button>
+                                <button class="audio-band-btn-inline" data-band="treble" data-param="${paramPath}" title="Treble">T</button>
+                            </div>
+                            <div class="audio-inline-directions">
+                                <button class="audio-dir-btn-inline active" data-direction="beat-forward" data-param="${paramPath}" title="Beat forward">+</button>
+                                <button class="audio-dir-btn-inline" data-direction="beat-backward" data-param="${paramPath}" title="Beat backward">−</button>
+                            </div>
+                            <div id="${controlId}_attack_release" class="audio-inline-knob"></div>
+                        </div>
+                    </div>
+                    <!-- Timeline Inline Controls (hidden by default) -->
+                    <div id="${controlId}_timeline_controls" class="param-dynamic-settings timeline-sequence" style="display: none;">
+                        <div class="dynamic-settings-content">
+                            <div class="timeline-inline-playback">
+                                <button class="timeline-play-btn-inline" data-direction="forward" data-param="${paramPath}" title="Play Forward">►</button>
+                                <button class="timeline-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">⏸</button>
+                            </div>
+                            <div class="timeline-inline-loop">
+                                <select class="timeline-loop-dropdown-inline" data-param="${paramPath}">
+                                    <option value="once">Once</option>
+                                    <option value="loop">Loop</option>
+                                    <option value="ping_pong">Ping-Pong</option>
+                                </select>
+                            </div>
+                            <div class="timeline-inline-duration">
+                                <input type="number" class="timeline-duration-input-inline" data-param="${paramPath}" 
+                                       value="1.0" min="0.1" max="300" step="0.1" title="Duration (seconds)">s
+                            </div>
+                            <div id="${controlId}_timeline_speed" class="timeline-inline-knob"></div>
+                        </div>
+                    </div>
+                    <!-- BPM Inline Controls (hidden by default) -->
+                    <div id="${controlId}_bpm_controls" class="param-dynamic-settings bpm-sequence" style="display: none;">
+                        <div class="dynamic-settings-content">
+                            <div class="bpm-inline-playback">
+                                <button class="bpm-play-btn-inline" data-direction="forward" data-param="${paramPath}" title="Play Forward">►</button>
+                                <button class="bpm-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">⏸</button>
+                            </div>
+                            <div class="bpm-inline-loop">
+                                <select class="bpm-loop-dropdown-inline" data-param="${paramPath}">
+                                    <option value="once">Once</option>
+                                    <option value="loop">Loop</option>
+                                    <option value="ping_pong">Ping-Pong</option>
+                                </select>
+                            </div>
+                            <div class="bpm-inline-division">
+                                <select class="bpm-division-dropdown-inline" data-param="${paramPath}" title="Beat Division">
+                                    <option value="0.0625">1/16</option>
+                                    <option value="0.125">1/8</option>
+                                    <option value="0.25">1/4</option>
+                                    <option value="0.5">1/2</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="4">4</option>
+                                    <option value="8" selected>8</option>
+                                    <option value="16">16</option>
+                                    <option value="32">32</option>
+                                </select>
+                            </div>
+                            <div id="${controlId}_bpm_speed" class="bpm-inline-knob"></div>
+                        </div>
+                    </div>
                 </div>
             `;
             break;
@@ -4817,7 +4911,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
         case 'COLOR':
             const colorPickerId = `${controlId}_colorpicker`;
             control = `
-                <div class="parameter-grid-row">
+                <div class="parameter-grid-row param-row-color">
                     <div class="param-cogwheel">
                         ${sequenceBtn}
                     </div>
@@ -4857,7 +4951,17 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                     <div class="parameter-control">
                         <div class="parameter-label">
                             <label>${param.label || param.name}</label>
-                            <span class="parameter-value" id="${controlId}_value">${fallbackDecimals === 0 ? Math.round(fallbackValue) : fallbackValue.toFixed(fallbackDecimals)}</span>
+                            ${ScrubInput.render({
+                                name: `${controlId}_value`,
+                                value: fallbackDecimals === 0 ? Math.round(fallbackValue) : fallbackValue.toFixed(fallbackDecimals),
+                                min: fallbackMin,
+                                max: fallbackMax,
+                                step: fallbackStep,
+                                buttons: true,
+                                extraInputClasses: 'param-value-scrub',
+                                onInput: `const v=parseFloat(this.value);const s=getTripleSlider('${controlId}');if(s){const r=s.getRange();s.updateValues(v,r.min,r.max);s.updateUI();}updateParameter('${player}',${effectIndex},'${param.name}',v,'${controlId}_value','${paramUid}')`,
+                                onContextmenu: `resetParameterToDefaultTriple(event,'${player}',${effectIndex},'${param.name}',${param.default || 0},'${controlId}','${controlId}_value',${fallbackDecimals});return false`,
+                            })}
                         </div>
                         <div id="${controlId}" class="triple-slider-container" 
                              data-default="${param.default || 0}" 
@@ -4867,6 +4971,7 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                 `;
                 // Initialize slider
                 setTimeout(() => {
+                    ScrubInput.initById(controlId + '_value');
                     // FIX: Check if slider exists AND if its DOM container is still in document
                     const existingSlider = getTripleSlider(controlId);
                     const containerInDOM = document.getElementById(controlId);
@@ -4892,7 +4997,12 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             rangeMax: fallbackMax,
                             onChange: (newValue) => {
                                 const finalValue = fallbackDecimals === 0 ? Math.round(newValue) : newValue;
-                                document.getElementById(`${controlId}_value`).textContent = fallbackDecimals === 0 ? Math.round(finalValue) : finalValue.toFixed(fallbackDecimals);
+                                const fallbackDisplayEl = document.getElementById(`${controlId}_value`);
+                                if (fallbackDisplayEl) {
+                                    const fb = fallbackDecimals === 0 ? String(Math.round(finalValue)) : finalValue.toFixed(fallbackDecimals);
+                                    if (fallbackDisplayEl.tagName === 'INPUT') { fallbackDisplayEl.value = fb; }
+                                    else { fallbackDisplayEl.textContent = fb; }
+                                }
                                 updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
                             }
                         });
@@ -4979,7 +5089,9 @@ window.updateParameter = async function(player, effectIndex, paramName, value, v
                 const controlId = valueDisplayId.replace('_value', '');
                 const slider = document.getElementById(controlId);
                 const decimals = slider ? parseInt(slider.getAttribute('data-decimals') || '0') : 0;
-                displayElement.textContent = decimals === 0 ? Math.round(value) : value.toFixed(decimals);
+                const formatted = decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals);
+                if (displayElement.tagName === 'INPUT') { displayElement.value = formatted; }
+                else { displayElement.textContent = formatted; }
             }
         }
         

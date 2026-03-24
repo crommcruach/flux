@@ -1,10 +1,12 @@
 """
 Transform Effect Plugin - 2D transformations (position, scale, rotation)
 """
+import math
 import cv2
 import numpy as np
 import logging
 from plugins import PluginBase, PluginType, ParameterType
+from src.modules.gpu.accelerator import get_gpu_accelerator
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ class TransformEffect(PluginBase):
         # Scale Group
         {
             'name': 'scale_xy',
-            'label': 'XY (Symmetric)',
+            'label': 'XY',
             'type': ParameterType.FLOAT,
             'default': 100.0,
             'min': 0.0,
@@ -156,10 +158,6 @@ class TransformEffect(PluginBase):
     
     def initialize(self, config):
         """Initialisiert Plugin mit Transform-Parametern."""
-        import traceback
-        caller = traceback.extract_stack()[-2]
-        logger.debug(f"🏗️ [Transform {id(self)}] Instance initialized for rendering (called from {caller.filename}:{caller.lineno})")
-        
         # Use _get_param_value() from PluginBase to handle range metadata
         self.position_x = self._get_param_value('position_x', 0.0)
         self.position_y = self._get_param_value('position_y', 0.0)
@@ -172,99 +170,124 @@ class TransformEffect(PluginBase):
         self.anchor_x = self._get_param_value('anchor_x', 50.0)
         self.anchor_y = self._get_param_value('anchor_y', 50.0)
         self.anchor_z = config.get('anchor_z', 50.0)
-    
+
+        # GPU accelerator for warpAffine / warpPerspective (NOT resize — see below)
+        self.gpu = get_gpu_accelerator(config)
+
+        # Pre-allocated output canvas — reused every frame to avoid per-frame 6 MB alloc.
+        # Resized lazily when resolution changes.
+        self._canvas = None
+        self._canvas_shape = None
+
     def process_frame(self, frame, **kwargs):
         """
         Wendet 2D-Transformationen auf Frame an.
         
-        Transformation Order:
-        1. Scale (symmetrisch + individuell)
-        2. 3D Rotation (X und Y Achsen)
-        3. Translation (Position)
+        Alle 2D-Transforms (Scale + Rotation Z + Translation) werden zu einer einzigen
+        Affine-Matrix kombiniert → ein einziger warpAffine-Call auf Original-Größe.
+        Kein Resize → np.zeros → Copy-Dance mehr (war 3× so teuer).
         
-        Args:
-            frame: Input Frame (NumPy Array, RGB, uint8)
-            **kwargs: Unused
-            
-        Returns:
-            Transformiertes Frame
+        3D-Rotation (X/Y) wird davor als Perspektiv-Transform angewandt.
         """
-        # FAST PATH: Check for no-op BEFORE any debug overhead (saves ~1-2μs)
-        if (self.position_x == 0 and self.position_y == 0 and 
-            self.scale_xy == 100.0 and self.scale_x == 100.0 and self.scale_y == 100.0 and
-            self.rotation_x == 0 and self.rotation_y == 0 and self.rotation_z == 0):
+        # FAST PATH: identity — no-op
+        if (self.position_x == 0 and self.position_y == 0 and
+                self.scale_xy == 100.0 and self.scale_x == 100.0 and self.scale_y == 100.0 and
+                self.rotation_x == 0 and self.rotation_y == 0 and self.rotation_z == 0):
             return frame
-        
-        # Debug logging for scale (throttled) - log every 120 frames
-        if not hasattr(self, '_process_counter'):
-            self._process_counter = 0
-        self._process_counter += 1
-        if self._process_counter % 120 == 1:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.debug(f"🖼️ [Transform {id(self)}] frame #{self._process_counter}: scale_xy={self.scale_xy:.1f}")
-        
+
         h, w = frame.shape[:2]
-        
-        # Berechne finale Skalierungsfaktoren (kombiniere symmetrisch + individuell)
-        scale_factor_xy = self.scale_xy / 100.0
-        scale_factor_x = (self.scale_x / 100.0) * scale_factor_xy
-        scale_factor_y = (self.scale_y / 100.0) * scale_factor_xy
-        
-        # Anchor point for transformations (percentage to actual coordinates)
-        anchor_x = w * (self.anchor_x / 100.0)
-        anchor_y = h * (self.anchor_y / 100.0)
-        
-        # === 1. Skalierung ===
-        if scale_factor_x != 1.0 or scale_factor_y != 1.0:
-            new_w = int(w * scale_factor_x)
-            new_h = int(h * scale_factor_y)
-            
-            if new_w > 0 and new_h > 0:
-                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-                # Update anchor nach Skalierung
-                anchor_x = new_w * (self.anchor_x / 100.0)
-                anchor_y = new_h * (self.anchor_y / 100.0)
-            else:
-                # Ungültige Skalierung, return schwarz
-                return np.zeros_like(frame)
-        
-        # === 2. 2D Rotation (Z-Achse) ===
-        if self.rotation_z != 0:
-            frame = self._apply_2d_rotation(frame, self.rotation_z, anchor_x, anchor_y)
-        
-        # === 3. 3D Rotation (Perspektive) ===
+
+        # Anchor point in pixels
+        ax = w * (self.anchor_x / 100.0)
+        ay = h * (self.anchor_y / 100.0)
+
+        # === 3D Rotation (Perspektive) — muss zuerst angewandt werden ===
         if self.rotation_x != 0 or self.rotation_y != 0:
-            frame = self._apply_3d_rotation(frame, self.rotation_x, self.rotation_y, anchor_x, anchor_y)
-        
-        # === 4. Translation (Position) ===
-        if self.position_x != 0 or self.position_y != 0:
-            # Erstelle Transformationsmatrix für Translation
-            M = np.float32([[1, 0, self.position_x], [0, 1, self.position_y]])
-            frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]), 
-                                   borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
-        
-        # Wenn Frame größer als Original durch Skalierung, auf Original-Größe croppen/padden
-        current_h, current_w = frame.shape[:2]
-        if current_h != h or current_w != w:
-            # Zentriertes Crop/Pad
-            result = np.zeros((h, w, 3), dtype=np.uint8)
-            
-            # Berechne Crop/Paste Bereiche
-            src_x = max(0, (current_w - w) // 2)
-            src_y = max(0, (current_h - h) // 2)
-            dst_x = max(0, (w - current_w) // 2)
-            dst_y = max(0, (h - current_h) // 2)
-            
-            copy_w = min(current_w - src_x, w - dst_x)
-            copy_h = min(current_h - src_y, h - dst_y)
-            
-            if copy_w > 0 and copy_h > 0:
-                result[dst_y:dst_y+copy_h, dst_x:dst_x+copy_w] = \
-                    frame[src_y:src_y+copy_h, src_x:src_x+copy_w]
-            
-            frame = result
-        
+            frame = self._apply_3d_rotation(frame, self.rotation_x, self.rotation_y, ax, ay)
+
+        scale_xy = self.scale_xy / 100.0
+        sx = (self.scale_x / 100.0) * scale_xy
+        sy = (self.scale_y / 100.0) * scale_xy
+
+        # FAST PATH: scale-only (no rotation_z) → crop-then-resize + canvas placement.
+        # warpAffine does per-pixel inverse mapping over the full output buffer which
+        # is 3-5× slower than a dedicated resize for the scale case.
+        if self.rotation_z == 0:
+            new_w = max(1, round(w * sx))
+            new_h = max(1, round(h * sy))
+
+            # Top-left corner of scaled frame in canvas coordinates:
+            # The anchor point stays fixed → x0 = ax - ax*sx + px, y0 = ay - ay*sy + py
+            x0 = int(round(ax * (1.0 - sx) + self.position_x))
+            y0 = int(round(ay * (1.0 - sy) + self.position_y))
+
+            # Clip source and destination to canvas bounds
+            src_x0 = max(0, -x0)
+            src_y0 = max(0, -y0)
+            dst_x0 = max(0, x0)
+            dst_y0 = max(0, y0)
+            copy_w = min(new_w - src_x0, w - dst_x0)
+            copy_h = min(new_h - src_y0, h - dst_y0)
+
+            if copy_w <= 0 or copy_h <= 0:
+                nc = frame.shape[2] if frame.ndim == 3 else 1
+                return np.zeros((h, w, nc), dtype=np.uint8)
+
+            # cv2.resize only READS its input — writeable flag is irrelevant.
+            # Only copy when memory layout is non-contiguous (e.g. transposed slice).
+            # Memmap views are always read-only but C_CONTIGUOUS, so this is a no-op
+            # for the common case, saving the previous 6 MB copy on every frame.
+            if not frame.flags['C_CONTIGUOUS']:
+                frame = np.ascontiguousarray(frame)
+
+            # Always crop-then-resize: only process the source pixels that map to the
+            # visible canvas region. For zoom-in this avoids a large intermediate;
+            # for partial off-canvas content it halves or more the resize work.
+            orig_x0 = int(src_x0 / sx)
+            orig_y0 = int(src_y0 / sy)
+            orig_x1 = min(w, math.ceil((src_x0 + copy_w) / sx))
+            orig_y1 = min(h, math.ceil((src_y0 + copy_h) / sy))
+            result = cv2.resize(frame[orig_y0:orig_y1, orig_x0:orig_x1],
+                                (copy_w, copy_h), interpolation=cv2.INTER_LINEAR)
+
+            # Full-canvas fast exit — result already fills the entire output.
+            if dst_x0 == 0 and dst_y0 == 0 and copy_w == w and copy_h == h:
+                return result
+
+            # Compose into reused canvas (avoids fresh 6 MB alloc every frame).
+            nc = frame.shape[2] if frame.ndim == 3 else 1
+            target_shape = (h, w, nc)
+            if self._canvas is None or self._canvas_shape != target_shape:
+                self._canvas = np.empty(target_shape, dtype=np.uint8)
+                self._canvas_shape = target_shape
+            self._canvas[:] = 0
+            self._canvas[dst_y0:dst_y0 + copy_h, dst_x0:dst_x0 + copy_w] = result
+            return self._canvas
+
+        # === Slow path: rotation_z present → combined affine matrix ===
+        # Kombiniert (α = cos θ, β = sin θ, sx/sy = Scale-Faktoren):
+        #   M = [[α·sx,  β·sy,  ax·(1 - α·sx) - ay·β·sy  + px],
+        #        [-β·sx, α·sy,  ax·β·sx       + ay·(1 - α·sy) + py]]
+        angle_rad = np.radians(self.rotation_z)
+        cos_a = np.cos(angle_rad)
+        sin_a = np.sin(angle_rad)
+
+        m00 = cos_a * sx
+        m01 = sin_a * sy
+        m10 = -sin_a * sx
+        m11 = cos_a * sy
+
+        M = np.float32([
+            [m00, m01, ax * (1.0 - m00) - ay * m01 + self.position_x],
+            [m10, m11, ax * (-m10) + ay * (1.0 - m11) + self.position_y],
+        ])
+
+        nc = frame.shape[2] if frame.ndim == 3 else 1
+        border_val = (0,) * nc
+        frame = self.gpu.warpAffine(frame, M, (w, h),
+                                    flags=cv2.INTER_LINEAR,
+                                    borderMode=cv2.BORDER_CONSTANT,
+                                    borderValue=border_val)
         return frame
     
     def _apply_2d_rotation(self, frame, angle, anchor_x, anchor_y):
@@ -287,9 +310,9 @@ class TransformEffect(PluginBase):
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
         
         # Wende Rotation an
-        rotated = cv2.warpAffine(frame, M, (w, h), 
-                                 borderMode=cv2.BORDER_CONSTANT, 
-                                 borderValue=(0, 0, 0))
+        rotated = self.gpu.warpAffine(frame, M, (w, h),
+                                      borderMode=cv2.BORDER_CONSTANT,
+                                      borderValue=(0, 0, 0))
         
         return rotated
     
@@ -370,9 +393,9 @@ class TransformEffect(PluginBase):
         M = cv2.getPerspectiveTransform(src_pts, dst_pts)
         
         # Wende Transformation an
-        result = cv2.warpPerspective(frame, M, (w, h), 
-                                     borderMode=cv2.BORDER_CONSTANT, 
-                                     borderValue=(0, 0, 0))
+        result = self.gpu.warpPerspective(frame, M, (w, h),
+                                          borderMode=cv2.BORDER_CONSTANT,
+                                          borderValue=(0, 0, 0))
         
         return result
     
