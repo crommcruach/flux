@@ -48,6 +48,7 @@ class PerformanceProfiler:
         'source_decode',       # Codec decoding (FFmpeg, HAP, etc.)
         'clip_effects',        # Clip-level effects processing
         'layer_composition',   # Multi-layer blending
+        'composite_download',  # GPU texture.read() stall (sub-stage of layer_composition)
         'player_effects',      # Player-level effects
         'audio_sequences',     # Audio-driven parameter modulation
         'transitions',         # Crossfade/transition effects

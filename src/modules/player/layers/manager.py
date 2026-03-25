@@ -952,7 +952,11 @@ class LayerManager:
                 pool.release(composite)
                 return None, source_delay  # finally block still runs
 
-            result = composite.download()
+            if profiler:
+                with profiler.profile_stage('composite_download'):
+                    result = composite.download()
+            else:
+                result = composite.download()
             pool.release(composite)
 
         finally:

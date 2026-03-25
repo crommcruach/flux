@@ -344,6 +344,7 @@
             'source_decode': '🎬 Source Decode',
             'clip_effects': '✨ Clip Effects',
             'layer_composition': '🎨 Layer Composition',
+            'composite_download': '↳ GPU Download',
             'player_effects': '🎭 Player Effects',
             'audio_sequences': '🎵 Audio Sequences',
             'transitions': '🔀 Transitions',
@@ -454,9 +455,10 @@
                 barColor = '#f44336';
             }
             
+            const isSubStage = stage.name === 'composite_download';
             return `
-                <div class="stage-row">
-                    <div class="stage-name">${label}</div>
+                <div class="stage-row" style="${isSubStage ? 'margin-left:20px;opacity:0.85;' : ''}">
+                    <div class="stage-name" style="${isSubStage ? 'font-size:0.9em;color:#aaa;' : ''}">${label}</div>
                     <div class="stage-bar-container">
                         <div class="stage-bar" style="width: ${barWidth}%; background: ${barColor};">
                             ${percentage > 10 ? percentage.toFixed(1) + '%' : ''}
@@ -487,8 +489,6 @@
         }
         
         async function resetMetrics() {
-            if (!confirm('Reset all performance metrics?')) return;
-            
             try {
                 const response = await fetch('/api/performance/reset', {
                     method: 'POST',
