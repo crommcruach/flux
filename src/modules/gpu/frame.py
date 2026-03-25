@@ -23,6 +23,18 @@ at upload/download time, which adds negligible overhead.
 import numpy as np
 import moderngl
 
+# Module-level singleton — shared across all GPUFrame instances.
+# Lazy-imported to avoid circular imports; resolved on first download() call.
+_ssbo_downloader = None
+
+
+def _get_ssbo_downloader(ctx):
+    global _ssbo_downloader
+    if _ssbo_downloader is None:
+        from .ssbo_downloader import SSBODownloader
+        _ssbo_downloader = SSBODownloader(ctx)
+    return _ssbo_downloader
+
 
 class GPUFrame:
     """
@@ -78,20 +90,13 @@ class GPUFrame:
         """
         Download GL float32 texture → numpy BGR uint8.
 
-        Returns (H, W, components) uint8 array in BGR/BGRA order.
-        Uses texture.read() (float32 path) to avoid the AMD glReadPixels bug
-        that returns zeros when reading float32 FBOs as uint8 (dtype='u1').
-        Pre-allocated buffers eliminate per-frame heap allocation.
+        Returns (H, W, 3) uint8 array in BGR order.
+
+        Uses a compute shader + SSBO readback (glGetBufferSubData) to avoid
+        the AMD pipeline-drain stall (~111 ms) caused by glGetTexImage.
+        Falls back to texture.read() if compute shaders are unavailable.
         """
-        data = self.texture.read()
-        arr = np.frombuffer(data, dtype=np.float32).reshape(
-            self.height, self.width, self.components
-        )
-        # In-place float→uint8 conversion reusing pre-allocated buffers.
-        np.multiply(arr, 255.0, out=self._upload_buf)
-        np.clip(self._upload_buf, 0, 255, out=self._upload_buf)
-        np.copyto(self._download_buf, self._upload_buf, casting='unsafe')
-        return self._download_buf[:, :, ::-1].copy()   # RGB→BGR
+        return _get_ssbo_downloader(self.ctx).download(self)
 
     # ------------------------------------------------------------------
     # Pixel sampling (Art-Net)
@@ -104,18 +109,12 @@ class GPUFrame:
         xs, ys: integer arrays of pixel coordinates (same length N), y=0 = top.
         Returns: (N, 3) uint8 array in RGB order (Art-Net expects RGB).
 
-        Row 0 of the array = top of the image (same convention as upload).
-        Uses texture.read() — AMD-safe float32 path, same as download().
+        Uses the SSBO download path — same AMD-stall avoidance as download().
+        BGR frame is indexed at (ys, xs) and channels are swapped to RGB.
         """
-        data = self.texture.read()
-        arr = np.frombuffer(data, dtype=np.float32).reshape(
-            self.height, self.width, self.components
-        )
-        np.multiply(arr, 255.0, out=self._upload_buf)
-        np.clip(self._upload_buf, 0, 255, out=self._upload_buf)
-        np.copyto(self._download_buf, self._upload_buf, casting='unsafe')
-        # arr[y, x] = RGB pixel at screen position (x, y); no Y-flip needed
-        return self._download_buf[ys, xs, :3]    # return RGB (drop alpha if present)
+        bgr = _get_ssbo_downloader(self.ctx).download(self)  # (H, W, 3) BGR
+        # BGR channel order: index [B, G, R]; Art-Net wants [R, G, B]
+        return bgr[ys, xs, ::-1].copy()  # BGR→RGB slice
 
     # ------------------------------------------------------------------
     # Cleanup

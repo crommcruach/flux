@@ -1,0 +1,54 @@
+#version 430
+// Preview SSBO Downloader — compute shader.
+//
+// Reads every pixel from a float32 RGB/RGBA composite texture and writes
+// BGRX uint32 values (1 per pixel) into a flat SSBO.
+//
+// Why this exists:
+//   texture.read() (glGetTexImage) triggers the AMD pipeline-drain stall
+//   (~111 ms on gfx902).  glGetBufferSubData on a compute-written SSBO does
+//   NOT trigger the stall — measured ~2-21 ms depending on buffer size.
+//
+// Output layout: row-major, top-to-bottom, 1 uint32 per pixel.
+//   uint32 = B | (G<<8) | (R<<16) | (0xFF<<24)   [BGRX, X=255]
+//   CPU reads as uint8 array shaped (H, W, 4), channels 0..2 = BGR.
+//
+// 1 uint32 per pixel = 4 bytes/pixel → 8 MB for 1080p (vs 24 MB float32).
+// No atomic writes needed — each thread owns exactly one uint32 word.
+//
+// Dispatch: ceil(width * height / 256) groups of 256 threads.
+
+layout(local_size_x = 256) in;
+
+uniform sampler2D uTexture;   // float32 RGB composite texture
+uniform int uWidth;
+uniform int uHeight;
+
+// 1 uint32 per pixel (BGRX).  Total elements = width * height.
+layout(std430, binding = 0) writeonly buffer PixelData {
+    uint data[];
+};
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(uWidth * uHeight)) return;
+
+    uint x = idx % uint(uWidth);
+    uint y = idx / uint(uWidth);
+
+    // UV: moderngl uploads data[row 0] to the GL texture bottom (standard OpenGL
+    // convention). UV (0,0) = bottom of texture = numpy row 0 = top of image.
+    // Therefore NO Y-flip is needed: UV.y = y / H maps correctly to the original row.
+    vec2 uv = vec2(
+        (float(x) + 0.5) / float(uWidth),
+        (float(y) + 0.5) / float(uHeight)
+    );
+
+    vec4 c = texture(uTexture, uv);
+    uint r = uint(clamp(c.r * 255.0, 0.0, 255.0));
+    uint g = uint(clamp(c.g * 255.0, 0.0, 255.0));
+    uint b = uint(clamp(c.b * 255.0, 0.0, 255.0));
+
+    // Pack BGRX: B in byte0, G in byte1, R in byte2, X=255 in byte3.
+    data[idx] = b | (g << 8u) | (r << 16u) | (0xFFu << 24u);
+}
