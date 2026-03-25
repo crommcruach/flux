@@ -64,6 +64,13 @@ class LayerManager:
         # a compute shader to sample only the N LED positions without a full
         # frame download.  Set via set_artnet_gpu_hook().
         self._artnet_gpu_hook = None
+
+        # ─── Download gate (preview pull model) ──────────────────────────────────
+        # When False, composite_layers() skips composite.download() and returns
+        # (None, source_delay).  Player.core sets this BEFORE each composite_layers()
+        # call based on needs_cpu_frame (preview subscriber count + ArtNet sampler
+        # readiness).  Default True = always download (safe conservative default).
+        self._needs_download: bool = True
         
     def _set_websocket_context_on_transport(self, clip_id, player_name=""):
         """Set WebSocket context on all transport effects in layers."""
@@ -938,6 +945,13 @@ class LayerManager:
                 except Exception as e:
                     logger.error(f"ArtNet GPU hook error: {e}")
 
+            # ── Download gate: skip texture.read() when nobody needs the CPU frame ──
+            # composite.download() costs ~43-111 ms on AMD (pipeline drain stall).
+            # When _needs_download=False the GPU composite is released without reading.
+            if not self._needs_download:
+                pool.release(composite)
+                return None, source_delay  # finally block still runs
+
             result = composite.download()
             pool.release(composite)
 
@@ -956,6 +970,16 @@ class LayerManager:
         Pass None to disable.
         """
         self._artnet_gpu_hook = callback
+
+    def set_needs_download(self, value: bool) -> None:
+        """
+        Gate the GPU→CPU download in composite_layers().
+
+        When False, composite_layers() skips texture.read() (saves the ~43-111 ms
+        AMD pipeline drain stall) and returns (None, source_delay).  Set to True
+        whenever a preview subscriber is connected or a CPU consumer needs the frame.
+        """
+        self._needs_download = value
     
     def clear(self):
         """Clear all layers (thread-safe)."""

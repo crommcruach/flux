@@ -74,12 +74,15 @@ class RoutingBridge:
         self.initialized = True
         logger.debug(f"Routing bridge initialized with {len(outputs)} output(s)")
     
-    def process_frame(self, frame: np.ndarray):
+    def process_frame(self, frame: Optional[np.ndarray]):
         """
         Process a video frame and send to all active outputs.
-        
+
         Args:
-            frame: Video frame as RGB numpy array (H, W, 3) uint8
+            frame: Video frame as RGB numpy array (H, W, 3) uint8, OR None when
+                   the GPU compute-shader sampler already populated
+                   _gpu_pixel_buffer (frame download was skipped to avoid the
+                   ~43-111 ms AMD pipeline drain stall).
         """
         if not self.enabled or not self.initialized:
             return
@@ -99,15 +102,19 @@ class RoutingBridge:
             self._frame_counter = 0
         self._frame_counter += 1
         if self._frame_counter % 120 == 1:
-            logger.debug(f"🎬 [RoutingBridge] Received frame: shape={frame.shape}, mean={frame.mean():.1f}")
-        
+            if frame is not None:
+                logger.debug(f"🎬 [RoutingBridge] Received frame: shape={frame.shape}, mean={frame.mean():.1f}")
+            else:
+                logger.debug("🎬 [RoutingBridge] frame=None (GPU sampler active)")
+
         try:
             # Get current objects from routing manager
             objects = self.routing_manager.get_all_objects()
-            
+
             # Convert BGR (OpenCV native) → RGB (expected by pixel sampler)
-            rgb_frame = frame[:, :, ::-1]
-            
+            # frame may be None when GPU sampler covered all LED reads.
+            rgb_frame = frame[:, :, ::-1] if frame is not None else None
+
             # Render frame to DMX data per output
             rendered_outputs = self.output_manager.render_frame(
                 frame=rgb_frame,

@@ -286,67 +286,53 @@ def register_info_routes(app, player_manager, api=None, config=None):
         
         def generate_frames():
             """Generator for MJPEG stream"""
-            while True:
-                try:
-                    # Get player
-                    player = player_manager.get_player(player_id)
-                    
-                    if not player or not hasattr(player, 'output_manager') or not player.output_manager:
-                        # Black frame if player or output manager not found
-                        frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                    else:
-                        # Get output
-                        output = player.output_manager.outputs.get(output_id)
-                        
-                        if not output or not output.enabled:
-                            # Black frame if output not found or disabled
+            _player = player_manager.get_player(player_id)
+            if _player is not None and hasattr(_player, '_preview_subscriber_count'):
+                _player._preview_subscriber_count += 1
+            try:
+                while True:
+                    try:
+                        # Get player
+                        player = player_manager.get_player(player_id)
+
+                        if not player or not hasattr(player, 'output_manager') or not player.output_manager:
                             frame = np.zeros((180, 320, 3), dtype=np.uint8)
                         else:
-                            # Get latest frame from output
-                            frame = output.get_latest_frame()
-                            
-                            if frame is None:
-                                # Black frame if no frame available yet
+                            output = player.output_manager.outputs.get(output_id)
+                            if not output or not output.enabled:
                                 frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                    
-                    # Scale if needed
-                    if max_width > 0 and frame.shape[1] > max_width:
-                        scale = max_width / frame.shape[1]
-                        new_width = int(frame.shape[1] * scale)
-                        new_height = int(frame.shape[0] * scale)
-                        frame = cv2.resize(frame, (new_width, new_height))
-                    
-                    # Encode as JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame, 
-                                              [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-                    if not ret:
+                            else:
+                                frame = output.get_latest_frame()
+                                if frame is None:
+                                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+
+                        # Scale if needed
+                        if max_width > 0 and frame.shape[1] > max_width:
+                            scale = max_width / frame.shape[1]
+                            frame = cv2.resize(frame, (int(frame.shape[1] * scale), int(frame.shape[0] * scale)))
+
+                        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+                        if not ret:
+                            time.sleep(frame_delay)
+                            continue
+
+                        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
                         time.sleep(frame_delay)
-                        continue
-                    
-                    frame_bytes = buffer.tobytes()
-                    
-                    # MJPEG format
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + 
-                           frame_bytes + b'\r\n')
-                    
-                    time.sleep(frame_delay)
-                
-                except Exception as e:
-                    logger.error(f"Stream error for {player_id}/{output_id}: {e}")
-                    # Black frame on error
-                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                    ret, buffer = cv2.imencode('.jpg', frame)
-                    if ret:
-                        frame_bytes = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + 
-                               frame_bytes + b'\r\n')
-                    time.sleep(0.1)
-        
-        return Response(generate_frames(), 
+
+                    except Exception as e:
+                        logger.error(f"Stream error for {player_id}/{output_id}: {e}")
+                        frame = np.zeros((180, 320, 3), dtype=np.uint8)
+                        ret, buffer = cv2.imencode('.jpg', frame)
+                        if ret:
+                            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                        time.sleep(0.1)
+            finally:
+                if _player is not None and hasattr(_player, '_preview_subscriber_count'):
+                    _player._preview_subscriber_count = max(0, _player._preview_subscriber_count - 1)
+
+        return Response(generate_frames(),
                        mimetype='multipart/x-mixed-replace; boundary=frame')
-    
+
     @app.route('/api/outputs/<player_id>/stream/preview_live')
     def stream_preview_player(player_id):
         """
@@ -373,7 +359,12 @@ def register_info_routes(app, player_manager, api=None, config=None):
         
         def generate_preview_frames():
             """Generator for preview player MJPEG stream"""
-            while True:
+            _preview_player_id = f"{player_id}_preview"
+            _player = player_manager.get_player(_preview_player_id)
+            if _player is not None and hasattr(_player, '_preview_subscriber_count'):
+                _player._preview_subscriber_count += 1
+            try:
+              while True:
                 try:
                     # Get preview player
                     preview_player_id = f"{player_id}_preview"
@@ -432,9 +423,13 @@ def register_info_routes(app, player_manager, api=None, config=None):
                                frame_bytes + b'\r\n')
                     time.sleep(0.1)
         
+            finally:
+                if _player is not None and hasattr(_player, '_preview_subscriber_count'):
+                    _player._preview_subscriber_count = max(0, _player._preview_subscriber_count - 1)
+
         return Response(generate_preview_frames(), 
                        mimetype='multipart/x-mixed-replace; boundary=frame')
-    
+
     @app.route('/api/preview/stream')
     def preview_stream():
         """MJPEG Video-Stream des aktuellen Frames mit optionalem Slice-Parameter."""
@@ -469,8 +464,12 @@ def register_info_routes(app, player_manager, api=None, config=None):
         
         def generate_frames():
             """Generator für MJPEG-Stream."""
+            _player = player_manager.player
+            if _player is not None and hasattr(_player, '_preview_subscriber_count'):
+                _player._preview_subscriber_count += 1
             frame_count = 0
-            while True:
+            try:
+              while True:
                 try:
                     frame_count += 1
                     # Hole aktuellen Player dynamisch
@@ -563,6 +562,10 @@ def register_info_routes(app, player_manager, api=None, config=None):
                                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                     time.sleep(0.1)
         
+            finally:
+                if _player is not None and hasattr(_player, '_preview_subscriber_count'):
+                    _player._preview_subscriber_count = max(0, _player._preview_subscriber_count - 1)
+
         return Response(generate_frames(), 
                        mimetype='multipart/x-mixed-replace; boundary=frame')
     
@@ -666,8 +669,12 @@ def register_info_routes(app, player_manager, api=None, config=None):
         
         def generate_frames():
             """Generator für MJPEG-Stream ohne Preview-Skalierung."""
+            _player = player_manager.artnet_player if player_type == 'artnet' else player_manager.player
+            if _player is not None and hasattr(_player, '_preview_subscriber_count'):
+                _player._preview_subscriber_count += 1
             frame_count = 0
-            while True:
+            try:
+              while True:
                 try:
                     frame_count += 1
                     
@@ -748,9 +755,57 @@ def register_info_routes(app, player_manager, api=None, config=None):
                                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                     time.sleep(0.1)
         
-        return Response(generate_frames(), 
+            finally:
+                if _player is not None and hasattr(_player, '_preview_subscriber_count'):
+                    _player._preview_subscriber_count = max(0, _player._preview_subscriber_count - 1)
+
+        return Response(generate_frames(),
                        mimetype='multipart/x-mixed-replace; boundary=frame')
     
+    @app.route('/api/preview/toggle', methods=['POST'])
+    def toggle_preview():
+        """Enable or disable the preview stream for a player."""
+        from flask import request as _req
+        player_id = _req.json.get('player_id', 'video') if _req.is_json else 'video'
+        _player = player_manager.get_player(player_id)
+        if _player is None:
+            return jsonify({'error': 'player not found'}), 404
+        _player._preview_enabled = not getattr(_player, '_preview_enabled', True)
+        # Persist to session state
+        try:
+            from ..session.state import get_session_state
+            ss = get_session_state()
+            if ss:
+                if 'artnet' in player_id.lower():
+                    settings = ss.get_artnet_player_settings()
+                    settings['preview_enabled'] = _player._preview_enabled
+                    ss.set_artnet_player_settings(settings)
+                else:
+                    settings = ss.get_video_player_settings()
+                    settings['preview_enabled'] = _player._preview_enabled
+                    ss.set_video_player_settings(settings)
+        except Exception as e:
+            logger.warning(f'preview/toggle: session state save failed: {e}')
+        return jsonify({
+            'preview_enabled': _player._preview_enabled,
+            'subscriber_count': getattr(_player, '_preview_subscriber_count', 0),
+            'preview_active': getattr(_player, 'preview_active', False),
+        })
+
+    @app.route('/api/preview/status', methods=['GET'])
+    def preview_status():
+        """Return current preview subscriber count and enabled state for a player."""
+        from flask import request as _req
+        player_id = _req.args.get('player_id', 'video')
+        _player = player_manager.get_player(player_id)
+        if _player is None:
+            return jsonify({'error': 'player not found'}), 404
+        return jsonify({
+            'preview_enabled': getattr(_player, '_preview_enabled', True),
+            'subscriber_count': getattr(_player, '_preview_subscriber_count', 0),
+            'preview_active': getattr(_player, 'preview_active', False),
+        })
+
     @app.route('/api/preview/debug')
     def preview_debug():
         """Debug-Info über Player-Zustand."""

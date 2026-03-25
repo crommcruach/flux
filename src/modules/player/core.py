@@ -148,6 +148,13 @@ class Player:
         
         # Preview Frames
         self.last_video_frame = None  # Letztes komplettes Frame für Preview
+
+        # Preview subscriber tracking — incremented by MJPEG generator on connect,
+        # decremented on disconnect.  When count reaches 0 the render loop skips
+        # composite.download() (saves the ~43-111ms AMD pipeline drain stall).
+        self._preview_subscriber_count: int = 0
+        # User-facing toggle (persisted in session state)
+        self._preview_enabled: bool = True
         
         # Transition Manager
         self.transition_manager = TransitionManager()
@@ -218,6 +225,13 @@ class Player:
                         logger.debug(f"Output state restored for {self.player_name}: {len(saved_state.get('outputs', {}))} output configs, {len(saved_state.get('slices', {}))} slices")
                     except Exception as e:
                         logger.warning(f"Failed to restore output state: {e}")
+
+                # Restore preview_enabled toggle
+                try:
+                    _vid_settings = session_state.get_video_player_settings()
+                    self._preview_enabled = _vid_settings.get('preview_enabled', True)
+                except Exception:
+                    pass
                 else:
                     logger.debug(f"No saved output state found for {self.player_name}")
                 
@@ -340,6 +354,31 @@ class Player:
     def current_frame(self):
         """Aktueller Frame der Quelle."""
         return self.source.current_frame if self.source else 0
+
+    # ── Preview pull-model properties ──────────────────────────────────────
+
+    @property
+    def preview_active(self) -> bool:
+        """True when at least one MJPEG subscriber is connected AND preview is enabled."""
+        return self._preview_enabled and self._preview_subscriber_count > 0
+
+    @property
+    def needs_cpu_frame(self) -> bool:
+        """
+        True when the render loop must call composite.download() this frame.
+
+        False → LayerManager skips the expensive GPU→CPU readback (saves the
+        ~43-111 ms AMD pipeline drain stall) when nobody is watching and ArtNet
+        is handled by the GPU compute-shader sampler.
+        """
+        if self.preview_active:
+            return True
+        # ArtNet player: need CPU frame only when the GPU sampler hasn't kicked in yet
+        if self.routing_bridge and self.enable_artnet:
+            sampler = getattr(self.routing_bridge, '_gpu_sampler', None)
+            if sampler is None or not sampler.is_ready:
+                return True
+        return False
     
     @property
     def total_frames(self):
@@ -801,6 +840,17 @@ class Player:
             logger.error(f"Fehler beim Re-Initialisieren der Source: {self.source.get_source_name()}")
             return
         
+        # Restore preview_enabled for ArtNet player from session state
+        if self.enable_artnet:
+            try:
+                from ..session.state import get_session_state as _get_ss
+                _ss = _get_ss()
+                if _ss:
+                    _ap_settings = _ss.get_artnet_player_settings()
+                    self._preview_enabled = _ap_settings.get('preview_enabled', True)
+            except Exception:
+                pass
+
         # Start ArtNet Routing Bridge (if available and on Art-Net Player)
         if self.routing_bridge and self.enable_artnet:
             try:
@@ -1097,6 +1147,9 @@ class Player:
             
             # ========== MULTI-LAYER COMPOSITING ==========
             if not should_autoadvance and self.layers and len(self.layers) > 0:
+                # Gate GPU→CPU download: skip texture.read() (~43-111ms AMD stall)
+                # when no preview subscriber is connected and ArtNet uses GPU sampler.
+                self.layer_manager.set_needs_download(self.needs_cpu_frame)
                 # Delegate all layer compositing to LayerManager
                 # PROFILING: Now done inside composite_layers() for granular breakdown
                 # (source_decode, clip_effects, layer_composition measured separately)
@@ -1447,27 +1500,28 @@ class Player:
                 frame = self._alpha_composite_to_black(frame)
             
             # Frame is already in BGR format (native OpenCV), no conversion needed
-            self.last_video_frame = frame
-            
-            # Distribute frame to output routing system (if enabled)
-            if self.output_manager:
+            # frame may be None when GPU sampler covers ArtNet and no preview is active
+            if frame is not None:
+                self.last_video_frame = frame
+
+            # Distribute frame to output routing system (preview outputs).
+            # Skip when no subscriber is watching — avoids updating VirtualOutput
+            # with a stale reference the Flask generator would just re-encode.
+            if self.output_manager and self.preview_active and frame is not None:
                 try:
-                    # Pass BGR frame (cv2 windows expect BGR, already native format)
                     with self.profiler.profile_stage('frame_delivery'):
                         self.output_manager.update_frame(
-                            composite_frame=frame,  # BGR format for cv2, no conversion needed
+                            composite_frame=frame,
                             layer_manager=self.layer_manager,
                             current_clip_id=self.current_clip_id
                         )
                 except Exception as e:
                     logger.error(f"[OUTPUT] Frame update error: {e}", exc_info=True)
             
-            # ArtNet Routing System (NEW - processes video frame for routing outputs)
-            # Only run on Art-Net player (not Video player) for ArtNet output routing
+            # ArtNet Routing System — frame may be None when GPU sampler covers all
+            # outputs and no preview subscriber triggered a CPU download.
             if self.routing_bridge and self.enable_artnet and self.is_running:
                 try:
-                    # Use the OUTPUT frame (after effects but before DMX extraction)
-                    # This ensures routing system gets same frame as old ArtNet system
                     with self.profiler.profile_stage('output_routing'):
                         self.routing_bridge.process_frame(frame)
                 except Exception as e:

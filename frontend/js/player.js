@@ -7531,4 +7531,48 @@ window.addEventListener('beforeunload', () => {
         websocketArtnetPreview.stop();
         websocketArtnetPreview = null;
     }
+
+    // Close preview context menu on any outside click or Escape
+    document.addEventListener('click', hidePreviewContextMenu);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hidePreviewContextMenu(); });
 });
+
+// ── Preview pull-model: right-click context menu + toggle ─────────────
+
+function showPreviewContextMenu(e) {
+    const menu = document.getElementById('previewContextMenu');
+    if (!menu) return;
+    menu.style.display = 'block';
+    menu.style.left = e.clientX + 'px';
+    menu.style.top  = e.clientY + 'px';
+    updatePreviewMenuLabel();
+}
+
+function hidePreviewContextMenu() {
+    const menu = document.getElementById('previewContextMenu');
+    if (menu) menu.style.display = 'none';
+}
+
+async function updatePreviewMenuLabel() {
+    try {
+        const res = await fetch(`${API_BASE}/api/preview/status?player_id=video`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const item = document.getElementById('previewToggleItem');
+        if (item) item.textContent = data.preview_enabled ? 'Disable Preview' : 'Enable Preview';
+        const img = document.getElementById('videoPreviewImg');
+        if (img) img.style.opacity = data.preview_enabled ? '1' : '0.3';
+    } catch (_) { /* ignore */ }
+}
+
+async function togglePreview() {
+    hidePreviewContextMenu();
+    try {
+        await fetch(`${API_BASE}/api/preview/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: 'video' })
+        });
+        updatePreviewMenuLabel();
+    } catch (_) { /* ignore */ }
+}

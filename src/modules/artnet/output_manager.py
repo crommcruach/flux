@@ -139,6 +139,9 @@ class OutputManager:
             obj_id = str(obj.id) if hasattr(obj, 'id') else None
             if gpu_pixel_buffer and obj_id and obj_id in gpu_pixel_buffer:
                 rgb_pixels = gpu_pixel_buffer[obj_id]
+            elif frame is None:
+                # No CPU frame and no GPU buffer for this object — skip (blackout)
+                continue
             else:
                 rgb_pixels = self.sampler.sample_object(obj, frame)
             # Apply per-object color correction
