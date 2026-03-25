@@ -39,7 +39,6 @@ class LayerManager:
         self.layers = []  # List of Layer objects
         self.layer_counter = 0  # For generating unique layer IDs
         self._layer_effect_log_frame = {}  # Frame counter for logging
-        self._blend_cache = {}  # Cache blend plugin instances: {(blend_mode, opacity): plugin_instance}
         self.player = None  # Will be set by player after initialization
 
         # ─── Phase 2: Thread pools for parallel loading and rendering ─────────
@@ -714,43 +713,6 @@ class LayerManager:
                 self.load_layer_effects_from_registry(layer, player_name)
         
         logger.debug(f"✅ [{player_name}] All layer effects reloaded")
-    
-    def get_blend_plugin(self, blend_mode, opacity):
-        """
-        Get BlendEffect plugin instance (cached for performance).
-        
-        OPTIMIZATION: Cache by blend_mode only, update opacity dynamically.
-        This prevents cache pollution when opacity changes frequently (slider).
-        
-        Args:
-            blend_mode: Blend mode
-            opacity: Opacity 0-100%
-        
-        Returns:
-            BlendEffect plugin instance
-        """
-        # OPTIMIZATION: Cache by blend_mode only (not opacity)
-        # Opacity changes frequently via slider - don't create new instances!
-        cache_key = blend_mode
-        
-        # Check cache first
-        if cache_key in self._blend_cache:
-            blend = self._blend_cache[cache_key]
-            # Update opacity for this frame (lightweight attribute change)
-            blend.opacity = opacity
-            return blend
-        
-        # Create new instance and cache it
-        from plugins.effects.blend import BlendEffect
-        
-        blend = BlendEffect()
-        blend.initialize({
-            'blend_mode': blend_mode,
-            'opacity': opacity
-        })
-        
-        self._blend_cache[cache_key] = blend
-        return blend
     
     def composite_layers(self, preprocess_transport_callback, player_name="Player"):
         """

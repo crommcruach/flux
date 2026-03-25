@@ -83,6 +83,9 @@ class PluginManager:
                     # Finde alle PluginBase-Subklassen im Modul
                     for name, obj in inspect.getmembers(module, inspect.isclass):
                         if issubclass(obj, PluginBase) and obj is not PluginBase:
+                            if getattr(obj, 'DISABLED', False):
+                                logger.debug(f"Plugin disabled (DISABLED=True): {obj.__name__}")
+                                continue
                             try:
                                 self.register_plugin(obj)
                                 logger.debug(f"Plugin geladen: {obj.METADATA.get('id', 'unknown')} ({module_path})")
