@@ -1062,7 +1062,22 @@ class Player:
         self.start_time = time.time()
         self.frames_processed = 0
         self.current_loop = 0
-        
+
+        # ── GPU thread-affinity guard ─────────────────────────────────────────
+        # ModernGL standalone contexts are WGL-affine: the context must be
+        # current on the thread that uses it.  If the context was created in
+        # a different thread (e.g. Flask startup thread or a previous play_loop
+        # thread), reset ALL GPU singletons so they're recreated fresh here.
+        try:
+            from ..gpu import reset_gpu_pipeline, is_context_from_current_thread, probe_gpu_readback
+            if not is_context_from_current_thread():
+                logger.info(f"GPU context not current in {self.player_name} play thread — resetting pipeline")
+                reset_gpu_pipeline()
+                # Re-probe so GPU_READBACK_VIABLE is set correctly for new context
+                probe_gpu_readback(self.canvas_width, self.canvas_height)
+        except Exception as _e:
+            logger.warning(f"GPU pipeline reset check failed: {_e}")
+
         # FPS für Timing
         # Multi-Layer: Master-Layer (0) bestimmt FPS
         if self.layers:

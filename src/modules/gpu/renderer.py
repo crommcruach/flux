@@ -141,3 +141,9 @@ def get_renderer() -> Renderer:
     if _renderer is None:
         _renderer = Renderer(get_context())
     return _renderer
+
+
+def _reset_renderer() -> None:
+    """Discard the cached Renderer so it's recreated in the next calling thread."""
+    global _renderer
+    _renderer = None

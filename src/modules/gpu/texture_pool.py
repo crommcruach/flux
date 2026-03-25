@@ -87,3 +87,14 @@ def get_texture_pool() -> TexturePool:
     if _pool is None:
         _pool = TexturePool(get_context())
     return _pool
+
+
+def _reset_pool() -> None:
+    """Release all pooled textures and discard the singleton for thread recreation."""
+    global _pool
+    if _pool is not None:
+        try:
+            _pool.release_all()
+        except Exception:
+            pass
+        _pool = None
