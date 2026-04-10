@@ -1,11 +1,25 @@
 """
 Lines Generator Plugin - Horizontal lines pattern
 """
+import os
+import os
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
 
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_lines.wgsl'
+)
+
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_lines.wgsl'
+)
+
 
 class LinesGenerator(PluginBase):
+
+    _shader_src: str | None = None
+
+    _shader_src: str | None = None
     """Lines Generator - Horizontal lines pattern."""
     
     METADATA = {
@@ -152,6 +166,35 @@ class LinesGenerator(PluginBase):
             'color_b': self.color_b,
             'duration': self.duration
         }
-    
+
     def cleanup(self):
         pass
+
+    # ── GPU shader interface ─────────────────────────────────────────────
+    def get_shader(self) -> str | None:
+        if LinesGenerator._shader_src is None:
+            with open(_SHADER_PATH, 'r', encoding='utf-8') as f:
+                LinesGenerator._shader_src = f.read()
+        return LinesGenerator._shader_src
+
+    def get_uniforms(self, **kwargs) -> dict:
+        return {
+            'time':       0.0,
+            'cw':         float(kwargs.get('width', 0)),
+            'ch':         float(kwargs.get('height', 0)),
+            'line_count': int(self.line_count),
+            'line_width': int(self.line_width),
+            'r':          float(self.color_r),
+            'g':          float(self.color_g),
+            'b':          float(self.color_b),
+        }
+        return {
+            'time':       0.0,
+            'cw':         float(kwargs.get('width', 0)),
+            'ch':         float(kwargs.get('height', 0)),
+            'line_count': int(self.line_count),
+            'line_width': int(self.line_width),
+            'r':          float(self.color_r),
+            'g':          float(self.color_g),
+            'b':          float(self.color_b),
+        }

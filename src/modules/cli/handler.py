@@ -18,7 +18,6 @@ class CLIHandler:
     def __init__(self, player_manager, dmx_controller, rest_api, video_dir, data_dir, config):
         # Nutze player_manager für zentralen Player-Zugriff
         self.player_manager = player_manager
-        self.dmx_controller = dmx_controller  # Deprecated - DMX input removed
         self.rest_api = rest_api
         self.video_dir = video_dir
         self.data_dir = data_dir
@@ -191,10 +190,6 @@ class CLIHandler:
         if self.script_list_cache:
             return self.script_list_cache
         
-        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system
-        # scripts_dir = self.config['paths']['scripts_dir']
-        # script_gen = ScriptGenerator(scripts_dir)
-        # scripts = script_gen.list_scripts()
         scripts = []  # Script system deprecated
         
         self.script_list_cache = [s['filename'] for s in scripts]
@@ -815,7 +810,6 @@ class CLIHandler:
     
     def _handle_scripts(self, args):
         """Verwaltet Scripts."""
-        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system
         logger.debug("Script system deprecated. Use generators plugin instead.")
         return
     

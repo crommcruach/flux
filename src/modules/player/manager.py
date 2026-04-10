@@ -5,6 +5,7 @@ import time
 import os
 import json
 from ..core.logger import get_logger, debug_playback
+from . import sequencer_integration as _seq
 
 logger = get_logger(__name__)
 
@@ -48,11 +49,6 @@ class PlayerManager:
         self.artnet_preview_player = None
         self._preview_players_created = False
         self._preview_last_used = 0  # Timestamp for cleanup
-        
-        # TAKEOVER PREVIEW MODE
-        # Pauses active playlist and plays preview on main output players
-        self._takeover_mode_active = False
-        self._takeover_saved_state = {}  # Stores active playlist state
         
         # Unified player registry with IDs
         self.players = {
@@ -343,196 +339,6 @@ class PlayerManager:
         
         return False
     
-    # Takeover Preview Mode (Pause active playlist, use output players for preview)
-    def start_takeover_preview(self, playlist_id: str, player_id: str = None):
-        """
-        Start takeover preview mode: Pause active playlist and load preview playlist into output players.
-        This lets you preview on the actual output (Art-Net) without running separate players.
-        
-        Args:
-            playlist_id: ID of playlist to preview
-            player_id: Specific player to takeover ('video' or 'artnet'), or None for both
-        
-        Returns:
-            dict: Status with success, saved state info
-        """
-        if self._takeover_mode_active:
-            return {
-                "success": False,
-                "error": "Takeover preview already active",
-                "mode": "takeover_active"
-            }
-        
-        try:
-            # Stop any isolated preview players first (they conflict with takeover mode)
-            if self._preview_players_created:
-                logger.debug("🛑 Stopping isolated preview players for takeover mode")
-                self.destroy_preview_players()
-            
-            from ..api.player.playlists import get_playlist_system
-            playlist_system = get_playlist_system()
-            
-            if not playlist_system:
-                return {"success": False, "error": "Playlist system not available"}
-            
-            # Get active and preview playlists
-            active_playlist = playlist_system.get_active_playlist()
-            preview_playlist = playlist_system.get_playlist(playlist_id)
-            
-            if not active_playlist:
-                return {"success": False, "error": "No active playlist"}
-            
-            if not preview_playlist:
-                return {"success": False, "error": f"Preview playlist {playlist_id} not found"}
-            
-            # Determine which players to takeover
-            players_to_takeover = []
-            if player_id:
-                players_to_takeover = [player_id]
-            else:
-                players_to_takeover = ['video', 'artnet']
-            
-            # Save current state for each player
-            self._takeover_saved_state = {
-                'active_playlist_id': active_playlist.id,
-                'preview_playlist_id': playlist_id,
-                'players': {}
-            }
-            
-            for pid in players_to_takeover:
-                player = self.get_player(pid)
-                if not player:
-                    continue
-                
-                # Save current player state
-                self._takeover_saved_state['players'][pid] = {
-                    'is_playing': player.is_playing,
-                    'is_paused': player.is_paused,
-                    'current_clip_index': player.current_clip_index,
-                    'playlist': player.playlist.copy() if hasattr(player, 'playlist') and player.playlist else [],
-                    'playlist_ids': player.playlist_ids.copy() if hasattr(player, 'playlist_ids') and player.playlist_ids else [],
-                    'autoplay': player.autoplay if hasattr(player, 'autoplay') else False,
-                    'loop_playlist': player.loop_playlist if hasattr(player, 'loop_playlist') else False,
-                    'current_position': player.source.get_current_frame() if hasattr(player, 'source') and hasattr(player.source, 'get_current_frame') else 0
-                }
-                
-                # Pause active playback
-                if player.is_playing:
-                    player.pause()
-                    logger.debug(f"⏸️ Paused {pid} player for takeover preview")
-            
-            self._takeover_mode_active = True
-            logger.debug(f"🎬 Takeover preview mode activated: {preview_playlist.name}")
-            
-            return {
-                "success": True,
-                "mode": "takeover_started",
-                "active_playlist": active_playlist.name,
-                "preview_playlist": preview_playlist.name,
-                "players_paused": players_to_takeover,
-                "saved_state": True
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to start takeover preview: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
-    
-    def stop_takeover_preview(self):
-        """
-        Stop takeover preview mode and restore active playlist state.
-        
-        Returns:
-            dict: Status with success, restored state info
-        """
-        if not self._takeover_mode_active:
-            return {
-                "success": False,
-                "error": "No takeover preview active",
-                "mode": "not_active"
-            }
-        
-        try:
-            from ..api.player.playlists import get_playlist_system
-            playlist_system = get_playlist_system()
-            
-            if not playlist_system:
-                return {"success": False, "error": "Playlist system not available"}
-            
-            # Get active playlist
-            active_playlist_id = self._takeover_saved_state.get('active_playlist_id')
-            active_playlist = playlist_system.get_playlist(active_playlist_id)
-            
-            if not active_playlist:
-                logger.warning(f"Active playlist {active_playlist_id} not found, cannot restore")
-                self._takeover_mode_active = False
-                self._takeover_saved_state = {}
-                return {"success": False, "error": "Active playlist not found"}
-            
-            # Restore each player
-            restored_players = []
-            for pid, saved_state in self._takeover_saved_state.get('players', {}).items():
-                player = self.get_player(pid)
-                if not player:
-                    continue
-                
-                # Stop current playback
-                if player.is_playing:
-                    player.stop()
-                
-                # Restore playlist
-                player.playlist = saved_state['playlist']
-                player.playlist_ids = saved_state['playlist_ids']
-                player.autoplay = saved_state['autoplay']
-                player.loop_playlist = saved_state['loop_playlist']
-                
-                # Restore clip position
-                if saved_state['current_clip_index'] >= 0 and saved_state['current_clip_index'] < len(player.playlist):
-                    player.load_clip_by_index(saved_state['current_clip_index'], notify_manager=False)
-                
-                # Restore playback state
-                if saved_state['is_playing'] and not saved_state['is_paused']:
-                    player.play()
-                    logger.debug(f"▶️ Resumed {pid} player after takeover preview")
-                elif saved_state['is_paused']:
-                    player.pause()
-                    logger.debug(f"⏸️ Restored paused state for {pid} player")
-                
-                restored_players.append(pid)
-            
-            self._takeover_mode_active = False
-            prev_playlist_name = self._takeover_saved_state.get('preview_playlist_id', 'unknown')
-            self._takeover_saved_state = {}
-            
-            logger.debug(f"🎬 Takeover preview mode stopped, active playlist restored")
-            
-            return {
-                "success": True,
-                "mode": "takeover_stopped",
-                "active_playlist": active_playlist.name,
-                "players_restored": restored_players
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to stop takeover preview: {e}", exc_info=True)
-            self._takeover_mode_active = False
-            self._takeover_saved_state = {}
-            return {"success": False, "error": str(e)}
-    
-    def is_takeover_preview_active(self):
-        """Check if takeover preview mode is active."""
-        return self._takeover_mode_active
-    
-    def get_takeover_preview_state(self):
-        """Get current takeover preview state info."""
-        if not self._takeover_mode_active:
-            return None
-        return {
-            "active": True,
-            "active_playlist_id": self._takeover_saved_state.get('active_playlist_id'),
-            "preview_playlist_id": self._takeover_saved_state.get('preview_playlist_id'),
-            "players_taken": list(self._takeover_saved_state.get('players', {}).keys())
-        }
-    
     # Master/Slave Synchronization Methods
     
     def set_master_playlist(self, player_id: str = None) -> bool:
@@ -756,210 +562,32 @@ class PlayerManager:
                 self._sync_slave_to_index(slave_player, clip_index)
     
     # ========== SEQUENCER INTEGRATION ==========
-    
+    # Heavy logic lives in sequencer_integration.py; thin delegates here.
+
     def init_sequencer(self):
-        """Initialize audio sequencer (called during startup)"""
-        try:
-            from ..audio.sequencer import AudioSequencer
-            self.sequencer = AudioSequencer(player_manager=self)
-            
-            # Set up callbacks for UI updates
-            self.sequencer.on_slot_change = self._on_sequencer_slot_change
-            self.sequencer.on_position_update = self._on_sequencer_position_update
-            
-            logger.debug("🎵 AudioSequencer initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize sequencer: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+        """Initialize AudioSequencer.  See sequencer_integration.py."""
+        _seq.init_sequencer(self)
     
     def set_sequencer_mode(self, enabled: bool):
-        """Enable/disable sequencer mode
-        
-        When enabled:
-        - Sequencer becomes MASTER timeline controller
-        - All playlists become SLAVES following slot boundaries
-        - Master/slave via Transport is disabled
-        
-        When disabled:
-        - Normal Master/Slave operation via Transport
-        - Sequencer is inactive
-        
-        Args:
-            enabled: True to enable sequencer mode, False to disable
-        """
-        self.sequencer_mode_active = enabled
-        
-        # Update all players' slave cache when sequencer mode changes
-        self._update_all_slave_caches()
-        
-        if enabled:
-            # Clear master playlist - sequencer controls all
-            old_master = self.master_playlist
-            self.master_playlist = None
-            logger.debug(f"🎵 SEQUENCER MODE ON: Sequencer is MASTER, all playlists are SLAVES (previous master: {old_master})")
-        else:
-            logger.debug("🎵 SEQUENCER MODE OFF: Normal master/slave operation")
-            # Note: master_playlist will be set by user via transport position controls
-        
-        # Broadcast mode change via WebSocket
-        if self.socketio:
-            try:
-                self.socketio.emit('sequencer_mode_changed', {
-                    'enabled': enabled,
-                    'master_playlist': self.master_playlist
-                }, namespace='/player')
-            except Exception as e:
-                logger.error(f"❌ Error emitting sequencer_mode_changed: {e}")
+        """Enable/disable sequencer mode.  See sequencer_integration.py."""
+        _seq.set_sequencer_mode(self, enabled)
     
     def sequencer_advance_slaves(self, slot_index: int, force_reload: bool = False):
-        """Advance all players to the clip matching the sequencer slot.
-        
-        Called when sequencer slot boundary is crossed.
-        Sequencer is MASTER, all playlists are SLAVES.
-        Slot index maps directly to clip index (slot 0 → clip 0, slot 1 → clip 1, etc.)
-        
-        Args:
-            slot_index: Current slot index (0, 1, 2, ...) - maps to clip index
-            force_reload: If True, reload clips even if already at correct index
-        """
-        logger.debug(f"🎯 Sequencer slot {slot_index}: Loading clip index in all playlists")
-        
-        if not self.sequencer_mode_active:
-            logger.warning("⚠️ Sequencer mode not active, skipping slave advance")
-            return
-        
-        # Load clip at slot_index in ALL playlists (they are all slaves to sequencer)
-        for player_id, player in self.players.items():
-            if player and player.playlist_manager.playlist and len(player.playlist_manager.playlist) > 0:
-                playlist_length = len(player.playlist_manager.playlist)
-                
-                # Check if slot index exceeds playlist length → stop player and show black screen
-                if slot_index >= playlist_length:
-                    player.stop()
-                    
-                    # Create black frame
-                    import numpy as np
-                    black_frame_rgb = np.zeros((player.canvas_height, player.canvas_width, 3), dtype=np.uint8)
-                    
-                    # Clear Art-Net output via routing_bridge (if enabled)
-                    if hasattr(player, 'routing_bridge') and player.routing_bridge and player.enable_artnet:
-                        try:
-                            player.routing_bridge.process_frame(black_frame_rgb)
-                        except Exception as e:
-                            logger.error(f"Failed to send black frame via routing_bridge: {e}")
-                    
-                    # Clear preview frame
-                    import cv2
-                    black_frame_bgr = cv2.cvtColor(black_frame_rgb, cv2.COLOR_RGB2BGR)
-                    player.last_video_frame = black_frame_bgr
-                    player.last_frame = None
-                    
-                    logger.debug(f"⏹️ Sequencer slot {slot_index}: {player_id} stopped (only has {playlist_length} clips) - black screen")
-                    continue
-                
-                current_index = getattr(player, 'current_clip_index', -1)
-                target_index = slot_index
-                
-                if target_index != current_index or force_reload:
-                    logger.debug(f"🔄 Sequencer: Loading {player_id} clip {target_index}")
-                    
-                    # Load clip at target index
-                    success = player.load_clip_by_index(target_index, notify_manager=False)
-                    
-                    if not success:
-                        logger.warning(f"❌ Failed to load {player_id} clip {target_index}")
-                        continue
-                    
-                    # Emit playlist.changed for frontend UI update
-                    if self.socketio:
-                        self.socketio.emit('playlist.changed', {
-                            'player_id': player_id,
-                            'current_index': target_index
-                        }, namespace='/player')
-                    
-                    if not player.is_playing:
-                        player.start()
-                else:
-                    # Still emit playlist.changed even when skipping reload
-                    if self.socketio:
-                        self.socketio.emit('playlist.changed', {
-                            'player_id': player_id,
-                            'current_index': target_index
-                        }, namespace='/player')
-        
-        # Broadcast to frontend via WebSocket
-        if self.socketio:
-            try:
-                self.socketio.emit('sequencer_slot_advance', {
-                    'slot_index': slot_index,
-                    'timestamp': time.time()
-                }, namespace='/player')
-            except Exception as e:
-                logger.error(f"❌ Error emitting sequencer_slot_advance: {e}")
+        """Advance all players to clip *slot_index*.  See sequencer_integration.py."""
+        _seq.sequencer_advance_slaves(self, slot_index, force_reload)
     
     def _on_sequencer_slot_change(self, slot_index: int):
-        """Callback: Sequencer slot changed
-        
-        Args:
-            slot_index: New slot index
-        """
-        logger.debug(f"🎵 Sequencer slot change callback: slot {slot_index}")
-        # Additional logic can be added here if needed
-    
+        """Kept for backward compat — wired by sequencer_integration.init_sequencer."""
+        _seq._on_slot_change(self, slot_index)
+
     def _update_all_slave_caches(self):
-        """Update slave detection cache in all players when state changes"""
-        for player_id, player in self.players.items():
-            if player:
-                is_slave = (self.sequencer_mode_active or
-                           (self.master_playlist is not None and 
-                            not self.is_master(player_id)))
-                player._is_slave_cached = is_slave
-                logger.debug(f"Updated slave cache for {player_id}: {is_slave}")
-            else:
-                logger.debug(f"Skipping slave cache update for {player_id}: player is None")
-    
+        """Refresh slave-detection cache in all players.  See sequencer_integration.py."""
+        _seq.update_all_slave_caches(self)
+
     def _on_sequencer_position_update(self, position: float, slot_index: int):
-        """Callback: Sequencer position updated (100ms updates)
-        
-        Throttled to ~5/sec for WebSocket performance.
-        
-        Args:
-            position: Current position in seconds
-            slot_index: Current slot index or None
-        """
-        # Throttle WebSocket updates to 200ms (5/sec) for performance
-        if not hasattr(self, '_last_position_update'):
-            self._last_position_update = 0
-        
-        current_time = time.time()
-        if current_time - self._last_position_update < 0.2:  # 200ms throttle
-            return
-        
-        self._last_position_update = current_time
-        
-        # Broadcast position update via WebSocket
-        if self.socketio:
-            try:
-                self.socketio.emit('sequencer_position', {
-                    'position': position,
-                    'slot_index': slot_index
-                }, namespace='/player')
-            except Exception as e:
-                # Don't spam logs on WebSocket errors
-                pass
+        """Throttled position-update callback.  See sequencer_integration.py."""
+        _seq._on_position_update(self, position, slot_index)
     
     def update_sequences(self, dt: float):
-        """
-        Update all dynamic parameter sequences
-        
-        Should be called from the render loop with delta time.
-        
-        Args:
-            dt: Delta time in seconds since last update
-        """
-        if hasattr(self, 'sequence_manager') and self.sequence_manager:
-            try:
-                self.sequence_manager.update_all(dt, self)
-            except Exception as e:
-                logger.error(f"Error updating sequences: {e}", exc_info=True)
+        """Tick dynamic parameter sequences (render loop).  See sequencer_integration.py."""
+        _seq.update_sequences(self, dt)

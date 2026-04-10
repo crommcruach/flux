@@ -10,7 +10,7 @@ Ermöglicht:
 
 from flask import request, jsonify
 import logging
-from plugins.effects.blend import BlendEffect
+from ...gpu import BLEND_MODES
 from ...session.state import get_session_state
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
         """Gibt verfügbare Blend-Modes zurück."""
         return jsonify({
             "success": True,
-            "blend_modes": BlendEffect.BLEND_MODES
+            "blend_modes": list(BLEND_MODES.keys())
         })
     
     def reload_player_layers_if_active(clip_id):
@@ -120,7 +120,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
             if source_type not in ['video', 'generator', 'script']:
                 return jsonify({"success": False, "error": "Invalid source_type"}), 400
             
-            if blend_mode not in BlendEffect.BLEND_MODES:
+            if blend_mode not in BLEND_MODES:
                 return jsonify({"success": False, "error": "Invalid blend_mode"}), 400
             
             # Create layer config
@@ -218,7 +218,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
             
             # Validate blend_mode if provided
             if 'blend_mode' in data:
-                if data['blend_mode'] not in BlendEffect.BLEND_MODES:
+                if data['blend_mode'] not in BLEND_MODES:
                     return jsonify({"success": False, "error": "Invalid blend_mode"}), 400
             
             # Update

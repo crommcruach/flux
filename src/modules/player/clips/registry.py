@@ -53,20 +53,16 @@ class ClipRegistry:
         Returns:
             clip_id: Eindeutige UUID für diesen Clip
         """
-        # If clip_id is provided and already exists, return it (idempotent)
+        # If clip_id is provided and already exists in registry, reuse it (idempotent).
         if clip_id and clip_id in self.clips:
             logger.debug(f"🔄 Clip already registered: {clip_id} → {player_id}/{os.path.basename(absolute_path)} (reusing existing data)")
             return clip_id
-        
-        # CRITICAL FIX: Check if clip already exists by path (for session restore)
-        # When restoring from saved state, clips are already in registry with effects/layers
-        # We must NOT overwrite them with fresh registrations!
-        existing_clip_id = self.find_clip_by_path(player_id, absolute_path)
-        if existing_clip_id:
-            logger.debug(f"🔄 Clip already registered: {existing_clip_id} → {player_id}/{os.path.basename(absolute_path)} (reusing existing data)")
-            return existing_clip_id
-        
-        # Create NEW clip with provided or generated UUID
+
+        # Always create a new entry with a fresh UUID when no clip_id is given.
+        # Path-based dedup is intentionally removed here: each call to register_clip
+        # may represent a distinct playlist slot (even for the same file), and each
+        # slot must have its own UUID so effects/parameters can be assigned independently.
+        # Session-restore dedup is handled separately via _ensure_clip_registered.
         if not clip_id:
             clip_id = str(uuid.uuid4())
         
@@ -807,6 +803,28 @@ class ClipRegistry:
             index_key = (clip_data['player_id'], clip_data['absolute_path'])
             self._path_index[index_key] = clip_id
         
+        # Repair stale UIDs: effect parameter _uid strings may reference an old
+        # clip_id that no longer matches the current clip_id (e.g. after a path-
+        # mismatch re-registration).  Walk every parameter value and rewrite the
+        # clip segment of each UID so the frontend always sends the current ID.
+        repaired = 0
+        for clip_id, clip_data in self.clips.items():
+            for effect in clip_data.get('effects', []):
+                for param_name, param_val in list(effect.get('parameters', {}).items()):
+                    if isinstance(param_val, dict) and '_uid' in param_val:
+                        uid = param_val['_uid']
+                        prefix = 'param_clip_'
+                        if uid.startswith(prefix):
+                            # UID format: param_clip_<old_id>_effect_<n>_<param>
+                            rest = uid[len(prefix):]
+                            # old_id is the 36-char UUID segment (UUID v4 = 36 chars)
+                            old_id = rest[:36]
+                            if old_id != clip_id:
+                                param_val['_uid'] = prefix + clip_id + rest[36:]
+                                repaired += 1
+        if repaired:
+            logger.debug(f"📋 ClipRegistry: repaired {repaired} stale UIDs after deserialize")
+
         # DEBUG: Log layer counts after deserialize
         total_layers = sum(len(clip.get('layers', [])) for clip in self.clips.values())
         clips_with_layers = sum(1 for clip in self.clips.values() if len(clip.get('layers', [])) > 0)

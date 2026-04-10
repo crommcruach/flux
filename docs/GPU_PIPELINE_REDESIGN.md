@@ -13,6 +13,9 @@
 - **No FFmpeg at runtime.** Frame source stays numpy memmap (already implemented, keep as-is).  
 - **No frontend changes.** API contracts, session state, playlist — all unchanged.  
 - **No Art-Net protocol changes.** UDP output stays. Only the pixel sampling step moves.
+- **No deprecated / disabled code.** When old code is replaced, move it wholesale to `archive/legacy_cpu_pipeline.py` (one file per phase), then delete it from its original location. Never comment out, `# TODO: remove`, or leave dead code in place. The archive file is reference-only — never imported. If the old code has no value as reference, delete it outright instead of archiving.
+- **Write tests when needed.** For non-trivial GPU functions (upload/download roundtrip, blend weight correctness, texture pool acquire/release, pixel sampling accuracy) create standalone test scripts in `tests/gpu/`. Tests are plain Python — no test framework required. Run them manually to verify before integrating.
+- **Ask before deciding.** If anything is ambiguous — API shape, shader behavior at edge cases, how a component integrates with existing code — stop and ask. Do not guess on design decisions that affect the architecture.
 
 ---
 
@@ -166,8 +169,9 @@ class TexturePool:
 class GPUFrame:
     """
     Wraps a ModernGL texture + FBO pair.
-    Upload: numpy (H,W,3 uint8 BGR) → texture
-    Download: texture → numpy (H,W,3 uint8 BGR)
+    Upload: numpy (H,W,3 uint8 BGR) or (H,W,4 uint8 BGRA) → texture
+    Download: texture → numpy BGR or BGRA uint8
+    components auto-detected from source memmap shape[3] (3=BGR, 4=BGRA)
     Sample: vectorized pixel coordinate lookup (for Art-Net)
     """
     def __init__(self, ctx: moderngl.Context, width: int, height: int, components: int = 3):
@@ -175,29 +179,29 @@ class GPUFrame:
         self.width = width
         self.height = height
         self.components = components
-        # GL textures use RGB not BGR — conversion handled in upload/download
+        # GL textures use RGB/RGBA not BGR/BGRA — conversion handled in upload/download
         self.texture = ctx.texture((width, height), components, dtype='u1')
         self.texture.filter = moderngl.LINEAR, moderngl.LINEAR
         self.fbo = ctx.framebuffer(color_attachments=[self.texture])
 
     def upload(self, frame: np.ndarray):
         """
-        Upload numpy BGR uint8 → GL RGB texture.
-        Uses PBO (pixel buffer object) path when available for async DMA.
+        Upload numpy BGR/BGRA uint8 → GL RGB/RGBA texture.
+        Reverses channel order (BGR→RGB, BGRA→RGBA) — alpha channel preserved as-is.
         frame must be C-contiguous — checked at call site, not here.
         """
-        # BGR → RGB flip (single numpy op, ~0.3 ms at 1080p)
-        rgb = frame[:, :, ::-1]
-        self.texture.write(rgb.tobytes())
+        # BGR→RGB or BGRA→RGBA: reverse the color channels, keep alpha if present
+        converted = frame[:, :, ::-1]
+        self.texture.write(converted.tobytes())
 
     def download(self) -> np.ndarray:
         """
-        Download GL RGB texture → numpy BGR uint8.
+        Download GL RGB/RGBA texture → numpy BGR/BGRA uint8.
         ~0.5 ms at 1080p via glReadPixels.
         """
         data = self.fbo.read(components=self.components)
         arr = np.frombuffer(data, dtype=np.uint8).reshape(self.height, self.width, self.components)
-        return arr[::-1, :, ::-1].copy()   # Flip Y (GL origin bottom-left) + RGB→BGR
+        return arr[::-1, :, ::-1].copy()   # Flip Y (GL origin bottom-left) + RGB→BGR / RGBA→BGRA
 
     def sample_pixels(self, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
         """
@@ -294,8 +298,10 @@ def composite_layers(self, ...):
 
     for layer in self.layers:
         # 1. Upload source frame (memmap view → GPU)
+        # components auto-detected from memmap shape[3]: 3=BGR, 4=BGRA
         src_frame = layer.source.get_next_frame()
-        layer_tex = pool.acquire(canvas_w, canvas_h)
+        n_components = src_frame.shape[2]          # 3 or 4
+        layer_tex = pool.acquire(canvas_w, canvas_h, components=n_components)
         layer_tex.upload(src_frame)                # ~0.5 ms
 
         # 2. No effects yet — straight to blend
@@ -387,7 +393,7 @@ in vec2 v_uv;
 out vec4 fragColor;
 uniform sampler2D base;
 uniform sampler2D overlay;
-uniform float opacity;      // 0..1
+uniform float opacity;      // 0..1 (layer opacity, multiplied with source alpha)
 uniform int mode;           // 0=normal 1=add 2=subtract 3=multiply 4=screen 5=overlay
 
 vec3 blendNormal(vec3 b, vec3 o)    { return o; }
@@ -401,7 +407,10 @@ vec3 blendOverlay(vec3 b, vec3 o)   {
 
 void main() {
     vec3 b = texture(base, v_uv).rgb;
-    vec3 o = texture(overlay, v_uv).rgb;
+    vec4 ov = texture(overlay, v_uv);   // read full RGBA — alpha is 1.0 for RGB-only sources
+    vec3 o = ov.rgb;
+    // Final blend weight = layer opacity × source alpha (handles both RGB and RGBA clips)
+    float weight = opacity * ov.a;
     vec3 result;
     if      (mode == 0) result = blendNormal(b, o);
     else if (mode == 1) result = blendAdd(b, o);
@@ -409,9 +418,11 @@ void main() {
     else if (mode == 3) result = blendMultiply(b, o);
     else if (mode == 4) result = blendScreen(b, o);
     else                result = blendOverlay(b, o);
-    fragColor = vec4(mix(b, result, opacity), 1.0);
+    fragColor = vec4(mix(b, result, weight), 1.0);
 }
 ```
+
+**Alpha note:** RGB sources (3-channel .npy) upload as `GL_RGB` — OpenGL fills alpha=1.0 on sample, so `weight = opacity * 1.0 = opacity`. BGRA sources (4-channel .npy) upload as `GL_RGBA` — alpha comes from the source directly. No shader change needed between the two cases.
 
 ### `src/modules/gpu/shaders/color.frag`
 ```glsl
@@ -573,15 +584,20 @@ ctx = moderngl.create_standalone_context()
 
 ---
 
-## Removed Code
+## Code Removal / Archival Policy
 
-Once all phases are complete, delete:
+When replacing old code, move it to `archive/` first, then delete it from its original location. Never leave dead code, commented-out blocks, or `# TODO: remove` markers in production files.
 
+### Phase 1 archive target: `archive/legacy_cpu_pipeline_phase1.py`
 - `src/modules/gpu/accelerator.py` — OpenCL UMat wrapper (replaced by ModernGL)
-- `src/modules/gpu/compositor.py` — CPU/CuPy compositor (replaced by blend.frag)
-- The `process_frame(frame)` method from all effect plugins
-- `np.ascontiguousarray` calls throughout the codebase
+- `src/modules/gpu/compositor.py` — CPU/CuPy compositor (replaced by `blend.frag`)
+
+### Phase 2 archive target: `archive/legacy_cpu_pipeline_phase2.py`
+- The `process_frame(frame)` method from all effect plugins (one block per plugin)
+- `np.ascontiguousarray` call sites throughout the codebase
 - Writability flag checks (`frame.flags['WRITEABLE']`)
+
+The archive files are never imported — reference only. If the archived code has no reference value (e.g. trivial one-liners), delete outright.
 
 ---
 

@@ -1,15 +1,22 @@
 """
 Fire Generator Plugin - Realistic fire effect with flickering flames
 """
+import os
 import numpy as np
 import math
 import random
 from plugins import PluginBase, PluginType, ParameterType
 
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_fire.wgsl'
+)
+
 
 class FireGenerator(PluginBase):
     """
     Fire Generator - Realistischer Feuer-Effekt.
+
+    _shader_src: str | None = None
     
     Flackernde Flammen in Gelb/Orange/Rot die von unten nach oben züngeln.
     """
@@ -206,4 +213,22 @@ class FireGenerator(PluginBase):
             'turbulence': self.turbulence,
             'speed': self.speed,
             'detail': self.detail
+        }
+
+    # ── GPU shader interface ─────────────────────────────────────────────
+    def get_shader(self) -> str | None:
+        if FireGenerator._shader_src is None:
+            with open(_SHADER_PATH, 'r', encoding='utf-8') as f:
+                FireGenerator._shader_src = f.read()
+        return FireGenerator._shader_src
+
+    def get_uniforms(self, **kwargs) -> dict:
+        return {
+            'time':        float(kwargs.get('time', 0.0)),
+            'cw':          float(kwargs.get('width', 0)),
+            'ch':          float(kwargs.get('height', 0)),
+            'intensity':   float(self.intensity),
+            'turbulence':  float(self.turbulence),
+            'speed':       float(self.speed),
+            'detail':      float(self.detail),
         }

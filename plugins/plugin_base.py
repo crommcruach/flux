@@ -215,7 +215,24 @@ class PluginBase(ABC):
     # ========================================
     # TYPE-SPEZIFISCHE METHODEN
     # ========================================
-    
+
+    # --- GPU shader interface (Phase 2) ---
+    def get_shader(self) -> Optional[str]:
+        """
+        Return GLSL fragment shader source for this effect (Phase 2 GPU path).
+        The renderer caches compiled programs by source string — called once per plugin type.
+        Return None if this plugin has no GPU implementation (falls back to process_frame).
+        """
+        return None
+
+    def get_uniforms(self, **kwargs) -> Dict[str, Any]:
+        """
+        Return {uniform_name: value} for the current parameter values.
+        Called every frame when running the GPU shader path.
+        kwargs may include frame_w and frame_h for effects that need canvas dimensions.
+        """
+        return {}
+
     # --- EFFECT Plugins ---
     def process_frame(self, frame: np.ndarray, **kwargs) -> np.ndarray:
         """

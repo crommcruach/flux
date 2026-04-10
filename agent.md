@@ -10,6 +10,72 @@ This document provides best practices and guidelines for developing and maintain
 - **Performance and low latency are the top priorities** - optimize for speed and responsiveness
 - **Always ask before adding features**: Before implementing extra features, buttons, settings, or UI elements that weren't explicitly requested, ALWAYS ask the user if they want it
 
+### ⚠️ Pre-Alpha Stage — Architectural Changes Are Welcome
+
+**This project is in pre-alpha. Architectural changes can be made at any time without asking for permission.**
+
+- If a better architecture is identified — refactor it. No approval needed.
+- If an existing design blocks performance, correctness, or future work — replace it entirely.
+- Do not preserve broken or suboptimal patterns just because they already exist.
+- When making a significant architectural change, briefly note what changed and why in the response (no separate doc needed).
+- This rule overrides the general "don't refactor unless asked" guideline while the project is pre-alpha.
+
+### ⚠️ GPU-First Rendering Pipeline — MANDATORY
+
+**This project runs a 100% GLSL-shader-based GPU rendering pipeline. This is non-negotiable.**
+
+- **ALL frame processing MUST go through the GPU shader pipeline** (`get_shader()` / `get_uniforms()` on plugins, `Renderer.render()` in `src/modules/gpu/renderer.py`)
+- **NO CPU fallbacks**: Never implement `process_frame()` as a real frame-processing method for GLSL effects. The method MUST be a stub that returns the frame unchanged — actual work happens in the shader.
+- **NO conditional CPU paths**: Do not add `if not gpu: cv2.warpAffine(...)` style alternatives. If the GPU path has a bug, fix the shader — do not fall back to CPU.
+- **NO deprecated CPU code**: If you find old OpenCV/NumPy frame-processing code inside a plugin that already has a GLSL shader, **delete it** — do not leave it commented out or guarded behind a flag.
+- **Exceptions that ARE allowed**: `process_frame()` stubs (return frame unchanged), `initialize()`, `update_parameter()`, `is_noop()`, `get_shader()`, `get_uniforms()`, and helper methods that compute values for uniforms (pure math, no pixel manipulation).
+- **The AMD `texture.read()` latency problem is solved at the architecture level** (`_needs_download` gate, `stay_on_gpu` in `apply_layer_effects`). Do NOT bypass this by introducing CPU alternatives.
+
+### ⚠️ NO Unnecessary GPU↔CPU Conversions — MANDATORY
+
+**RULE: Avoid CPU/GPU copy. Every GPU→CPU download or CPU→GPU upload is a performance crime. Never add one without explicit justification.**
+
+Every GPU→CPU download (SSBO or texture.read) costs ~26 ms at 1080p. Every CPU→GPU upload costs ~5 ms. These are the two most expensive things we do. The rule is:
+
+**A conversion is only allowed if the destination REQUIRES CPU data.**
+
+| Consumer | Needs CPU? | Notes |
+|---|---|---|
+| GLSL effect shader | ❌ NO | stays on GPU, ping-pong textures |
+| Transitions / blend | ❌ NO | `apply_gpu()` GPU→GPU via `render_transition_gpu()` |
+| GLFW display window | ❌ NO | GPU texture → context-shared display (goal) |
+| Preview JPEG (web UI) | only small | GPU → downscale → JPEG, NOT full-res download |
+| Art-Net pixel sampling | ✅ YES | needs raw uint8 RGB pixels |
+| Video recording / export | ✅ YES | must write file bytes |
+
+**The full pipeline goal** (decode is CPU-side because FFmpeg/OpenCV is CPU-only):
+```
+VideoSource.get_next_frame() → numpy BGR   ← UNAVOIDABLE (FFmpeg is CPU)
+GPUUploader.upload()         → f4 texture  ← ~5 ms (rgba8ui staging + compute shader)
+effect shader ping-pong      → f4 texture  ← < 1 ms GPU
+preview_encode hook          → JPEG        ← fires on GL thread BEFORE download
+display hook                 → screen      ← GPU texture direct (context sharing goal)
+composite_download           → numpy BGR   ← ONLY when Art-Net/recording active
+```
+
+**Why not zero conversions?** FFmpeg/OpenCV's VideoCapture decodes to CPU memory always. There is no zero-copy GPU decode path in the current source system. If that changes (DXVA2/D3D11 decode), the upload would also disappear.
+
+**GLFWDisplay context sharing** — the long-term goal is to create the GLFW window's GL context sharing with the main render context (`glfw.create_window(..., share=main_window)`). This would eliminate the 26 ms SSBO download+26 ms for display entirely — the GLFW thread renders directly from the main context's float32 texture. Until that is implemented, `DisplayOutput` must set `needs_cpu_frame = False` and use a GPU display hook that fires BEFORE the download.
+
+**Never add a CPU conversion unless you have confirmed:**
+1. The consumer truly needs a numpy array (Art-Net, file write)
+2. You've checked that `_preview_gpu_hook` / `_display_gpu_hook` cannot serve instead
+3. You've updated `OutputBase.needs_cpu_frame` so the download is gated
+
+**Upload path (LOCKED — do not regress):**
+- `GPUUploader.upload()`: `cv2.cvtColor(BGR→BGRA)` + `staging_texture.write()` (6 MB) + compute shader (`imageLoad rgba8ui → imageStore rgba32f`) = ~5 ms
+- Old path was `np.power(buf, 2.2)` or `np.multiply(frame[:,:,::-1])` = 47–130 ms — never restore these
+
+**AMD driver bugs that affect conversion decisions:**
+- Bug #1: `usampler2D` + arithmetic returns zeros for GL_RGB8/GL_RGBA8 normalized textures. Use `imageLoad` on `rgba8ui` image bindings which are unaffected.
+- Bug #2: `fbo.read(dtype='u1')` returns zeros. Never use this.
+- Bug #3: SSBO `buffer.read()` is the only viable GPU→CPU path (~26 ms). No fallback, raise on error.
+
 **Data Persistence Strategy**:
 - **session_state.json**: ALL session + live data (save everything here!)
 - **config.json**: ONLY global application settings

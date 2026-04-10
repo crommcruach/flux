@@ -1,16 +1,16 @@
 """
 Blend Mode Effect Plugin
 Blends frames with colors or layers using various blend modes.
-GPU-native: uses blend_mode.frag shader via the ModernGL pipeline.
+GPU-native: uses blend_mode.wgsl shader via the wgpu pipeline.
 """
 import os
 from ..plugin_base import PluginBase, PluginType, ParameterType
 
 _SHADER_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'blend_mode.frag'
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'blend_mode.wgsl'
 )
 
-# Integer IDs for the 'mode' uniform — must match if-else order in blend_mode.frag
+# Integer IDs for the 'mode' uniform — must match if-else order in blend_mode.wgsl
 BLEND_MODE_IDS: dict = {
     'normal':     0,
     'multiply':   1,

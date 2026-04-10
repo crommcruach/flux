@@ -1,18 +1,34 @@
 """
-Layer Manager - Manages multi-layer compositing and layer effects
+Layer Manager — Manages layer stack, blending, and layer effects.
+
+This module is the **public face** of the layers package.
+Heavy per-frame logic lives in dedicated sub-modules:
+
+    effects.py     — apply_layer_effects, effect parameter helpers
+    compositor.py  — GPU ping-pong blend pipeline, ring-buffer download
+    slave.py       — per-slave FPS-throttled decode + effects
+
+All routing is done through thin wrapper methods so external callers
+continue to use the same API:::
+
+    layer_manager.composite_layers(cb, player_name, needs_download)
+    layer_manager.apply_layer_effects(layer, frame, ...)
+    layer_manager.set_preview_gpu_hook(cb)
+    ...etc.
 """
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from ...core.logger import get_logger, debug_layers, debug_transport
 from ..sources import VideoSource, GeneratorSource
-import cv2
 import numpy as np
-from ...gpu import get_context, get_texture_pool, get_renderer, load_shader, BLEND_MODES, probe_gpu_readback, GPU_READBACK_VIABLE
+from ...gpu import get_texture_pool, probe_gpu_readback
 from .layer import Layer
+from ..taps import TapConfig, TapRegistry
+from . import effects as _effects
+from .compositor import composite_layers as _composite_layers, _GPU_PROCESSED
 
 logger = get_logger(__name__)
-
 
 class LayerManager:
     """Manages layer stack, blending, and layer effects."""
@@ -64,12 +80,50 @@ class LayerManager:
         # frame download.  Set via set_artnet_gpu_hook().
         self._artnet_gpu_hook = None
 
-        # ─── Download gate (preview pull model) ──────────────────────────────────
-        # When False, composite_layers() skips composite.download() and returns
-        # (None, source_delay).  Player.core sets this BEFORE each composite_layers()
-        # call based on needs_cpu_frame (preview subscriber count + ArtNet sampler
-        # readiness).  Default True = always download (safe conservative default).
-        self._needs_download: bool = True
+        # ─── Preview GPU hook ────────────────────────────────────────────────
+        # Optional callback fired alongside _artnet_gpu_hook.  Used by the
+        # PreviewDownscaler to blit composite → small FBO → SSBO download →
+        # simplejpeg encode while the texture is still live.  This allows
+        # needs_download=False for MJPEG-only consumers (~19 ms saved at 1080p).
+        # Set via set_preview_gpu_hook().
+        self._preview_gpu_hook = None
+
+        # ─── Display GPU hook ────────────────────────────────────────────────
+        # Optional callback fired alongside _preview_gpu_hook.  Used by the
+        # GLFW display (GLFWDisplay) when WGL context sharing is active.
+        # Blit composite → dedicated display texture → ctx.finish() →
+        # signal GLFW thread.  Eliminates 26 ms SSBO download for display-only
+        # use cases.  Set via set_display_gpu_hook().
+        self._display_gpu_hook = None
+
+        # ─── Transition GPU hook ─────────────────────────────────────────────
+        # Optional callback fired with the composite GPUFrame before download.
+        # Used by TransitionManager to store the "A" buffer GPU-to-GPU when the
+        # render loop runs in GPU-only mode (needs_download=False), ensuring that
+        # transitions have a frame ready to use even without a CPU download.
+        # Set via set_transition_gpu_hook().
+        self._transition_gpu_hook = None
+
+        # ─── Tap system (spec §8) ────────────────────────────────────────────
+        # Formal per-frame layer capture at defined pipeline stages.
+        # register_tap() / unregister_tap() manage the config list.
+        # tap_registry is cleared and repopulated every frame.
+        self._tap_configs: list[TapConfig] = []
+        self.tap_registry = TapRegistry()
+
+        # ─── Composite download ring ───────────────────────────────────────
+        # Triple-buffer async download of the final composite frame.
+        # Eliminates the ~45 ms synchronous map_sync on the player thread:
+        # copy composite → staging[i] (async), read staging[i-2] (done).
+        # Only active when needs_download=True (CPU consumer present).
+        _COMP_RING = 3
+        self._comp_ring: list = []                      # [(GPUBuffer, bpr)]
+        self._comp_ring_idx: int = 0
+        self._comp_ring_submitted: list[bool] = [False] * _COMP_RING
+        self._comp_ring_w: int = 0
+        self._comp_ring_h: int = 0
+        self._COMP_RING: int = _COMP_RING
+
         
     def _set_websocket_context_on_transport(self, clip_id, player_name=""):
         """Set WebSocket context on all transport effects in layers."""
@@ -138,6 +192,15 @@ class LayerManager:
 
         abs_path = clip_data['absolute_path']
         video_extensions = tuple(self.config.get('extensions', ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.gif']))
+
+        # Resolve relative base path against video_dir when the direct check fails.
+        # This handles clips whose absolute_path was stored without the video_dir
+        # prefix (e.g. "test1" instead of "video/test1").
+        if video_dir and not os.path.isabs(abs_path) and not abs_path.startswith('generator:'):
+            if not (abs_path.endswith(video_extensions) or os.path.isdir(abs_path)):
+                maybe = os.path.join(video_dir, abs_path)
+                if os.path.isdir(maybe) or maybe.endswith(video_extensions):
+                    abs_path = maybe
 
         # ─── PHASE 1: Create all source objects (fast, sequential) ───────────
         # Each item: (kind, source_or_none, layer_def_or_none)
@@ -230,9 +293,14 @@ class LayerManager:
 
                 layer_clip_id = layer_def.get('clip_id')
                 if not layer_clip_id and self.clip_registry:
+                    # Compute full path with video_dir so the registry entry is
+                    # resolvable later (PHASE 1 uses the same expansion).
+                    abs_layer_path = source_path
+                    if source_type == 'video' and video_dir and not os.path.isabs(source_path):
+                        abs_layer_path = os.path.join(video_dir, source_path)
                     layer_clip_id = self.clip_registry.register_clip(
                         player_id=self.player_id,
-                        absolute_path=source_path,
+                        absolute_path=abs_layer_path,
                         relative_path=source_path,
                         metadata={
                             'type': 'layer',
@@ -485,447 +553,55 @@ class LayerManager:
         
         return True
     
-    def apply_layer_effects(self, layer, frame, player_name=""):
-        """
-        Apply all effects of a layer to a frame.
-        
-        Args:
-            layer: Layer object
-            frame: Input frame
-            player_name: Name for logging
-        
-        Returns:
-            Processed frame
-        """
-        # Layer effects logging removed for performance
-        
-        # REMOVED: Don't restore parameters from registry every frame!
-        # This was overwriting runtime parameter changes (e.g., from audio sequences).
-        # The live instance is the source of truth - parameters should only be updated via update_parameter().
-        # 
-        # # Get latest parameters from registry (updated via API)
-        # if self.clip_registry and layer.clip_id:
-        #     registry_effects = self.clip_registry.get_clip_effects(layer.clip_id)
-        #     
-        #     # Update parameters on instances from registry
-        #     for i, effect in enumerate(layer.effects):
-        #         if i < len(registry_effects):
-        #             registry_params = registry_effects[i].get('parameters', {})
-        #             instance = effect['instance']
-        #             
-        #             # Update each parameter on the instance
-        #             for param_name, param_value in registry_params.items():
-        #                 # Extract actual value if it's a range metadata dict
-        #                 if isinstance(param_value, dict) and '_value' in param_value:
-        #                     param_value = param_value['_value']
-        #                 setattr(instance, param_name, param_value)
-        
-        h, w = frame.shape[:2]
-        enabled_effects = [e for e in layer.effects if e.get('enabled', True)]
-        if not enabled_effects:
-            return frame
+    # ──────────────────────────────────────────────────────────────────────────
+    # Effects — delegate to layers/effects.py
+    # ──────────────────────────────────────────────────────────────────────────
 
-        # Fast check: does any enabled effect provide a GPU shader?
-        has_gpu_effect = any(e['instance'].get_shader() is not None for e in enabled_effects)
+    def apply_layer_effects(self, layer, frame, player_name="", stay_on_gpu=False):
+        """Apply GPU-shader effects to *frame*.  See layers/effects.py."""
+        return _effects.apply_layer_effects(self, layer, frame, player_name, stay_on_gpu)
 
-        if not has_gpu_effect:
-            # ── Pure CPU path — no GPU allocation needed ──────────────────────
-            for effect in enabled_effects:
-                instance = effect['instance']
-                try:
-                    frame = instance.process_frame(frame, source=layer.source, player=None)
-                except Exception as e:
-                    plugin_id = effect.get('id', 'unknown')
-                    logger.error(f"❌ [{player_name}] Layer {layer.layer_id} effect {plugin_id} error: {e}")
-            return frame
-
-        # ── GPU chaining path ─────────────────────────────────────────────────
-        # Upload once → texture-to-texture ping-pong for every GPU effect →
-        # single download at the end.  CPU effects force a one-off
-        # download+process+re-upload for that step only; the chain resumes after.
-        pool = get_texture_pool()
-        renderer = get_renderer()
-        current_gpu = None
-        try:
-            current_gpu = pool.acquire(w, h)
-            current_gpu.upload(frame)
-
-            for effect in enabled_effects:
-                instance = effect['instance']
-                try:
-                    shader_src = instance.get_shader()
-                    if shader_src is not None:
-                        dst_gpu = pool.acquire(w, h)
-                        try:
-                            renderer.render(
-                                frag_source=shader_src,
-                                target_fbo=dst_gpu.fbo,
-                                uniforms=instance.get_uniforms(frame_w=w, frame_h=h),
-                                textures={'inputTexture': (0, current_gpu)},
-                            )
-                            pool.release(current_gpu)
-                            current_gpu = dst_gpu  # ping-pong: no download
-                        except Exception:
-                            pool.release(dst_gpu)
-                            raise
-                        continue
-                    # CPU effect: download into numpy, process, re-upload
-                    frame = current_gpu.download()
-                    frame = instance.process_frame(frame, source=layer.source, player=None)
-                    current_gpu.upload(frame)
-                except Exception as e:
-                    plugin_id = effect.get('id', 'unknown')
-                    logger.error(f"❌ [{player_name}] Layer {layer.layer_id} effect {plugin_id} error: {e}")
-
-            # Single download — all GPU effects have already been applied
-            frame = current_gpu.download()
-        finally:
-            if current_gpu is not None:
-                pool.release(current_gpu)
-
-        return frame
-    
     def update_layer_effect_parameter(self, clip_id, effect_index, param_name, value, player_name=""):
-        """
-        Update a live effect plugin instance parameter on the layer whose clip_id matches.
-
-        Called from the WebSocket handler after the registry has already been updated.
-        Works for both single-clip (Layer 0) and additional slave layers.
-
-        Args:
-            clip_id: Clip UUID identifying which layer to update
-            effect_index: Index into layer.effects list
-            param_name: Parameter name on the plugin instance
-            value: New value (may be a dict with '_value' key for range sliders)
-            player_name: Name for logging
-
-        Returns:
-            bool: True if the instance was found and updated successfully
-        """
-        with self._render_lock:
-            layers_snap = list(self.layers)
-
-        for layer in layers_snap:
-            if layer.clip_id != clip_id:
-                continue
-            if not layer.effects or effect_index >= len(layer.effects):
-                logger.warning(f"⚠️ [{player_name}] update_layer_effect_parameter: effect_index {effect_index} out of range for layer {layer.layer_id} (has {len(layer.effects)} effects)")
-                return False
-
-            instance = layer.effects[effect_index].get('instance')
-            if instance is None:
-                logger.warning(f"⚠️ [{player_name}] update_layer_effect_parameter: no instance on effect {effect_index} for layer {layer.layer_id}")
-                return False
-
-            if hasattr(instance, 'update_parameter'):
-                success = instance.update_parameter(param_name, value)
-                logger.debug(f"🔧 [{player_name}] Layer {layer.layer_id} effect[{effect_index}].{param_name} = {value} → {'OK' if success else 'FAILED'}")
-                return bool(success)
-            else:
-                logger.warning(f"⚠️ [{player_name}] Effect instance has no update_parameter method")
-                return False
-
-        logger.warning(f"⚠️ [{player_name}] update_layer_effect_parameter: no layer with clip_id={clip_id[:8]}... found")
-        return False
+        """Update a live effect param on the matching layer.  See layers/effects.py."""
+        return _effects.update_layer_effect_parameter(self, clip_id, effect_index, param_name, value, player_name)
 
     def load_layer_effects_from_registry(self, layer, player_name=""):
-        """
-        Load layer effects from ClipRegistry and create plugin instances.
-        
-        Args:
-            layer: Layer object with clip_id
-            player_name: Name for logging
-        """
-        if not self.clip_registry or not layer.clip_id:
-            return
-        
-        clip_data = self.clip_registry.get_clip(layer.clip_id)
-        if not clip_data:
-            return
-        
-        effects = clip_data.get('effects', [])
-        if not effects:
-            return
-        
-        # Create plugin instances
-        layer.effects = []
-        logger.debug(f"📦 [{player_name}] Loading {len(effects)} effects for Layer {layer.layer_id} from registry")
-        for effect_config in effects:
-            plugin_id = effect_config.get('plugin_id')
-            # IMPORTANT: Use 'parameters' key (not 'params') to match API and registry format
-            params = effect_config.get('parameters', effect_config.get('params', {}))
-            enabled = effect_config.get('enabled', True)
-            
-            logger.debug(f"   Loading plugin '{plugin_id}' with params: {params}")
-            
-            # Load plugin instance
-            plugin_instance = self.plugin_manager.load_plugin(plugin_id, params)
-            if not plugin_instance:
-                logger.warning(f"⚠️ [{player_name}] Plugin '{plugin_id}' not found for Layer {layer.layer_id}")
-                continue
-            
-            # Special handling for transport
-            # CRITICAL: Only call _initialize_state() if transport has NO saved parameters
-            # Otherwise we'd overwrite restored values (e.g., transport_position=6 → 0)
-            if plugin_id == 'transport' and hasattr(plugin_instance, '_initialize_state') and layer.source:
-                # Check if we have saved transport parameters (not just defaults)
-                has_saved_params = params and any(key != 'metadata' for key in params.keys())
-                
-                if not has_saved_params:
-                    # No saved params - initialize from source
-                    plugin_instance._initialize_state(layer.source)
-                    debug_transport(logger, f"🎬 [{player_name}] Transport initialized from source for Layer {layer.layer_id}: out_point={plugin_instance.out_point}")
-                else:
-                    # Has saved params - just update source reference without resetting
-                    if hasattr(plugin_instance, '_frame_source'):
-                        plugin_instance._frame_source = layer.source
-                    debug_transport(logger, f"🎬 [{player_name}] Transport restored from saved params for Layer {layer.layer_id}: position={plugin_instance.current_position}, out_point={plugin_instance.out_point}")
-                
-                # Set WebSocket context for position updates (need to get player reference)
-                # This needs to be done after layers are attached to player
-                # For now, mark that we need to set it
-                plugin_instance._needs_websocket_context = True
-            
-            # Add to layer effects
-            try:
-                effect_dict = {
-                    'id': plugin_id,  # Use 'id' key for runtime checks (e.g., transport detection)
-                    'plugin_id': plugin_id,  # Also keep 'plugin_id' for registry compatibility
-                    'instance': plugin_instance,
-                    'parameters': effect_config.get('parameters', params),  # Use 'parameters' key, prefer from effect_config
-                    'enabled': enabled
-                }
-                layer.effects.append(effect_dict)
-                logger.debug(f"   ✅ Added {plugin_id} instance [{id(plugin_instance)}] to layer effects (index {len(layer.effects)-1})")
-            except Exception as e:
-                logger.error(f"❌ [{player_name}] Error loading effect '{plugin_id}' for Layer {layer.layer_id}: {e}")
-        
-        logger.debug(f"✅ [{player_name}] Loaded {len(layer.effects)} effects for Layer {layer.layer_id}")
-    
+        """Load effect plugin instances from ClipRegistry into *layer*.  See layers/effects.py."""
+        _effects.load_layer_effects_from_registry(self, layer, player_name)
+
     def reload_all_layer_effects(self, player_name=""):
-        """
-        Reload effects for all layers from ClipRegistry.
-        """
-        logger.debug(f"🔄 [{player_name}] Reloading all layer effects, layers={len(self.layers)}")
-        
-        for layer in self.layers:
-            if layer.clip_id:
-                self.load_layer_effects_from_registry(layer, player_name)
-        
-        logger.debug(f"✅ [{player_name}] All layer effects reloaded")
-    
-    def composite_layers(self, preprocess_transport_callback, player_name="Player"):
-        """
-        Composite all layers into a single frame using the ModernGL GPU pipeline.
+        """Reload effects for all layers from ClipRegistry.  See layers/effects.py."""
+        _effects.reload_all_layer_effects(self, player_name)
 
-        CPU side (parallel where possible):
-          - Layer 0 (master): transport preprocess + source decode + clip effects (sequential)
-          - Slave layers 1..N: same steps in parallel thread pool
+    # ──────────────────────────────────────────────────────────────────────────
+    # Compositor — delegate to layers/compositor.py
+    # ──────────────────────────────────────────────────────────────────────────
 
-        GPU side (sequential, all on the calling thread which owns the GL context):
-          - Upload each CPU frame to a pooled GL texture
-          - Blend onto composite FBO using blend.frag shader (ping-pong FBOs)
-          - Download composite to numpy BGR uint8 for CPU consumers
+    def composite_layers(self, preprocess_transport_callback, player_name="Player",
+                         needs_download: bool = True):
+        """GPU ping-pong blend pipeline.  See layers/compositor.py."""
+        from .compositor import composite_layers as _cl
+        return _cl(self, preprocess_transport_callback, player_name, needs_download)
 
-        Single-layer fast path skips the GPU entirely (no blend needed).
+    def _init_comp_ring(self, w: int, h: int) -> None:
+        """(Re-)allocate staging buffers.  See layers/compositor.py."""
+        from .compositor import init_comp_ring
+        init_comp_ring(self, w, h)
 
-        Args:
-            preprocess_transport_callback: called before fetching each layer's frame
-            player_name: used for effect logging
+    def _download_composite_ring(self, composite, w: int, h: int):
+        """Triple-buffer async composite download.  See layers/compositor.py."""
+        from .compositor import download_composite_ring
+        return download_composite_ring(self, composite, w, h)
 
-        Returns:
-            (np.ndarray BGR uint8, float source_delay)  or  (None, 0)
-        """
-        with self._render_lock:
-            layers_snap = list(self.layers)
+    def _fire_layer_processed_tap(self, layer, gpu_frame) -> None:
+        """Fire per-layer tap callbacks.  See layers/compositor.py."""
+        from .compositor import _fire_layer_processed_tap
+        _fire_layer_processed_tap(self, layer, gpu_frame)
 
-        if not layers_snap:
-            return None, 0
-
-        profiler = getattr(self, 'profiler', None)
-
-        # ─── Layer 0 (master) — sequential (controls timing + transport) ────
-        preprocess_transport_callback(layers_snap[0])
-
-        if profiler:
-            with profiler.profile_stage('source_decode'):
-                master_frame, source_delay = layers_snap[0].source.get_next_frame()
-        else:
-            master_frame, source_delay = layers_snap[0].source.get_next_frame()
-
-        if master_frame is None:
-            return None, source_delay
-
-        if profiler:
-            with profiler.profile_stage('clip_effects'):
-                master_frame = self.apply_layer_effects(
-                    layers_snap[0], master_frame, player_name)
-        else:
-            master_frame = self.apply_layer_effects(
-                layers_snap[0], master_frame, player_name)
-
-        # ─── Single-layer fast path: no blending needed ──────────────────────
-        if len(layers_snap) == 1:
-            return master_frame, source_delay
-
-        # ─── Slave layers: skip invisible ones early ─────────────────────────
-        active_slaves = [
-            l for l in layers_snap[1:] if l.enabled and l.opacity > 0
-        ]
-        if not active_slaves:
-            return master_frame, source_delay
-
-        # ─── Parallel CPU decode + effects for slave layers ──────────────────
-        # Only CPU work here (source decode + numpy effects) — GPU ops come later.
-        # cv2 / numpy release the GIL so threads run truly in parallel.
-        import time as _time
-        def _render_slave(layer):
-            try:
-                logger.debug(
-                    f"🧵 [THREAD:{threading.current_thread().name}] "
-                    f"rendering slave layer {layer.layer_id}")
-
-                # ── Per-slave FPS rate limiting ───────────────────────────────
-                # The slave is called once per master frame (at master FPS).
-                # If the slave clip has a lower FPS (e.g. 24fps slave on 30fps
-                # master), we must NOT advance its source every master frame —
-                # that would play it too fast.  Instead hold the last frame until
-                # enough time has elapsed for the slave's own frame interval.
-                now = _time.perf_counter()
-                slave_fps = getattr(layer.source, 'fps', 30.0) or 30.0
-                slave_frame_interval = 1.0 / slave_fps
-
-                if not hasattr(layer, '_slave_next_time'):
-                    # First call — initialise timing state; fetch immediately.
-                    layer._slave_next_time = now
-                    layer._slave_cached_frame = None
-
-                if now >= layer._slave_next_time or layer._slave_cached_frame is None:
-                    # Time to advance — fetch a new frame from the source.
-                    preprocess_transport_callback(layer)
-                    overlay_frame, _ = layer.source.get_next_frame()
-
-                    if overlay_frame is None:
-                        debug_layers(logger,
-                            f"🔁 Layer {layer.layer_id} reached end, auto-reset (slave loop)")
-                        layer.source.reset()
-                        overlay_frame, _ = layer.source.get_next_frame()
-
-                    if overlay_frame is None:
-                        source_info = getattr(
-                            layer.source, 'video_path',
-                            getattr(layer.source, 'generator_name', 'Unknown'))
-                        if not hasattr(self, '_warned_layers'):
-                            self._warned_layers = set()
-                        if layer.layer_id not in self._warned_layers:
-                            logger.warning(
-                                f"⚠️ Layer {layer.layer_id} (source: {source_info}) "
-                                f"returned None after reset, skipping")
-                            self._warned_layers.add(layer.layer_id)
-                        return layer.layer_id, None
-
-                    overlay_frame = self.apply_layer_effects(
-                        layer, overlay_frame, player_name)
-                    layer._slave_cached_frame = overlay_frame
-                    # Advance deadline by one slave frame interval (drift-safe)
-                    layer._slave_next_time += slave_frame_interval
-                    # Guard: if we've fallen far behind, don't try to catch up
-                    if layer._slave_next_time < now - slave_frame_interval:
-                        layer._slave_next_time = now + slave_frame_interval
-
-                return layer.layer_id, layer._slave_cached_frame
-
-            except Exception as e:
-                logger.error(
-                    f"❌ Parallel slave render error (layer {layer.layer_id}): {e}")
-                return layer.layer_id, None
-
-        futures_map = {
-            self._render_pool.submit(_render_slave, layer): layer
-            for layer in active_slaves
-        }
-
-        slave_frames: dict = {}
-        try:
-            for future in as_completed(futures_map, timeout=0.5):
-                layer = futures_map[future]
-                try:
-                    layer_id, overlay = future.result()
-                    slave_frames[layer_id] = overlay
-                except Exception as e:
-                    logger.error(
-                        f"❌ Slave render future error (layer {layer.layer_id}): {e}")
-        except TimeoutError:
-            logger.error(
-                "⚠️ Slave layer rendering timed out (0.5s) — compositing available frames only")
-
-        if profiler:
-            stage_cm = profiler.profile_stage('layer_composition')
-            stage_cm.__enter__()
-
-        try:
-            # ── GPU compositing path ──────────────────────────────────────────
-            # blend.frag shader chain on GPU — single download at the very end.
-            # No longer gated on self._use_gpu: with GPU-chained effects the
-            # per-frame readback is already paid once per layer; the compositor
-            # blend shaders themselves cost only microseconds.
-            ctx = get_context()
-            pool = get_texture_pool()
-            renderer = get_renderer()
-            blend_src = load_shader('blend.frag')
-            canvas_w, canvas_h = self.canvas_width, self.canvas_height
-
-            composite = pool.acquire(canvas_w, canvas_h)
-            composite.upload(np.ascontiguousarray(master_frame[:, :, :3] if master_frame.shape[2] == 4 else master_frame))
-
-            for layer in layers_snap[1:]:
-                if not layer.enabled or layer.opacity <= 0:
-                    continue
-                overlay = slave_frames.get(layer.layer_id)
-                if overlay is None:
-                    continue
-                ov3 = overlay[:, :, :3] if overlay.shape[2] == 4 else overlay
-                if ov3.shape[:2] != (canvas_h, canvas_w):
-                    ov3 = cv2.resize(ov3, (canvas_w, canvas_h))
-                layer_tex = pool.acquire(canvas_w, canvas_h)
-                try:
-                    layer_tex.upload(np.ascontiguousarray(ov3))
-                    blend_mode = BLEND_MODES.get(getattr(layer, 'blend_mode', 'normal'), 0)
-                    renderer.render(
-                        frag_source=blend_src,
-                        target_fbo=composite.fbo,
-                        uniforms={'opacity': layer.opacity / 100.0, 'mode': blend_mode},
-                        textures={'base': (0, composite), 'overlay': (1, layer_tex)},
-                    )
-                finally:
-                    pool.release(layer_tex)
-
-            # ── ArtNet GPU hook: sample LEDs while texture is still on GPU ──
-            if self._artnet_gpu_hook is not None:
-                try:
-                    self._artnet_gpu_hook(composite)
-                except Exception as e:
-                    logger.error(f"ArtNet GPU hook error: {e}")
-
-            # ── Download gate: skip texture.read() when nobody needs the CPU frame ──
-            # composite.download() costs ~43-111 ms on AMD (pipeline drain stall).
-            # When _needs_download=False the GPU composite is released without reading.
-            if not self._needs_download:
-                pool.release(composite)
-                return None, source_delay  # finally block still runs
-
-            if profiler:
-                with profiler.profile_stage('composite_download'):
-                    result = composite.download()
-            else:
-                result = composite.download()
-            pool.release(composite)
-
-        finally:
-            if profiler:
-                stage_cm.__exit__(None, None, None)
-
-        return result, source_delay
+    def _fire_composite_after_n_tap(self, n: int, composite_gpu) -> None:
+        """Fire composite-after-N tap callbacks.  See layers/compositor.py."""
+        from .compositor import _fire_composite_after_n_tap
+        _fire_composite_after_n_tap(self, n, composite_gpu)
 
     def set_artnet_gpu_hook(self, callback) -> None:
         """
@@ -937,16 +613,59 @@ class LayerManager:
         """
         self._artnet_gpu_hook = callback
 
-    def set_needs_download(self, value: bool) -> None:
+    def set_preview_gpu_hook(self, callback) -> None:
         """
-        Gate the GPU→CPU download in composite_layers().
+        Register a callback that receives the final composite GPUFrame before
+        it is downloaded to CPU.  Used by PreviewDownscaler to produce a small
+        JPEG-encoded preview without a full-resolution SSBO download.
 
-        When False, composite_layers() skips texture.read() (saves the ~43-111 ms
-        AMD pipeline drain stall) and returns (None, source_delay).  Set to True
-        whenever a preview subscriber is connected or a CPU consumer needs the frame.
+        Pass None to disable.
         """
-        self._needs_download = value
-    
+        self._preview_gpu_hook = callback
+
+    def set_display_gpu_hook(self, callback) -> None:
+        """
+        Register a callback that receives the final composite GPUFrame for
+        zero-copy display via WGL context sharing.
+
+        The callback is called from the render thread while the GL context is
+        current.  It should:
+          1. Blit composite → dedicated display texture (main context).
+          2. Call ctx.finish() so GPU writes are complete.
+          3. Call glfw_display.push_gpu_frame(glo, w, h).
+
+        This eliminates the 26 ms SSBO download when only display outputs are
+        active (no Art-Net, no recording).
+
+        Pass None to disable.
+        """
+        self._display_gpu_hook = callback
+
+    def set_transition_gpu_hook(self, callback) -> None:
+        """
+        Register a callback that receives the final composite GPUFrame before
+        it is downloaded to CPU.  Used by TransitionManager to store the "A"
+        buffer GPU-to-GPU when the render loop runs in GPU-only mode.
+
+        Pass None to disable.
+        """
+        self._transition_gpu_hook = callback
+
+    # ─── Tap API (spec §8) ────────────────────────────────────────────────────
+
+    def register_tap(self, config: TapConfig) -> None:
+        """Register a tap. Replaces any existing tap with the same tap_id."""
+        self._tap_configs = [tc for tc in self._tap_configs if tc.tap_id != config.tap_id]
+        self._tap_configs.append(config)
+        logger.info(f"Tap registered: {config.tap_id} stage={config.stage} layer={config.layer_selector}")
+
+    def unregister_tap(self, tap_id: str) -> None:
+        """Remove a tap. Silent if not found."""
+        before = len(self._tap_configs)
+        self._tap_configs = [tc for tc in self._tap_configs if tc.tap_id != tap_id]
+        if len(self._tap_configs) < before:
+            logger.info(f"Tap unregistered: {tap_id}")
+
     def clear(self):
         """Clear all layers (thread-safe)."""
         with self._render_lock:

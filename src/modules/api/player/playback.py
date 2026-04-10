@@ -195,15 +195,22 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     clip_id=clip_id  # Pass frontend-provided UUID if available
                 )
                     
-                # Update playlist_ids list at current index (if in playlist)
+                # Update playlist_ids at the correct slot.
+                # Use player.playlist_index when it points to this path (handles
+                # duplicate-path playlists where list.index() would only find
+                # the first occurrence and leave later slots as None).
                 if hasattr(player, 'playlist') and absolute_path in player.playlist:
-                    idx = player.playlist.index(absolute_path)
+                    pi = getattr(player, 'playlist_index', 0) or 0
+                    if pi < len(player.playlist) and player.playlist[pi] == absolute_path:
+                        idx = pi
+                    else:
+                        idx = player.playlist.index(absolute_path)
                     if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
                         player.playlist_ids = []
                     while len(player.playlist_ids) <= idx:
                         player.playlist_ids.append(None)
                     player.playlist_ids[idx] = clip_id
-                
+
                 # Load video into player with clip_id for trim/reverse support
                 video_source = VideoSource(
                     absolute_path,
@@ -220,9 +227,12 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 
                 # Set current clip ID for effect management AND save to playlist_ids
                 player.current_clip_id = clip_id
-                # Store UUID in playlist_ids list at current index (if in playlist)
                 if hasattr(player, 'playlist') and absolute_path in player.playlist:
-                    idx = player.playlist.index(absolute_path)
+                    pi = getattr(player, 'playlist_index', 0) or 0
+                    if pi < len(player.playlist) and player.playlist[pi] == absolute_path:
+                        idx = pi
+                    else:
+                        idx = player.playlist.index(absolute_path)
                     if not hasattr(player, 'playlist_ids') or not isinstance(player.playlist_ids, list):
                         player.playlist_ids = []
                     while len(player.playlist_ids) <= idx:

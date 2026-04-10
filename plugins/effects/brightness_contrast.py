@@ -4,14 +4,16 @@ Brightness/Contrast Effect Plugin - Basic brightness and contrast control
 import os
 from plugins import PluginBase, PluginType, ParameterType
 
-_SHADER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'brightness_contrast.frag')
+_SHADER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'brightness_contrast.wgsl')
 
 
 class BrightnessContrastEffect(PluginBase):
     """
     Brightness/Contrast Effect - Helligkeit und Kontrast anpassen.
     """
-    
+
+    _shader_src: str | None = None
+
     METADATA = {
         'id': 'brightness_contrast',
         'name': 'Brightness/Contrast',
@@ -56,8 +58,10 @@ class BrightnessContrastEffect(PluginBase):
     
     # ── GPU shader interface ────────────────────────────────────────────
     def get_shader(self):
-        with open(_SHADER_PATH) as f:
-            return f.read()
+        if BrightnessContrastEffect._shader_src is None:
+            with open(_SHADER_PATH) as f:
+                BrightnessContrastEffect._shader_src = f.read()
+        return BrightnessContrastEffect._shader_src
 
     def get_uniforms(self, **kwargs):
         return {

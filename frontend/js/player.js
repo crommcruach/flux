@@ -100,9 +100,8 @@ function initEarlyPreviewStream() {
     if (previewImg && !previewImg.src) {
         // Start MJPEG stream immediately without waiting for full init
         const apiBase = window.API_BASE || '';
-        // NEW: Use generalized output streaming endpoint
-        previewImg.src = `${apiBase}/api/outputs/video/stream/preview_virtual?fps=25&quality=85`;
-        console.log('🚀 Early preview stream initialized (new output-based endpoint)');
+        previewImg.src = `${apiBase}/api/preview/stream`;
+        console.log('🚀 Early preview stream initialized');
     }
 }
 
@@ -211,12 +210,12 @@ async function init() {
                     const artnetPreviewImg = document.getElementById('artnetPreviewImg');
                     
                     if (videoPreviewImg) {
-                        videoPreviewImg.src = `${API_BASE}/api/outputs/video/stream/preview_virtual?t=${Date.now()}`;
+                        videoPreviewImg.src = `${API_BASE}/api/preview/stream?t=${Date.now()}`;
                         videoPreviewImg.title = 'Active Output';
                     }
                     
                     if (artnetPreviewImg) {
-                        artnetPreviewImg.src = `${API_BASE}/api/outputs/artnet/stream/preview_virtual?t=${Date.now()}`;
+                        artnetPreviewImg.src = `${API_BASE}/api/preview/artnet/stream?t=${Date.now()}`;
                         artnetPreviewImg.title = 'Active Output';
                     }
                 }
@@ -1638,9 +1637,9 @@ function startPreviewStream() {
     
     // Check if stream already started (by early init)
     const currentSrc = previewImg.src;
-    const expectedSrc = `${API_BASE}/api/outputs/video/stream/preview_virtual?fps=25&quality=85`;
-    if (currentSrc && currentSrc.includes('/api/outputs/video/stream/preview_virtual')) {
-        debug.log(`MJPEG preview stream already running (new output endpoint)`);
+    const expectedSrc = `${API_BASE}/api/preview/stream`;
+    if (currentSrc && currentSrc.includes('/api/preview/stream')) {
+        debug.log(`MJPEG preview stream already running`);
         return;
     }
     
@@ -1651,7 +1650,7 @@ function startPreviewStream() {
     previewImg.style.display = 'block';
     previewImg.src = expectedSrc;
     
-    debug.log(`MJPEG preview stream started (new output-based endpoint)`);
+    debug.log(`MJPEG preview stream started`);
 }
 
 function stopPreviewStream() {
@@ -4712,46 +4711,17 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
                         },
                         onRangeChange: (rangeMin, rangeMax) => {
-                            // Sync scrub input min/max to new range
+                            // Sync scrub input min/max to new range (display only — no API call during drag)
                             const scrubEl = document.getElementById(`${controlId}_value`);
                             if (scrubEl && scrubEl.tagName === 'INPUT') {
                                 scrubEl.min = rangeMin;
                                 scrubEl.max = rangeMax;
                             }
-                            // Range changed - trigger update to save range
+                            // Keep local display value in sync while dragging
                             const slider = getTripleSlider(controlId);
                             if (slider) {
                                 const finalValue = intDecimals === 0 ? Math.round(slider.getValue()) : slider.getValue();
                                 updateDisplayValue(finalValue);
-                                updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
-                                
-                                // Update audio reactive sequence min/max if exists
-                                if (window.sequenceManager && paramUid) {
-                                    const sequence = window.sequenceManager.sequences.find(s => s.target_parameter === paramUid);
-                                    if (sequence && sequence.type === 'audio') {
-                                        console.log(`🔄 Updating audio sequence range: ${rangeMin} - ${rangeMax}`);
-                                        window.sequenceManager.updateSequenceInline(paramUid, { 
-                                            min_value: rangeMin, 
-                                            max_value: rangeMax 
-                                        });
-                                    }
-                                    // Update BPM sequence min/max if exists
-                                    if (sequence && sequence.type === 'bpm') {
-                                        console.log(`🔄 Updating BPM sequence range: ${rangeMin} - ${rangeMax}`);
-                                        window.sequenceManager.updateBPMSequenceInline(paramUid, { 
-                                            min_value: rangeMin, 
-                                            max_value: rangeMax 
-                                        });
-                                    }
-                                    // Update timeline sequence min/max if exists
-                                    if (sequence && sequence.type === 'timeline') {
-                                        console.log(`🔄 Updating timeline sequence range: ${rangeMin} - ${rangeMax}`);
-                                        window.sequenceManager.updateTimelineSequenceInline(paramUid, { 
-                                            min_value: rangeMin, 
-                                            max_value: rangeMax 
-                                        });
-                                    }
-                                }
                             }
                         },
                         onDragStart: (handleType) => {
@@ -4764,6 +4734,38 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             // Resume video only when releasing the value handle
                             if (handleType === 'value' && player === 'clip' && selectedClipPlayerType) {
                                 play(selectedClipPlayerType);
+                            }
+                            // Send trim (min/max) to backend only on release, not on every drag move
+                            if (handleType === 'min' || handleType === 'max') {
+                                const slider = getTripleSlider(controlId);
+                                if (slider) {
+                                    const finalValue = intDecimals === 0 ? Math.round(slider.getValue()) : slider.getValue();
+                                    updateDisplayValue(finalValue);
+                                    updateParameter(player, effectIndex, param.name, finalValue, `${controlId}_value`, paramUid);
+                                    
+                                    // Update audio reactive sequence min/max if exists
+                                    if (window.sequenceManager && paramUid) {
+                                        const sequence = window.sequenceManager.sequences.find(s => s.target_parameter === paramUid);
+                                        if (sequence && sequence.type === 'audio') {
+                                            window.sequenceManager.updateSequenceInline(paramUid, { 
+                                                min_value: slider.config.rangeMin, 
+                                                max_value: slider.config.rangeMax 
+                                            });
+                                        }
+                                        if (sequence && sequence.type === 'bpm') {
+                                            window.sequenceManager.updateBPMSequenceInline(paramUid, { 
+                                                min_value: slider.config.rangeMin, 
+                                                max_value: slider.config.rangeMax 
+                                            });
+                                        }
+                                        if (sequence && sequence.type === 'timeline') {
+                                            window.sequenceManager.updateTimelineSequenceInline(paramUid, { 
+                                                min_value: slider.config.rangeMin, 
+                                                max_value: slider.config.rangeMax 
+                                            });
+                                        }
+                                    }
+                                }
                             }
                         }
                     });
@@ -6870,13 +6872,6 @@ function showPlaylistContextMenu(x, y, playlistId, index, fileItem) {
     const isNonActive = viewedPlaylistId && activePlaylistId && viewedPlaylistId !== activePlaylistId;
     
     menu.innerHTML = `
-        ${isNonActive ? `
-        <div class="context-menu-item" data-action="takeover-preview">
-            <span>🎬 Live Preview This Clip</span>
-            <small>Pause active, play on output</small>
-        </div>
-        <div class="context-menu-separator"></div>
-        ` : ''}
         <div class="context-menu-item" data-action="clone">
             <span>🔄 Clone</span>
             <small>Full copy with effects & layers</small>
@@ -6930,10 +6925,6 @@ function showPlaylistContextMenu(x, y, playlistId, index, fileItem) {
         
         try {
             switch (action) {
-                case 'takeover-preview':
-                    // Start takeover preview with this specific clip (no separate window)
-                    await window.startTakeoverPreview(viewedPlaylistId, null, index);
-                    break;
                 case 'clone':
                     await clonePlaylistItem(playlistId, index, fileItem);
                     break;
@@ -7127,6 +7118,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function showVideoPlayerSettingsModal() {
+    updatePreviewMenuLabel();  // sync preview switch before opening
     const modal = new bootstrap.Modal(document.getElementById('videoPlayerSettingsModal'));
     modal.show();
 }
@@ -7228,6 +7220,7 @@ async function saveVideoPlayerSettings() {
 // Make functions globally accessible
 window.showVideoPlayerSettingsModal = showVideoPlayerSettingsModal;
 window.saveVideoPlayerSettings = saveVideoPlayerSettings;
+window.onPreviewToggleChange = onPreviewToggleChange;
 
 // ========================================
 // ART-NET PLAYER SETTINGS
@@ -7336,186 +7329,6 @@ async function saveArtnetPlayerSettings() {
 window.showArtnetPlayerSettingsModal = showArtnetPlayerSettingsModal;
 window.saveArtnetPlayerSettings = saveArtnetPlayerSettings;
 
-// ========================================
-// TAKEOVER PREVIEW MODE
-// ========================================
-
-/**
- * Start takeover preview mode: Pause active playlist and play preview playlist on output
- */
-async function startTakeoverPreview(playlistId, playerType = null, clipIndex = 0) {
-    try {
-        console.log(`🎬 Starting takeover preview for playlist ${playlistId}${playerType ? ` (${playerType} only)` : ''} at clip ${clipIndex}`);
-        
-        const response = await fetch(`${API_BASE}/api/playlists/${playlistId}/takeover-preview/start`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                player_id: playerType,  // null = both players
-                clip_index: clipIndex   // Start at this clip
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            console.log('✅ Takeover preview started:', result);
-            showToast(`🎬 Live Preview: ${result.preview_playlist} (Output taken over)`, 'success');
-            
-            // Switch preview images to show main output (takeover uses main players)
-            const videoPreviewImg = document.getElementById('videoPreviewImg');
-            const artnetPreviewImg = document.getElementById('artnetPreviewImg');
-            
-            if (videoPreviewImg) {
-                videoPreviewImg.src = `${API_BASE}/api/outputs/video/stream/preview_virtual?t=${Date.now()}`;
-                videoPreviewImg.title = 'Output (Takeover Preview Active)';
-            }
-            
-            if (artnetPreviewImg) {
-                artnetPreviewImg.src = `${API_BASE}/api/outputs/artnet/stream/preview_virtual?t=${Date.now()}`;
-                artnetPreviewImg.title = 'Output (Takeover Preview Active)';
-            }
-            
-            // Update UI to show takeover mode
-            updateTakeoverPreviewUI(true, playlistId);
-            
-            return true;
-        } else {
-            console.error('❌ Failed to start takeover preview:', result.error);
-            showToast(`Failed to start live preview: ${result.error}`, 'error');
-            return false;
-        }
-    } catch (error) {
-        console.error('❌ Takeover preview error:', error);
-        showToast('Failed to start live preview', 'error');
-        return false;
-    }
-}
-
-/**
- * Stop takeover preview mode and restore active playlist
- */
-async function stopTakeoverPreview() {
-    try {
-        console.log('🛑 Stopping takeover preview...');
-        
-        const response = await fetch(`${API_BASE}/api/playlists/takeover-preview/stop`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'}
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            console.log('✅ Takeover preview stopped:', result);
-            showToast(`▶️ Restored: ${result.active_playlist}`, 'success');
-            
-            // Update UI to remove takeover mode indicator
-            updateTakeoverPreviewUI(false);
-            
-            return true;
-        } else {
-            console.error('❌ Failed to stop takeover preview:', result.error);
-            showToast(`Failed to stop live preview: ${result.error}`, 'error');
-            return false;
-        }
-    } catch (error) {
-        console.error('❌ Stop takeover preview error:', error);
-        showToast('Failed to stop live preview', 'error');
-        return false;
-    }
-}
-
-/**
- * Check takeover preview status
- */
-async function checkTakeoverPreviewStatus() {
-    try {
-        const response = await fetch(`${API_BASE}/api/playlists/takeover-preview/status`);
-        const result = await response.json();
-        
-        if (result.success && result.takeover_active) {
-            return result.state;
-        }
-        return null;
-    } catch (error) {
-        console.error('❌ Check takeover status error:', error);
-        return null;
-    }
-}
-
-/**
- * Update UI to show takeover preview mode
- */
-function updateTakeoverPreviewUI(active, playlistId = null) {
-    // Add visual indicator to show takeover mode is active
-    const container = document.getElementById('playlistTabsContainer');
-    if (!container) return;
-    
-    if (active) {
-        // Add takeover indicator
-        let indicator = document.getElementById('takeoverPreviewIndicator');
-        if (!indicator) {
-            indicator = document.createElement('div');
-            indicator.id = 'takeoverPreviewIndicator';
-            indicator.className = 'takeover-preview-indicator';
-            indicator.innerHTML = `
-                <span class="takeover-text">🎬 LIVE PREVIEW MODE</span>
-                <button class="btn btn-sm btn-danger" onclick="stopTakeoverPreview()">Stop & Restore</button>
-            `;
-            container.parentElement.insertBefore(indicator, container);
-        }
-    } else {
-        // Remove takeover indicator
-        const indicator = document.getElementById('takeoverPreviewIndicator');
-        if (indicator) {
-            indicator.remove();
-        }
-    }
-}
-
-/**
- * Toggle takeover preview for viewed playlist
- */
-async function toggleTakeoverPreview() {
-    const status = await checkTakeoverPreviewStatus();
-    
-    if (status) {
-        // Already active - stop it
-        await stopTakeoverPreview();
-    } else {
-        // Start takeover preview for viewed playlist
-        const viewedPlaylistId = window.playlistTabsManager?.viewedPlaylistId;
-        const activePlaylistId = window.playlistTabsManager?.activePlaylistId;
-        
-        if (!viewedPlaylistId) {
-            showToast('No playlist selected', 'warning');
-            return;
-        }
-        
-        if (viewedPlaylistId === activePlaylistId) {
-            showToast('Cannot preview active playlist', 'info');
-            return;
-        }
-        
-        await startTakeoverPreview(viewedPlaylistId);
-    }
-}
-
-// Export functions
-window.startTakeoverPreview = startTakeoverPreview;
-window.stopTakeoverPreview = stopTakeoverPreview;
-window.checkTakeoverPreviewStatus = checkTakeoverPreviewStatus;
-window.toggleTakeoverPreview = toggleTakeoverPreview;
-
-// Check takeover status on load
-document.addEventListener('DOMContentLoaded', async () => {
-    const status = await checkTakeoverPreviewStatus();
-    if (status) {
-        updateTakeoverPreviewUI(true, status.preview_playlist_id);
-    }
-});
-
 // Cleanup
 window.addEventListener('beforeunload', () => {
     if (updateInterval) {
@@ -7553,26 +7366,41 @@ function hidePreviewContextMenu() {
     if (menu) menu.style.display = 'none';
 }
 
-async function updatePreviewMenuLabel() {
-    try {
-        const res = await fetch(`${API_BASE}/api/preview/status?player_id=video`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const item = document.getElementById('previewToggleItem');
-        if (item) item.textContent = data.preview_enabled ? 'Disable Preview' : 'Enable Preview';
-        const img = document.getElementById('videoPreviewImg');
-        if (img) img.style.opacity = data.preview_enabled ? '1' : '0.3';
-    } catch (_) { /* ignore */ }
+function updatePreviewMenuLabel() {
+    // Derive state from CSS visibility — MJPEG stream stays connected at all times
+    // so the output pipeline keeps running. The toggle just hides/shows the image.
+    const img = document.getElementById('videoPreviewImg');
+    const enabled = !!(img && img.style.display !== 'none');
+    // Context menu item
+    const item = document.getElementById('previewToggleItem');
+    if (item) item.textContent = enabled ? 'Hide Preview' : 'Show Preview';
+    // Settings modal toggle switch (programmatic set does NOT fire onchange)
+    const sw = document.getElementById('videoPreviewToggle');
+    if (sw) sw.checked = enabled;
 }
 
-async function togglePreview() {
-    hidePreviewContextMenu();
-    try {
-        await fetch(`${API_BASE}/api/preview/toggle`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ player_id: 'video' })
-        });
-        updatePreviewMenuLabel();
-    } catch (_) { /* ignore */ }
+function onPreviewToggleChange() {
+    const sw = document.getElementById('videoPreviewToggle');
+    const img = document.getElementById('videoPreviewImg');
+    if (!img) return;
+    if (sw && sw.checked) {
+        img.style.display = 'block';
+    } else {
+        img.style.display = 'none';
+    }
+    updatePreviewMenuLabel();
 }
+
+function togglePreview() {
+    hidePreviewContextMenu();
+    const img = document.getElementById('videoPreviewImg');
+    if (!img) return;
+    const visible = img.style.display !== 'none';
+    img.style.display = visible ? 'none' : 'block';
+    updatePreviewMenuLabel();
+}
+
+// Initialise preview toggle button to reflect current backend state
+document.addEventListener('DOMContentLoaded', () => {
+    updatePreviewMenuLabel();
+});

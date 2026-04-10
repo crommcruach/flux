@@ -222,7 +222,7 @@ class OutputManager:
         self.outputs[output_id].disable()
         self._save_state()
         return True
-    
+
     def update_frame(self, composite_frame: np.ndarray, 
                     layer_manager: Optional[Any] = None,
                     current_clip_id: Optional[str] = None):
@@ -243,6 +243,9 @@ class OutputManager:
         if not hasattr(self, '_frame_count'):
             self._frame_count = 0
         self._frame_count += 1
+        if self._frame_count == 1:
+            enabled_ids = [oid for oid, o in self.outputs.items() if o.enabled]
+            logger.info(f'[{self.player_name}] OutputManager: first frame, enabled outputs: {enabled_ids}')
         if self._frame_count <= 5:
             enabled_outputs = [(oid, o.config.get('type', 'unknown')) for oid, o in self.outputs.items() if o.enabled]
             logger.debug(f"[{self.player_name}] update_frame called (frame #{self._frame_count}), total outputs: {len(self.outputs)}, enabled: {len(enabled_outputs)}")

@@ -272,10 +272,15 @@ function renderParameterControl(param, currentValue, effectIndex) {
                         updateParameter(effectIndex, param.name, newValue, `${controlId}_value`);
                     },
                     onRangeChange: (rangeMin, rangeMax) => {
-                        // Range changed - trigger update to save range
-                        const slider = getTripleSlider(controlId);
-                        if (slider) {
-                            updateParameter(effectIndex, param.name, slider.getValue(), `${controlId}_value`);
+                        // Display only during drag — no API call until mouse release
+                    },
+                    onDragEnd: (handleType) => {
+                        // Send range to backend only on release
+                        if (handleType === 'min' || handleType === 'max') {
+                            const slider = getTripleSlider(controlId);
+                            if (slider) {
+                                updateParameter(effectIndex, param.name, slider.getValue(), `${controlId}_value`);
+                            }
                         }
                     }
                 });

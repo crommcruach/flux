@@ -82,3 +82,16 @@ Bugs and problems identified but not yet resolved. Add new entries at the top of
 **Status:** Open
 **Description:** Playing video in reverse (negative speed/direction) has noticeably degraded performance compared to forward playback. Frame delivery is inconsistent and the perceived frame rate drops under normal load.
 **Planned fix:** Investigate frame decoding strategy for reverse playback — likely requires pre-buffering frames or seeking backwards frame-by-frame, which is expensive. Consider caching a short reverse buffer or using a dedicated reverse-decode path.
+
+---
+
+## Improvements
+
+Potential optimisations identified but not yet implemented. Not bugs — things work correctly, these would just make them faster.
+
+### GPU command encoder batching (layer composition)
+**File:** `src/modules/player/layers/compositor.py`, `src/modules/player/layers/effects.py`
+**Expected gain:** ~2ms off `layer_composition` stage
+**Description:** Each frame involves two separate `queue.submit()` calls — one for master layer effects (`batch_enc` in `effects.py`) and one for the slave blend passes (`blend_enc` in `compositor.py`). On AMD Vulkan each `queue.submit()` costs ~2ms as a kernel context switch regardless of payload size. Merging both into a single encoder/submit would eliminate one round-trip.
+**How:** Thread a shared `GPUCommandEncoder` from `composite_layers()` into `_apply_effects()` for the master layer, record all passes (master effects + slave blends) into it, then do one final `queue.submit()`. Requires `apply_layer_effects()` to accept an optional external encoder parameter (same pattern already used in `renderer.render()`).
+**Note:** `effects.py` currently calls `device.queue.submit([batch_enc.finish()])` at the end of its chain. That submit would be removed and deferred to the compositor.

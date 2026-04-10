@@ -13,7 +13,6 @@ import cv2
 
 class _CPUAccelerator:
     enabled = False   # plugins guard GPU paths with `if self.gpu.enabled:`
-    backend = "CPU"   # main.py startup log reads _gpu.backend
 
     def resize(self, frame, size, interpolation=cv2.INTER_LINEAR):
         return cv2.resize(frame, size, interpolation=interpolation)

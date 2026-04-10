@@ -212,7 +212,7 @@
             const delaySeconds = (delay / 1000).toFixed(1);
             
             reconnectStatus.textContent = `Reconnecting in ${delaySeconds}s (attempt ${reconnectAttempts})...`;
-            console.log(`🔄 Reconnect attempt ${reconnectAttempts} in ${delaySeconds}s`);
+            console.log(`� Reconnect attempt ${reconnectAttempts} in ${delaySeconds}s`);
             
             reconnectTimer = setTimeout(() => {
                 updateStream();

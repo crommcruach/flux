@@ -1,0 +1,641 @@
+Source, Clip #Quelle
+Layer(s)     #Zuweisung Layer Default Layer 0
+Effects      #Anwendung Effekte
+Blends	     #Anwendung Blends nur wenn Layer > 0 
+Layer Out    #Möglichkeit zum abgriff von Layer(n) bsp. Layer2 oder sogar Layer 2-3 Zuweisung auf Slices
+Transition   #Nur wenn zugewiesen/angewendet
+Composition  #Rendern der Composition Layer 
+Slice Rendering#
+Transform Rendering,Artnet Rendering (SSBO?)
+Final output
+
+SSBO Layer(s)  für complexe berechnungen shader die nicht per default in der GPU vorhanden sind
+
+GPU Video/Layer Renderer (Python + moderngl, OpenGL/GLSL)
+Start: RAW (NumPy/memmap) → Migration: HAP Q Alpha
+Rendering & Compositing: 100% shader‑basiert
+Alpha‑Standard: Straight (un‑premultiplied)
+Farbraum‑Standard: Linear
+Zusatz: Layer‑Abgriff (Taps) + Slice‑Routing mit canonical order niedrig → hoch
+Zusatz: Effekt‑Plugins (einfach erweiterbar, auch durch Dritte)
+Zusatz: cv2‑Steuerung ablösen – direkte Player‑Kontrolle inkl. Playlist‑Navigation
+Zusatz: Human‑Decision Gate bei <30 fps + Profiler (Dev/Light), alle Schritte nachvollziehbar
+
+0) Zweck, Scope & Zielvorgaben
+0.1 Zweck
+Dieses Dokument beschreibt eine deterministische Architektur für Video-/Layer‑Compositing mit frei konfigurierbarem Effekt‑Stack (Reihenfolge frei, Mehrfachanwendung), Multiplatform Python, moderngl, shader‑only Pipeline.
+0.2 Mindestanforderung (Tier A – „Muss laufen“)
+
+30 fps Standardziel
+2 Player/Streams, Full HD
+1 Layer
+max. 5 Effekte pro Stack
+Live‑Parameteränderungen ohne Recompile‑Stottern
+Stack‑Änderungen dürfen während Playback passieren, ohne harte Render‑Stalls (Fallback).
+
+0.3 Optional (Tier C – Highend/Media PCs)
+
+60 fps (nur geeignete Hardware), bis 4K, mehrere Layer
+
+
+1) Projektweite Invarianten (nicht verhandelbar)
+1.1 Alpha‑Konvention: Straight Alpha (global)
+
+Alle Texturen/Frames/Zwischenergebnisse: Straight Alpha
+Kein globales Premultiply
+Falls einzelne Operationen intern premultiplied rechnen müssen: nur lokal im Shader, danach Rückführung auf Straight.
+
+
+Hinweis: In HAP‑Workflows wird u. a. „straight alpha“ als Erwartung erwähnt; die Festlegung auf Straight ist damit kompatibel. [renderheads.com]
+
+1.2 Farbraum‑Konvention: Linear (global)
+
+Alle Berechnungen (Effekte, Blendmodes, Composite, Tap‑Combines) erfolgen in Linear.
+Ein-/Ausgabe in sRGB ist nur eine I/O‑Frage (Decoding/Encoding), nicht der Arbeitsfarbraum.
+Jede Quelle wird vor Effekt‑Stack auf Linear normalisiert.
+Tap/Slice Outputs sind standardmäßig Linear + Straight Alpha, außer ein Output ist explizit „Display‑Output“ mit sRGB‑Encoding.
+
+Konsequenz: SampleSource() liefert immer Linear RGBA (Straight).
+1.3 Einheitliches Render‑Modell (für alle Quellen)
+SourceNode → Normalize/SampleSource → EffectStackPass → CompositePass → Output
+
+SourceNode liefert Texturen + Metadaten (Planes, Typ).
+SampleSource() ist die einzige Stelle mit formatabhängiger Logik.
+Effekt‑Stack und Compositing sind danach identisch.
+
+1.4 Transform‑Semantik im Stack: Resample
+
+Transform kann überall im Stack stehen.
+Bedeutung: UV transformieren und erneut aus der Source sampeln (Resample).
+So bleibt freie Reihenfolge in einem Pass definierbar (Transform kostet zusätzliche Samples).
+
+
+2) Gesamtarchitektur in Modulen
+2.1 Datenmodelle (Python)
+TextureSet (SourceOutput)
+
+textures: Map „Name → moderngl Texture Handle“ (z. B. "rgba", "cocgsy", "alpha")
+width, height
+color_model: "RGBA", "HAPQ_ALPHA", "ISF_RGBA", …
+alpha_mode: immer "STRAIGHT"
+colorspace_hint: "srgb" oder "linear" (Input-Hinweis)
+timestamp oder frame_index
+
+LayerDescriptor
+
+Source‑Binding (welcher Player/Clip)
+Effekt‑Stack (Liste von Effekt‑Instanzen, Reihenfolge, Duplikate erlaubt)
+Parameter‑Offsets/Indices (Buffer)
+Composite‑Parameter (Opacity, Blendmode, Masken)
+Tap-/Slice‑Konfiguration (optional)
+
+2.2 Interfaces
+ISource
+
+open(uri, opts)
+seek(time_or_frame)
+acquire(time_or_frame) -> TextureSet
+close()
+
+Anforderung: acquire() darf nicht unbounded blockieren → Prefetch/Ringbuffer Pflicht.
+IRenderer
+
+render(frame_time) liefert:
+
+Main Output Texture
+Slice Outputs (0..N, siehe Abschnitt 8)
+Tap Registry (pro Frame)
+
+3) Quellen (SourceNodes)
+3.1 RAW Source (Startzustand: NumPy/memmap)
+Input: RGBA8 Straight Alpha, typischerweise als memmap / contiguous Framefile.
+Pflichtfeatures
+
+Contiguous Storage pro Clip (berechenbare Offsets, schnelles Scrubbing)
+Prefetch Thread + Ringbuffer pro Player
+Asynchroner Uploadpfad (Double/Triple Buffer Pattern)
+Texture Reuse (keine Neuallokation pro Frame)
+
+Farbraum
+
+RAW‑Frames müssen deklarieren, ob sie sRGB oder Linear repräsentieren.
+Normalisierung auf Linear erfolgt in SampleSource().
+
+3.2 HAP Q Alpha Source (Migration/Ziel)
+HAP‑Kontext (für Integration relevant)
+
+HAP ist auf hochperformantes Echtzeit‑Playback ausgerichtet, Tradeoff sind sehr große Dateien (I/O‑Limit). [hap.video], [renderheads.com], [derivative.ca]
+HAP Q / HAP Q Alpha verwenden YCoCg und benötigen beim Rendern eine Shader‑Konvertierung; Q Alpha kombiniert zusätzlich die Alpha‑Plane. [hap.video]
+Referenzdokumentation beschreibt die Frame‑Struktur und externe Kompressionsschemata (S3TC/BCn etc.). [github.com], [hap.video]
+
+Pflichtfeatures
+
+Demux Container (MOV/AVI) → Frames extrahieren
+Decode (MVP: RGBA ok; Ziel: getrennte Planes "cocgsy" + "alpha")
+Prefetch/Ringbuffer (I/O‑lastig)
+SampleSource() führt aus:
+
+YCoCg→RGB Dekodierung (HAP Q/QAlpha)
+Alpha combine
+ggf. sRGB→Linear (falls Source als sRGB markiert)
+Ergebnis: Linear + Straight Alpha
+
+
+
+
+Hinweis: Support für Q Alpha kann je nach Toolchain variieren; früh mit echten Dateien testen. [renderheads.com], [legacy-hel...sguise.one]
+
+3.3 ISF Source (optional)
+ISF ist ein Shader‑Format inkl. Metadaten, gedacht als wiederverwendbare Shader‑Ressource. 
+Regel: ISF wird in ein FBO gerendert, Output ist RGBA Straight Alpha; Farbraum deklarieren, dann Normalisierung in SampleSource(). [docs.vidvox.net]
+
+4) Shader‑Schicht: SampleSource() (Normalize‑Gate)
+4.1 Vertrag
+SampleSource() liefert immer:
+
+RGBA
+Straight Alpha
+Linear Farbraum
+
+4.2 Aufgaben
+
+Format-/Plane‑Handling (RAW vs HAP Planes vs ISF)
+Farbkodierungs‑Konvertierung (YCoCg→RGB bei HAP Q/QAlpha) [hap.video]
+sRGB→Linear Decoding falls nötig
+Optionale Standard‑Policies (Clamp/Wrapping) nur, wenn projectweit festgelegt
+
+
+5) Effekt‑Stack System (frei reorderbar, mehrfach, max ~20)
+5.1 Anforderungen
+
+Reihenfolge frei, Duplikate erlaubt
+typ. 1–5, max ~20
+Parameteränderungen nur Buffer Updates
+Stack‑Änderungen im Playback ohne harte Stalls
+
+5.2 Ausführung: JIT + Cache + Fallback
+JIT Shader pro Stack‑Signatur
+
+StackSignature enthält:
+
+Effekt‑IDs (namespaced), Versionen, Reihenfolge inkl. Duplikate
+Semantik‑Flags (Transform=Resample)
+Pipeline‑Version (Linear+Straight; plus ggf. Qualitätsflags)
+
+
+ProgramCache:
+
+State: Ready / Compiling / Failed
+LRU‑Limit (z. B. 128–256)
+
+
+
+Fallback Interpreter Shader
+
+verarbeitet Commandliste (max 20 Ops)
+nutzt Plugin‑Opcode Registry (siehe Abschnitt 9)
+
+Compile‑Policy
+
+Debounce/compile-on-drop bei Drag&Drop
+während Compiling: Fallback oder last known good (UX‑Policy)
+
+
+6) Datenhaltung für Effekte (Buffer Layout, moderngl)
+6.1 Parameter‑Buffer
+
+fester Slot pro Layer
+pro Effekt‑Instanz fester Parameterbereich (N×vec4 Slots)
+Live‑Änderungen: Sub‑Update des Layer‑Slots
+
+6.2 Command‑Buffer
+
+pro Layer: cmdBase, cmdCount
+Commands: opcode + paramIndex
+
+
+7) Composite Pass (shader‑basiert, Linear + Straight Alpha)
+7.1 Anforderungen
+
+kein fixed-function blending
+Standard Over in Linear, plus Blendmodes/Masken
+
+7.2 Korrektheit
+
+Over‑Operator muss Straight Alpha korrekt behandeln
+Blendmodes müssen in Linear definiert sein
+Output bleibt Linear+Straight (außer expliziter Display‑Output)
+
+
+8) Layer Abgriff (Taps) + Slice‑Routing (Pflicht)
+8.1 Ziel
+
+Abgriff einzelner Layer (z. B. Layer2)
+Abgriff mehrerer Layer (z. B. Layer2 & Layer3) getrennt oder kombiniert
+Routing auf Slices (z. B. Slice 1, Slice 3)
+Optional: Batch‑Assignment „Slices [1,3]“ (UI Convenience); intern ist beliebiges Mapping möglich
+
+8.2 Tap‑Stages (Abgriffpunkte)
+Pflicht
+
+LayerProcessed (nach Stack, vor Composite)
+CompositeAfterN (Zwischenergebnis nach Layer N)
+
+Optional
+
+SourceDecoded (nach SampleSource, vor Effekten)
+
+8.3 Tap‑Definition
+
+tap_id
+stage
+layer_selector: single (layer_index) oder multi (layer_indices)
+mode bei multi:
+
+separate → N Texturen (eine pro Layer)
+combined → 1 Textur (kombiniert)
+
+
+resolution_policy (native/output/fixed)
+lifetime_policy (frame‑ephemeral/persist)
+
+8.4 Canonical Layer Order: immer niedrig → hoch
+Bei multi‑layer taps:
+
+Duplikate entfernen
+Sortieren aufsteigend
+Ungültige Indices ignorieren + warn log (Default)
+
+Gilt für:
+
+combined: Combine‑Reihenfolge
+separate: OutputIndex Reihenfolge (0 = kleinster Index)
+
+8.5 Combine‑Regel bei combined
+
+Combine = Straight Alpha Over in canonical order (niedrig→hoch)
+Combine erfolgt in Linear
+
+8.6 Slice‑System
+Slice Definition
+
+slice_id
+target_type: separate Texture pro Slice oder Atlas/Viewport Region
+resolution_policy / region
+
+Slice Mapping
+
+slice_id → tap_id
+optional tap_output_index (bei separate)
+optional scaling policy
+
+8.7 Scheduling Konsequenzen
+
+Taps sollen vorhandene RTs referenzieren (kein unnötiges Re-Render)
+CompositeAfterN erfordert Composite‑Zwischentexturen
+Tap Outputs müssen gepinnt werden (RT Pool darf nicht überschreiben)
+
+8.8 Tap Registry
+
+pro Frame: tap_id → texture(s)
+Slice Outputs werden wie Main Output bereitgestellt
+
+
+9) Plugin‑basiertes Effekt‑System (Third‑Party‑fähig)
+9.1 Ziel
+
+Effekte als Plugins, ohne Core‑Änderung erweiterbar
+Third‑Party‑Pakete möglich
+kompatibel mit JIT + Interpreter Fallback
+Parameter/UI/Constraints deklarativ
+
+9.2 Identität & Versionierung
+
+effect_id (namespaced)
+effect_version (Semver)
+effect_api_version (Host‑Kompatibilität)
+
+9.3 Packaging (Python)
+Plugin kann enthalten:
+
+Metadaten
+Parameter‑Schema + Packing Plan
+GLSL Module/Snippets
+UI Hints
+Constraints/Validatoren
+
+Discovery via Plugin‑Registry/Entry Points.
+9.4 Parameter‑Schema (SSBO‑kompatibel)
+
+Live‑Updates Buffer‑only
+Packing in engine‑owned Layout
+Default/Range/Semantik definiert
+Wenn Effekt mehr Slots braucht:
+optional extended slot policy
+oder multi-pass Klassifikation
+
+9.5 Shader‑Integration
+JIT Pfad
+
+Plugins liefern „apply“‑Bausteine + Dependencies
+Engine namespaced & bindet deterministisch
+
+Interpreter Pfad
+
+Plugin erhält opcode (Registry)
+Interpreter dispatcht opcodes
+Plugins können als „JIT-only“ markiert sein (UX‑Tradeoff bei Stack‑Änderungen)
+
+9.6 Effekt‑Klassifikation
+
+A: Local / Single‑sample
+B: Multi‑sample (1 Pass)
+C: Multi‑pass (Render‑Subgraph)
+Multi‑pass Effekte integrieren sich als Nodes in den Rendergraph.
+
+9.7 Validierung
+
+Output bleibt Straight Alpha
+Linear‑Annahmen passen
+Constraints werden nicht stillschweigend umsortiert (außer Tap canonical order)
+
+9.8 Cache‑Key Regeln
+
+enthält effect_id + version + order + defines
+enthält keine Parameterwerte
+
+9.9 Robustheit
+
+Compile errors isolieren (Plugin deaktivieren, fallback)
+keine Crashes
+Quarantäne für wiederholt fehlerhafte Plugins
+
+
+10) cv2‑Ablösung: Direkte Player‑Steuerung (Pflicht, FINAL)
+10.1 Ziel
+cv2/OpenCV darf nicht länger Transportsteuerung liefern. Alle Player Controls sind First‑Class API.
+10.2 Player als Zustandsmaschine
+States: Stopped, Playing, Paused
+Player besitzt Position/Timebase; Renderer ist Consumer.
+10.3 Pflicht‑Controls
+
+play, pause, stop
+next, prev
+loop enable (+ mode optional)
+autoplay enable
+
+10.4 Semantik (FINAL)
+Next/Prev
+
+beziehen sich auf Playlist‑Item (Clip):
+
+next = nächster Clip in der Playlist
+prev = vorheriger Clip in der Playlist
+
+
+
+Stop
+
+stop = Playback stoppen und letzten Frame anzeigen/halten:
+
+Player wechselt in Stopped
+Position wird nicht resetet
+zuletzt gerendertes Bild bleibt sichtbar (Freeze)
+
+
+
+10.5 Loop/Autoplay
+
+loop wirkt deterministisch (Clip oder Playlist‑Mode je nach späterer UI‑Policy)
+autoplay=true startet automatisch beim Laden/Clip‑Wechsel
+
+10.6 Prefetch Integration
+Player steuert Prefetch abhängig von:
+
+state
+direction (Playlist Vor/Zurück)
+loop mode
+
+10.7 Verbotene Pfade
+
+cv2 ist nicht Source of Truth für timing, stepping, loop, pause, transport
+cv2 darf ggf. weiterhin außerhalb Playback-Control benutzt werden (Tools), nicht im Playback‑Hotpath
+
+
+11) Ressourcenmanagement (moderngl)
+11.1 RenderTarget Pool
+Pooling nach (w,h,format). Reuse obligatorisch.
+11.2 Stall‑Vermeidung
+
+keine harten Sync‑Punkte im Hotpath
+Upload entkoppeln (Double/Triple buffering)
+JIT compile nicht blockierend im Render‑Loop (Fallback)
+
+
+12) I/O & Streaming Policy (HAP kritisch)
+
+Prefetch/Ringbuffer Pflicht
+Metriken: read throughput, decode time, upload time, latency
+optional Preview‑Quality Mode
+
+
+HAP‑Files können sehr groß sein; I/O ist oft der Engpass. [renderheads.com], [derivative.ca]
+
+
+13) Migrationsplan (RAW → HAP Q Alpha)
+Phase 1: RAW + Core stabil
+
+ISource + RAW Source (Prefetch, async upload)
+EffectStack (JIT+Cache+Fallback)
+Composite shader-only (Linear+Straight)
+Taps/Slices (LayerProcessed + CompositeAfterN)
+Profiling hooks
+
+Phase 2: HAP Q Alpha MVP
+
+HAP Q Alpha Source (MVP RGBA ok)
+SampleSource HAP Pfad (YCoCg→RGB + Alpha combine + sRGB→Linear falls nötig) [hap.video]
+Playback Tests + I/O Profiling
+
+Phase 3: Optimierung / Highend
+
+Plane‑basierter HAP Pfad
+Cache warmup, LRU tuning
+60 fps Validation
+
+
+14) Akzeptanztests (Functional, Correctness, Performance)
+Functional
+
+RAW: play/seek, stack reorder, param live changes, taps/slices
+HAP: play/seek, stack reorder, param changes, taps/slices
+ISF optional: source render → stack → composite → taps [docs.vidvox.net]
+
+Correctness
+
+Linear + Straight: Compositing ohne Halos/Fringing
+Transform resample: Transform mitten im Stack wirkt wie resample
+Multi‑layer taps combine low→high deterministisch
+Stop hält letzten Frame sichtbar
+Next/Prev wechselt Playlist‑Item deterministisch
+
+Performance
+
+Tier A: 2×FHD 30 fps, 1 Layer, 5 Effekte <1% Drops / 60s
+Taps aktiv: keine unnötigen zusätzlichen Passes; RT pinning korrekt
+
+
+15) Performance‑Policy & Human‑Decision Gate (Dev‑Maschinen / Zielabweichung)
+15.1 Grundsatz
+Wenn das 30‑fps Ziel nicht erreicht wird (insb. auf Dev‑Maschinen), darf das System nicht automatisch Architektur/Qualität/Funktionsumfang ändern. Stattdessen muss ein Human‑Decision Gate ausgelöst werden: Der Mensch entscheidet, ob der aktuelle gemessene Wert (z. B. 22 fps) in dieser Umgebung akzeptiert wird.
+15.2 Trigger (wann gefragt werden muss)
+Gate auslösen bei:
+
+Sustained FPS Drop: Average < 30 fps über konfigurierbares Fenster (z. B. 3–10 s) unter Tier‑A‑Konfiguration
+wiederholte Budgetverletzung (Frame time > 33.3 ms) über Fenster
+Regression Detection (z. B. >20% Drop ggü. Baseline)
+
+15.3 Prompt‑Inhalt
+Frage eindeutig:
+
+„30 fps Ziel wird nicht erreicht. Soll der aktuelle Wert (X fps) für diese Maschine/Session verwendet werden?“
+optional: Dev/Low‑Spec markieren (ja/nein)
+optional: Session vs Profil speichern
+
+15.4 Optionen
+
+A) Akzeptieren: aktueller FPS‑Wert wird genutzt (für diese Session/Profil)
+B) Nicht akzeptieren: erst nach Zustimmung Vorschläge anbieten (Profiling/Analyse, optionale Preview‑Mode‑Umschaltung etc.)
+
+15.5 Logging/Telemetry
+Beim Gate:
+
+FPS/frametime stats
+aktive Config (Auflösung, Layer, Effekte, Taps)
+Hardware/Profil
+Entscheidung (Akzeptiert/Abgelehnt + Scope)
+
+
+16) Profiler & Observability (Pflicht): „Alle Schritte nachvollziehbar“
+16.1 Grundsatz
+Jeder relevante Verarbeitungsschritt muss im Profiler sichtbar, messbar und korrelierbar sein (CPU & GPU, pro Frame + aggregiert), damit Ursachen für <30 fps eindeutig identifizierbar sind.
+16.2 Pflicht‑Scope (Stages)
+Profiler muss mindestens erfassen:
+A) Player & Timeline
+
+State transitions (Playing/Paused/Stopped)
+Events: Next/Prev (Playlist‑Item), Stop (Freeze), Loop, Autoplay, Seek
+Prefetch health: Queue depth, cache hit/miss, starvation events
+
+B) Sources (pro Source‑Typ)
+
+RAW: Read, optional unpack/copy, Upload
+HAP: Demux, Decode, Upload, Prefetch stats [hap.video], [renderheads.com]
+ISF: Render time, param update time [docs.vidvox.net]
+
+C) Render Pipeline
+
+SampleSource Normalize (inkl. sRGB→Linear, HAP YCoCg→RGB, alpha combine) [hap.video]
+EffectStackPass pro Layer (JIT vs Interpreter, effect count, transform resamples count)
+CompositePass (layer count, blend/mask overhead)
+Taps/Slices (LayerProcessed, CompositeAfterN costs; RT pinning impacts)
+
+D) Shader Build/Cache
+
+JIT generation, compile, link times
+cache hit/miss
+fallback reason codes, swap events
+
+E) RT Pool/Memory
+
+allocations vs reuse
+pinned RT count (durch taps)
+formats/resolution
+
+16.3 Korrelation
+
+CPU‑Zeiten pro Stage (wall time)
+GPU‑Zeiten pro Pass (wenn möglich)
+gemeinsame Frame‑Korrelation:
+
+Frame ID / timestamp
+Player/Clip ID
+StackSignature hash
+Source type + tap/slice config
+
+
+
+16.4 Naming & Hierarchie
+Events müssen stabil benannt und hierarchisch organisiert sein (Frame → Player → Sources → Render → Taps/Slices), damit Aggregationen reproduzierbar sind.
+16.5 Export
+
+Live‑Ansicht + Aggregation (min/avg/max, p95/p99)
+Export mindestens JSON; optional CSV
+
+16.6 Verbindung zum Human‑Decision Gate
+Wenn Gate auslöst:
+
+Profiler Snapshot wird erzeugt (mind. Light Snapshot)
+Prompt bietet „Profiler öffnen / Details“ an
+
+
+16.8 Profiler‑Modi (Pflicht): Dev und Light(prod)
+16.8.1 Ziele
+
+Dev Mode: maximale Diagnose (voller Scope, tiefe Hierarchie).
+Light Mode: minimaler Overhead für Normalbetrieb, aber ausreichend für Gate‑Entscheidung.
+
+16.9 Mode‑Definitionen
+Dev Mode
+
+Voller Scope gemäß 16.2 (per layer/tap/slice, per pass).
+Shader compile/link & cache details sichtbar.
+RT pool stats detailliert.
+Overhead darf höher sein (z. B. +5–15%), muss aber reproduzierbare Messungen liefern.
+
+Light Mode
+
+Minimal‑Buckets:
+
+Frame total (CPU), GPU frame total (falls möglich)
+Source total (pro player aggregiert)
+Render total (Stack+Composite aggregiert)
+JIT total (nur wenn aktiv)
+Tap/Slice total (aggregiert)
+
+
+Flags/Zähler:
+
+Interpreter fallback active? (ja/nein + Anteil)
+Cache hit/miss grob
+Prefetch starvation events
+
+
+Overhead Ziel: sehr niedrig (typ. <1–3%)
+
+16.10 Umschaltlogik
+
+Runtime umschaltbar: Light ↔ Dev (optional Off)
+Optional: bei Gate‑Trigger Vorschlag „temporär Dev Mode“ (N Sekunden/Frames), danach zurück zu Light.
+
+16.11 Snapshots & Export
+
+Light Snapshot immer beim Gate
+Dev Snapshot auf Anforderung
+Kontextdaten im Snapshot: config, fps, layer/effect counts, taps/slices, cache status
+
+16.12 Akzeptanzkriterien (Dev/Light)
+
+Dev: vollständige Stages sichtbar; Stack‑änderung zeigt fallback/compile/swap.
+Light: Buckets + fallback + prefetch health sichtbar; Gate erzeugt Snapshot automatisch.
+
+17 Weitere Themen
+Transport Plugin Funktionen Speed vorwärts rückwärts bounce random Timeline Echtzeit Status (Tripple Slider Trim Min Max) müssen im neuen System weiter funktionieren
+Plugin System für Frontend muss kompatibel bleiben.
+MJPEG Stream 
+kein COPY to CPU!!!
+Output Routing umbau?
+ArtNet Pixel Berechnung Ausgabe?
+API Endpoints bleiben bestehen
+möglichst 100% kompatibel mit akt frontend
+

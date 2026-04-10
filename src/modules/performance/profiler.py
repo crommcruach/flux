@@ -45,16 +45,19 @@ class PerformanceProfiler:
     
     # Pipeline stage definitions (in processing order)
     STAGES = [
-        'source_decode',       # Codec decoding (FFmpeg, HAP, etc.)
-        'clip_effects',        # Clip-level effects processing
-        'layer_composition',   # Multi-layer blending
-        'composite_download',  # GPU texture.read() stall (sub-stage of layer_composition)
-        'player_effects',      # Player-level effects
-        'audio_sequences',     # Audio-driven parameter modulation
-        'transitions',         # Crossfade/transition effects
-        'background_composite',# Background image overlay
-        'output_routing',      # ArtNet pixel mapping
-        'frame_delivery',      # Final output delivery
+        'transport_preprocess', # Transport effect frame-position calculation
+        'source_decode',        # Codec decoding (FFmpeg, HAP, etc.)
+        'clip_effects',         # Clip-level effects processing
+        'effects_upload',       # GPU texture upload for effect chain
+        'composite_download',   # GPU texture.read() stall (SSBO / texture.read fallback)
+        'layer_composition',    # Multi-layer blending
+        'preview_encode',       # MJPEG thumbnail encode (PIL resize + simplejpeg)
+        'player_effects',       # Player-level effects
+        'audio_sequences',      # Audio-driven parameter modulation
+        'transitions',          # Crossfade/transition effects
+        'background_composite', # Background image overlay
+        'output_routing',       # ArtNet pixel mapping
+        'frame_delivery',       # Final output delivery
     ]
     
     def __init__(self, history_size: int = 100, player_name: str = "Unknown"):
@@ -70,17 +73,16 @@ class PerformanceProfiler:
         self.enabled = True
         
         # Storage: {stage_name: deque([time1, time2, ...])}
+        # All known stages are pre-created so profile_stage() never needs a
+        # lock for them — deque.append and dict.__setitem__ are GIL-atomic in CPython.
         self._timings: Dict[str, deque] = {
             stage: deque(maxlen=history_size) for stage in self.STAGES
         }
         
-        # Current frame timing (for nested stages)
-        self._current_frame_times: Dict[str, float] = {}
+        # Current frame timing — pre-populated so dict never resizes for known stages.
+        self._current_frame_times: Dict[str, float] = {stage: 0.0 for stage in self.STAGES}
         
-        # Thread-local storage for timer stack (handles nested timers)
-        self._local = threading.local()
-        
-        # Lock for thread-safe access
+        # Lock only used for: unknown-stage lazy-create, get_metrics(), record_frame_complete()
         self._lock = threading.RLock()
         
         # Frame counter
@@ -89,34 +91,46 @@ class PerformanceProfiler:
         
         # Total frame time tracking
         self._total_frame_times = deque(maxlen=history_size)
+        self._source_fps: float = 0.0  # updated each frame via record_frame_complete
     
     @contextmanager
     def profile_stage(self, stage_name: str):
         """
         Context manager for profiling a pipeline stage.
-        
-        Usage:
-            with profiler.profile_stage('clip_effects'):
-                # ... processing code ...
-        
-        When profiling is disabled, this has near-zero overhead (just a yield).
+
+        Accepts any stage name — predefined stages in STAGES as well as
+        dynamic sub-stages (e.g. effects_upload, effects_shader_transform).
+
+        Hot-path design: zero lock acquisitions for known stages.
+        deque.append and dict.__setitem__ are GIL-atomic in CPython, so no
+        lock is needed when writing to pre-created entries from the render
+        thread.  The lock is only acquired for unknown dynamic stages (rare)
+        and by get_metrics() / record_frame_complete() when reading.
         """
-        # Fast path: profiling disabled or invalid stage (minimal overhead)
-        if not self.enabled or stage_name not in self.STAGES:
+        if not self.enabled:
             yield
             return
-        
-        # Profiling enabled: measure timing
-        start_time = time.perf_counter()
+
+        # Fast path: known stage — no lock needed (pre-created in __init__)
+        timings = self._timings.get(stage_name)
+        if timings is None:
+            # Unknown dynamic stage — create once, then never lock again
+            with self._lock:
+                if stage_name not in self._timings:
+                    self._timings[stage_name] = deque(maxlen=self.history_size)
+                    self._current_frame_times[stage_name] = 0.0
+            timings = self._timings[stage_name]
+
+        start = time.perf_counter()
         try:
             yield
         finally:
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
-            with self._lock:
-                self._timings[stage_name].append(elapsed_ms)
-                self._current_frame_times[stage_name] = elapsed_ms
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            # GIL-atomic writes — no lock needed for known stages
+            timings.append(elapsed_ms)
+            self._current_frame_times[stage_name] = elapsed_ms
     
-    def record_frame_complete(self, frame_start_perf: float = None):
+    def record_frame_complete(self, frame_start_perf: float = None, source_fps: float = None):
         """Mark end of frame processing and record total time.
 
         Args:
@@ -125,18 +139,22 @@ class PerformanceProfiler:
                 elapsed time is stored as total_frame_time.  When omitted, falls
                 back to summing profiled stages (old behaviour — always too low
                 because it ignores unprofiled gaps like MJPEG encoding).
+            source_fps: actual FPS of the current clip/source (e.g. 17 for a GIF,
+                30 for standard video).  Stored so get_metrics() can report the
+                real frame budget instead of a hardcoded target.
         """
         with self._lock:
             if frame_start_perf is not None:
                 total_time = (time.perf_counter() - frame_start_perf) * 1000
             else:
-                # Fallback: sum of measured stages only (underestimates real cost)
                 total_time = sum(self._current_frame_times.values())
             self._total_frame_times.append(total_time)
             self._frame_count += 1
+            if source_fps and source_fps > 0:
+                self._source_fps = source_fps
 
-            # Clear current frame times for next frame
-            self._current_frame_times = {}
+            for key in self._current_frame_times:
+                self._current_frame_times[key] = 0.0
     
     def get_metrics(self) -> Dict:
         """
@@ -149,10 +167,13 @@ class PerformanceProfiler:
             # Calculate total frame time average
             total_avg = sum(self._total_frame_times) / len(self._total_frame_times) if self._total_frame_times else 0
             
-            # Stage metrics
+            # Stage metrics — predefined stages first, then any dynamic sub-stages
+            all_stage_names = list(self.STAGES) + [
+                s for s in self._timings if s not in self.STAGES
+            ]
             stages_data = []
-            for stage in self.STAGES:
-                timings = list(self._timings[stage])
+            for stage in all_stage_names:
+                timings = list(self._timings.get(stage, []))
                 if not timings:
                     stages_data.append(StageMetrics(
                         name=stage,
@@ -193,20 +214,28 @@ class PerformanceProfiler:
                     'avg_ms': round(total_avg, 3),
                     'min_ms': round(min(self._total_frame_times), 3) if self._total_frame_times else 0,
                     'max_ms': round(max(self._total_frame_times), 3) if self._total_frame_times else 0,
-                    'target_fps': 60,
-                    'target_frame_time_ms': 16.67,
-                    'performance_ratio': round((16.67 / total_avg) if total_avg > 0 else 0, 2)
+                    'source_fps': round(self._source_fps, 3),
+                    'target_frame_time_ms': round(1000.0 / self._source_fps, 3) if self._source_fps > 0 else 0,
+                    'performance_ratio': round((1000.0 / self._source_fps / total_avg) if (self._source_fps > 0 and total_avg > 0) else 0, 2),
                 },
-                'stages': stages_data
+                'stages': stages_data,
+                'unaccounted_ms': round(
+                    max(0.0, total_avg - sum(
+                        s['avg_ms'] for s in stages_data if s['avg_ms'] > 0
+                    )),
+                    3
+                ),
             }
     
     def reset(self):
         """Reset all metrics."""
         with self._lock:
-            for stage in self.STAGES:
-                self._timings[stage].clear()
+            for deq in self._timings.values():
+                deq.clear()
             self._total_frame_times.clear()
-            self._current_frame_times.clear()
+            self._source_fps = 0.0
+            for key in self._current_frame_times:
+                self._current_frame_times[key] = 0.0
             self._frame_count = 0
             self._start_time = time.time()
     

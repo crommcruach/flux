@@ -24,7 +24,6 @@ class RestAPI:
     
     def __init__(self, player_manager, dmx_controller, data_dir, video_dir, config=None, replay_manager=None):
         self.player_manager = player_manager
-        self.dmx_controller = dmx_controller  # Deprecated - DMX input removed
         self.data_dir = data_dir
         self.video_dir = video_dir
         self.config = config or {}
@@ -464,7 +463,11 @@ class RestAPI:
             range_min = data.get('rangeMin')
             range_max = data.get('rangeMax')
             uid = data.get('uid')  # Preserve UID for sequence restoration
-            
+
+            if not clip_id:
+                logger.warning(f"🌐 WebSocket 'command.effect.param': clip_id is None — ignored (effect[{effect_index}].{param_name})")
+                return
+
             # Debug: Log WebSocket effect parameter updates
             logger.debug(f"🌐 WebSocket 'command.effect.param': clip={clip_id[:8]}..., effect[{effect_index}].{param_name} = {value}")
             
@@ -478,6 +481,23 @@ class RestAPI:
                 from ..player.clips.registry import get_clip_registry
                 registry = get_clip_registry()
                 clip = registry.get_clip(clip_id)
+                
+                if not clip:
+                    # Fallback: search for a clip whose effect parameter UIDs reference
+                    # this (now-stale) clip_id.  This happens when the clip was
+                    # re-registered with a new UUID but the embedded _uid strings
+                    # inside its parameters still carry the old ID.
+                    stale_prefix = f'param_clip_{clip_id}'
+                    for cid, cdata in registry.clips.items():
+                        for eff in cdata.get('effects', []):
+                            for pval in eff.get('parameters', {}).values():
+                                if isinstance(pval, dict) and stale_prefix in pval.get('_uid', ''):
+                                    clip = cdata
+                                    clip_id = cid  # redirect to real ID for all subsequent ops
+                                    logger.debug(f"WebSocket effect.param: stale clip_id resolved {data.get('clip_id')[:8]}→{cid[:8]}")
+                                    break
+                            if clip:
+                                break
                 
                 if not clip:
                     raise ValueError(f"Clip {clip_id} not found")
@@ -529,65 +549,17 @@ class RestAPI:
                                 param_name=param_name,
                                 param_value=param_value_to_store
                             )
-                            if update_success:
+                            if update_success is True:
                                 logger.debug(f"🔄 Sent layer effect update command to player process")
-                            else:
+                            elif update_success is False:
+                                # Layer was found but the update itself failed — real problem
                                 logger.warning(f"⚠️ Failed to send layer effect update command")
+                            # else None: clip not currently playing, registry write is sufficient
                         else:
                             logger.debug(f"⚠️ Player has no update_layer_effect_parameter (no clip loaded, skipping live update)")
                         
                         # Invalidate cache so changes are picked up
                         registry._invalidate_cache(clip_id)
-                        
-                        # 🎬 Check if this is a transition effect and update TransitionManager
-                        is_transition = effect.get('effect') == 'transition' or effect.get('plugin_id') == 'transition'
-                        if is_transition and player.transition_manager:
-                            logger.info(f"🎬 Transition effect parameter changed: {param_name}={value}")
-                            # Get the full transition config from the effect plugin
-                            try:
-                                # Use load_plugin() to create a new instance (proper way)
-                                transition_effect_plugin = player.plugin_manager.load_plugin('transition')
-                                
-                                if transition_effect_plugin:
-                                    transition_config = transition_effect_plugin.get_transition_config(effect.get('parameters', {}))
-                                    
-                                    if transition_config:
-                                        plugin_name = transition_config.get('plugin')
-                                        
-                                        # Load the actual transition plugin instance (use load_plugin not get_plugin)
-                                        transition_plugin_instance = player.plugin_manager.load_plugin(plugin_name)
-                                        
-                                        if transition_plugin_instance:
-                                            # Save original defaults before applying custom transition
-                                            if not hasattr(player.transition_manager, '_original_effect'):
-                                                player.transition_manager._original_effect = player.transition_manager.config.get('effect', 'fade')
-                                                player.transition_manager._original_plugin = player.transition_manager.config.get('plugin')
-                                                player.transition_manager._original_duration = player.transition_manager.config.get('duration', 1.0)
-                                                player.transition_manager._original_easing = player.transition_manager.config.get('easing', 'ease_in_out')
-                                                logger.debug(f"🎬 Saved playlist defaults: {player.transition_manager._original_effect}")
-                                            
-                                            # Extract actual values (handle triple-slider metadata)
-                                            duration = transition_config.get('duration', 1.0)
-                                            if isinstance(duration, dict) and '_value' in duration:
-                                                duration = duration['_value']
-                                            
-                                            easing = transition_config.get('easing', 'ease_in_out')
-                                            if isinstance(easing, dict) and '_value' in easing:
-                                                easing = easing['_value']
-                                            
-                                            player.transition_manager.configure(
-                                                plugin=transition_plugin_instance,
-                                                effect=plugin_name,
-                                                duration=duration,
-                                                easing=easing
-                                            )
-                                            logger.info(f"🎬 Applied custom transition: {plugin_name}")
-                                        else:
-                                            logger.warning(f"🎬 Transition plugin not found: {plugin_name}")
-                                    else:
-                                        logger.debug(f"🎬 Transition effect disabled")
-                            except Exception as e:
-                                logger.error(f"🎬 Error applying transition config: {e}")
                         
                         emit('command.response', {
                             'success': True,

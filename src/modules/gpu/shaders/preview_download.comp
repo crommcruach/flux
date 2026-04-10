@@ -45,9 +45,12 @@ void main() {
     );
 
     vec4 c = texture(uTexture, uv);
-    uint r = uint(clamp(c.r * 255.0, 0.0, 255.0));
-    uint g = uint(clamp(c.g * 255.0, 0.0, 255.0));
-    uint b = uint(clamp(c.b * 255.0, 0.0, 255.0));
+    // GPU textures store sRGB-normalized float32 (no gamma decode on upload).
+    // Values are already in [0,1] sRGB space — quantise directly to uint8.
+    vec3 srgb = clamp(c.rgb, 0.0, 1.0);
+    uint r = uint(srgb.r * 255.0);
+    uint g = uint(srgb.g * 255.0);
+    uint b = uint(srgb.b * 255.0);
 
     // Pack BGRX: B in byte0, G in byte1, R in byte2, X=255 in byte3.
     data[idx] = b | (g << 8u) | (r << 16u) | (0xFFu << 24u);

@@ -143,6 +143,14 @@ class TransportEffect(PluginBase):
         
         info_log_conditional(logger, DebugCategories.TRANSPORT, f"✅ Transport initialized: in={self.in_point}, pos={self.current_position}, out={self.out_point}, speed={self.speed}, mode={self.playback_mode}")
     
+    def get_shader(self):
+        """Transport is a playback-control effect — no GPU shader needed."""
+        return None
+
+    def is_noop(self):
+        """Transport never modifies pixels — always skip in the GPU render pipeline."""
+        return True
+
     def initialize(self, config):
         """
         Initialisiert Plugin mit Konfiguration.
@@ -243,6 +251,10 @@ class TransportEffect(PluginBase):
                         '_rangeMin': self.in_point,
                         '_rangeMax': self.out_point
                     }
+                
+                # Discard out-of-trim frames from RAM — only keep [in_point, out_point]
+                if hasattr(frame_source, 'retrim'):
+                    frame_source.retrim(self.in_point, self.out_point)
             else:
                 # No valid trim settings - initialize to full range
                 self.in_point = 0
@@ -466,6 +478,7 @@ class TransportEffect(PluginBase):
                 
                 # Clamp ranges to valid total_frames (can't trim beyond actual content)
                 max_frame = (self._total_frames - 1) if self._total_frames else 10000
+                prev_in, prev_out = self.in_point, self.out_point
                 self.in_point = max(0, int(new_in))
                 self.out_point = min(max_frame, int(new_out))
                 
@@ -479,6 +492,11 @@ class TransportEffect(PluginBase):
                         '_rangeMax': self.out_point
                     }
                     debug_transport(logger, f"✅ Transport trim persisted to config: [{self.in_point}, {self.out_point}]")
+                
+                # Trim changed by the user — retrim the source to free/load RAM accordingly
+                trim_changed = (self.in_point != prev_in or self.out_point != prev_out)
+                if trim_changed and self._frame_source and hasattr(self._frame_source, 'retrim'):
+                    self._frame_source.retrim(self.in_point, self.out_point)
                 
                 # Update position (user can drag position handle to jump)
                 new_pos_int = int(new_position)

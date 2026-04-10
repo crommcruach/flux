@@ -1,8 +1,13 @@
 """
 Plasma Generator Plugin - Classic demo effect with flowing color patterns
 """
+import os
 import numpy as np
 from plugins import PluginBase, PluginType, ParameterType
+
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_plasma.wgsl'
+)
 
 
 class PlasmaGenerator(PluginBase):
@@ -12,6 +17,8 @@ class PlasmaGenerator(PluginBase):
     Erzeugt organische, fließende Farbmuster durch überlagerte Sinus-Wellen.
     """
     
+    _shader_src: str | None = None
+
     METADATA = {
         'id': 'plasma',
         'name': 'Plasma',
@@ -165,4 +172,21 @@ class PlasmaGenerator(PluginBase):
             'speed': self.speed,
             'scale': self.scale,
             'hue_shift': self.hue_shift
+        }
+
+    # ── GPU shader interface ─────────────────────────────────────────────
+    def get_shader(self) -> str | None:
+        if PlasmaGenerator._shader_src is None:
+            with open(_SHADER_PATH, 'r', encoding='utf-8') as f:
+                PlasmaGenerator._shader_src = f.read()
+        return PlasmaGenerator._shader_src
+
+    def get_uniforms(self, **kwargs) -> dict:
+        return {
+            'time':       float(kwargs.get('time', 0.0)),
+            'cw':         float(kwargs.get('width', 0)),
+            'ch':         float(kwargs.get('height', 0)),
+            'speed':      float(self.speed),
+            'scale':      float(self.scale),
+            'hue_shift':  float(self.hue_shift),
         }

@@ -244,9 +244,6 @@ class PlaylistTabsManager {
             <button data-action="activate">
                 <i class="fas fa-play"></i> Activate (Start Playing)
             </button>
-            <button data-action="takeover-preview">
-                🎬 Live Preview (Takeover Output)
-            </button>
             <hr>
             <button data-action="rename">
                 <i class="fas fa-edit"></i> Rename
@@ -266,25 +263,6 @@ class PlaylistTabsManager {
         menu.querySelector('[data-action="activate"]').addEventListener('click', () => {
             if (this.contextMenuPlaylistId) {
                 this.activatePlaylist(this.contextMenuPlaylistId);
-            }
-            this.hideContextMenu();
-        });
-        
-        menu.querySelector('[data-action="takeover-preview"]').addEventListener('click', async () => {
-            if (this.contextMenuPlaylistId) {
-                // Check if already in takeover mode
-                const status = await window.checkTakeoverPreviewStatus();
-                if (status) {
-                    // Stop current takeover
-                    await window.stopTakeoverPreview();
-                } else {
-                    // Start takeover for this playlist
-                    if (this.contextMenuPlaylistId === this.activePlaylistId) {
-                        alert('Cannot preview the active playlist. This playlist is already playing.');
-                    } else {
-                        await window.startTakeoverPreview(this.contextMenuPlaylistId);
-                    }
-                }
             }
             this.hideContextMenu();
         });

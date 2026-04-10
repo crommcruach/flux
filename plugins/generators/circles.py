@@ -1,13 +1,20 @@
 """
 Circles Generator Plugin - Draw circles pattern
 """
+import os
 import numpy as np
 import cv2
 from plugins import PluginBase, PluginType, ParameterType
 
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_circles.wgsl'
+)
+
 
 class CirclesGenerator(PluginBase):
     """Circles Generator - Draw circles pattern."""
+
+    _shader_src: str | None = None
     
     METADATA = {
         'id': 'circles',
@@ -178,6 +185,26 @@ class CirclesGenerator(PluginBase):
             'color_b': self.color_b,
             'duration': self.duration
         }
-    
+
     def cleanup(self):
         pass
+
+    # ── GPU shader interface ─────────────────────────────────────────────
+    def get_shader(self) -> str | None:
+        if CirclesGenerator._shader_src is None:
+            with open(_SHADER_PATH, 'r', encoding='utf-8') as f:
+                CirclesGenerator._shader_src = f.read()
+        return CirclesGenerator._shader_src
+
+    def get_uniforms(self, **kwargs) -> dict:
+        return {
+            'time':         0.0,
+            'cw':           float(kwargs.get('width', 0)),
+            'ch':           float(kwargs.get('height', 0)),
+            'circle_count': int(self.circle_count),
+            'radius':       float(self.radius),
+            'thickness':    int(self.thickness),
+            'r':            float(self.color_r),
+            'g':            float(self.color_g),
+            'b':            float(self.color_b),
+        }

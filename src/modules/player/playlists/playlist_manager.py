@@ -377,6 +377,16 @@ class MultiPlaylistSystem:
                     # Apply transition config to player
                     if hasattr(player, 'transition_config') and player_state.transition_config:
                         player.transition_config = player_state.transition_config.copy()
+                        # Also configure the transition_manager so its internal
+                        # config['enabled'] flag is updated immediately.
+                        if hasattr(player, 'transition_manager') and player.transition_manager:
+                            tc = player_state.transition_config
+                            player.transition_manager.configure(
+                                enabled=tc.get('enabled', False),
+                                effect=tc.get('effect', 'fade'),
+                                duration=tc.get('duration', 1.0),
+                                easing=tc.get('easing', 'ease_in_out'),
+                            )
                     
                     # Apply clip parameters (includes per-clip effects)
                     if hasattr(player, 'playlist_params'):
@@ -394,7 +404,22 @@ class MultiPlaylistSystem:
                                             logger.debug(f"[RESTORE DEBUG] {player_id} -     {param_name} = {param_value}")
                             else:
                                 logger.debug(f"[RESTORE DEBUG] {player_id} - Clip {clip_id[:8]}... has no effects key in params")
-                    
+
+                    # Eagerly pre-register ALL playlist clips into clip_registry NOW.
+                    # Without this, any REST API call that arrives before autoplay reaches
+                    # a clip will find the registry empty and create a FRESH UUID — which
+                    # then diverges from the playlist UUID the layer ends up using.
+                    if hasattr(player, '_ensure_clip_registered'):
+                        clips_list = player_state.clips
+                        ids_list   = player_state.clip_ids
+                        n_registered = 0
+                        for _clip_item, _clip_id in zip(clips_list, ids_list):
+                            if _clip_item and _clip_id and not _clip_item.startswith('generator:'):
+                                player._ensure_clip_registered(_clip_item, _clip_id)
+                                n_registered += 1
+                        if n_registered:
+                            logger.debug(f"[RESTORE] Pre-registered {n_registered} playlist clips for {player_id}")
+
                     # Apply global effects to player
                     if hasattr(player, 'effect_processor') and player.effect_processor:
                         chain_type = 'artnet' if player_id == 'artnet' else 'video'

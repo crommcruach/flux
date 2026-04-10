@@ -1,12 +1,26 @@
 """
 Oscillator Generator Plugin - Generates waveform visualizations
 """
+import os
+import os
 import numpy as np
 import cv2
 from plugins import PluginBase, PluginType, ParameterType
 
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_oscillator.wgsl'
+)
+
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_oscillator.wgsl'
+)
+
 
 class OscillatorGenerator(PluginBase):
+
+    _shader_src: str | None = None
+
+    _shader_src: str | None = None
     """Oscillator Generator - Sine, square, sawtooth, triangle waveforms."""
     
     METADATA = {
@@ -196,6 +210,38 @@ class OscillatorGenerator(PluginBase):
             'animated': self.animated,
             'duration': self.duration
         }
-    
+
     def cleanup(self):
         pass
+
+    # ── GPU shader interface ─────────────────────────────────────────────
+    def get_shader(self) -> str | None:
+        if OscillatorGenerator._shader_src is None:
+            with open(_SHADER_PATH, 'r', encoding='utf-8') as f:
+                OscillatorGenerator._shader_src = f.read()
+        return OscillatorGenerator._shader_src
+
+    def get_uniforms(self, **kwargs) -> dict:
+        waveform_map = {'sine': 0, 'square': 1, 'sawtooth': 2, 'triangle': 3}
+        return {
+            'time':       float(kwargs.get('time', 0.0)),
+            'cw':         float(kwargs.get('width', 0)),
+            'ch':         float(kwargs.get('height', 0)),
+            'waveform':   waveform_map.get(self.waveform, 0),
+            'frequency':  float(self.frequency),
+            'amplitude':  float(self.amplitude),
+            'line_count': int(self.line_count),
+            'line_width': int(self.line_width),
+            'animated':   int(bool(self.animated)),
+        }
+        return {
+            'time':       float(kwargs.get('time', 0.0)),
+            'cw':         float(kwargs.get('width', 0)),
+            'ch':         float(kwargs.get('height', 0)),
+            'waveform':   waveform_map.get(self.waveform, 0),
+            'frequency':  float(self.frequency),
+            'amplitude':  float(self.amplitude),
+            'line_count': int(self.line_count),
+            'line_width': int(self.line_width),
+            'animated':   int(bool(self.animated)),
+        }

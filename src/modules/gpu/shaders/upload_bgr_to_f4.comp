@@ -1,0 +1,33 @@
+#version 430
+// upload_bgr_to_f4.comp
+// Converts a BGR uint8 BGRA staging texture to a normalized float32 RGB texture.
+//
+// Input:  rgba8ui image binding 0  (BGRA uint8 — alpha channel unused)
+// Output: rgba32f image binding 1  (RGB float32, alpha fixed to 1.0)
+//
+// Channel swap: src.r=B, src.g=G, src.b=R (BGR packing) → dst.r=R, dst.g=G, dst.b=B (RGB)
+//
+// Using imageLoad on rgba8ui bypasses AMD driver Bug #1 (usampler2D arithmetic
+// returns zeros for GL_RGB8 normalized textures). imageLoad on integer format
+// images is unaffected by this bug and returns correct uvec4 values.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba8ui, binding = 0) uniform readonly uimage2D uSrc;  // BGRA uint8 staging
+layout(rgba32f, binding = 1) uniform writeonly image2D uDst;  // RGB float32 working
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (pos.x >= sz.x || pos.y >= sz.y) return;
+
+    uvec4 v = imageLoad(uSrc, pos);
+    // Input is BGRA: v.r=B, v.g=G, v.b=R, v.a=unused
+    // Output is RGB float32: swap R↔B
+    imageStore(uDst, pos, vec4(
+        float(v.b) * (1.0 / 255.0),  // R
+        float(v.g) * (1.0 / 255.0),  // G
+        float(v.r) * (1.0 / 255.0),  // B
+        1.0
+    ));
+}

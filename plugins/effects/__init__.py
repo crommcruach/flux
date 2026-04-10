@@ -1,101 +1,28 @@
 """
-Effect Plugins - Bildverarbeitung
+Effect Plugins — GPU-shader effects only.
+
+Active effects (all use WGSL shaders via get_shader()/get_uniforms()):
+  - TransformEffect      — position, scale, rotation (transform.wgsl)
+  - BrightnessContrastEffect — brightness/contrast (brightness_contrast.wgsl)
+  - ColorizeEffect       — hue/saturation colorize (colorize.wgsl)
+  - HueRotateEffect      — hue rotation (hue_rotate.wgsl)
+  - BlendModeEffect      — 14-mode color blend (blend_mode.wgsl)
+
+Special exception (CPU, required by core playback engine):
+  - TransportEffect      — frame position, speed, trim, loop control
 """
-from .blend import BlendEffect
-from .blur import BlurEffect
-from .opacity import OpacityEffect
 from .transform import TransformEffect
-from .sharpen import SharpenEffect
-from .emboss import EmbossEffect
-from .sepia import SepiaEffect
-from .gamma import GammaEffect
-from .temperature import TemperatureEffect
-from .channel_mixer import ChannelMixerEffect
-from .noise import NoiseEffect
-from .solarize import SolarizeEffect
-from .duotone import DuotoneEffect
-from .oil_paint import OilPaintEffect
-from .mosaic import MosaicEffect
-from .zoom import ZoomEffect
-from .rotate import RotateEffect
-from .border import BorderEffect
-from .crop import CropEffect
-from .flip import FlipEffect
-from .mirror import MirrorEffect
-from .slide import SlideEffect
-from .keystone import KeystoneEffect
-from .fisheye import FisheyeEffect
-from .twist import TwistEffect
-from .radial_blur import RadialBlurEffect
-from .pixelate import PixelateEffect
-from .displace import DisplaceEffect
-from .wave_warp import WaveWarpEffect
-from .shift_glitch import ShiftGlitchEffect
-from .distortion import DistortionEffect
-from .static import StaticEffect
-from .shift_rgb import ShiftRGBEffect
-from .edge_detection import EdgeDetectionEffect
-from .auto_mask import AutoMaskEffect
-from .chroma_key import ChromaKeyEffect
-from .keystone_mask import KeystoneMaskEffect
-from .vignette import VignetteEffect
-from .drop_shadow import DropShadowEffect
-from .kaleidoscope import KaleidoscopeEffect
-from .tile import TileEffect
-from .circles import CirclesEffect
-from .bendoscope import BendoscopeEffect
+from .brightness_contrast import BrightnessContrastEffect
+from .colorize import ColorizeEffect
+from .hue_rotate import HueRotateEffect
+from .blend_mode import BlendModeEffect
 from .transport import TransportEffect
-from .ascii_art import AsciiArtEffect
-from .snow import SnowEffect
-from .motion_key import MotionKeyEffect
 
 __all__ = [
-    'BlendEffect', 
-    'BlurEffect', 
-    'OpacityEffect', 
     'TransformEffect',
+    'BrightnessContrastEffect',
+    'ColorizeEffect',
+    'HueRotateEffect',
+    'BlendModeEffect',
     'TransportEffect',
-    'SharpenEffect',
-    'EmbossEffect',
-    'SepiaEffect',
-    'GammaEffect',
-    'TemperatureEffect',
-    'ChannelMixerEffect',
-    'NoiseEffect',
-    'SolarizeEffect',
-    'DuotoneEffect',
-    'OilPaintEffect',
-    'MosaicEffect',
-    'ZoomEffect',
-    'RotateEffect',
-    'BorderEffect',
-    'CropEffect',
-    'FlipEffect',
-    'MirrorEffect',
-    'SlideEffect',
-    'KeystoneEffect',
-    'FisheyeEffect',
-    'TwistEffect',
-    'RadialBlurEffect',
-    'PixelateEffect',
-    'DisplaceEffect',
-    'WaveWarpEffect',
-    'ShiftGlitchEffect',
-    'DistortionEffect',
-    'StaticEffect',
-    'ShiftRGBEffect',
-    'EdgeDetectionEffect',
-    'AutoMaskEffect',
-    'ChromaKeyEffect',
-    'KeystoneMaskEffect',
-    'VignetteEffect',
-    'DropShadowEffect',
-    'KaleidoscopeEffect',
-    'TileEffect',
-    'CirclesEffect',
-    'BendoscopeEffect',
-    'TransportEffect',
-    'AsciiArtEffect',
-    'SnowEffect',
-    'MotionKeyEffect'
 ]

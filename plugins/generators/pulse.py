@@ -1,13 +1,20 @@
 """
 Pulse Generator Plugin - Pulsing solid color effect
 """
+import os
 import numpy as np
 import math
 from plugins import PluginBase, PluginType, ParameterType
 
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_pulse.wgsl'
+)
+
 
 class PulseGenerator(PluginBase):
     """
+
+    _shader_src: str | None = None
     Pulse Generator - Pulsierende Vollfarbe.
     
     Einfaches pulsierendes Farbfeld mit konfigurierbarer Frequenz.
@@ -171,4 +178,23 @@ class PulseGenerator(PluginBase):
             'max_brightness': self.max_brightness,
             'hue_rotation': self.hue_rotation,
             'saturation': self.saturation
+        }
+
+    # ── GPU shader interface ─────────────────────────────────────────────
+    def get_shader(self) -> str | None:
+        if PulseGenerator._shader_src is None:
+            with open(_SHADER_PATH, 'r', encoding='utf-8') as f:
+                PulseGenerator._shader_src = f.read()
+        return PulseGenerator._shader_src
+
+    def get_uniforms(self, **kwargs) -> dict:
+        return {
+            'time':           float(kwargs.get('time', 0.0)),
+            'cw':             float(kwargs.get('width', 0)),
+            'ch':             float(kwargs.get('height', 0)),
+            'frequency':      float(self.frequency),
+            'min_brightness': float(self.min_brightness),
+            'max_brightness': float(self.max_brightness),
+            'hue_rotation':   float(self.hue_rotation),
+            'saturation':     float(self.saturation),
         }

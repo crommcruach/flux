@@ -5,17 +5,16 @@ Unterstützt Videos, Scripts und zukünftige Quellen über FrameSource-Interface
 import time
 import threading
 import numpy as np
-import cv2
 import os
 from collections import deque
 from ..core.logger import get_logger, debug_transport, debug_layers, debug_playback, debug_effects
 from .sources import VideoSource
 from ..plugins.manager import get_plugin_manager
-from .layers.layer import Layer
+from .layers.manager import LayerManager, _GPU_PROCESSED
+from ..gpu import get_texture_pool
 from .transitions.manager import TransitionManager
 from .effects.processor import EffectProcessor
 from .playlists.manager import PlaylistManager
-from .layers.manager import LayerManager
 from ..performance.profiler import get_profiler
 from ..core.constants import (
     DEFAULT_SPEED,
@@ -148,13 +147,6 @@ class Player:
         
         # Preview Frames
         self.last_video_frame = None  # Letztes komplettes Frame für Preview
-
-        # Preview subscriber tracking — incremented by MJPEG generator on connect,
-        # decremented on disconnect.  When count reaches 0 the render loop skips
-        # composite.download() (saves the ~43-111ms AMD pipeline drain stall).
-        self._preview_subscriber_count: int = 0
-        # User-facing toggle (persisted in session state)
-        self._preview_enabled: bool = True
         
         # Transition Manager
         self.transition_manager = TransitionManager()
@@ -175,7 +167,36 @@ class Player:
         debug_playback(logger, f"  Source: {self.source.get_source_name()} ({type(self.source).__name__})")
         debug_playback(logger, f"  Canvas: {self.canvas_width}x{self.canvas_height}")
         debug_playback(logger, f"  Art-Net: {'Enabled' if enable_artnet else 'Disabled'} ({target_ip}, Start-Universe: {start_universe})")
-        
+
+        # MJPEG subscriber count — incremented by each active browser MJPEG
+        # generator, decremented on disconnect.  When 0 and no display output
+        # is enabled, composite_layers() skips the SSBO download entirely.
+        self._mjpeg_subscriber_count: int = 0
+        # Fullscreen stream subscriber count — tracked so needs_cpu_frame skips
+        # the SSBO download when a GPU fullscreen downscaler is active.
+        self._fullscreen_subscriber_count: int = 0
+
+        # GPU preview downscaler — produces last_preview_jpeg on the GPU hook
+        # while the composite texture is still live.  When active, MJPEG
+        # subscribers no longer trigger a full-resolution SSBO download.
+        self.last_preview_jpeg: bytes | None = None
+        self._preview_downscaler = None  # type: ignore[assignment]
+        # GPU fullscreen downscaler — sync readback at canvas resolution.
+        # Produces last_fullscreen_jpeg; eliminates the full-res SSBO download for
+        # the /api/fullscreen/stream endpoint.
+        self.last_fullscreen_jpeg: bytes | None = None
+        self._fullscreen_downscaler = None  # type: ignore[assignment]
+        self._init_preview_downscaler()
+
+        # Display GPU hook — zero-copy GLFW display via WGL context sharing.
+        # When active, DisplayOutput consumers are served by blitting the
+        # composite texture directly into a shared display texture instead of
+        # downloading the frame to CPU and re-uploading it.
+        self._display_tex = None       # GPUFrame holding the shared display texture
+        self._display_gpu_active = False  # True when WGL sharing is confirmed ready
+        self._glfw_wgl_failed = False     # True after a GLFW restart where WGL sharing failed — inhibits retries
+        self._init_display_gpu_hook()
+
         # ArtNet Routing Bridge (NEW - for routing system output)
         self.routing_bridge = None
 
@@ -226,12 +247,6 @@ class Player:
                     except Exception as e:
                         logger.warning(f"Failed to restore output state: {e}")
 
-                # Restore preview_enabled toggle
-                try:
-                    _vid_settings = session_state.get_video_player_settings()
-                    self._preview_enabled = _vid_settings.get('preview_enabled', True)
-                except Exception:
-                    pass
                 else:
                     logger.debug(f"No saved output state found for {self.player_name}")
                 
@@ -239,7 +254,26 @@ class Player:
                 self.output_manager.set_state_save_callback(
                     lambda player_name, state: session_state.save_output_state(player_name, state)
                 )
-                
+
+                # Inject player reference into DisplayOutput instances so they
+                # can call _on_display_gpu_ready() after WGL sharing is confirmed.
+                from .outputs.plugins.display_output import DisplayOutput
+                for out in self.output_manager.outputs.values():
+                    if isinstance(out, DisplayOutput):
+                        out._player_ref = self
+
+                # OutputManager.enable() starts GLFW synchronously inside its
+                # __init__, BEFORE we inject _player_ref above.  So the
+                # is_gpu_mode() check in initialize() always found _player_ref=None
+                # and never called _on_display_gpu_ready().  Activate it now if
+                # GLFW already came up in GPU mode.
+                try:
+                    from ..gpu.glfw_display import get_glfw_display
+                    if get_glfw_display().is_gpu_mode():
+                        self._on_display_gpu_ready()
+                except Exception:
+                    pass
+
                 logger.debug(f"✅ Output Manager initialized for {self.player_name}")
             except Exception as e:
                 logger.error(f"Output Manager initialization failed: {e}", exc_info=True)
@@ -248,7 +282,216 @@ class Player:
             logger.debug(f"{self.player_name}: Output routing disabled (Art-Net player)")
         else:
             logger.debug(f"{self.player_name}: Output routing unavailable (imports failed)")
-    
+
+    @property
+    def needs_cpu_frame(self) -> bool:
+        """
+        True when at least one CPU consumer needs a full-resolution download.
+
+        Consumers:
+        - Fullscreen stream viewers — always need full-res CPU download.
+        - Thumbnail MJPEG streams — only when GPU preview downscaler is NOT
+          active.  When _preview_downscaler is set the GPU hook handles
+          encoding and the full-resolution SSBO download is skipped.
+        - Any enabled output plugin (DisplayOutput, VirtualOutput, …) — but
+          NOT when the display GPU hook is active, because the GL display path
+          handles the frame on the GPU without a CPU round-trip.
+        When False, composite_layers() skips the SSBO download.
+        """
+        # Transitions are now pure GPU (apply_gpu via _transition_gpu_hook).
+        # No composite download needed for the transition path.
+        if self._fullscreen_subscriber_count > 0 and self._fullscreen_downscaler is None:
+            self._log_needs_cpu_once('fullscreen_subscriber')
+            return True
+        if self._mjpeg_subscriber_count > 0 and self._preview_downscaler is None:
+            self._log_needs_cpu_once('mjpeg_no_downscaler')
+            return True
+        if self.output_manager:
+            for out in self.output_manager.outputs.values():
+                if out.enabled:
+                    from .outputs.plugins import DisplayOutput, VirtualOutput
+                    # Display outputs: served by GPU hook when WGL sharing is active.
+                    if isinstance(out, DisplayOutput) and self._display_gpu_active:
+                        continue
+                    # Virtual outputs: fed from preview downscaler's small download (~2 ms)
+                    # instead of the full 1080p SSBO download (~26 ms).
+                    if isinstance(out, VirtualOutput) and self._preview_downscaler is not None:
+                        continue
+                    reason = (
+                        f'output:{out.output_id}(DisplayOutput,gpu_active=False)'
+                        if isinstance(out, DisplayOutput)
+                        else f'output:{out.output_id}(type={type(out).__name__})'
+                    )
+                    self._log_needs_cpu_once(reason)
+                    return True
+        return False
+
+    def _log_needs_cpu_once(self, reason: str) -> None:
+        """Log why needs_cpu_frame=True, but only when the reason changes."""
+        if getattr(self, '_last_needs_cpu_reason', None) != reason:
+            self._last_needs_cpu_reason = reason
+            logger.info('%s: needs_cpu_frame=True reason=%s '
+                        '(_display_gpu_active=%s)',
+                        self.player_name, reason, self._display_gpu_active)
+
+    # ------------------------------------------------------------------
+    def _init_display_gpu_hook(self) -> None:
+        """Register the display GPU hook for zero-copy GLFW display.
+
+        Called once at startup (before any GLFW window exists).  The hook
+        itself is a lightweight closure that will be a no-op until the GLFW
+        window signals it has established WGL context sharing.
+
+        The hook:
+          1. Blits composite → self._display_tex (a dedicated 4-ch f4 texture
+             that both GL contexts can see after wglShareLists).
+          2. Calls glfw_display.push_gpu_frame(glo, w, h).
+
+        Only registered for the video player (enable_artnet=False) since the
+        display window belongs to the video player.
+        """
+        if self.enable_artnet:
+            return  # Art-Net player has no display window
+
+        def _display_hook(composite) -> None:
+            """Copy composite GPUFrame → GLFWDisplay internal buffer, then wake GLFW."""
+            try:
+                from ..gpu.glfw_display import get_glfw_display
+                get_glfw_display().push_gpu_frame(composite)
+            except Exception as _e:
+                logger.debug('Display GPU hook error: %s', _e)
+
+        self.layer_manager.set_display_gpu_hook(_display_hook)
+        logger.debug('%s: display GPU hook registered', self.player_name)
+
+    def _on_display_gpu_ready(self) -> None:
+        """Called when GLFW window confirms WGL context sharing is active.
+
+        Sets _display_gpu_active = True so the display hook starts firing.
+        This is called from DisplayOutput.on_gpu_ready() after
+        GLFWDisplay.start() returns with is_gpu_mode() == True.
+        """
+        self._display_gpu_active = True
+        logger.info('%s: GPU display path active (zero-copy GLFW/wgpu)', self.player_name)
+
+    # ------------------------------------------------------------------
+    def _init_preview_downscaler(self) -> None:
+        """Initialise GPU preview and fullscreen downscalers from config and register hook."""
+        try:
+            from ..gpu.preview_downscaler import PreviewDownscaler
+            video_cfg = self.config.get('video', {}).get('preview_stream', {})
+
+            # Thumbnail MJPEG downscaler (video or artnet key)
+            player_key = 'artnet' if self.enable_artnet else 'video'
+            ps = video_cfg.get(player_key, {})
+            pw = ps.get('preview_width', 0)
+            ph = ps.get('preview_height', 0)
+            quality = ps.get('jpeg_quality', 85)
+            if pw > 0 and ph > 0:
+                self._preview_downscaler = PreviewDownscaler(pw, ph, quality)
+                logger.debug(
+                    '%s: GPU preview downscaler %dx%d q=%d',
+                    self.player_name, pw, ph, quality,
+                )
+
+            # Fullscreen downscaler — canvas-resolution triple-buffer ring.
+            # Only for the video player (artnet player has no fullscreen endpoint).
+            if not self.enable_artnet:
+                fs = video_cfg.get('fullscreen', {})
+                fw = fs.get('preview_width', 0)
+                fh = fs.get('preview_height', 0)
+                fq = fs.get('jpeg_quality', 90)
+                if fw > 0 and fh > 0:
+                    self._fullscreen_downscaler = PreviewDownscaler(fw, fh, fq)
+                    logger.debug(
+                        '%s: GPU fullscreen downscaler %dx%d q=%d',
+                        self.player_name, fw, fh, fq,
+                    )
+
+            # Register hook only when at least one downscaler is active.
+            if self._preview_downscaler is not None or self._fullscreen_downscaler is not None:
+                self.layer_manager.set_preview_gpu_hook(self._on_preview_gpu_frame)
+        except ImportError:
+            pass  # simplejpeg not available — fall back to CPU path
+
+        # Register transition GPU hook so the "A" buffer stays up-to-date even
+        # in GPU-only mode (no CPU download).  The hook is lightweight — it only
+        # performs a GPU-to-GPU texture copy when a transition is configured.
+        self.layer_manager.set_transition_gpu_hook(self._on_transition_gpu_frame)
+
+    def _on_preview_gpu_frame(self, composite) -> None:
+        """Encode composite to preview/fullscreen JPEGs and feed VirtualOutput instances.
+
+        Called for both GPU frames (from the GL thread while the texture is
+        still live) and plain numpy frames (CPU path, no GPU effects).
+
+        Thumbnail downscaler: always encodes (cheap at 640p) so VirtualOutput.latest_frame
+        stays populated even when no MJPEG subscriber is connected.
+        Fullscreen downscaler: only encodes when a subscriber is active (8MB/frame).
+        """
+        # During an active GPU transition the transition hook feeds the blended
+        # result directly — skip raw composite encoding to avoid flicker.
+        if self.transition_manager.active:
+            return
+
+        is_numpy = isinstance(composite, np.ndarray)
+
+        # ── Thumbnail MJPEG downscaler ────────────────────────────────────────
+        if self._preview_downscaler is not None:
+            if is_numpy:
+                result = self._preview_downscaler.encode_numpy(composite)
+            else:
+                result = self._preview_downscaler.encode(composite)
+            if self._mjpeg_subscriber_count > 0 and result is not None:
+                self.last_preview_jpeg = result
+            # Feed VirtualOutput instances with the small raw frame (~2 ms download)
+            raw = self._preview_downscaler.last_raw
+            if raw is not None and self.output_manager is not None:
+                from .outputs.plugins import VirtualOutput
+                for out in self.output_manager.outputs.values():
+                    if isinstance(out, VirtualOutput) and out.enabled:
+                        out.latest_frame = raw
+
+        # ── Fullscreen downscaler (canvas-res sync readback) ─────────────────
+        if self._fullscreen_downscaler is not None and self._fullscreen_subscriber_count > 0:
+            if is_numpy:
+                fs_result = self._fullscreen_downscaler.encode_numpy(composite)
+            else:
+                fs_result = self._fullscreen_downscaler.encode(composite)
+            if fs_result is not None:
+                self.last_fullscreen_jpeg = fs_result
+
+    def _on_transition_gpu_frame(self, gpu_frame) -> None:
+        """Pure-GPU transition hook — no CPU round-trips.
+
+        When a transition is active: blend A-buffer + new composite on GPU,
+        push the blended GPUFrame to display AND re-feed the preview encoder
+        so MJPEG streams show the cross-fade instead of the raw composite.
+
+        When idle: keep the A-buffer up-to-date for the next transition via
+        a GPU-to-GPU texture copy (~0.1 ms).
+        """
+        if self.transition_manager.active:
+            try:
+                from ..gpu.glfw_display import get_glfw_display
+                def _display_blended(blended):
+                    get_glfw_display().push_gpu_frame(blended)
+                    # Encode blended result directly — cannot call _on_preview_gpu_frame
+                    # here because it skips encoding while transition_manager.active.
+                    if self._preview_downscaler is not None:
+                        result = self._preview_downscaler.encode(blended)
+                        if self._mjpeg_subscriber_count > 0 and result is not None:
+                            self.last_preview_jpeg = result
+                    if self._fullscreen_downscaler is not None and self._fullscreen_subscriber_count > 0:
+                        fs_result = self._fullscreen_downscaler.encode(blended)
+                        if fs_result is not None:
+                            self.last_fullscreen_jpeg = fs_result
+                self.transition_manager.apply_gpu(gpu_frame, _display_blended)
+            except Exception as e:
+                logger.debug('Transition GPU blend error: %s', e)
+        else:
+            self.transition_manager.store_gpu_frame(gpu_frame)
+
     def update_resolution(self, new_width: int, new_height: int, autosize_mode: str = None):
         """Update player canvas resolution dynamically
         
@@ -355,31 +598,6 @@ class Player:
         """Aktueller Frame der Quelle."""
         return self.source.current_frame if self.source else 0
 
-    # ── Preview pull-model properties ──────────────────────────────────────
-
-    @property
-    def preview_active(self) -> bool:
-        """True when at least one MJPEG subscriber is connected AND preview is enabled."""
-        return self._preview_enabled and self._preview_subscriber_count > 0
-
-    @property
-    def needs_cpu_frame(self) -> bool:
-        """
-        True when the render loop must call composite.download() this frame.
-
-        False → LayerManager skips the expensive GPU→CPU readback (saves the
-        ~43-111 ms AMD pipeline drain stall) when nobody is watching and ArtNet
-        is handled by the GPU compute-shader sampler.
-        """
-        if self.preview_active:
-            return True
-        # ArtNet player: need CPU frame only when the GPU sampler hasn't kicked in yet
-        if self.routing_bridge and self.enable_artnet:
-            sampler = getattr(self.routing_bridge, '_gpu_sampler', None)
-            if sampler is None or not sampler.is_ready:
-                return True
-        return False
-    
     @property
     def total_frames(self):
         """Gesamtzahl Frames der Quelle."""
@@ -481,7 +699,66 @@ class Player:
         from .clips.registry import get_clip_registry
         registry = get_clip_registry()
         return registry.get_clip(clip_id)
-    
+
+    def _ensure_clip_registered(self, clip_item: str, clip_id: str) -> str:
+        """Ensure a clip path is registered in clip_registry under the given clip_id.
+
+        The clip_registry starts EMPTY every run (session_state is cleared on startup).
+        playlist_ids may contain UIDs from a saved/loaded playlist that are therefore
+        not yet in the registry.  This method registers the clip so load_clip_layers()
+        can find it.
+
+        IMPORTANT: We do NOT use register_clip() here because it deduplicates by path
+        (find_clip_by_path), which would collapse duplicate playlist entries that point
+        to the same file (e.g. video\\original appears twice with different UUIDs).
+        That causes the same-clip fast-loop to trigger and autoplay to hang.
+        Instead we insert directly into clips[clip_id] preserving the intended UUID.
+        """
+        if not self.clip_registry or not clip_id or clip_item.startswith('generator:'):
+            return clip_id
+
+        # Fast path: already registered
+        if self.clip_registry.get_clip(clip_id):
+            return clip_id
+
+        # Resolve absolute path — must use the same resolution the REST API uses
+        # (os.path.join(video_dir, relative_path) then os.path.abspath) so that
+        # register_clip()'s find_clip_by_path() can match our entry later.
+        video_dir = self.config.get('paths', {}).get('video_dir', 'video')
+        if os.path.isabs(clip_item):
+            abs_path = clip_item
+        else:
+            candidate = os.path.join(video_dir, clip_item)
+            # Prefer the video_dir-joined path if it exists; fall back to clip_item
+            abs_path = os.path.abspath(candidate if os.path.exists(candidate) else clip_item)
+
+        # Insert directly — bypasses path-based dedup so each playlist slot
+        # keeps its own clip_id even when the same file appears multiple times.
+        # Also copy any saved effects from playlist_params so load_clip_layers
+        # can build the transport/transform effect chain correctly.
+        saved_effects = []
+        playlist_params = getattr(self, 'playlist_params', {}) or {}
+        if clip_id in playlist_params:
+            saved_effects = playlist_params[clip_id].get('effects', [])
+
+        self.clip_registry.clips[clip_id] = {
+            'clip_id': clip_id,
+            'player_id': self.player_id,
+            'absolute_path': abs_path,
+            'relative_path': clip_item,
+            'filename': os.path.basename(abs_path),
+            'metadata': {},
+            'created_at': __import__('datetime').datetime.now().isoformat(),
+            'effects': saved_effects,
+            'layers': [],
+            'sequences': {},
+            'in_point': None,
+            'out_point': None,
+            'reverse': False,
+        }
+        logger.debug(f"[{self.player_name}] Auto-registered clip {clip_id[:8]} for {clip_item} ({len(saved_effects)} effects)")
+        return clip_id
+
     def _extract_transition_from_effects(self, effects):
         """
         Extract transition effect configuration from clip effects.
@@ -498,16 +775,13 @@ class Player:
         for effect in effects:
             # Check both 'effect' and 'plugin_id' keys (registry uses plugin_id)
             if effect.get('effect') == 'transition' or effect.get('plugin_id') == 'transition':
-                # Load the transition effect plugin
-                try:
-                    plugin = self.plugin_manager.load_plugin('transition')
-                    if plugin:
-                        parameters = effect.get('parameters', {})
-                        config = plugin.get_transition_config(parameters)
-                        return config
-                except Exception as e:
-                    logger.error(f"🎬 [{self.player_name}] Error extracting transition config: {e}")
+                params = effect.get('parameters', {})
+                plugin = params.get('plugin', 'fade')
+                if plugin == 'none':
                     return None
+                duration = params.get('duration', 1.0)
+                easing = params.get('easing', 'ease_in_out')
+                return {'enabled': True, 'plugin': plugin, 'duration': duration, 'easing': easing}
         return None
     
     def switch_source(self, new_source):
@@ -616,68 +890,16 @@ class Player:
             effects = clip_data.get('effects', [])
             transition_config = self._extract_transition_from_effects(effects)
             
-            if transition_config:
-                plugin_name = transition_config.get('plugin')
-                logger.debug(f"🎬 [{self.player_name}] Custom transition found: plugin={plugin_name}, duration={transition_config.get('duration')}s, easing={transition_config.get('easing')}")
-                
-                # Load the actual transition plugin instance using load_plugin()
-                transition_plugin_instance = self.plugin_manager.load_plugin(plugin_name)
-                if transition_plugin_instance:
-                    # Apply custom transition config to TransitionManager
-                    if self.transition_manager:
-                        # Extract actual values (handle triple-slider metadata)
-                        duration = transition_config.get('duration', 1.0)
-                        if isinstance(duration, dict) and '_value' in duration:
-                            duration = duration['_value']
-                        
-                        easing = transition_config.get('easing', 'ease_in_out')
-                        if isinstance(easing, dict) and '_value' in easing:
-                            easing = easing['_value']
-                        
-                        self.transition_manager.configure(
-                            plugin=transition_plugin_instance,
-                            effect=plugin_name,
-                            duration=duration,
-                            easing=easing
-                        )
-                        logger.debug(f"🎬 [{self.player_name}] Applied transition plugin instance: {transition_plugin_instance}")
-                else:
-                    logger.error(f"🎬 [{self.player_name}] Transition plugin not found: {plugin_name}")
-            else:
-                logger.debug(f"🎬 [{self.player_name}] No custom transition, restoring playlist defaults")
-                # Reset to playlist defaults by reloading the default transition plugin
-                if self.transition_manager:
-                    # Get current playlist transition config (defaults)
-                    current_effect = self.transition_manager.config.get('effect', 'fade')
-                    current_duration = self.transition_manager.config.get('duration', 1.0)
-                    current_easing = self.transition_manager.config.get('easing', 'ease_in_out')
-                    
-                    # Check if we need to restore (only if different from current)
-                    # Store original defaults on first custom transition
-                    if not hasattr(self.transition_manager, '_original_effect'):
-                        # Save the current config as original defaults
-                        self.transition_manager._original_effect = current_effect
-                        self.transition_manager._original_duration = current_duration
-                        self.transition_manager._original_easing = current_easing
-                        self.transition_manager._original_plugin = self.transition_manager.config.get('plugin')
-                        logger.debug(f"🎬 [{self.player_name}] Saved original defaults: {current_effect}")
-                    
-                    # Restore original defaults
-                    original_effect = getattr(self.transition_manager, '_original_effect', 'fade')
-                    original_plugin = getattr(self.transition_manager, '_original_plugin', None)
-                    
-                    if current_effect != original_effect or original_plugin:
-                        logger.debug(f"🎬 [{self.player_name}] Restoring playlist default transition: {original_effect}")
-                        # Reload the original plugin
-                        if original_plugin is None:
-                            original_plugin = self.plugin_manager.load_plugin(original_effect)
-                        
-                        self.transition_manager.configure(
-                            plugin=original_plugin,
-                            effect=original_effect,
-                            duration=getattr(self.transition_manager, '_original_duration', 1.0),
-                            easing=getattr(self.transition_manager, '_original_easing', 'ease_in_out')
-                        )
+            if transition_config and self.transition_manager:
+                effect = transition_config.get('plugin', transition_config.get('effect', 'fade'))
+                duration = transition_config.get('duration', 1.0)
+                if isinstance(duration, dict) and '_value' in duration:
+                    duration = duration['_value']
+                easing = transition_config.get('easing', 'ease_in_out')
+                if isinstance(easing, dict) and '_value' in easing:
+                    easing = easing['_value']
+                self.transition_manager.configure(effect=effect, duration=duration, easing=easing)
+                logger.debug(f"🎬 [{self.player_name}] Custom transition: {effect} {duration}s")
         else:
             logger.debug(f"🎬 [{self.player_name}] Clip data not found for ID {clip_id}, using default transitions")
         
@@ -717,6 +939,12 @@ class Player:
                 logger.error(f"❌ [{self.player_name}] Failed to initialize clip: {clip_item}")
                 return False
             
+            # Start transition BEFORE replacing the old source so the A-buffer
+            # (last frame from the outgoing clip) is still intact.
+            # Only when was_playing — no buffer if the player wasn't running.
+            if was_playing:
+                self.transition_manager.start(self.player_name)
+            
             # Cleanup old source and replace (after thread stopped)
             if self.layers:
                 # Multi-Layer: Replace Layer 0 source
@@ -739,6 +967,10 @@ class Player:
             if self.clip_registry and clip_id:
                 video_dir = self.config.get('paths', {}).get('video_dir', 'video')
                 try:
+                    # Ensure the clip is in the registry before loading its layers.
+                    # playlist_ids may contain UUIDs from a loaded/saved playlist that
+                    # haven't been re-registered since the registry starts empty each run.
+                    clip_id = self._ensure_clip_registered(clip_item, clip_id)
                     self.load_clip_layers(clip_id, self.clip_registry, video_dir)
                     logger.debug(f"🎨 [{self.player_name}] Loaded layers for clip {clip_id}")
                 except Exception as e:
@@ -840,17 +1072,6 @@ class Player:
             logger.error(f"Fehler beim Re-Initialisieren der Source: {self.source.get_source_name()}")
             return
         
-        # Restore preview_enabled for ArtNet player from session state
-        if self.enable_artnet:
-            try:
-                from ..session.state import get_session_state as _get_ss
-                _ss = _get_ss()
-                if _ss:
-                    _ap_settings = _ss.get_artnet_player_settings()
-                    self._preview_enabled = _ap_settings.get('preview_enabled', True)
-            except Exception:
-                pass
-
         # Start ArtNet Routing Bridge (if available and on Art-Net Player)
         if self.routing_bridge and self.enable_artnet:
             try:
@@ -1063,18 +1284,91 @@ class Player:
         self.frames_processed = 0
         self.current_loop = 0
 
-        # ── GPU thread-affinity guard ─────────────────────────────────────────
-        # ModernGL standalone contexts are WGL-affine: the context must be
-        # current on the thread that uses it.  If the context was created in
-        # a different thread (e.g. Flask startup thread or a previous play_loop
-        # thread), reset ALL GPU singletons so they're recreated fresh here.
+        # ── GPU pipeline init ─────────────────────────────────────────────────
+        # wgpu is thread-safe — no thread affinity, no context-current required.
+        # Reset singletons if pipeline was created on a different thread.
         try:
             from ..gpu import reset_gpu_pipeline, is_context_from_current_thread, probe_gpu_readback
-            if not is_context_from_current_thread():
-                logger.info(f"GPU context not current in {self.player_name} play thread — resetting pipeline")
-                reset_gpu_pipeline()
-                # Re-probe so GPU_READBACK_VIABLE is set correctly for new context
-                probe_gpu_readback(self.canvas_width, self.canvas_height)
+            need_pipeline_reset = not is_context_from_current_thread()
+
+            if need_pipeline_reset:
+                # Before resetting, try to claim exclusive GPU ownership.
+                # If another play thread already owns the GPU context, we must
+                # NOT destroy it (that causes a SEGFAULT via dangling SSBO
+                # numpy pointers on the other thread).  Skip reset and let
+                # this player use the CPU blend path instead.
+                from ..gpu.context import try_claim_gpu
+                if not try_claim_gpu():
+                    logger.info(
+                        f"{self.player_name}: GPU owned by another play thread — "
+                        f"skipping pipeline reset; player will use CPU blend path"
+                    )
+                    need_pipeline_reset = False
+                else:
+                    logger.info(f"GPU context not current in {self.player_name} play thread — resetting pipeline")
+                    # Only stop GLFW when it is NOT already in GPU mode.
+                    # reset_gpu_pipeline() now preserves the GLFW anchor window so
+                    # the display window's sharing (wglCreateContextAttribsARB) stays
+                    # valid — no stop/restart is needed in that case.
+                    try:
+                        from ..gpu.glfw_display import get_glfw_display as _get_glfw
+                        _glfw_already_gpu = _get_glfw().is_active() and _get_glfw().is_gpu_mode()
+                    except Exception:
+                        _glfw_already_gpu = False
+                    if not _glfw_already_gpu and self._display_gpu_active:
+                        self._display_gpu_active = False
+                        try:
+                            from ..gpu.glfw_display import get_glfw_display
+                            get_glfw_display().stop()
+                        except Exception:
+                            pass
+                    reset_gpu_pipeline()
+                    probe_gpu_readback(self.canvas_width, self.canvas_height)
+
+            # Ensure GL context exists now (creates it on this thread if needed)
+            from ..gpu import get_context as _get_ctx
+            _get_ctx()
+
+            # (Re-)start GLFW with GPU sharing from this thread.
+            # This is needed in two cases:
+            #   1. Context was reset (need_pipeline_reset=True)
+            #   2. GLFW started during __init__ before the GL context existed
+            #      (is_active but not gpu_mode, _display_gpu_active still False)
+            if not self.enable_artnet and self.output_manager:
+                try:
+                    from .outputs.plugins.display_output import DisplayOutput
+                    from ..gpu.glfw_display import get_glfw_display
+                    display = get_glfw_display()
+                    glfw_needs_restart = (
+                        not self._glfw_wgl_failed and
+                        not display.is_gpu_mode() and
+                        (
+                            need_pipeline_reset or
+                            (display.is_active() and not self._display_gpu_active)
+                        )
+                    )
+                    if glfw_needs_restart:
+                        logger.info(f"{self.player_name}: restarting GLFW display for GPU sharing "
+                                    f"(reset={need_pipeline_reset}, active={display.is_active()}, "
+                                    f"gpu_mode={display.is_gpu_mode()})")
+                        if display.is_active():
+                            display.stop()
+                        for out in self.output_manager.outputs.values():
+                            if isinstance(out, DisplayOutput) and out.enabled:
+                                out.initialize()
+                        if get_glfw_display().is_gpu_mode():
+                            self._on_display_gpu_ready()
+                        else:
+                            logger.warning(f"{self.player_name}: GLFW still in CPU mode after restart "
+                                           f"— WGL sharing failed. Display stays in CPU mode (no retry until next pipeline reset).")
+                            self._glfw_wgl_failed = True
+                    elif need_pipeline_reset and display.is_gpu_mode() and not self._display_gpu_active:
+                        # Anchor preserved, GLFW already in GPU mode — just re-enable the display hook.
+                        logger.info(f"{self.player_name}: GLFW already in GPU mode, skipping restart "
+                                    f"(anchor preserved, reusing existing WGL sharing)")
+                        self._on_display_gpu_ready()
+                except Exception as _ex:
+                    logger.warning(f"GLFW (re)start for GPU sharing failed: {_ex}")
         except Exception as _e:
             logger.warning(f"GPU pipeline reset check failed: {_e}")
 
@@ -1162,23 +1456,54 @@ class Player:
             
             # ========== MULTI-LAYER COMPOSITING ==========
             if not should_autoadvance and self.layers and len(self.layers) > 0:
-                # Gate GPU→CPU download: skip texture.read() (~43-111ms AMD stall)
-                # when no preview subscriber is connected and ArtNet uses GPU sampler.
-                self.layer_manager.set_needs_download(self.needs_cpu_frame)
-                # Delegate all layer compositing to LayerManager
-                # PROFILING: Now done inside composite_layers() for granular breakdown
-                # (source_decode, clip_effects, layer_composition measured separately)
-                frame, source_delay = self.layer_manager.composite_layers(
-                    preprocess_transport_callback=self._preprocess_layer_transport,
-                    player_name=self.player_name
-                )
+                try:
+                    frame, source_delay = self.layer_manager.composite_layers(
+                        preprocess_transport_callback=self._preprocess_layer_transport,
+                        player_name=self.player_name,
+                        needs_download=self.needs_cpu_frame,
+                    )
+                except Exception as _cmp_err:
+                    logger.error(f"❌ [{self.player_name}] composite_layers error: {_cmp_err}", exc_info=True)
+                    frame, source_delay = None, 0
                 
             elif not should_autoadvance:
                 # Fallback: Single-Source Mode (Backward Compatibility)
                 frame, source_delay = self.source.get_next_frame()
+                # GPU generators now return GPUFrame — download immediately in the
+                # legacy single-source path which has no GPU hooks or upload block.
+                if hasattr(frame, 'texture'):
+                    _cpu = frame.download()
+                    get_texture_pool().release(frame)
+                    frame = _cpu
             
             # ========== REST IST UNVERÄNDERT ==========
-            
+
+            # GPU-only path: composite_layers processed the frame on GPU but
+            # skipped the CPU download (needs_download=False).  This is NOT a
+            # source EOF — treat it as a successfully rendered frame.
+            if frame is _GPU_PROCESSED:
+                if self.routing_bridge and self.enable_artnet and self.is_running:
+                    try:
+                        with self.profiler.profile_stage('output_routing'):
+                            self.routing_bridge.process_frame(None)
+                    except Exception as e:
+                        logger.error(f"Routing bridge error: {e}", exc_info=True)
+                self.profiler.record_frame_complete(loop_start_perf, source_fps=fps)
+                if not self.is_running:
+                    break
+                from . import lock as lock_module
+                if self.enable_artnet and lock_module._active_player is not self:
+                    break
+                self.frames_processed += 1
+                delay = source_delay if source_delay > 0 else frame_time
+                delay /= self.speed_factor
+                next_frame_time += delay
+                current_time = time.time()
+                sleep_time = next_frame_time - current_time
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                continue
+
             if frame is None:
                 # Ende der Source (Video-Loop oder Fehler)
                 # ACHTUNG: current_loop wurde bereits im Transport-Loop-Check erhöht!
@@ -1339,6 +1664,10 @@ class Player:
                                     relative_path=relative_path,
                                     metadata={}
                                 )
+                        else:
+                            # next_clip_id came from playlist_ids — may be stale (not in registry).
+                            # Ensure it is registered so load_clip_layers can find it.
+                            next_clip_id = self._ensure_clip_registered(next_item_path, next_clip_id)
                         
                         # Only reload layers if switching to a different clip
                         # Use _loaded_clip_id to avoid property getter issues during layer reload
@@ -1352,53 +1681,19 @@ class Player:
                             
                             # 🎬 Check for custom transition effect on new clip
                             clip_data = self._find_clip_by_id(next_clip_id)
-                            if clip_data:
+                            if clip_data and self.transition_manager:
                                 effects = clip_data.get('effects', [])
                                 transition_config = self._extract_transition_from_effects(effects)
-                                
                                 if transition_config:
-                                    plugin_name = transition_config.get('plugin')
-                                    logger.debug(f"🎬 [{self.player_name}] Autoplay: Custom transition on clip: {plugin_name}")
-                                    
-                                    # Load and apply transition plugin
-                                    transition_plugin_instance = self.plugin_manager.load_plugin(plugin_name)
-                                    if transition_plugin_instance and self.transition_manager:
-                                        # Save defaults if not already saved
-                                        if not hasattr(self.transition_manager, '_original_effect'):
-                                            self.transition_manager._original_effect = self.transition_manager.config.get('effect', 'fade')
-                                            self.transition_manager._original_plugin = self.transition_manager.config.get('plugin')
-                                            self.transition_manager._original_duration = self.transition_manager.config.get('duration', 1.0)
-                                            self.transition_manager._original_easing = self.transition_manager.config.get('easing', 'ease_in_out')
-                                        
-                                        # Extract actual values (handle triple-slider metadata)
-                                        duration = transition_config.get('duration', 1.0)
-                                        if isinstance(duration, dict) and '_value' in duration:
-                                            duration = duration['_value']
-                                        
-                                        easing = transition_config.get('easing', 'ease_in_out')
-                                        if isinstance(easing, dict) and '_value' in easing:
-                                            easing = easing['_value']
-                                        
-                                        self.transition_manager.configure(
-                                            plugin=transition_plugin_instance,
-                                            effect=plugin_name,
-                                            duration=duration,
-                                            easing=easing
-                                        )
-                                else:
-                                    # No custom transition - restore defaults
-                                    if self.transition_manager and hasattr(self.transition_manager, '_original_effect'):
-                                        logger.debug(f"🎬 [{self.player_name}] Autoplay: Restoring default transition")
-                                        original_plugin = self.transition_manager._original_plugin
-                                        if original_plugin is None:
-                                            original_plugin = self.plugin_manager.load_plugin(self.transition_manager._original_effect)
-                                        
-                                        self.transition_manager.configure(
-                                            plugin=original_plugin,
-                                            effect=self.transition_manager._original_effect,
-                                            duration=self.transition_manager._original_duration,
-                                            easing=self.transition_manager._original_easing
-                                        )
+                                    effect = transition_config.get('plugin', transition_config.get('effect', 'fade'))
+                                    duration = transition_config.get('duration', 1.0)
+                                    if isinstance(duration, dict) and '_value' in duration:
+                                        duration = duration['_value']
+                                    easing = transition_config.get('easing', 'ease_in_out')
+                                    if isinstance(easing, dict) and '_value' in easing:
+                                        easing = easing['_value']
+                                    self.transition_manager.configure(effect=effect, duration=duration, easing=easing)
+                                    logger.debug(f"🎬 [{self.player_name}] Autoplay: Custom transition: {effect}")
                             
                             # Load layers for new clip
                             video_dir = self.config.get('paths', {}).get('video_dir', 'video')
@@ -1467,62 +1762,22 @@ class Player:
                     self.source.reset()
                 continue
             
-            # Apply transition if active
-            with self.profiler.profile_stage('transitions'):
-                frame = self.transition_manager.apply(frame, self.player_name)
-            
-            # Store frame for next transition
-            self.transition_manager.store_frame(frame)
-            
-            # Helligkeit in-place anwenden (Performance-Optimierung: keine Kopie!)
-            if self.brightness != 1.0 or self.hue_shift != 0:
-                # Ensure writability — frame may be a read-only memmap view when no
-                # effect ran before this point (e.g. identity transform fast-path).
-                # When a transform/effect DID run, it already produced a fresh writable
-                # array so this check is free (just a flag test, no copy).
-                if not frame.flags['WRITEABLE']:
-                    frame = frame.copy()
+            # CPU-dependent post-processing -- skipped when frame is None
+            if frame is not None:
+                # (Transitions are GPU-only; handled by _on_transition_gpu_frame hook)
+                # (Clip effects are GPU-only; applied by composite_layers → apply_layer_effects)
 
-            if self.brightness != 1.0:
-                # NumPy in-place multiplication (arbeitet direkt auf frame)
-                np.multiply(frame, self.brightness, out=frame, casting='unsafe')
-                np.clip(frame, 0, 255, out=frame)
-                frame = frame.astype(np.uint8)
-            
-            # Hue Shift in-place anwenden wenn aktiviert (OPTIMIZATION: Lazy conversion)
-            if self.hue_shift != 0:
-                frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                frame_hsv[:, :, 0] = (frame_hsv[:, :, 0].astype(np.int16) + self.hue_shift // 2) % 180
-                cv2.cvtColor(frame_hsv, cv2.COLOR_HSV2BGR, dst=frame)
-            # Note: When hue_shift == 0, skip entire HSV conversion (saves 2-3ms)
-            
-            # Wende Effect Chains an - nur kopieren wenn beide Chains unterschiedlich sind
-            # Each player instance uses a single chain: artnet player → 'artnet', video player → 'video'
-            # (The dual-chain design was legacy from a single-player architecture; now each player is
-            # a separate instance that only populates the chain matching its player_id.)
-            active_chain = 'artnet' if self.enable_artnet else 'video'
-            with self.profiler.profile_stage('player_effects'):
-                if not self.effect_processor.is_chain_noop(active_chain):
-                    # NOTE: clip effects are already applied by composite_layers → apply_layer_effects.
-                    frame = self.effect_processor.apply_effects(
-                        frame,
-                        chain_type=active_chain,
-                        player_name=self.player_name
-                    )
-            
-            # Alpha-Compositing (wenn RGBA vorhanden)
-            if frame.shape[2] == 4:
-                frame = self._alpha_composite_to_black(frame)
+                # Alpha-Compositing (wenn RGBA vorhanden)
+                if frame is not None and isinstance(frame, np.ndarray) and frame.shape[2] == 4:
+                    frame = self._alpha_composite_to_black(frame)
             
             # Frame is already in BGR format (native OpenCV), no conversion needed
             # frame may be None when GPU sampler covers ArtNet and no preview is active
             if frame is not None:
                 self.last_video_frame = frame
 
-            # Distribute frame to output routing system (preview outputs).
-            # Skip when no subscriber is watching — avoids updating VirtualOutput
-            # with a stale reference the Flask generator would just re-encode.
-            if self.output_manager and self.preview_active and frame is not None:
+            # Distribute frame to output routing system.
+            if self.output_manager and frame is not None:
                 try:
                     with self.profiler.profile_stage('frame_delivery'):
                         self.output_manager.update_frame(
@@ -1533,8 +1788,8 @@ class Player:
                 except Exception as e:
                     logger.error(f"[OUTPUT] Frame update error: {e}", exc_info=True)
             
-            # ArtNet Routing System — frame may be None when GPU sampler covers all
-            # outputs and no preview subscriber triggered a CPU download.
+            # ArtNet Routing System — frame may be None when ArtNet player GPU sampler
+            # covers all outputs directly (enable_artnet=True + sampler ready).
             if self.routing_bridge and self.enable_artnet and self.is_running:
                 try:
                     with self.profiler.profile_stage('output_routing'):
@@ -1545,7 +1800,7 @@ class Player:
             # Mark frame processing complete for profiler
             # Pass loop_start_perf so total_frame_time reflects actual wall-clock
             # elapsed (including MJPEG encoding, brightness, hue and other untracked gaps)
-            self.profiler.record_frame_complete(loop_start_perf)
+            self.profiler.record_frame_complete(loop_start_perf, source_fps=fps)
             
             # Beende wenn gestoppt
             if not self.is_running:
@@ -1573,6 +1828,13 @@ class Player:
             elif sleep_time < -0.1:  # Zu langsam, Reset
                 next_frame_time = current_time + delay
         
+        # Release GPU ownership so the next play-loop thread (on clip change,
+        # stop/restart, or new player) can claim it and create a fresh context.
+        try:
+            from ..gpu.context import release_gpu_ownership
+            release_gpu_ownership()
+        except Exception:
+            pass
         # Always reset flags when loop exits (whether via break or normal end).
         # Without this, is_playing stays True after a natural clip end, making
         # play() believe the player is still running and silently skip restart.

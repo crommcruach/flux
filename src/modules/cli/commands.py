@@ -53,7 +53,6 @@ class CommandExecutor:
             config: Configuration dictionary
         """
         self.player_provider = player_provider
-        self.dmx_controller = dmx_controller  # Deprecated - DMX input removed
         self.video_dir = video_dir
         self.data_dir = data_dir
         self.config = config
@@ -405,21 +404,7 @@ class CommandExecutor:
     
     def _handle_scripts(self, args):
         """List all scripts."""
-        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system
         return CommandResult(True, "Script system deprecated. Use generators plugin.", {"scripts": []})
-        
-        if not scripts:
-            return CommandResult(True, "Keine Scripts gefunden", {"scripts": []})
-        
-        lines = [f"Verfügbare Scripts ({len(scripts)}):"]
-        for i, script in enumerate(scripts, 1):
-            name = script['name']
-            desc = script.get('description', 'Keine Beschreibung')
-            lines.append(f"  {i}. {name} - {desc}")
-        
-        return CommandResult(True, "\n".join(lines), {"scripts": scripts, "count": len(scripts)})
-    
-    def _handle_video_load(self, video_name):
         """Load a video."""
         import os
         from ..player.sources import VideoSource

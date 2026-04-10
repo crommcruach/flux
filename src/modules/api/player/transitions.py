@@ -9,10 +9,13 @@ Provides:
 
 from flask import request, jsonify
 from ...core.logger import get_logger
-from ...plugins.manager import get_plugin_manager
-from plugins.plugin_base import PluginType
 
 logger = get_logger(__name__)
+
+# Available GPU shader transitions (WGSL-based)
+_GPU_TRANSITIONS = [
+    {"id": "fade", "name": "Fade", "description": "Cross-fade blend"},
+]
 
 
 def register_transition_routes(app, player_manager, playlist_system=None):
@@ -24,37 +27,18 @@ def register_transition_routes(app, player_manager, playlist_system=None):
         player_manager: PlayerManager-Instanz
         playlist_system: MultiPlaylistSystem instance for playlist-aware operations (optional)
     """
-    plugin_manager = get_plugin_manager()
-    
     @app.route('/api/transitions/list', methods=['GET'])
     def list_transitions():
-        """Liste aller verfügbaren Transition-Plugins."""
+        """List available GPU shader transitions."""
         try:
-            transitions = plugin_manager.list_plugins(PluginType.TRANSITION)
-            
-            # Format für Frontend
-            transition_list = []
-            for trans in transitions:
-                transition_list.append({
-                    "id": trans["id"],
-                    "name": trans["name"],
-                    "description": trans.get("description", ""),
-                    "parameters": trans.get("parameters", {}),
-                    "version": trans.get("version", "1.0.0")
-                })
-            
             return jsonify({
                 "success": True,
-                "transitions": transition_list,
-                "count": len(transition_list)
+                "transitions": _GPU_TRANSITIONS,
+                "count": len(_GPU_TRANSITIONS)
             })
-            
         except Exception as e:
             logger.error(f"❌ Error listing transitions: {e}", exc_info=True)
-            return jsonify({
-                "success": False,
-                "error": str(e)
-            }), 500
+            return jsonify({"success": False, "error": str(e)}), 500
     
     
     @app.route('/api/player/<player_id>/transition/config', methods=['POST'])
@@ -121,43 +105,29 @@ def register_transition_routes(app, player_manager, playlist_system=None):
             
             # Otherwise apply to physical player (active playlist)
             logger.debug(f"[TRANSITION CONFIG DEBUG] Applying to physical player (active playlist)")
-            
-            # Check if transition plugin exists
-            transition_plugin = None
-            if enabled:
-                # Get plugin instance (PluginManager.get_plugin only takes plugin_id)
-                transition_plugin = plugin_manager.get_plugin(effect)
-                if not transition_plugin:
-                    # Try to load the plugin if not already loaded
-                    transition_plugin = plugin_manager.load_plugin(effect)
-                
-                if not transition_plugin:
-                    return jsonify({
-                        "success": False,
-                        "error": f"Transition plugin '{effect}' not found"
-                    }), 404
-                
-                # Verify it's a transition plugin (type is PluginType enum, not string)
-                plugin_type = transition_plugin.__class__.METADATA.get('type')
-                if plugin_type != PluginType.TRANSITION:
-                    return jsonify({
-                        "success": False,
-                        "error": f"Plugin '{effect}' is not a transition plugin (type: {plugin_type})"
-                    }), 400
-                
-                # Set transition parameters (update_parameter is singular)
-                transition_plugin.update_parameter("duration", duration)
-                transition_plugin.update_parameter("easing", easing)
-            
-            # Store config in player's transition manager
-            player.transition_manager.configure(
-                enabled=enabled,
-                effect=effect,
-                duration=duration,
-                easing=easing,
-                plugin=transition_plugin
-            )
-            
+
+            new_config = {
+                'enabled': enabled,
+                'effect': effect,
+                'duration': duration,
+                'easing': easing,
+            }
+
+            # 1. Update the in-memory transition manager
+            player.transition_manager.configure(**new_config)
+
+            # 2. Keep player.transition_config in sync so _auto_save() persists it
+            player.transition_config = new_config.copy()
+
+            # 3. Update the active playlist's stored player_state and trigger a save
+            if playlist_system:
+                active_playlist = playlist_system.playlists.get(playlist_system.active_playlist_id)
+                if active_playlist:
+                    player_state = active_playlist.get_player_state(player_id)
+                    if player_state:
+                        player_state.transition_config = new_config.copy()
+                playlist_system._auto_save()
+
             logger.debug(f"✅ {player_id} transition config updated: "
                        f"enabled={enabled}, effect={effect}, duration={duration}s, easing={easing}")
             

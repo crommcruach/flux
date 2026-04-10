@@ -203,21 +203,26 @@ def graceful_shutdown(signum=None, frame=None):
     print("✅ Shutdown complete. Auf Wiedersehen!")
     print("="*80)
     
-    # Force exit after 1 second to ensure we don't hang
+    # Force exit after 1 second to ensure we don't hang regardless of
+    # whether this was called from a signal handler or an atexit callback.
+    # os._exit() bypasses atexit — that's intentional here.
     def force_exit():
         time.sleep(1.0)
         os._exit(0)
-    
+
     exit_thread = threading.Thread(target=force_exit, daemon=True)
     exit_thread.start()
-    
-    # Exit cleanly
-    sys.exit(0)
+
+    # Only call sys.exit() when invoked from a signal handler.
+    # When called from an atexit callback sys.exit() raises SystemExit which
+    # Python catches and prints as an unhandled exception — use return instead.
+    if signum is not None:
+        sys.exit(0)
 
 # Register signal handlers
 signal.signal(signal.SIGINT, graceful_shutdown)   # Ctrl+C
 signal.signal(signal.SIGTERM, graceful_shutdown)  # Termination request
-atexit.register(lambda: graceful_shutdown() if not _shutdown_requested else None)
+atexit.register(lambda: graceful_shutdown() if not _shutdown_requested else None)  # signum=None → no sys.exit()
 
 
 # Cleanup helper functions
@@ -557,10 +562,8 @@ def main():
     artnet_player.start()
     logger.debug("Players started for preview generation")
 
-    # ─── Eager GPU + system status banner ────────────────────────────────────
-    from modules.gpu.accelerator import get_gpu_accelerator
-    _gpu = get_gpu_accelerator(config)
-    logger.info(f"🖥️  Startup status → GPU: {_gpu.backend}  |  Threads: load=8, render=4  |  Compositor: GPUCompositor")
+    # ─── Startup status banner ────────────────────────────────────────────────
+    logger.info("🖥️  Startup status → Compositor: GPUCompositor  |  Threads: load=8, render=4")
     
     # Register cleanup for outputs (first to close display windows)
     register_cleanup_resource('outputs', lambda: _cleanup_outputs(player_manager))
@@ -590,19 +593,7 @@ def main():
     # Session State wird NICHT geladen beim Start (frischer Start)
     # User kann über Snapshots wiederherstellen wenn gewünscht
     logger.debug("Start mit leeren Playlists (Session State gelöscht)")
-    
-    # Kommentiert: Alte Session State Loading Logik - nicht mehr beim Start geladen
-    # try:
-    #     saved_state = session_state.load()
-    #     # ... Restore Video Player state ...
-    #     # ... Restore Art-Net Player state ...
-    #     logger.info(f"✅ Session State geladen: {saved_state['last_updated']}")
-    # except Exception as e:
-    #     logger.warning(f"⚠️ Fehler beim Laden von Session State: {e}")
-    
-    # DMX Input Controller removed - will be reimplemented later
-    # See snippets/old-dmx-input/ for archived implementation
-    
+
     # REST API initialisieren und automatisch starten
     # Note: replay_manager=None - Recording system removed, will be reimplemented later
     rest_api = RestAPI(player_manager, None, data_dir, video_dir, config, replay_manager=None)
@@ -631,7 +622,31 @@ def main():
         logger.debug("SequenceManager connected to SocketIO for real-time updates")
     
     rest_api.start(host=config['api']['host'], port=config['api']['port'])
-    
+
+    # Forward GPU warmup status lines to the web CLI console
+    try:
+        from modules.gpu.renderer import set_warmup_console_log_fn
+        set_warmup_console_log_fn(rest_api.add_log)
+    except Exception:
+        pass
+
+    # Kick off GPU shader cache warmup and wait for it to finish before the
+    # CLI becomes interactive.  Warmup typically takes 5-10 s; we allow up to
+    # 60 s before giving up so headless / slow systems are not hard-blocked.
+    # This prevents the user from adding effects and hitting compile stalls.
+    _WARMUP_TIMEOUT = 60
+    try:
+        from modules.gpu.renderer import get_renderer, warmup_done as _warmup_done_fn
+        get_renderer()   # creates Renderer singleton + starts warmup thread
+        print('⏳ GPU: waiting for shader cache … (max 60 s)', flush=True)
+        ready = _warmup_done_fn().wait(timeout=_WARMUP_TIMEOUT)
+        if not ready:
+            logger.warning('GPU shader warmup did not finish within %ds — continuing anyway', _WARMUP_TIMEOUT)
+            print(f'⚠️  GPU: shader cache timeout after {_WARMUP_TIMEOUT}s — some effects may compile on first use', flush=True)
+        # success message is already printed by warmup thread via set_warmup_console_log_fn
+    except Exception as e:
+        logger.warning('GPU renderer early init failed (will retry on first use): %s', e)
+
     # Register cleanup for REST API
     register_cleanup_resource('rest_api', lambda: _cleanup_rest_api(rest_api))
     

@@ -16,6 +16,10 @@
     "file_log_level": "INFO",
     "max_log_files": 10
   },
+  "gpu": {
+    "_force_gpu_path_comment": "Set true to bypass the readback speed probe and force GPU shaders regardless of hardware (for shader testing on slow-readback GPUs like AMD). Do NOT use in production.",
+    "force_gpu_path": true
+  },
   "artnet": {
     "broadcast": true,
     "fps": 30,
@@ -201,7 +205,6 @@
       "_comment": "Default routing used on startup",
       "artnet": [],
       "video": [
-        "main_display",
         "preview_virtual"
       ]
     },
@@ -209,7 +212,7 @@
       {
         "description": "Main display output",
         "enable_capture": true,
-        "enabled": true,
+        "enabled": false,
         "fps": 60,
         "fullscreen": true,
         "id": "main_display",
@@ -223,7 +226,7 @@
       {
         "description": "Virtual output for web preview streaming",
         "enable_capture": true,
-        "enabled": true,
+        "enabled": false,
         "fps": 30,
         "id": "preview_virtual",
         "resolution": [
@@ -284,24 +287,30 @@
     },
     "preview_fps_limit": 30,
     "preview_stream": {
-      "_comment": "MJPEG stream settings. fps: 25-60 recommended. max_width: 0 for original size. jpeg_quality: 1-100",
+      "_comment": "MJPEG stream settings. fps: 25-60 recommended. preview_width/preview_height: GPU downscale target (0=off). jpeg_quality: 1-100",
       "artnet": {
         "_comment": "Art-Net player preview stream settings",
         "fps": 25,
         "jpeg_quality": 85,
-        "max_width": 320
+        "max_width": 320,
+        "preview_width": 640,
+        "preview_height": 360
       },
       "fullscreen": {
-        "_comment": "Fullscreen stream settings. max_width=0 means no scaling (original size)",
+        "_comment": "Fullscreen stream settings. preview_width=0 disables GPU downscale (uses full canvas resolution)",
         "fps": 30,
-        "jpeg_quality": 85,
-        "max_width": 0
+        "jpeg_quality": 90,
+        "max_width": 0,
+        "preview_width": 1920,
+        "preview_height": 1080
       },
       "video": {
         "_comment": "Video player preview stream settings",
         "fps": 25,
         "jpeg_quality": 85,
-        "max_width": 640
+        "max_width": 640,
+        "preview_width": 640,
+        "preview_height": 360
       }
     }
   },

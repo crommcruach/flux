@@ -17,7 +17,6 @@ API Routes - Playback, Settings, Art-Net Endpoints
 """
 from flask import jsonify, request
 from ...core.logger import get_logger
-from ...core.image_utils import apply_mask_to_frame, apply_inline_slice
 
 logger = get_logger(__name__)
 
@@ -259,552 +258,118 @@ def register_info_routes(app, player_manager, api=None, config=None):
             }
         })
     
-    @app.route('/api/outputs/<player_id>/stream/<output_id>')
-    def stream_output(player_id, output_id):
-        """
-        MJPEG stream for any output (generalized streaming endpoint)
-        
-        Args:
-            player_id: Player identifier (e.g., 'video', 'artnet')
-            output_id: Output identifier from OutputManager
-        
-        Query Parameters:
-            fps: Stream FPS (default: 25)
-            quality: JPEG quality 0-100 (default: 85)
-            max_width: Max width scaling (default: 640, 0=no scaling)
-        """
-        from flask import Response, request
-        import cv2
-        import numpy as np
-        import time
-        
-        # Get query parameters
-        stream_fps = int(request.args.get('fps', 25))
-        jpeg_quality = int(request.args.get('quality', 85))
-        max_width = int(request.args.get('max_width', 640))
-        frame_delay = 1.0 / stream_fps if stream_fps > 0 else 0.04
-        
-        def generate_frames():
-            """Generator for MJPEG stream"""
-            _player = player_manager.get_player(player_id)
-            if _player is not None and hasattr(_player, '_preview_subscriber_count'):
-                _player._preview_subscriber_count += 1
-            try:
-                while True:
-                    try:
-                        # Get player
-                        player = player_manager.get_player(player_id)
-
-                        if not player or not hasattr(player, 'output_manager') or not player.output_manager:
-                            frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                        else:
-                            output = player.output_manager.outputs.get(output_id)
-                            if not output or not output.enabled:
-                                frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                            else:
-                                frame = output.get_latest_frame()
-                                if frame is None:
-                                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
-
-                        # Scale if needed
-                        if max_width > 0 and frame.shape[1] > max_width:
-                            scale = max_width / frame.shape[1]
-                            frame = cv2.resize(frame, (int(frame.shape[1] * scale), int(frame.shape[0] * scale)))
-
-                        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-                        if not ret:
-                            time.sleep(frame_delay)
-                            continue
-
-                        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-                        time.sleep(frame_delay)
-
-                    except Exception as e:
-                        logger.error(f"Stream error for {player_id}/{output_id}: {e}")
-                        frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                        ret, buffer = cv2.imencode('.jpg', frame)
-                        if ret:
-                            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-                        time.sleep(0.1)
-            finally:
-                if _player is not None and hasattr(_player, '_preview_subscriber_count'):
-                    _player._preview_subscriber_count = max(0, _player._preview_subscriber_count - 1)
-
-        return Response(generate_frames(),
-                       mimetype='multipart/x-mixed-replace; boundary=frame')
-
-    @app.route('/api/outputs/<player_id>/stream/preview_live')
-    def stream_preview_player(player_id):
-        """
-        MJPEG stream for preview players (non-active playlist preview)
-        
-        Args:
-            player_id: 'video' or 'artnet' (preview player automatically selected)
-        
-        Query Parameters:
-            fps: Stream FPS (default: 15)
-            quality: JPEG quality 0-100 (default: 80)
-            max_width: Max width scaling (default: 640)
-        """
-        from flask import Response, request
-        import cv2
-        import numpy as np
-        import time
-        
-        # Get query parameters (lower defaults for preview)
-        stream_fps = int(request.args.get('fps', 15))
-        jpeg_quality = int(request.args.get('quality', 80))
-        max_width = int(request.args.get('max_width', 640))
-        frame_delay = 1.0 / stream_fps if stream_fps > 0 else 0.066
-        
-        def generate_preview_frames():
-            """Generator for preview player MJPEG stream"""
-            _preview_player_id = f"{player_id}_preview"
-            _player = player_manager.get_player(_preview_player_id)
-            if _player is not None and hasattr(_player, '_preview_subscriber_count'):
-                _player._preview_subscriber_count += 1
-            try:
-              while True:
-                try:
-                    # Get preview player
-                    preview_player_id = f"{player_id}_preview"
-                    preview_player = player_manager.get_player(preview_player_id)
-                    
-                    if not preview_player:
-                        # Black frame with text if preview player not found
-                        frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                        cv2.putText(frame, "Preview not active", (10, 90),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                    else:
-                        # Get last video frame from preview player
-                        if player_id == 'video':
-                            frame = preview_player.last_video_frame
-                        else:  # artnet
-                            frame = preview_player.last_video_frame
-                        
-                        if frame is None:
-                            # Black frame if no frame available yet
-                            frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                            cv2.putText(frame, "Loading preview...", (10, 90),
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                    
-                    # Scale if needed
-                    if max_width > 0 and frame.shape[1] > max_width:
-                        scale = max_width / frame.shape[1]
-                        new_width = int(frame.shape[1] * scale)
-                        new_height = int(frame.shape[0] * scale)
-                        frame = cv2.resize(frame, (new_width, new_height))
-                    
-                    # Encode as JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame, 
-                                              [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-                    if not ret:
-                        time.sleep(frame_delay)
-                        continue
-                    
-                    frame_bytes = buffer.tobytes()
-                    
-                    # MJPEG format
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + 
-                           frame_bytes + b'\r\n')
-                    
-                    time.sleep(frame_delay)
-                
-                except Exception as e:
-                    logger.error(f"Preview stream error for {player_id}: {e}")
-                    # Black frame on error
-                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                    ret, buffer = cv2.imencode('.jpg', frame)
-                    if ret:
-                        frame_bytes = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + 
-                               frame_bytes + b'\r\n')
-                    time.sleep(0.1)
-        
-            finally:
-                if _player is not None and hasattr(_player, '_preview_subscriber_count'):
-                    _player._preview_subscriber_count = max(0, _player._preview_subscriber_count - 1)
-
-        return Response(generate_preview_frames(), 
-                       mimetype='multipart/x-mixed-replace; boundary=frame')
-
     @app.route('/api/preview/stream')
     def preview_stream():
-        """MJPEG Video-Stream des aktuellen Frames mit optionalem Slice-Parameter."""
-        from flask import Response, request
-        import cv2
-        import numpy as np
+        """MJPEG Video-Stream des aktuellen Frames."""
+        from flask import Response
         import time
-        import json
-        
-        # Get optional slice parameter from query string
-        slice_param = request.args.get('slice', None)
-        slice_config = None
-        
-        if slice_param:
-            try:
-                # Try to parse as JSON (inline slice definition)
-                slice_config = json.loads(slice_param)
-            except:
-                # If not JSON, treat as slice ID (string)
-                slice_config = slice_param
-        
-        # Load config settings for video preview
+
         cfg = config if config else {}
         preview_config = cfg.get('video', {}).get('preview_stream', {}).get('video', {})
         stream_fps = preview_config.get('fps', 30)
-        max_width = preview_config.get('max_width', 640)
-        jpeg_quality = preview_config.get('jpeg_quality', 85)
         frame_delay = 1.0 / stream_fps
-        
-        # WICHTIG: Keine Logger/Print-Aufrufe vor oder im Generator!
-        # Dies würde "write() before start_response" Fehler verursachen
         
         def generate_frames():
             """Generator für MJPEG-Stream."""
             _player = player_manager.player
-            if _player is not None and hasattr(_player, '_preview_subscriber_count'):
-                _player._preview_subscriber_count += 1
-            frame_count = 0
+            if _player and hasattr(_player, '_mjpeg_subscriber_count'):
+                _player._mjpeg_subscriber_count += 1
             try:
-              while True:
-                try:
-                    frame_count += 1
-                    # Hole aktuellen Player dynamisch
+                while True:
                     player = player_manager.player
-                    
-                    # Check if player exists and is initialized
-                    if player is None:
-                        frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                    # Hole aktuelles Video-Frame (komplettes Bild)
-                    elif hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
-                        # Verwende komplettes Video-Frame (bereits in BGR) - MAKE A COPY to avoid race conditions
-                        try:
-                            frame = player.last_video_frame.copy()
-                        except:
-                            # If copy fails, create black frame
-                            canvas_width = getattr(player, 'canvas_width', 320)
-                            canvas_height = getattr(player, 'canvas_height', 180)
-                            frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-                    elif not hasattr(player, 'last_frame') or player.last_frame is None:
-                        # Schwarzes Bild wenn kein Frame vorhanden
-                        canvas_width = getattr(player, 'canvas_width', 320)
-                        canvas_height = getattr(player, 'canvas_height', 180)
-                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-                    else:
-                        # Fallback: Rekonstruiere Bild aus LED-Punkten (NumPy-optimiert)
-                        frame_data = player.last_frame
-                        canvas_width = getattr(player, 'canvas_width', 320)
-                        canvas_height = getattr(player, 'canvas_height', 180)
-                        point_coords = getattr(player, 'point_coords', None)
-                        
-                        # Erstelle schwarzes Bild
-                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-                        
-                        # Zeichne die Punkte auf das Bild (NumPy fancy indexing - 10-50x schneller)
-                        if point_coords is not None and len(frame_data) >= len(point_coords) * 3:
-                            # NumPy array aus frame_data erstellen und reshapen
-                            rgb_array = np.array(frame_data, dtype=np.uint8).reshape(-1, 3)
-                            
-                            # Filtere gültige Koordinaten
-                            x_coords = point_coords[:, 0]
-                            y_coords = point_coords[:, 1]
-                            valid_mask = (y_coords >= 0) & (y_coords < canvas_height) & (x_coords >= 0) & (x_coords < canvas_width)
-                            
-                            # Setze alle Pixel auf einmal (BGR Format für OpenCV)
-                            frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
-                    
-                    # Apply slice if configured
-                    if slice_config is not None:
-                        if isinstance(slice_config, dict):
-                            # Inline slice definition - apply directly
-                            frame = apply_inline_slice(frame, slice_config)
-                        elif player and hasattr(player, 'output_manager') and player.output_manager:
-                            # Slice ID - use output manager's slice manager
-                            if hasattr(player.output_manager, 'slice_manager'):
-                                frame = player.output_manager.slice_manager.get_slice(slice_config, frame)
-                    
-                    # Skaliere auf Preview-Größe (wenn konfiguriert)
-                    if max_width > 0 and frame.shape[1] > max_width:
-                        scale = max_width / frame.shape[1]
-                        new_width = int(frame.shape[1] * scale)
-                        new_height = int(frame.shape[0] * scale)
-                        frame = cv2.resize(frame, (new_width, new_height))
-                    
-                    # Encode als JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-                    if not ret:
-                        time.sleep(frame_delay)
-                        continue
-                    
-                    frame_bytes = buffer.tobytes()
-                    
-                    # Traffic-Tracking
-                    api.stream_traffic['preview']['bytes'] += len(frame_bytes)
-                    api.stream_traffic['preview']['frames'] += 1
-                    
-                    # MJPEG Format: --frame boundary
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    
-                    # Frame rate limiting
-                    time.sleep(frame_delay)
-                
-                except Exception as e:
-                    # Bei Fehler: Schwarzes Bild
-                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                    ret, buffer = cv2.imencode('.jpg', frame)
-                    if ret:
-                        frame_bytes = buffer.tobytes()
+                    frame_bytes = getattr(player, 'last_preview_jpeg', None) if player else None
+                    if frame_bytes is not None:
+                        api.stream_traffic['preview']['bytes'] += len(frame_bytes)
+                        api.stream_traffic['preview']['frames'] += 1
                         yield (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    time.sleep(0.1)
-        
+                    time.sleep(frame_delay)
             finally:
-                if _player is not None and hasattr(_player, '_preview_subscriber_count'):
-                    _player._preview_subscriber_count = max(0, _player._preview_subscriber_count - 1)
+                if _player and hasattr(_player, '_mjpeg_subscriber_count'):
+                    _player._mjpeg_subscriber_count = max(0, _player._mjpeg_subscriber_count - 1)
 
-        return Response(generate_frames(), 
+        return Response(generate_frames(),
                        mimetype='multipart/x-mixed-replace; boundary=frame')
     
     @app.route('/api/preview/artnet/stream')
     def preview_artnet_stream():
         """MJPEG Stream des Art-Net Players."""
         from flask import Response
-        import cv2
-        import numpy as np
         import time
-        
-        # Load config settings for artnet preview
+
         cfg = config if config else {}
         preview_config = cfg.get('video', {}).get('preview_stream', {}).get('artnet', {})
         stream_fps = preview_config.get('fps', 30)
-        max_width = preview_config.get('max_width', 640)
-        jpeg_quality = preview_config.get('jpeg_quality', 85)
         frame_delay = 1.0 / stream_fps
         
         def generate_frames():
             """Generator für Art-Net Player MJPEG-Stream."""
-            while True:
-                try:
-                    # Hole Art-Net Player
+            _player = player_manager.artnet_player
+            if _player and hasattr(_player, '_mjpeg_subscriber_count'):
+                _player._mjpeg_subscriber_count += 1
+            try:
+                while True:
                     player = player_manager.artnet_player
-                    
-                    # Hole aktuelles Frame
-                    if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
-                        frame = player.last_video_frame
-                    elif not hasattr(player, 'last_frame') or player.last_frame is None:
-                        canvas_width = getattr(player, 'canvas_width', 320)
-                        canvas_height = getattr(player, 'canvas_height', 180)
-                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-                    else:
-                        # Rekonstruiere aus LED-Punkten
-                        frame_data = player.last_frame
-                        canvas_width = getattr(player, 'canvas_width', 320)
-                        canvas_height = getattr(player, 'canvas_height', 180)
-                        point_coords = getattr(player, 'point_coords', None)
-                        
-                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-                        
-                        if point_coords is not None and len(frame_data) >= len(point_coords) * 3:
-                            rgb_array = np.array(frame_data, dtype=np.uint8).reshape(-1, 3)
-                            x_coords = point_coords[:, 0]
-                            y_coords = point_coords[:, 1]
-                            valid_mask = (y_coords >= 0) & (y_coords < canvas_height) & (x_coords >= 0) & (x_coords < canvas_width)
-                            frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
-                    
-                    # Skaliere auf Preview-Größe (wenn konfiguriert)
-                    if max_width > 0 and frame.shape[1] > max_width:
-                        scale = max_width / frame.shape[1]
-                        new_width = int(frame.shape[1] * scale)
-                        new_height = int(frame.shape[0] * scale)
-                        frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
-                    
-                    # Encode als JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-                    if not ret:
-                        time.sleep(frame_delay)
-                        continue
-                    
-                    frame_bytes = buffer.tobytes()
-                    
-                    # MJPEG Format
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    
-                    time.sleep(frame_delay)
-                
-                except Exception as e:
-                    frame = np.zeros((180, 320, 3), dtype=np.uint8)
-                    ret, buffer = cv2.imencode('.jpg', frame)
-                    if ret:
-                        frame_bytes = buffer.tobytes()
+                    frame_bytes = getattr(player, 'last_preview_jpeg', None) if player else None
+                    if frame_bytes is not None:
                         yield (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    time.sleep(0.1)
-        
-        return Response(generate_frames(), 
+                    time.sleep(frame_delay)
+            finally:
+                if _player and hasattr(_player, '_mjpeg_subscriber_count'):
+                    _player._mjpeg_subscriber_count = max(0, _player._mjpeg_subscriber_count - 1)
+
+        return Response(generate_frames(),
                        mimetype='multipart/x-mixed-replace; boundary=frame')
     
     @app.route('/api/fullscreen/stream')
     def fullscreen_stream():
         """MJPEG Video-Stream in voller Player-Auflösung (ohne Skalierung)."""
         from flask import Response, request
-        import cv2
-        import numpy as np
         import time
-        
+
         # Get player type from query parameter (video or artnet)
         player_type = request.args.get('player', 'video')
-        
-        # Load config settings for fullscreen
+
         cfg = config if config else {}
         fullscreen_config = cfg.get('video', {}).get('preview_stream', {}).get('fullscreen', {})
         stream_fps = fullscreen_config.get('fps', 60)
-        max_width = fullscreen_config.get('max_width', 0)
-        jpeg_quality = fullscreen_config.get('jpeg_quality', 95)
         frame_delay = 1.0 / stream_fps
         
         def generate_frames():
             """Generator für MJPEG-Stream ohne Preview-Skalierung."""
             _player = player_manager.artnet_player if player_type == 'artnet' else player_manager.player
-            if _player is not None and hasattr(_player, '_preview_subscriber_count'):
-                _player._preview_subscriber_count += 1
-            frame_count = 0
+            # Signal the player that a fullscreen subscriber is active so the
+            # GPU fullscreen downscaler starts encoding (triple-buffer ring).
+            if _player and hasattr(_player, '_fullscreen_subscriber_count'):
+                _player._fullscreen_subscriber_count += 1
             try:
-              while True:
-                try:
-                    frame_count += 1
-                    
-                    # Select player based on parameter
-                    if player_type == 'artnet':
-                        player = player_manager.artnet_player
-                    else:
-                        player = player_manager.player
-                    
-                    # Hole aktuelles Video-Frame (komplettes Bild)
-                    if hasattr(player, 'last_video_frame') and player.last_video_frame is not None:
-                        # Verwende komplettes Video-Frame in voller Auflösung (bereits in BGR) - KEIN COPY!
-                        frame = player.last_video_frame
-                    elif not hasattr(player, 'last_frame') or player.last_frame is None:
-                        # Schwarzes Bild wenn kein Frame vorhanden
-                        canvas_width = getattr(player, 'canvas_width', 320)
-                        canvas_height = getattr(player, 'canvas_height', 180)
-                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-                    else:
-                        # Fallback: Rekonstruiere Bild aus LED-Punkten (NumPy-optimiert)
-                        frame_data = player.last_frame
-                        canvas_width = getattr(player, 'canvas_width', 320)
-                        canvas_height = getattr(player, 'canvas_height', 180)
-                        point_coords = getattr(player, 'point_coords', None)
-                        
-                        # Erstelle schwarzes Bild
-                        frame = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-                        
-                        # Zeichne die Punkte auf das Bild (NumPy fancy indexing - 10-50x schneller)
-                        if point_coords is not None and len(frame_data) >= len(point_coords) * 3:
-                            # NumPy array aus frame_data erstellen und reshapen
-                            rgb_array = np.array(frame_data, dtype=np.uint8).reshape(-1, 3)
-                            
-                            # Filtere gültige Koordinaten
-                            x_coords = point_coords[:, 0]
-                            y_coords = point_coords[:, 1]
-                            valid_mask = (y_coords >= 0) & (y_coords < canvas_height) & (x_coords >= 0) & (x_coords < canvas_width)
-                            
-                            # Setze alle Pixel auf einmal (BGR Format für OpenCV)
-                            frame[y_coords[valid_mask], x_coords[valid_mask]] = rgb_array[valid_mask][:, [2, 1, 0]]
-                    
-                    # Skaliere auf konfigurierte Größe (wenn max_width > 0)
-                    if max_width > 0 and frame.shape[1] > max_width:
-                        scale = max_width / frame.shape[1]
-                        new_width = int(frame.shape[1] * scale)
-                        new_height = int(frame.shape[0] * scale)
-                        frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
-                    
-                    # Encode als JPEG mit konfigurierter Qualität
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-                    if not ret:
+                while True:
+                    try:
+                        player = player_manager.artnet_player if player_type == 'artnet' else player_manager.player
+
+                        # Fast path: GPU downscaler pre-encoded the JPEG on the
+                        # player thread via the triple-buffer ring — no CPU download.
+                        frame_bytes = getattr(player, 'last_fullscreen_jpeg', None) if player else None
+
+                        if frame_bytes is not None:
+                            api.stream_traffic['fullscreen']['bytes'] += len(frame_bytes)
+                            api.stream_traffic['fullscreen']['frames'] += 1
+                            yield (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                         time.sleep(frame_delay)
-                        continue
-                    
-                    frame_bytes = buffer.tobytes()
-                    
-                    # Traffic-Tracking
-                    api.stream_traffic['fullscreen']['bytes'] += len(frame_bytes)
-                    api.stream_traffic['fullscreen']['frames'] += 1
-                    
-                    # MJPEG Format: --frame boundary
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    
-                    # Frame rate limiting
-                    time.sleep(frame_delay)
-                
-                except Exception as e:
-                    # Bei Fehler: Schwarzes Bild mit aktueller Player-Auflösung
-                    player = player_manager.player
-                    error_width = getattr(player, 'canvas_width', 320)
-                    error_height = getattr(player, 'canvas_height', 180)
-                    frame = np.zeros((error_height, error_width, 3), dtype=np.uint8)
-                    ret, buffer = cv2.imencode('.jpg', frame)
-                    if ret:
-                        frame_bytes = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    time.sleep(0.1)
-        
+
+                    except Exception as e:
+                        logger.debug('fullscreen_stream error: %s', e)
+                        time.sleep(0.1)
+
             finally:
-                if _player is not None and hasattr(_player, '_preview_subscriber_count'):
-                    _player._preview_subscriber_count = max(0, _player._preview_subscriber_count - 1)
+                if _player and hasattr(_player, '_fullscreen_subscriber_count'):
+                    _player._fullscreen_subscriber_count = max(
+                        0, _player._fullscreen_subscriber_count - 1)
 
         return Response(generate_frames(),
                        mimetype='multipart/x-mixed-replace; boundary=frame')
-    
-    @app.route('/api/preview/toggle', methods=['POST'])
-    def toggle_preview():
-        """Enable or disable the preview stream for a player."""
-        from flask import request as _req
-        player_id = _req.json.get('player_id', 'video') if _req.is_json else 'video'
-        _player = player_manager.get_player(player_id)
-        if _player is None:
-            return jsonify({'error': 'player not found'}), 404
-        _player._preview_enabled = not getattr(_player, '_preview_enabled', True)
-        # Persist to session state
-        try:
-            from ..session.state import get_session_state
-            ss = get_session_state()
-            if ss:
-                if 'artnet' in player_id.lower():
-                    settings = ss.get_artnet_player_settings()
-                    settings['preview_enabled'] = _player._preview_enabled
-                    ss.set_artnet_player_settings(settings)
-                else:
-                    settings = ss.get_video_player_settings()
-                    settings['preview_enabled'] = _player._preview_enabled
-                    ss.set_video_player_settings(settings)
-        except Exception as e:
-            logger.warning(f'preview/toggle: session state save failed: {e}')
-        return jsonify({
-            'preview_enabled': _player._preview_enabled,
-            'subscriber_count': getattr(_player, '_preview_subscriber_count', 0),
-            'preview_active': getattr(_player, 'preview_active', False),
-        })
-
-    @app.route('/api/preview/status', methods=['GET'])
-    def preview_status():
-        """Return current preview subscriber count and enabled state for a player."""
-        from flask import request as _req
-        player_id = _req.args.get('player_id', 'video')
-        _player = player_manager.get_player(player_id)
-        if _player is None:
-            return jsonify({'error': 'player not found'}), 404
-        return jsonify({
-            'preview_enabled': getattr(_player, '_preview_enabled', True),
-            'subscriber_count': getattr(_player, '_preview_subscriber_count', 0),
-            'preview_active': getattr(_player, 'preview_active', False),
-        })
 
     @app.route('/api/preview/debug')
     def preview_debug():

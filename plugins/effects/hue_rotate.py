@@ -1,16 +1,19 @@
 """
 Hue Rotate Effect Plugin - Hue shift on HSV color space
 """
-import cv2
-import numpy as np
+import os
 from plugins import PluginBase, PluginType, ParameterType
+
+_SHADER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'hue_rotate.wgsl')
 
 
 class HueRotateEffect(PluginBase):
     """
     Hue Rotate Effect - Verschiebt den Farbton (Hue) auf HSV-Basis.
     """
-    
+
+    _shader_src: str | None = None
+
     METADATA = {
         'id': 'hue_rotate',
         'name': 'Hue Rotate',
@@ -39,36 +42,25 @@ class HueRotateEffect(PluginBase):
         self.hue_shift = config.get('hue_shift', 0.0)
     
     def process_frame(self, frame, **kwargs):
-        """
-        Verschiebt den Hue-Wert auf HSV-Basis.
-        
-        Args:
-            frame: Input Frame (NumPy Array, BGR)
-            **kwargs: Unused
-            
-        Returns:
-            Frame mit verschobenem Hue
-        """
-        if abs(self.hue_shift) < 0.1:
-            return frame  # No shift, return original
-        
-        # Convert BGR to HSV
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
-        
-        # Shift hue (OpenCV uses 0-180 range for hue)
-        # Convert our -180 to +180 range to 0-180 OpenCV range
-        hsv[:, :, 0] = (hsv[:, :, 0] + self.hue_shift / 2.0) % 180
-        
-        # Convert back to uint8 and BGR
-        hsv = hsv.astype(np.uint8)
-        return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        """GPU-native plugin — rendered via GLSL shader. This stub is never called on live frames."""
+        return frame
     
+    # ── GPU shader interface ────────────────────────────────────────────
+    def get_shader(self):
+        if HueRotateEffect._shader_src is None:
+            with open(_SHADER_PATH) as f:
+                HueRotateEffect._shader_src = f.read()
+        return HueRotateEffect._shader_src
+
+    def get_uniforms(self, **kwargs):
+        return {'hue_shift': float(self.hue_shift)}
+
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""
         # Extract actual value if it's a range metadata dict
         if isinstance(value, dict) and '_value' in value:
             value = value['_value']
-        
+
         if name == 'hue_shift':
             self.hue_shift = float(value)
     

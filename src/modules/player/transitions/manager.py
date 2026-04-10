@@ -1,24 +1,23 @@
 """
-Transition Manager - Handles smooth transitions between clips.
+Transition Manager - GPU-only clip transitions.
 
-GPU path (fade): uses GPUTransitionRenderer + fade_transition.frag.
-CPU fallback: uses transition plugin's blend_frames() when GPU unavailable.
+All blending happens on the GPU via apply_gpu() + GPUTransitionRenderer.
+No CPU fallbacks, no numpy pixel manipulation.
 """
 import time
-import numpy as np
 from typing import Optional
 from ...core.logger import get_logger, debug_playback
 
 logger = get_logger(__name__)
 
-# GPU transition shaders (filenames relative to src/modules/gpu/shaders/)
+# WGSL shader filenames (relative to src/modules/gpu/shaders/)
 _GPU_TRANSITION_SHADERS: dict = {
-    'fade': 'fade_transition.frag',
+    'fade': 'fade_transition.wgsl',
 }
 
 
 class TransitionManager:
-    """Manages transitions between video clips. GPU-accelerated for 'fade'."""
+    """GPU-only transition between clips. Uses wgpu shader pipeline."""
 
     def __init__(self):
         self.config = {
@@ -26,106 +25,116 @@ class TransitionManager:
             "effect": "fade",
             "duration": 1.0,
             "easing": "ease_in_out",
-            "plugin": None
         }
-        self.buffer: Optional[np.ndarray] = None  # CPU fallback "from" frame
         self.active = False
         self.start_time = 0.0
         self.frames = 0
         self._gpu_renderer = None    # GPUTransitionRenderer, lazily created
-        self._gpu_shaders: dict = {} # effect → loaded frag source string
+        self._gpu_shaders: dict = {} # effect → loaded WGSL source string
 
     # ── configuration ─────────────────────────────────────────────────────────
 
-    def configure(self, enabled=None, effect=None, duration=None, easing=None, plugin=None):
+    def configure(self, enabled=None, effect=None, duration=None, easing=None, **_ignored):
+        """Update transition config. Unknown kwargs (e.g. legacy 'plugin=') are silently dropped."""
         if enabled is not None:  self.config["enabled"] = enabled
         if effect is not None:   self.config["effect"] = effect
         if duration is not None: self.config["duration"] = duration
         if easing is not None:   self.config["easing"] = easing
-        if plugin is not None:   self.config["plugin"] = plugin
 
     # ── lifecycle ──────────────────────────────────────────────────────────────
 
     def start(self, player_name=""):
+        """Activate the transition. Returns False if not enabled or no A-buffer."""
         if not self.config.get("enabled"):
+            logger.info(f"⏭️ [{player_name}] Transition skipped: enabled=False")
             return False
-        has_frame = (
-            self.buffer is not None
-            or (self._gpu_renderer is not None and self._gpu_renderer._has_a)
-        )
+        has_frame = self._gpu_renderer is not None and self._gpu_renderer._has_a
         if not has_frame:
+            logger.info(
+                f"⏭️ [{player_name}] Transition skipped: no A-buffer "
+                f"(renderer={'None' if self._gpu_renderer is None else 'ok'}, "
+                f"_has_a={getattr(self._gpu_renderer, '_has_a', '?')})"
+            )
             return False
         self.active = True
         self.start_time = time.time()
         self.frames = 0
-        debug_playback(logger, f"⚡ [{player_name}] Transition started: {self.config['effect']}")
+        logger.info(f"⚡ [{player_name}] Transition STARTED: {self.config['effect']} {self.config.get('duration', 1.0)}s")
         return True
 
-    def apply(self, new_frame: np.ndarray, player_name: str = "") -> np.ndarray:
+    def apply_gpu(self, gpu_frame_b, display_fn) -> bool:
+        """Pure GPU transition: blend A-buffer + gpu_frame_b → display.
+
+        Called every frame by _on_transition_gpu_frame while active.
+        display_fn(GPUFrame) — glfw_display.push_gpu_frame().
+        Releases the blended GPUFrame immediately after display_fn.
+        Returns True while running, False when duration expires.
+        """
         if not self.active:
-            return new_frame
+            return False
+
+        # Reset timer on first frame — guards against thread-stop gap.
+        if self.frames == 0:
+            self.start_time = time.time()
 
         elapsed = time.time() - self.start_time
         duration = self.config.get("duration", 1.0)
 
-        if elapsed < duration:
-            progress = min(1.0, elapsed / duration)
-            eased = max(0.0, min(1.0, self._apply_easing(
-                progress, self.config.get("easing", "linear")
-            )))
-            effect = self.config.get("effect", "fade")
-
-            # ── GPU path ───────────────────────────────────────────────────────
-            frag_src = self._get_gpu_shader(effect)
-            if frag_src is not None and self._gpu_renderer is not None:
-                try:
-                    result = self._gpu_renderer.render_transition(
-                        frag_src, new_frame, {'progress': eased}
-                    )
-                    if result is not None:
-                        self.frames += 1
-                        return result
-                except Exception as e:
-                    logger.warning(f"⚠️ [{player_name}] GPU transition fallback to CPU: {e}")
-
-            # ── CPU fallback ──────────────────────────────────────────────────
-            transition_plugin = self.config.get("plugin")
-            if transition_plugin is not None and self.buffer is not None:
-                try:
-                    blended = transition_plugin.blend_frames(self.buffer, new_frame, eased)
-                    self.frames += 1
-                    return blended
-                except Exception as e:
-                    logger.error(f"❌ [{player_name}] Transition error: {e}")
-                    self.active = False
-
-            return new_frame
-        else:
+        if elapsed >= duration:
             self.active = False
-            debug_playback(logger, f"✅ [{player_name}] Transition complete ({self.frames} frames)")
+            logger.info(f"✅ GPU transition complete ({self.frames} frames blended)")
+            return False
 
-        return new_frame
+        progress = min(1.0, elapsed / duration)
+        eased = max(0.0, min(1.0, self._apply_easing(
+            progress, self.config.get("easing", "linear")
+        )))
+        frag_src = self._get_gpu_shader(self.config.get("effect", "fade"))
 
-    def store_frame(self, frame: np.ndarray) -> None:
-        """Store the outgoing frame for use as transition start.
+        if frag_src is None:
+            effect = self.config.get('effect', 'fade')
+            logger.warning(f"⚠️ GPU transition shader not available for effect='{effect}' — no blend rendered")
+            return False
 
-        Only runs when not already in a transition: avoids overwriting the stored
-        outgoing frame and eliminates the wasteful every-frame copy during an
-        active transition.
+        if self._gpu_renderer is not None:
+            try:
+                result = self._gpu_renderer.render_transition_gpu(
+                    frag_src, gpu_frame_b, {'progress': eased}
+                )
+                if result is not None:
+                    try:
+                        display_fn(result)
+                        self.frames += 1
+                        return True
+                    finally:
+                        from ...gpu.texture_pool import get_texture_pool
+                        get_texture_pool().release(result)
+            except Exception as e:
+                logger.warning(f"⚠️ GPU transition blend error: {e}")
+
+        return False
+
+    def store_gpu_frame(self, gpu_frame) -> None:
+        """Store the outgoing composite as the transition A-buffer (GPU→GPU copy).
+
+        Called every frame by _on_transition_gpu_frame while NOT active,
+        keeping the A-buffer fresh for the next transition trigger.
         """
         if not self.config.get("enabled") or self.active:
             return
-        self.buffer = frame.copy()
         if self._gpu_renderer is None:
-            self._try_init_gpu(frame.shape[1], frame.shape[0])
+            self._try_init_gpu(gpu_frame.width, gpu_frame.height)
+            if self._gpu_renderer is not None:
+                logger.info(f"🎬 GPU transition renderer created ({gpu_frame.width}×{gpu_frame.height})")
+            else:
+                logger.warning("⚠️ GPU transition renderer init FAILED — transitions unavailable")
         if self._gpu_renderer is not None:
             try:
-                self._gpu_renderer.store_frame(frame)
-            except Exception:
-                pass
+                self._gpu_renderer.store_gpu_frame(gpu_frame)
+            except Exception as e:
+                logger.debug(f"store_gpu_frame error: {e}")
 
     def clear(self):
-        self.buffer = None
         self.active = False
         self.start_time = 0.0
         self.frames = 0
@@ -140,11 +149,7 @@ class TransitionManager:
     # ── private helpers ────────────────────────────────────────────────────────
 
     def _try_init_gpu(self, width: int, height: int) -> None:
-        """Lazily create GPUTransitionRenderer when the GL context is current."""
         try:
-            from ...gpu import is_context_from_current_thread
-            if not is_context_from_current_thread():
-                return
             from ...gpu.transition_renderer import GPUTransitionRenderer
             self._gpu_renderer = GPUTransitionRenderer(width, height)
             logger.debug(f"GPUTransitionRenderer created ({width}×{height})")
@@ -174,4 +179,3 @@ class TransitionManager:
             else:
                 return 1.0 - ((-2.0 * progress + 2.0) ** 3) / 2.0
         return progress  # linear
-

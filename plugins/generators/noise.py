@@ -1,13 +1,20 @@
 """
 Noise Generator Plugin - Various noise patterns
 """
+import os
 import numpy as np
 import cv2
 from plugins import PluginBase, PluginType, ParameterType
 
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_noise.wgsl'
+)
+
 
 class NoiseGenerator(PluginBase):
     """Noise Generator - White noise, Perlin-like noise patterns."""
+
+    _shader_src: str | None = None
     
     METADATA = {
         'id': 'noise',
@@ -150,3 +157,21 @@ class NoiseGenerator(PluginBase):
     
     def cleanup(self):
         pass
+
+    # ── GPU shader interface ─────────────────────────────────────────────
+    def get_shader(self) -> str | None:
+        if NoiseGenerator._shader_src is None:
+            with open(_SHADER_PATH, 'r', encoding='utf-8') as f:
+                NoiseGenerator._shader_src = f.read()
+        return NoiseGenerator._shader_src
+
+    def get_uniforms(self, **kwargs) -> dict:
+        noise_type_map = {'white': 0, 'smooth': 1, 'colored': 2}
+        return {
+            'time':       float(kwargs.get('time', 0.0)),
+            'cw':         float(kwargs.get('width', 0)),
+            'ch':         float(kwargs.get('height', 0)),
+            'noise_type': noise_type_map.get(self.noise_type, 0),
+            'scale':      float(self.scale),
+            'animated':   int(self.animated),
+        }

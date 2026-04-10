@@ -9,7 +9,7 @@ import logging
 from plugins import PluginBase, PluginType, ParameterType
 from src.modules.gpu.accelerator import get_gpu_accelerator
 
-_SHADER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'transform.frag')
+_SHADER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'transform.wgsl')
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,10 @@ class TransformEffect(PluginBase):
     
     Ermöglicht das Verschieben, Skalieren und Rotieren des Videos im 2D-Raum.
     """
-    
+
+    # Shader source cached at class level — read once, never from disk again.
+    _shader_src: str | None = None
+
     METADATA = {
         'id': 'transform',
         'name': 'Transform',
@@ -300,8 +303,10 @@ class TransformEffect(PluginBase):
         # NOTE: rotation_x / rotation_y (3D perspective) are not yet implemented
         # in the GLSL shader — those parameters are ignored on the GPU path.
         # This is intentional: 100% GPU pipeline, no CPU fallback.
-        with open(_SHADER_PATH) as f:
-            return f.read()
+        if TransformEffect._shader_src is None:
+            with open(_SHADER_PATH) as f:
+                TransformEffect._shader_src = f.read()
+        return TransformEffect._shader_src
 
     def get_uniforms(self, **kwargs):
         frame_w = kwargs.get('frame_w', 1920)

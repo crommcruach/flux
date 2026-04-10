@@ -1,13 +1,20 @@
 """
 Triangles Generator Plugin - Triangular pattern like checkerboard
 """
+import os
 import numpy as np
 import cv2
 from plugins import PluginBase, PluginType, ParameterType
 
+_SHADER_PATH = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'src', 'modules', 'gpu', 'shaders', 'gen_triangles.wgsl'
+)
+
 
 class TrianglesGenerator(PluginBase):
     """Triangles Generator - Triangular pattern (▼▲▼▲)."""
+
+    _shader_src: str | None = None
     
     METADATA = {
         'id': 'triangles',
@@ -129,6 +136,25 @@ class TrianglesGenerator(PluginBase):
             'rows': self.rows,
             'duration': self.duration
         }
-    
+
     def cleanup(self):
         pass
+
+    # ── GPU shader interface ─────────────────────────────────────────────
+    def get_shader(self) -> str | None:
+        if TrianglesGenerator._shader_src is None:
+            with open(_SHADER_PATH, 'r', encoding='utf-8') as f:
+                TrianglesGenerator._shader_src = f.read()
+        return TrianglesGenerator._shader_src
+
+    def get_uniforms(self, **kwargs) -> dict:
+        return {
+            'time':    0.0,
+            'cw':      float(kwargs.get('width', 0)),
+            'ch':      float(kwargs.get('height', 0)),
+            'columns': int(self.columns),
+            'rows':    int(self.rows),
+            'r':       255.0,
+            'g':       255.0,
+            'b':       255.0,
+        }

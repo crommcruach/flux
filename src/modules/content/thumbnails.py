@@ -6,7 +6,7 @@ import os
 import hashlib
 from pathlib import Path
 from PIL import Image
-import cv2
+import av
 import threading
 from queue import Queue
 from ..core.logger import get_logger
@@ -189,7 +189,10 @@ class ThumbnailGenerator:
             # Generiere basierend auf Dateityp
             file_ext = file_path.suffix.lower()
             
-            if file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv']:
+            if file_ext == '.npy':
+                # Converted clip: grab first frame directly from memmap (BGR)
+                success = self._generate_npy_thumbnail(file_path, thumbnail_path)
+            elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv']:
                 # Video: Erstes Frame extrahieren
                 success = self._generate_video_thumbnail(file_path, thumbnail_path)
             elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
@@ -210,29 +213,39 @@ class ThumbnailGenerator:
             logger.error(f"Error generating thumbnail for {file_path}: {e}")
             return None
             
+    def _generate_npy_thumbnail(self, npy_path, output_path):
+        """Grab first frame from a converted .npy clip (BGR memmap, zero decode)"""
+        try:
+            import numpy as np
+            frames = np.load(str(npy_path), mmap_mode='r')
+            if frames.ndim != 4 or frames.shape[0] == 0:
+                return False
+            frame_bgr = frames[0]  # (H, W, 3) BGR
+            img = Image.fromarray(frame_bgr[:, :, ::-1])  # BGR -> RGB
+            img.thumbnail(self.size, Image.Resampling.LANCZOS)
+            img.save(output_path, 'JPEG', quality=self.quality, optimize=True)
+            return True
+        except Exception as e:
+            logger.error(f"Error reading npy thumbnail: {e}")
+            return False
+
     def _generate_video_thumbnail(self, video_path, output_path):
         """Extrahiert erstes Frame aus Video"""
         try:
-            cap = cv2.VideoCapture(str(video_path))
-            
-            # Lese erstes Frame
-            ret, frame = cap.read()
-            cap.release()
-            
-            if not ret or frame is None:
+            container = av.open(str(video_path))
+            img = None
+            for frame in container.decode(video=0):
+                img = frame.to_image()  # PIL Image in RGB
+                break
+            container.close()
+
+            if img is None:
                 return False
-                
-            # Konvertiere BGR -> RGB
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Erstelle PIL Image und resize
-            img = Image.fromarray(frame_rgb)
+
             img.thumbnail(self.size, Image.Resampling.LANCZOS)
-            
-            # Speichere als JPEG
             img.save(output_path, 'JPEG', quality=self.quality, optimize=True)
             return True
-            
+
         except Exception as e:
             logger.error(f"Error extracting video frame: {e}")
             return False
@@ -325,39 +338,32 @@ class ThumbnailGenerator:
         Generiert animiertes GIF aus Video
         """
         try:
-            cap = cv2.VideoCapture(str(video_path))
-            
-            # Video-Eigenschaften
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            video_fps = cap.get(cv2.CAP_PROP_FPS)
-            
-            if total_frames == 0 or video_fps == 0:
-                cap.release()
+            container = av.open(str(video_path))
+            stream = container.streams.video[0]
+            video_fps = float(stream.average_rate) if stream.average_rate else 0
+
+            if video_fps == 0:
+                container.close()
                 return False
-                
+
             # Berechne Frame-Intervall
             target_frames = int(self.video_preview_duration * self.video_preview_fps)
             frame_interval = max(1, int(video_fps / self.video_preview_fps))
-            
+
             # Extrahiere Frames
             frames = []
             frame_count = 0
-            
-            while len(frames) < target_frames:
-                ret, frame = cap.read()
-                if not ret:
+
+            for frame in container.decode(video=0):
+                if len(frames) >= target_frames:
                     break
-                    
                 if frame_count % frame_interval == 0:
-                    # Konvertiere BGR -> RGB und resize
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    img = Image.fromarray(frame_rgb)
+                    img = frame.to_image()  # PIL Image in RGB
                     img.thumbnail(self.size, Image.Resampling.LANCZOS)
                     frames.append(img)
-                    
                 frame_count += 1
-                
-            cap.release()
+
+            container.close()
             
             if len(frames) < 2:
                 return False

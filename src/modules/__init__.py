@@ -2,7 +2,7 @@
 Flux Module Package
 """
 # Lazy imports to avoid circular dependencies
-__all__ = ['Player', 'VideoSource', 'GeneratorSource', 'RestAPI', 'ScriptGenerator',
+__all__ = ['Player', 'VideoSource', 'GeneratorSource', 'RestAPI',
            'PointsLoader', 'CacheManager', 'ConfigValidator', 'PlayerManager', 'ClipRegistry',
            'list_videos', 'print_help', 'list_points_files', 'validate_points_file', 'validate_points_json']
 
@@ -22,9 +22,6 @@ def __getattr__(name):
     elif name == 'RestAPI':
         from .api.app import RestAPI
         return RestAPI
-    elif name == 'ScriptGenerator':
-        # from .script_generator import ScriptGenerator  # Deprecated - using plugin system now
-        return ScriptGenerator
     elif name == 'PointsLoader':
         from .content.points import PointsLoader
         return PointsLoader

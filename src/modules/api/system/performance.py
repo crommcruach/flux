@@ -3,6 +3,7 @@ Performance Monitoring API - Provides real-time performance metrics.
 """
 from flask import jsonify, request
 from ...performance.profiler import get_all_profilers
+from ...performance.system_memory import get_system_memory_snapshot
 from ...core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,7 +29,8 @@ def register_performance_routes(app, player_manager):
             return jsonify({
                 'success': True,
                 'metrics': metrics,
-                'players': list(metrics.keys())
+                'players': list(metrics.keys()),
+                'system': get_system_memory_snapshot(),
             })
         except Exception as e:
             logger.error(f"Failed to get performance metrics: {e}", exc_info=True)

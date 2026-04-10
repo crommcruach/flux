@@ -1,24 +1,6 @@
 """
-Transition Plugins - Übergänge zwischen Frames
+Transition Plugins — GPU shader-based (WGSL).
+CPU-based transition plugins have been archived. New transitions are
+implemented as WGSL shaders in src/modules/gpu/shaders/.
 """
-from .fade import FadeTransition
-from .slide_wipe import SlideWipeUpTransition, SlideWipeDownTransition, SlideWipeLeftTransition, SlideWipeRightTransition
-from .rgb_split import RGBSplitTransition
-from .lens_blur import CameraLensBlurTransition
-from .wipes import LinearWipeTransition, RadialWipeTransition, RoundWipeTransition
-from .zoom import PunchZoomInTransition, PunchZoomOutTransition
-
-__all__ = [
-    'FadeTransition',
-    'SlideWipeUpTransition',
-    'SlideWipeDownTransition',
-    'SlideWipeLeftTransition',
-    'SlideWipeRightTransition',
-    'RGBSplitTransition',
-    'CameraLensBlurTransition',
-    'LinearWipeTransition',
-    'RadialWipeTransition',
-    'RoundWipeTransition',
-    'PunchZoomInTransition',
-    'PunchZoomOutTransition'
-]
+__all__ = []
