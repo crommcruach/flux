@@ -33,8 +33,10 @@ flux <domain> <action> [options]
 - `audio` - Audio analysis & sequencer
 - `sequence` - Parameter sequences
 - `content` - File & project management
+- `convert` - Video conversion & .npy pipeline
 - `mapper` - LED mapping tools
 - `debug` - Debug & logging
+- `perf` - Performance monitoring (GPU pipeline stages)
 - `system` - System utilities
 
 ---
@@ -795,29 +797,55 @@ plugin set blur radius 10      # Set global default parameter
 | `GET /api/converter/status` | `convert status` | `convert status` |
 | `GET /api/converter/formats` | `convert formats` | `convert formats` |
 | `POST /api/converter/info` | `convert info <file>` | `convert info video.mp4` |
-| `POST /api/converter/convert` | `convert <input> [options]` | `convert video.mp4 --output out.mp4` |
+| `POST /api/converter/convert` | `convert run <input> [options]` | `convert run video.mp4 --codec hap` |
 | `POST /api/converter/batch` | `convert batch <pattern> [options]` | `convert batch *.mp4 --codec hap` |
 | `POST /api/converter/upload` | `convert upload <file>` | `convert upload video.mp4` |
 | `GET /api/converter/canvas-size` | `convert canvas` | `convert canvas` |
 
 **Suggested CLI Commands:**
 ```bash
-# Converter info
-convert status                 # Show conversion status
-convert formats                # Show supported formats
-convert canvas                 # Show canvas size
+# Status & capability info
+convert status                 # Show current conversion queue / active jobs
+convert formats                # Show supported input/output formats and codecs
+convert canvas                 # Show current canvas resolution (target for conversion)
 
-# File info
-convert info video.mp4         # Get video information
+# File inspection
+convert info video.mp4         # Show streams, resolution, fps, duration, codec of a file
+convert info video.mp4 --json  # Machine-readable output
 
-# Convert
-convert video.mp4 --output out.mp4 --codec hap
-convert video.mp4 -o out.mp4 -c hap -q high
-convert batch *.mp4 --codec hap --quality high
+# Single file conversion
+convert run video.mp4                              # Convert to default format (.npy)
+convert run video.mp4 --codec npy                  # Explicit .npy (raw BGR NumPy)
+convert run video.mp4 --codec hap                  # HAP GPU-compressed
+convert run video.mp4 --codec hap-alpha            # HAP with alpha channel
+convert run video.mp4 --codec h264                 # H.264 for storage
+convert run video.mp4 -o out/                      # Output to specific directory
+convert run video.mp4 --fps 30                     # Force output FPS
+convert run video.mp4 --scale 1920x1080            # Rescale to resolution
+convert run video.mp4 --quality high               # Quality preset (low/medium/high)
+convert run video.mp4 --loop-optimize              # Trim to loop-clean length
+convert run video.mp4 --no-audio                   # Strip audio track
 
-# Upload
-convert upload video.mp4       # Upload file for conversion
+# Batch conversion
+convert batch "video/*.mp4"                        # Convert all .mp4 files
+convert batch "video/*.mp4" --codec npy            # Batch to .npy
+convert batch "video/*.mp4" --codec hap --quality high
+convert batch "video/*.mp4" --workers 4            # Parallel conversion (N workers)
+convert batch "video/*.mp4" --dry-run              # Preview what would be converted
+convert batch "video/*.mp4" --skip-existing        # Skip already-converted files
+
+# Upload (web API upload path)
+convert upload video.mp4                           # Upload file to server video dir
+
+# Cancel / queue management
+convert cancel                 # Cancel current conversion job
+convert cancel --all           # Cancel all queued jobs
 ```
+
+**Notes:**
+- `.npy` output (raw BGR uint8 NumPy arrays) is the native format for the GPU pipeline. All clips should be pre-converted to `.npy` before playback for zero-decode latency.
+- Clips smaller than `config.json performance.eager_load_threshold_mb` (default 512 MB) are eagerly loaded to heap RAM at load time; larger clips stay memory-mapped.
+- `--loop-optimize` trims the clip so the last frame flows cleanly into the first, eliminating visual glitch on loop.
 
 ---
 
@@ -907,17 +935,67 @@ log clear                      # Clear log buffer
 
 | API Endpoint | CLI Command | Example |
 |--------------|-------------|---------|
-| `GET /api/performance/metrics` | `perf metrics` | `perf metrics` |
-| `POST /api/performance/reset` | `perf reset` | `perf reset` |
+| `GET /api/performance/metrics` | `perf metrics [-p <player>]` | `perf metrics -p video` |
+| `POST /api/performance/reset` | `perf reset [-p <player>]` | `perf reset` |
 | `POST /api/performance/toggle` | `perf toggle` | `perf toggle` |
 
 **Suggested CLI Commands:**
 ```bash
-# Performance monitoring
-perf metrics                   # Show performance metrics
-perf reset                     # Reset metrics
-perf toggle                    # Toggle performance monitoring
+# Show metrics
+perf metrics                   # Show metrics for all players (table view)
+perf metrics -p video          # Show metrics for video player only
+perf metrics -p artnet         # Show metrics for artnet player
+perf metrics --json            # Machine-readable JSON output
+perf metrics --watch           # Live-updating view (refresh every 1s, Ctrl+C to stop)
+perf metrics --watch --interval 0.5    # Custom refresh interval (seconds)
+
+# Inspect specific pipeline stages
+perf stage source_decode       # Show detailed stats for one stage
+perf stage slice_processing    # Slice GPU processing stage
+perf stage composition_processing      # Multi-slice GPU composition
+perf stage autosize_scale      # GPU autosize scale pass
+perf stage transition_gpu      # GPU crossfade blend
+perf stage preview_downscale   # GPU→JPEG preview encode
+perf stage artnet_gpu_sampler  # ArtNet GPU compute sampler
+perf stage composite_download  # GPU readback (DMA stall)
+perf stage slave_decode        # Parallel slave layer decode
+
+# Summary view
+perf summary                   # One-line summary per player (budget %, avg ms, fps)
+perf summary --all             # Summary for all active players
+
+# Reset
+perf reset                     # Reset metrics for all players
+perf reset -p video            # Reset video player metrics only
+
+# Toggle profiler
+perf toggle                    # Toggle performance profiling on/off
+perf enable                    # Enable profiling
+perf disable                   # Disable profiling (zero overhead)
+
+# Open browser monitor
+perf open                      # Open performance.html in default browser
 ```
+
+**Pipeline Stages (GPU-first pipeline):**
+
+| Stage | Domain | Description |
+|-------|--------|-------------|
+| `transport_preprocess` | CPU | Transport effect frame-position calculation |
+| `source_decode` | CPU | .npy frame load from RAM/memmap |
+| `autosize_scale` | GPU | Scale pass when source res ≠ canvas (scale_mode.wgsl) |
+| `clip_effects` | GPU | Clip-level WGSL shader effects |
+| `slave_decode` | CPU‖ | Parallel slave layer decode + effects (thread pool) |
+| `layer_composition` | GPU | Multi-layer GPU blend (compositor.py) |
+| `composite_download` | DMA | GPU texture.read() stall (readback) |
+| `artnet_gpu_sampler` | GPU | ArtNet GPU compute sampler dispatch |
+| `slice_processing` | GPU | Single-slice crop/rotate/colour/mask |
+| `composition_processing` | GPU | Multi-slice composition blit |
+| `transition_gpu` | GPU | GPU crossfade blend (apply_gpu) |
+| `preview_downscale` | DMA | GPU→JPEG preview/fullscreen downscale |
+| `audio_sequences` | CPU | Audio-driven parameter modulation |
+| `output_routing` | CPU | ArtNet pixel mapping |
+| `frame_delivery` | CPU | Final output delivery |
 
 ### 15.2 Console
 
@@ -989,10 +1067,12 @@ config.py       # Config commands
 audio.py        # Audio commands
 sequence.py     # Sequence commands
 content.py      # Content commands
+convert.py      # Video conversion & .npy pipeline
 project.py      # Project commands
 plugin.py       # Plugin commands
 mapper.py       # Mapper commands
 debug.py        # Debug commands
+perf.py         # Performance monitoring (pipeline stages)
 system.py       # System commands
 ```
 
@@ -1077,13 +1157,232 @@ Consistent error codes:
 
 ---
 
+## SESSION STATE PERSISTENCE
+
+Every CLI command that mutates application state MUST trigger a write to `session_state.json` through the backend API. The CLI itself never writes to the file directly — it calls the REST API, and the API layer (which already tracks in-memory state) persists to `session_state.json`.
+
+> **Rule from agent.md**: `session_state.json` holds ALL session + live data. `config.json` holds ONLY global application settings. Never write playback, effects, outputs, or playlist state to `config.json`.
+
+### State-Mutating Commands and Their session_state.json Keys
+
+The table below lists every CLI command that causes a persistent state write. Read-only commands (`status`, `list`, `current`, `--json`) are omitted.
+
+#### Player
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `player set loop <bool>` | `players.<player>.loop` |
+| `player set autoplay <bool>` | `players.<player>.autoplay` |
+| `player set brightness <v>` | `players.<player>.global_effects[transform].params.brightness` |
+| `player set speed <v>` | `players.<player>.global_effects[transport].params.speed` |
+| `player set fps <v>` | `players.<player>.global_effects[transport].params.fps` |
+| `player set hue <v>` | `players.<player>.global_effects[hue_shift].params.hue` |
+| `player play / pause / stop` | *(transient — playback state is not persisted, only playlist/clip position is)* |
+| `player next / prev` | `players.<player>.current_index` |
+| `player sync` | *(transient — no persisted key)* |
+| `player master <v>` | `players.<player>.master_brightness` *(if implemented)* |
+
+#### Clip
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `clip load <path>` | `players.<player>.playlist` (appends entry), `players.<player>.current_index` |
+| `clip effect add <plugin_id>` | `players.<player>.global_effects` (appends effect entry) |
+| `clip effect remove <index>` | `players.<player>.global_effects` (removes entry at index) |
+| `clip effect set <index> <param> <val>` | `players.<player>.global_effects[<index>].params.<param>` |
+| `clip effect toggle <index>` | `players.<player>.global_effects[<index>].enabled` |
+| `clip effect clear` | `players.<player>.global_effects` (set to `[]`) |
+| `clip generator set <param> <val>` | `players.<player>.generator_params.<param>` |
+
+#### Effect (global player effects)
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `effect add <plugin_id>` | `players.<player>.global_effects` (appends) |
+| `effect remove <index>` | `players.<player>.global_effects` (removes at index) |
+| `effect set <index> <param> <val>` | `players.<player>.global_effects[<index>].params.<param>` |
+| `effect toggle <index>` | `players.<player>.global_effects[<index>].enabled` |
+| `effect clear` | `players.<player>.global_effects` → `[]` |
+
+#### Layer
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `layer add` | `players.<player>.layers` (appends layer entry) |
+| `layer remove <id>` | `players.<player>.layers` (removes entry) |
+| `layer set <id> <param> <val>` | `players.<player>.layers[<id>].<param>` |
+| `layer load <id> <path>` | `players.<player>.layers[<id>].playlist`, `.current_index` |
+| `layer enable/disable <id>` | `players.<player>.layers[<id>].enabled` |
+| `layer opacity <id> <val>` | `players.<player>.layers[<id>].opacity` |
+| `layer blend <id> <mode>` | `players.<player>.layers[<id>].blend_mode` |
+
+#### Output
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `output add <type>` | `outputs.<route_group>.outputs.<id>` (new entry) |
+| `output remove <id>` | `outputs.<route_group>.outputs.<id>` (deleted) |
+| `output enable <id>` | `outputs.<route_group>.outputs.<id>.enabled` → `true` |
+| `output disable <id>` | `outputs.<route_group>.outputs.<id>.enabled` → `false` |
+| `output set <id> <param> <val>` | `outputs.<route_group>.outputs.<id>.<param>` |
+| `output artnet set universe <v>` | `artnet.start_universe` |
+| `output artnet set fps <v>` | `artnet.fps` |
+| `output artnet set ip <v>` | `artnet.target_ip` |
+| `output artnet set broadcast <bool>` | `artnet.broadcast` |
+| `output artnet resolution <WxH>` | `outputs.<artnet_group>.outputs.<id>.resolution` |
+
+#### Playlist
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `playlist create <name>` | `players.<player>.playlist` (new named playlist object) |
+| `playlist delete <id>` | `players.<player>.playlist` (removes entry) |
+| `playlist rename <id> <name>` | `players.<player>.playlist[<id>].name` |
+| `playlist activate <id>` | `players.<player>.current_index`, `players.<player>.playlist` |
+| `playlist add <id> <path>` | `players.<player>.playlist[<id>].clips` (appends) |
+| `playlist remove <id> <clip_index>` | `players.<player>.playlist[<id>].clips` (removes at index) |
+| `playlist reorder <id> <from> <to>` | `players.<player>.playlist[<id>].clips` (reordered) |
+
+#### Transition
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `transition set <effect>` | `players.<player>.transition_config.effect` |
+| `transition duration <v>` | `players.<player>.transition_config.duration` |
+| `transition easing <mode>` | `players.<player>.transition_config.easing` |
+| `transition enable` | `players.<player>.transition_config.enabled` → `true` |
+| `transition disable` | `players.<player>.transition_config.enabled` → `false` |
+
+#### Audio / Sequencer
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `audio device set <id>` | `audio_analyzer.device` |
+| `audio bpm set <v>` | `audio_analyzer.bpm.manual_bpm`, `.mode` → `"manual"` |
+| `audio bpm mode <auto\|manual\|tap>` | `audio_analyzer.bpm.mode` |
+| `audio bpm enable/disable` | `audio_analyzer.bpm.enabled` |
+| `audio sequencer load <file>` | `sequencer.audio_file`, `sequencer.timeline.*` |
+| `audio sequencer set <param> <val>` | `sequencer.<param>` |
+| `audio sequencer enable/disable` | `sequencer.mode_active` |
+
+#### Config (writes to `config.json`, NOT session_state)
+
+| CLI command | config.json key written |
+|---|---|
+| `config set paths.video_dir <v>` | `paths.video_dir` |
+| `config set artnet.fps <v>` | *(same as `output artnet set fps` — prefer output command)* |
+| `config set app.console_log_level <v>` | `app.console_log_level` |
+
+> Note: `config set` targets `config.json` for global defaults. Runtime overrides that should survive only for the session should use the domain-specific commands above (which write to `session_state.json`).
+
+#### Debug / Logging
+
+| CLI command | session_state.json key(s) written |
+|---|---|
+| `debug enable` | `app.console_log_level` → `"DEBUG"` |
+| `debug disable` | `app.console_log_level` → `"INFO"` |
+| `debug enable --module <name>` | `app.debug_modules` (appends module name) |
+| `debug disable --module <name>` | `app.debug_modules` (removes module name) |
+
+#### Session (explicit save/restore)
+
+| CLI command | Effect on session_state.json |
+|---|---|
+| `session save <name>` | Copies full `session_state.json` to `data/<name>_<timestamp>.json` |
+| `session load <file>` | Replaces `session_state.json` with contents of file, hot-reloads backend state |
+| `session snapshot` | Copies `session_state.json` to `snapshots/<timestamp>.json` |
+| `session restore <snapshot>` | Same as `session load` but from `snapshots/` |
+| `session delete <file>` | Deletes file from `data/` (does NOT touch live `session_state.json`) |
+
+#### Project (composite save/restore)
+
+| CLI command | Effect on session_state.json |
+|---|---|
+| `project save <name>` | Serialises subset of `session_state.json` (players + outputs + effects) to `projects/<name>.json` |
+| `project load <file>` | Merges project keys back into live `session_state.json` (partial restore — does not overwrite `artnet`, `api`, `app`) |
+
+### Non-Persisted (Transient) Commands
+
+These commands affect live runtime state but do NOT write to `session_state.json`:
+
+| CLI command | Reason not persisted |
+|---|---|
+| `player play / pause / stop` | Playback mode is live; on restart the player re-reads `autoplay` |
+| `player sync` | One-shot sync, no configuration to save |
+| `output artnet blackout` | One-shot DMX burst |
+| `output artnet test` | One-shot test frame |
+| `perf enable / disable` | Debug tool, not show state |
+| `perf metrics / stage / summary` | Read-only |
+| `log tail / search / clear` | Log management only |
+| `content list / thumbnail` | Read-only content browsing |
+| `convert run / batch / cancel` | File pipeline, not session state |
+| `debug status` | Read-only |
+| `session status` | Read-only |
+
+### Implementation Pattern
+
+Every state-mutating command module must call `_persist()` after the API call succeeds:
+
+```python
+# src/modules/cli/commands/_base.py
+import requests
+
+API_BASE = 'http://localhost:5000'
+
+def api_call(method: str, path: str, **kwargs):
+    """Call the backend API. Raises CLIError on failure."""
+    url = f"{API_BASE}{path}"
+    try:
+        resp = requests.request(method, url, timeout=5, **kwargs)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.ConnectionError:
+        raise CLIError(
+            "Could not connect to Flux backend",
+            "Start it with: python src/main.py",
+        )
+    except requests.HTTPError as e:
+        raise CLIError(f"API error {e.response.status_code}: {e.response.text}")
+```
+
+```python
+# src/modules/cli/commands/player.py  (example)
+from ._base import api_call
+from ..errors import CLIError
+from ..colors import colorize, print_status
+
+def cmd_player_set(args):
+    """flux player set <param> <value> [-p player]"""
+    player = args.player or 'video'
+    payload = {args.param: args.value}
+    result = api_call('POST', f'/api/player/{player}/set', json=payload)
+    # The API endpoint writes the new value to session_state.json internally.
+    # The CLI does NOT write to session_state.json directly.
+    print_status('success', f"Set {args.param} = {args.value} on player '{player}'")
+    return result
+```
+
+> **Key rule**: The CLI is a thin HTTP client. It calls the API. The API handler updates in-memory state AND calls `save_session_state()`. The CLI never opens `session_state.json` itself.
+
+### What the Backend API Must Do
+
+For every mutable endpoint, the handler must:
+
+1. Validate and apply the change to in-memory state
+2. Call `session_manager.save()` (or equivalent) to flush `session_state.json`
+3. Return `{ "success": true, "data": <updated_value> }`
+
+If step 2 fails (disk error), the API returns a 500 and the CLI shows an error — it does **not** silently continue with unsaved state.
+
+---
+
 ## CLI USER EXPERIENCE FEATURES
 
 This section covers advanced UX features that make the CLI intuitive and user-friendly.
 
 **Quick Navigation:**
 - [Tab Completion](#tab-completion) - Auto-complete commands, files, and IDs
-- [Interactive Help](#interactive-help-system) - Contextual help as you type
+- [Comprehensive Help](#comprehensive-help-system) - Multi-level help with full registry and search
 - [Fuzzy Matching](#fuzzy-command-matching--did-you-mean) - Typo correction and suggestions
 - [Inline Hints](#inline-command-hints) - Show available options
 - [Command History](#command-history) - Persistent history across sessions
@@ -1167,166 +1466,725 @@ Complete commands with context-aware suggestions:
 
 ```python
 # src/modules/cli/completers.py
+import os
+import glob
 
 def complete_player_id(prefix, parsed_args, **kwargs):
     """Complete player IDs (video, artnet)."""
     return ['video', 'artnet', 'all']
 
 def complete_video_files(prefix, parsed_args, **kwargs):
-    """Complete video file paths."""
-    import glob
-    video_dir = get_video_dir()
-    pattern = os.path.join(video_dir, f'{prefix}*')
-    files = glob.glob(pattern + '*.mp4') + glob.glob(pattern + '*.mov')
-    return [os.path.basename(f) for f in files]
+    """Complete video file paths from the configured video directory.
+    
+    Supports both bare filenames (video dir) and absolute/relative paths.
+    Falls back to filesystem completion when the user types a path separator.
+    """
+    # If the prefix looks like a path (contains / or \), do filesystem completion
+    if os.sep in prefix or '/' in prefix:
+        pattern = prefix + '*'
+        return [f for f in glob.glob(pattern) if os.path.isfile(f)]
+
+    video_dir = _get_video_dir()
+    pattern = os.path.join(video_dir, prefix + '*')
+    extensions = ('.mp4', '.mov', '.avi', '.mkv', '.gif', '.npy')
+    return [
+        os.path.basename(f) for f in glob.glob(pattern)
+        if f.lower().endswith(extensions)
+    ]
+
+def complete_npy_files(prefix, parsed_args, **kwargs):
+    """Complete .npy clip paths (pre-converted GPU-native format)."""
+    if os.sep in prefix or '/' in prefix:
+        pattern = prefix + '*'
+        return [f for f in glob.glob(pattern) if f.endswith('.npy')]
+
+    video_dir = _get_video_dir()
+    pattern = os.path.join(video_dir, prefix + '*.npy')
+    return [os.path.basename(f) for f in glob.glob(pattern)]
+
+def complete_any_file(prefix, parsed_args, **kwargs):
+    """Generic filesystem path completion (for upload, convert, etc.)."""
+    if not prefix:
+        # Show current directory contents
+        return [f + ('/' if os.path.isdir(f) else '') for f in os.listdir('.')]
+
+    pattern = prefix + '*'
+    results = glob.glob(pattern)
+    # Append / to directories so the user can keep tabbing into subdirs
+    return [r + ('/' if os.path.isdir(r) else '') for r in results]
+
+def complete_audio_files(prefix, parsed_args, **kwargs):
+    """Complete audio files in the sequencer audio directory."""
+    audio_dir = _get_audio_dir()
+    if os.sep in prefix or '/' in prefix:
+        return [f + ('/' if os.path.isdir(f) else '') for f in glob.glob(prefix + '*')]
+
+    pattern = os.path.join(audio_dir, prefix + '*')
+    extensions = ('.mp3', '.wav', '.ogg', '.flac', '.aac')
+    return [os.path.basename(f) for f in glob.glob(pattern) if f.lower().endswith(extensions)]
+
+def complete_project_files(prefix, parsed_args, **kwargs):
+    """Complete project .json files."""
+    projects_dir = _get_projects_dir()
+    pattern = os.path.join(projects_dir, prefix + '*.json')
+    return [os.path.basename(f) for f in glob.glob(pattern)]
+
+def complete_session_files(prefix, parsed_args, **kwargs):
+    """Complete saved session files."""
+    data_dir = _get_data_dir()
+    pattern = os.path.join(data_dir, prefix + '*.json')
+    return [os.path.basename(f) for f in glob.glob(pattern)]
 
 def complete_playlist_ids(prefix, parsed_args, **kwargs):
     """Complete playlist IDs from API."""
     try:
         response = api_call('/api/playlists/list')
         if response and response.get('success'):
-            playlists = response.get('playlists', [])
-            return [p['id'] for p in playlists]
-    except:
+            return [p['id'] for p in response.get('playlists', []) if p['id'].startswith(prefix)]
+    except Exception:
         return []
     return []
 
 def complete_plugin_ids(prefix, parsed_args, **kwargs):
-    """Complete plugin IDs."""
+    """Complete plugin IDs from API."""
     try:
         response = api_call('/api/plugins/list')
         if response:
-            return [p['id'] for p in response.get('plugins', [])]
-    except:
+            return [p['id'] for p in response.get('plugins', []) if p['id'].startswith(prefix)]
+    except Exception:
         return []
     return []
 
-# Usage in parser
-parser.add_argument('plugin_id', choices=[]).completer = complete_plugin_ids
-parser.add_argument('video_path').completer = complete_video_files
-parser.add_argument('-p', '--player').completer = complete_player_id
+def complete_clip_ids(prefix, parsed_args, **kwargs):
+    """Complete clip UUIDs for the current player."""
+    player = getattr(parsed_args, 'player', 'video') or 'video'
+    try:
+        response = api_call(f'/api/player/{player}/clips')
+        if response:
+            return [c['id'] for c in response.get('clips', []) if c['id'].startswith(prefix)]
+    except Exception:
+        return []
+    return []
+
+def complete_effect_indices(prefix, parsed_args, **kwargs):
+    """Complete effect slot indices (0-N)."""
+    player = getattr(parsed_args, 'player', 'video') or 'video'
+    try:
+        response = api_call(f'/api/player/{player}/effects')
+        if response:
+            count = len(response.get('effects', []))
+            return [str(i) for i in range(count) if str(i).startswith(prefix)]
+    except Exception:
+        return [str(i) for i in range(8)]  # fallback: 0–7
+    return []
+
+def complete_performance_stages(prefix, parsed_args, **kwargs):
+    """Complete profiler stage names."""
+    stages = [
+        'transport_preprocess', 'source_decode', 'autosize_scale',
+        'clip_effects', 'slave_decode', 'layer_composition',
+        'composite_download', 'artnet_gpu_sampler', 'slice_processing',
+        'composition_processing', 'transition_gpu', 'preview_downscale',
+        'audio_sequences', 'output_routing', 'frame_delivery',
+    ]
+    return [s for s in stages if s.startswith(prefix)]
+
+def complete_codecs(prefix, parsed_args, **kwargs):
+    """Complete supported output codecs for convert run/batch."""
+    codecs = ['npy', 'hap', 'hap-alpha', 'hap-q', 'h264', 'h265', 'prores']
+    return [c for c in codecs if c.startswith(prefix)]
+
+def _get_video_dir():
+    try:
+        import json
+        with open('config.json') as f:
+            cfg = json.load(f)
+        return cfg.get('paths', {}).get('video_dir', 'video')
+    except Exception:
+        return 'video'
+
+def _get_audio_dir():
+    try:
+        import json
+        with open('config.json') as f:
+            cfg = json.load(f)
+        return cfg.get('paths', {}).get('sequencer_audio_dir', 'audio')
+    except Exception:
+        return 'audio'
+
+def _get_projects_dir():
+    try:
+        import json
+        with open('config.json') as f:
+            cfg = json.load(f)
+        return cfg.get('paths', {}).get('projects_dir', 'projects')
+    except Exception:
+        return 'projects'
+
+def _get_data_dir():
+    try:
+        import json
+        with open('config.json') as f:
+            cfg = json.load(f)
+        return cfg.get('paths', {}).get('data_dir', 'data')
+    except Exception:
+        return 'data'
 ```
 
-### Interactive Help System
+#### Argument → Completer Mapping
 
-#### Contextual Help Messages
+Every argument that accepts a path or ID must have a completer registered:
 
-Show helpful guidance when commands are incomplete or incorrect:
+```python
+# Mapping: where each completer should be attached
+ARGUMENT_COMPLETERS = {
+    # File path arguments
+    'clip load <path>':             complete_video_files,
+    'layer load <path>':            complete_video_files,
+    'convert run <input>':          complete_any_file,
+    'convert batch <pattern>':      complete_any_file,
+    'convert upload <file>':        complete_any_file,
+    'convert info <file>':          complete_any_file,
+    'audio sequencer upload <file>':complete_audio_files,
+    'audio sequencer load <name>':  complete_audio_files,
+    'session upload <file>':        complete_any_file,
+    'content delete <path>':        complete_any_file,
+    'content thumbnail <path>':     complete_video_files,
+
+    # Project / session files
+    'project load <filename>':      complete_project_files,
+    'project delete <filename>':    complete_project_files,
+    'session load <filename>':      complete_session_files,
+    'session delete <filename>':    complete_session_files,
+    'session restore <snapshot>':   complete_session_files,
+
+    # Dynamic IDs
+    '-p / --player':                complete_player_id,
+    'clip effect * <clip_id>':      complete_clip_ids,
+    'clip layer * <clip_id>':       complete_clip_ids,
+    'effect remove <index>':        complete_effect_indices,
+    'effect set <index>':           complete_effect_indices,
+    'effect toggle <index>':        complete_effect_indices,
+    'playlist * <playlist_id>':     complete_playlist_ids,
+    'plugin * <plugin_id>':         complete_plugin_ids,
+
+    # GPU pipeline
+    'perf stage <name>':            complete_performance_stages,
+    'convert run --codec':          complete_codecs,
+    'convert batch --codec':        complete_codecs,
+}
+```
+
+#### Path Completion Behaviour
+
+| Prefix typed | What completes |
+|---|---|
+| `clip load <TAB>` | filenames in `config.paths.video_dir` |
+| `clip load sub<TAB>` | filenames starting with `sub` in video dir |
+| `clip load /abs/<TAB>` | absolute filesystem path |
+| `clip load ./rel/<TAB>` | relative filesystem path |
+| `convert run *.mp4<TAB>` | glob-expanded files |
+| `project load my<TAB>` | `my*.json` in `projects/` |
+| `session load <TAB>` | all `.json` in `data/` |
+| `audio sequencer load <TAB>` | audio files in `audio/` |
+| `perf stage <TAB>` | all 15 GPU pipeline stage names |
+| `convert run --codec <TAB>` | `npy hap hap-alpha hap-q h264 h265 prores` |
+
+### Comprehensive Help System
+
+#### Design Goals
+
+The help system has four levels of detail, each accessible with a different invocation:
+
+| Invocation | What it shows |
+|---|---|
+| `flux --help` | Top-level domain list with one-line summaries |
+| `flux <domain> --help` | All actions for a domain with short descriptions |
+| `flux <domain> <action> --help` | Full flag reference + examples for one command |
+| `flux help` | Searchable full reference (pager, colorized) |
+
+The same data drives all four levels — defined once in `src/modules/cli/help_registry.py`.
+
+#### Help Registry
+
+```python
+# src/modules/cli/help_registry.py
+"""
+Central registry of all CLI commands, their descriptions, options, and examples.
+Adding a command here automatically populates --help, flux help, and error hints.
+"""
+
+HELP_REGISTRY = {
+    'player': {
+        'summary': 'Control video and ArtNet player playback',
+        'actions': {
+            'play':   { 'summary': 'Start playback', 'options': [('-p', 'Player: video|artnet|all')], 'examples': ['player play', 'player play -p artnet', 'player play --all'] },
+            'pause':  { 'summary': 'Pause playback',  'options': [('-p', 'Player: video|artnet|all')], 'examples': ['player pause', 'player pause -p video'] },
+            'stop':   { 'summary': 'Stop and reset to frame 0', 'options': [('-p', 'Player')], 'examples': ['player stop'] },
+            'status': { 'summary': 'Show playback state and current clip', 'options': [('-p', 'Player'), ('--json', 'Machine-readable output')], 'examples': ['player status', 'player status -p video --json'] },
+            'next':   { 'summary': 'Advance to next clip in playlist', 'options': [('-p', 'Player')], 'examples': ['player next'] },
+            'prev':   { 'summary': 'Go back to previous clip in playlist', 'options': [('-p', 'Player')], 'examples': ['player prev'] },
+            'set':    { 'summary': 'Set a playback parameter', 'options': [('-p', 'Player'), ('param', 'brightness|speed|fps|loop|hue'), ('value', 'New value')], 'examples': ['player set brightness 0.8', 'player set speed 1.5 -p video', 'player set loop true'] },
+            'sync':   { 'summary': 'Sync video and ArtNet players to same frame', 'options': [], 'examples': ['player sync'] },
+        }
+    },
+    'clip': {
+        'summary': 'Manage clips: load, effects, layers, generators',
+        'actions': {
+            'load':       { 'summary': 'Load a clip from the video directory', 'options': [('-p', 'Player'), ('path', 'Video file (TAB-completes from video dir)')], 'examples': ['clip load intro.npy', 'clip load promo.mp4 -p video'] },
+            'current':    { 'summary': 'Show currently loaded clip info', 'options': [('-p', 'Player'), ('--json', 'JSON output')], 'examples': ['clip current', 'clip current -p artnet --json'] },
+            'effect add': { 'summary': 'Add an effect to current clip', 'options': [('-p', 'Player'), ('plugin_id', 'Effect plugin (TAB-completes)')], 'examples': ['clip effect add blur', 'clip effect add chromakey -p video'] },
+            'effect set': { 'summary': 'Set an effect parameter', 'options': [('index', 'Effect slot (0-N)'), ('param', 'Parameter name'), ('value', 'Value')], 'examples': ['clip effect set 0 radius 10', 'clip effect set 1 strength 0.5'] },
+        }
+    },
+    'convert': {
+        'summary': 'Convert video files to .npy or other formats',
+        'actions': {
+            'run': {
+                'summary': 'Convert a single file',
+                'options': [
+                    ('input', 'Input file path (TAB-completes from filesystem)'),
+                    ('-o / --output', 'Output path (default: same dir, .npy extension)'),
+                    ('--codec', 'Output codec: npy|hap|hap-alpha|hap-q|h264|h265|prores (TAB-completes)'),
+                    ('--fps', 'Override output frame rate'),
+                    ('--scale', 'Scale: 0.5, 1280x720, etc.'),
+                    ('--quality', 'Quality 1–100 (codec-dependent)'),
+                    ('--loop-optimize', 'Trim silence at loop boundaries'),
+                    ('--no-audio', 'Strip audio track'),
+                ],
+                'examples': [
+                    'convert run promo.mp4',
+                    'convert run promo.mp4 --codec npy',
+                    'convert run promo.mp4 -o clips/promo.npy --fps 60',
+                    'convert run /media/ext/raw.mov --scale 1920x1080 --loop-optimize',
+                ],
+                'notes': [
+                    '.npy is the native GPU format — largest files but zero decode overhead.',
+                    'Files below eager_load_threshold_mb are fully loaded to RAM; larger files are memory-mapped.',
+                ],
+            },
+            'batch': {
+                'summary': 'Convert multiple files matching a glob pattern',
+                'options': [
+                    ('pattern', 'Glob pattern, e.g. "raw/*.mp4" (TAB-completes)'),
+                    ('--codec', 'Output codec (TAB-completes)'),
+                    ('--workers N', 'Parallel worker count (default: CPU count)'),
+                    ('--dry-run', 'Show what would be converted without doing it'),
+                    ('--skip-existing', 'Skip files that already have an output'),
+                ],
+                'examples': [
+                    'convert batch "raw/*.mp4"',
+                    'convert batch "raw/*.mp4" --codec npy --workers 4',
+                    'convert batch "video/**/*.mov" --dry-run',
+                ],
+            },
+            'cancel': { 'summary': 'Cancel an in-progress conversion', 'options': [('job_id', 'Job ID from convert run output')], 'examples': ['convert cancel job_abc123'] },
+            'info':   { 'summary': 'Show metadata for a video file', 'options': [('file', 'File path (TAB-completes)')], 'examples': ['convert info promo.npy', 'convert info raw.mp4'] },
+        }
+    },
+    'perf': {
+        'summary': 'GPU pipeline performance metrics and profiling',
+        'actions': {
+            'metrics': {
+                'summary': 'Show per-stage GPU timing (15 pipeline stages)',
+                'options': [('-p', 'Player: video|artnet'), ('--json', 'Machine-readable output'), ('--watch', 'Live updating display'), ('--interval S', 'Refresh interval in seconds (default: 1.0)')],
+                'examples': ['perf metrics', 'perf metrics -p video --watch', 'perf metrics --json'],
+            },
+            'stage':   { 'summary': 'Show timing detail for one pipeline stage', 'options': [('name', 'Stage name (TAB-completes from all 15 stages)')], 'examples': ['perf stage clip_effects', 'perf stage source_decode'] },
+            'summary': { 'summary': 'Show aggregated frame time breakdown', 'options': [], 'examples': ['perf summary'] },
+            'enable':  { 'summary': 'Enable performance collection', 'options': [], 'examples': ['perf enable'] },
+            'disable': { 'summary': 'Disable performance collection', 'options': [], 'examples': ['perf disable'] },
+            'open':    { 'summary': 'Open performance.html in the browser', 'options': [], 'examples': ['perf open'] },
+        }
+    },
+    'effect': {
+        'summary': 'Manage global effects on the current clip',
+        'actions': {
+            'list':   { 'summary': 'List active effects with their indices and parameters', 'options': [('-p', 'Player'), ('--json', 'JSON output')], 'examples': ['effect list', 'effect list -p video --json'] },
+            'add':    { 'summary': 'Append an effect plugin', 'options': [('plugin_id', 'Plugin ID (TAB-completes)'), ('-p', 'Player')], 'examples': ['effect add blur', 'effect add chromakey'] },
+            'remove': { 'summary': 'Remove effect by slot index', 'options': [('index', 'Slot 0-N (TAB-completes)'), ('-p', 'Player')], 'examples': ['effect remove 0', 'effect remove 2'] },
+            'set':    { 'summary': 'Set a parameter on an effect', 'options': [('index', 'Slot'), ('param', 'Parameter name'), ('value', 'Value')], 'examples': ['effect set 0 radius 12', 'effect set 1 opacity 0.7'] },
+            'toggle': { 'summary': 'Enable or disable an effect slot', 'options': [('index', 'Slot')], 'examples': ['effect toggle 0'] },
+            'clear':  { 'summary': 'Remove all effects', 'options': [('-p', 'Player'), ('--confirm', 'Skip confirmation prompt')], 'examples': ['effect clear', 'effect clear --confirm'] },
+        }
+    },
+    'output': {
+        'summary': 'Configure video output routes and ArtNet',
+        'actions': {
+            'list':    { 'summary': 'List all output routes', 'options': [('--json', 'JSON output')], 'examples': ['output list'] },
+            'add':     { 'summary': 'Add a new output route', 'options': [('type', 'preview|artnet|ndi')], 'examples': ['output add preview', 'output add artnet'] },
+            'enable':  { 'summary': 'Enable an output route', 'options': [('id', 'Route ID')], 'examples': ['output enable route_0'] },
+            'disable': { 'summary': 'Disable an output route', 'options': [('id', 'Route ID')], 'examples': ['output disable route_0'] },
+            'artnet settings': { 'summary': 'Show ArtNet universe and IP settings', 'options': [], 'examples': ['output artnet settings'] },
+            'artnet set': { 'summary': 'Set ArtNet parameter', 'options': [('key', 'universe|fps|ip'), ('value', 'New value')], 'examples': ['output artnet set universe 0', 'output artnet set ip 2.255.255.255'] },
+            'artnet blackout': { 'summary': 'Send all-zero DMX frame', 'options': [], 'examples': ['output artnet blackout'] },
+        }
+    },
+    'session': {
+        'summary': 'Save and restore session state',
+        'actions': {
+            'save':    { 'summary': 'Save session to a named file', 'options': [('name', 'Filename (without .json)')], 'examples': ['session save show_night1'] },
+            'load':    { 'summary': 'Restore a saved session', 'options': [('filename', 'File (TAB-completes from data/)')], 'examples': ['session load show_night1.json'] },
+            'list':    { 'summary': 'List saved sessions', 'options': [('--json', 'JSON output')], 'examples': ['session list'] },
+            'delete':  { 'summary': 'Delete a saved session file', 'options': [('filename', 'File (TAB-completes)')], 'examples': ['session delete old_test.json'] },
+            'status':  { 'summary': 'Show the current live session state summary', 'options': [('--json', 'JSON output')], 'examples': ['session status'] },
+            'snapshot':{ 'summary': 'Take a quick snapshot to snapshots/', 'options': [], 'examples': ['session snapshot'] },
+        }
+    },
+    'project': {
+        'summary': 'Manage show projects (grouped presets + state)',
+        'actions': {
+            'list':   { 'summary': 'List all projects', 'options': [('--json', 'JSON output')], 'examples': ['project list'] },
+            'load':   { 'summary': 'Load a project file', 'options': [('filename', 'File (TAB-completes from projects/)')], 'examples': ['project load festival_2026.json'] },
+            'save':   { 'summary': 'Save current state as a project', 'options': [('name', 'Project name')], 'examples': ['project save festival_2026'] },
+            'delete': { 'summary': 'Delete a project', 'options': [('filename', 'File (TAB-completes)')], 'examples': ['project delete old.json'] },
+        }
+    },
+    'config': {
+        'summary': 'Read and modify global configuration (config.json)',
+        'actions': {
+            'get':    { 'summary': 'Get a config value by key', 'options': [('key', 'Dot-separated path: e.g. paths.video_dir')], 'examples': ['config get paths.video_dir', 'config get artnet.fps'] },
+            'set':    { 'summary': 'Set a config value', 'options': [('key', 'Dot-separated path'), ('value', 'New value')], 'examples': ['config set artnet.fps 44', 'config set paths.video_dir /media/ssd/clips'] },
+            'list':   { 'summary': 'List all config keys and values', 'options': [('--json', 'JSON output')], 'examples': ['config list'] },
+            'reload': { 'summary': 'Reload config from disk', 'options': [], 'examples': ['config reload'] },
+        }
+    },
+    'debug': {
+        'summary': 'Enable or disable backend debug logging',
+        'actions': {
+            'enable':  { 'summary': 'Enable debug mode', 'options': [('--module', 'Scope to one module')], 'examples': ['debug enable', 'debug enable --module wgpu_renderer'] },
+            'disable': { 'summary': 'Disable debug mode', 'options': [], 'examples': ['debug disable'] },
+            'status':  { 'summary': 'Show current log level and modules', 'options': [], 'examples': ['debug status'] },
+        }
+    },
+    'log': {
+        'summary': 'Tail or search the backend log',
+        'actions': {
+            'tail':   { 'summary': 'Stream the log in real time', 'options': [('-n N', 'Last N lines (default: 20)'), ('--level', 'Filter by level: DEBUG|INFO|WARNING|ERROR')], 'examples': ['log tail', 'log tail -n 50', 'log tail --level ERROR'] },
+            'search': { 'summary': 'Search log for a pattern', 'options': [('pattern', 'Search string or regex'), ('--json', 'JSON output')], 'examples': ['log search "WGSL"', 'log search "frame drop"'] },
+            'clear':  { 'summary': 'Clear the log file', 'options': [('--confirm', 'Skip confirmation')], 'examples': ['log clear --confirm'] },
+        }
+    },
+}
+```
+
+#### Top-Level Help Output (`flux --help`)
+
+```
+flux — GPU-accelerated video compositor and ArtNet controller
+
+Usage: flux <command> [<action>] [options]
+
+Commands:
+  player     Control video and ArtNet player playback
+  clip       Manage clips: load, effects, layers, generators
+  effect     Manage global effects on the current clip
+  layer      Manage clip layers (multi-clip composition)
+  output     Configure video output routes and ArtNet
+  playlist   Manage and activate playlists
+  transition Configure transition effects
+  audio      Audio sequencer and BPM tools
+  sequence   BPM-synced event sequences
+  convert    Convert video files to .npy or other formats
+  content    Browse and manage the video library
+  project    Manage show projects
+  session    Save and restore session state
+  config     Read and modify global configuration
+  plugin     Inspect loaded effect plugins
+  mapper     2D canvas fixture mapper
+  perf       GPU pipeline performance metrics
+  debug      Enable or disable backend debug logging
+  log        Tail or search the backend log
+  console    Open browser console for this session
+
+Run 'flux <command> --help' for actions and options.
+Run 'flux help [<command>]' for the full searchable reference.
+```
+
+#### Domain-Level Help Output (`flux convert --help`)
+
+```
+flux convert — Convert video files to .npy or other formats
+
+Actions:
+  run      Convert a single file
+  batch    Convert multiple files matching a glob pattern
+  cancel   Cancel an in-progress conversion
+  info     Show metadata for a video file
+
+Run 'flux convert <action> --help' for details.
+```
+
+#### Action-Level Help Output (`flux convert run --help`)
+
+```
+flux convert run <input> [options]
+
+Convert a single file to GPU-native .npy or another codec.
+
+Arguments:
+  input                  Input file path (tab-completes from filesystem)
+
+Options:
+  -o, --output PATH      Output path [default: same dir, .npy extension]
+  --codec CODEC          npy|hap|hap-alpha|hap-q|h264|h265|prores  [default: npy]
+  --fps FPS              Override output frame rate
+  --scale SCALE          Scale factor or WxH, e.g. 0.5 or 1280x720
+  --quality N            Quality 1–100 (codec-dependent)
+  --loop-optimize        Trim silence at loop boundaries
+  --no-audio             Strip audio track
+
+Notes:
+  .npy is the native GPU format — largest files but zero decode overhead.
+  Files below eager_load_threshold_mb are fully loaded to RAM; larger files
+  are memory-mapped.
+
+Examples:
+  $ flux convert run promo.mp4
+  $ flux convert run promo.mp4 --codec npy
+  $ flux convert run promo.mp4 -o clips/promo.npy --fps 60
+  $ flux convert run /media/ext/raw.mov --scale 1920x1080 --loop-optimize
+```
+
+#### Implementation
 
 ```python
 # src/modules/cli/help.py
+"""
+Renders multi-level help from the central HELP_REGISTRY.
+Called both by argparse (--help) and by 'flux help [command]'.
+"""
 
-class SmartHelpFormatter(argparse.RawDescriptionHelpFormatter):
-    """Custom help formatter with examples and tips."""
-    
-    def _format_action(self, action):
-        # Add custom formatting with colors and examples
-        help_text = super()._format_action(action)
-        
-        # Add examples for certain commands
-        if hasattr(action, 'examples'):
-            help_text += f"\n\n  {self._color('Examples:', 'cyan')}\n"
-            for example in action.examples:
-                help_text += f"    {self._color('$', 'green')} {example}\n"
-        
-        return help_text
-    
-    def _color(self, text, color):
-        """Add ANSI color codes."""
-        colors = {
-            'red': '\033[91m',
-            'green': '\033[92m',
-            'yellow': '\033[93m',
-            'blue': '\033[94m',
-            'cyan': '\033[96m',
-            'reset': '\033[0m'
-        }
-        return f"{colors.get(color, '')}{text}{colors['reset']}"
+import os
+import sys
+from .help_registry import HELP_REGISTRY
+from .colors import colorize
 
-# Add examples to commands
-play_parser.examples = [
-    'player play',
-    'player play -p video',
-    'player play --all'
-]
+def print_top_level_help():
+    """Print 'flux --help' output."""
+    print(f"\n{colorize('flux', 'cyan', bold=True)} — GPU-accelerated video compositor and ArtNet controller\n")
+    print(f"Usage: {colorize('flux <command> [<action>] [options]', 'white')}\n")
+    print(colorize('Commands:', 'yellow'))
+
+    for domain, data in HELP_REGISTRY.items():
+        print(f"  {colorize(domain, 'cyan'):<20} {data['summary']}")
+
+    print(f"\nRun {colorize('flux <command> --help', 'cyan')} for actions and options.")
+    print(f"Run {colorize('flux help [<command>]', 'cyan')} for the full searchable reference.\n")
+
+
+def print_domain_help(domain: str):
+    """Print 'flux <domain> --help'."""
+    if domain not in HELP_REGISTRY:
+        print(f"{colorize('Error:', 'red')} Unknown command '{domain}'. Run {colorize('flux --help', 'cyan')} to see all commands.")
+        return
+
+    data = HELP_REGISTRY[domain]
+    print(f"\n{colorize(f'flux {domain}', 'cyan', bold=True)} — {data['summary']}\n")
+    print(colorize('Actions:', 'yellow'))
+
+    for action, adata in data['actions'].items():
+        print(f"  {colorize(action, 'cyan'):<22} {adata['summary']}")
+
+    print(f"\nRun {colorize(f'flux {domain} <action> --help', 'cyan')} for details.\n")
+
+
+def print_action_help(domain: str, action: str):
+    """Print 'flux <domain> <action> --help'."""
+    if domain not in HELP_REGISTRY:
+        print(f"{colorize('Error:', 'red')} Unknown command '{domain}'.")
+        return
+
+    actions = HELP_REGISTRY[domain]['actions']
+    if action not in actions:
+        print(f"{colorize('Error:', 'red')} Unknown action '{action}' for '{domain}'.")
+        print(f"Available: {', '.join(actions.keys())}")
+        return
+
+    adata = actions[action]
+    print(f"\n{colorize(f'flux {domain} {action}', 'cyan', bold=True)}\n")
+    print(f"{adata['summary']}\n")
+
+    if adata.get('options'):
+        print(colorize('Options:', 'yellow'))
+        for flag, desc in adata['options']:
+            print(f"  {colorize(str(flag), 'cyan'):<28} {desc}")
+        print()
+
+    if adata.get('notes'):
+        print(colorize('Notes:', 'yellow'))
+        for note in adata['notes']:
+            print(f"  {note}")
+        print()
+
+    if adata.get('examples'):
+        print(colorize('Examples:', 'yellow'))
+        for ex in adata['examples']:
+            if ex.startswith('#') or not ex:
+                print(f"  {colorize(ex, 'dim')}")
+            else:
+                print(f"  {colorize('$', 'green')} flux {ex}")
+        print()
+
+
+def print_full_reference(domain: str = None):
+    """
+    'flux help' or 'flux help <domain>'.
+    Opens a pager for long output; falls back to plain print.
+    """
+    import io
+    buf = io.StringIO()
+
+    domains_to_show = [domain] if domain else list(HELP_REGISTRY.keys())
+
+    for dom in domains_to_show:
+        if dom not in HELP_REGISTRY:
+            continue
+        data = HELP_REGISTRY[dom]
+        buf.write(f"\n{'─'*60}\n")
+        buf.write(f"  {dom.upper()} — {data['summary']}\n")
+        buf.write(f"{'─'*60}\n\n")
+        for act, adata in data['actions'].items():
+            buf.write(f"  flux {dom} {act}\n")
+            buf.write(f"    {adata['summary']}\n")
+            if adata.get('examples'):
+                buf.write(f"    Examples:\n")
+                for ex in adata['examples'][:2]:  # first 2 only in full ref
+                    if ex and not ex.startswith('#'):
+                        buf.write(f"      $ flux {ex}\n")
+            buf.write("\n")
+
+    content = buf.getvalue()
+
+    # Try pager; fall back to plain print on Windows or pipes
+    if sys.stdout.isatty() and os.name != 'nt':
+        import pydoc
+        pydoc.pager(content)
+    else:
+        print(content)
+
+
+def search_help(query: str):
+    """
+    'flux help --search <query>'
+    Full-text search across all command summaries, options, and examples.
+    """
+    query_lower = query.lower()
+    results = []
+
+    for domain, data in HELP_REGISTRY.items():
+        if query_lower in domain or query_lower in data['summary'].lower():
+            results.append((domain, None, data['summary']))
+        for action, adata in data['actions'].items():
+            summary = adata['summary'].lower()
+            examples = ' '.join(adata.get('examples', [])).lower()
+            opts = ' '.join(f"{f} {d}" for f, d in adata.get('options', [])).lower()
+            if query_lower in action or query_lower in summary or query_lower in examples or query_lower in opts:
+                results.append((domain, action, adata['summary']))
+
+    if not results:
+        print(f"\n{colorize('No matches', 'yellow')} for '{query}'. Run {colorize('flux --help', 'cyan')} to see all commands.\n")
+        return
+
+    print(f"\n{colorize('Search results', 'cyan')} for '{query}':\n")
+    for domain, action, summary in results:
+        cmd = f"flux {domain} {action}" if action else f"flux {domain}"
+        print(f"  {colorize(cmd, 'cyan'):<35} {summary}")
+    print()
 ```
 
-#### Command-Specific Help with Usage Examples
+#### `flux help` Usage
+
+```bash
+# Show full command reference in a pager
+$ flux help
+
+# Show full reference for one domain
+$ flux help convert
+
+# Full-text search across all commands
+$ flux help --search path
+$ flux help --search artnet
+$ flux help --search codec
+$ flux help --search npy
+
+# Standard argparse --help at each level
+$ flux --help
+$ flux player --help
+$ flux convert run --help
+$ flux perf metrics --help
+```
+
+#### Registering Help with Argparse
 
 ```python
-def show_command_help(domain, action=None):
-    """Show detailed help for a command with examples."""
-    
-    help_data = {
-        'player': {
-            'description': 'Control video playback and player settings',
-            'actions': {
-                'play': {
-                    'description': 'Start playback on one or more players',
-                    'examples': [
-                        'player play              # Start current player',
-                        'player play -p video     # Start video player',
-                        'player play --all        # Start all players'
-                    ],
-                    'options': {
-                        '-p, --player': 'Specify player: video, artnet, or all',
-                    }
-                },
-                'pause': {
-                    'description': 'Pause playback',
-                    'examples': ['player pause', 'player pause -p artnet']
-                }
-            },
-            'examples': [
-                '# Basic playback control',
-                'player play',
-                'player pause',
-                'player stop',
-                '',
-                '# Player-specific control',
-                'player play -p video',
-                'player status -p artnet'
-            ]
-        }
-    }
-    
-    if domain in help_data:
-        data = help_data[domain]
-        print(f"\n{colorize('Command:', 'cyan')} {domain}")
-        print(f"{colorize('Description:', 'cyan')} {data['description']}\n")
-        
-        if action and action in data.get('actions', {}):
-            action_data = data['actions'][action]
-            print(f"{colorize('Action:', 'cyan')} {action}")
-            print(f"{action_data['description']}\n")
-            
-            if 'options' in action_data:
-                print(f"{colorize('Options:', 'cyan')}")
-                for opt, desc in action_data['options'].items():
-                    print(f"  {colorize(opt, 'yellow'):<20} {desc}")
-                print()
-            
-            if 'examples' in action_data:
-                print(f"{colorize('Examples:', 'cyan')}")
-                for example in action_data['examples']:
-                    print(f"  {colorize('$', 'green')} {example}")
-                print()
+# src/modules/cli/main.py  (excerpt)
+
+from .help import print_top_level_help, print_domain_help, print_action_help, print_full_reference, search_help
+from .help_registry import HELP_REGISTRY
+
+def build_parser():
+    """Build argparse tree from HELP_REGISTRY (single source of truth)."""
+    parser = argparse.ArgumentParser(
+        prog='flux',
+        description='GPU-accelerated video compositor and ArtNet controller',
+        formatter_class=SmartHelpFormatter,
+        add_help=False,  # Custom --help so we can colorize output
+    )
+    parser.add_argument('--help', '-h', action='store_true', help='Show this help message')
+    parser.add_argument('--version', action='version', version='flux 0.1.0')
+
+    subparsers = parser.add_subparsers(dest='domain')
+
+    # 'flux help [domain] [--search query]'
+    help_parser = subparsers.add_parser('help', help='Full searchable command reference')
+    help_parser.add_argument('topic', nargs='?', help='Command domain to show help for')
+    help_parser.add_argument('--search', '-s', metavar='QUERY', help='Search all commands')
+
+    for domain, data in HELP_REGISTRY.items():
+        dp = subparsers.add_parser(domain, help=data['summary'])
+        dp.add_argument('--help', '-h', action='store_true')
+        action_sub = dp.add_subparsers(dest='action')
+
+        for action_name, adata in data['actions'].items():
+            # action names may contain spaces (e.g. 'effect add') — split into subparsers
+            parts = action_name.split()
+            if len(parts) == 1:
+                ap = action_sub.add_parser(parts[0], help=adata['summary'])
+                _attach_options(ap, adata, domain, action_name)
+
+    return parser
+
+def _attach_options(ap, adata, domain, action_name):
+    """Attach options and completers from registry to an argparse subparser."""
+    from .completers import (
+        complete_video_files, complete_any_file, complete_player_id,
+        complete_plugin_ids, complete_clip_ids, complete_effect_indices,
+        complete_performance_stages, complete_codecs, complete_project_files,
+        complete_session_files, complete_audio_files,
+    )
+    import argcomplete
+
+    for flag, desc in adata.get('options', []):
+        flag = flag.strip()
+        if flag.startswith('-'):
+            long_flag = flag.split('/')[0].strip()
+            ap.add_argument(long_flag, help=desc)
         else:
-            print(f"{colorize('Available actions:', 'cyan')}")
-            for act in data.get('actions', {}).keys():
-                print(f"  - {act}")
-            print()
-            
-            if 'examples' in data:
-                print(f"{colorize('Examples:', 'cyan')}")
-                for example in data['examples']:
-                    if example:
-                        if example.startswith('#'):
-                            print(f"  {colorize(example, 'yellow')}")
-                        else:
-                            print(f"  {colorize('$', 'green')} {example}")
-                    else:
-                        print()
+            arg = ap.add_argument(flag, help=desc)
+            # Attach path completers based on argument name
+            if flag in ('path', 'input', 'file'):
+                arg.completer = complete_any_file
+            elif flag == 'plugin_id':
+                arg.completer = complete_plugin_ids
+            elif flag == 'index':
+                arg.completer = complete_effect_indices
+            elif flag == 'name' and action_name == 'stage':
+                arg.completer = complete_performance_stages
+            elif flag == '--codec':
+                arg.completer = complete_codecs
+
+    argcomplete.autocomplete(ap)
 ```
 
 ### Fuzzy Command Matching & Did-You-Mean
@@ -1820,17 +2678,63 @@ def print_status(status, message):
 
 **Tab Completion in Action:**
 ```bash
+# Domain completion
 $ flux pla<TAB>
 player  playlist
 
+# Action completion
 $ flux player <TAB>
 play  pause  stop  clear  status  next  prev  set  master  sync  settings
 
+# Parameter name completion
 $ flux player set <TAB>
 brightness  speed  fps  loop  hue
 
+# File completion — video dir (no path prefix)
 $ flux clip load <TAB>
-video1.mp4  video2.mp4  subfolder/  test.mov
+intro.npy  loop1.npy  loop2.npy  promo.mp4  subfolder/
+
+$ flux clip load lo<TAB>
+loop1.npy  loop2.npy
+
+# File completion — relative path
+$ flux clip load ./video/in<TAB>
+./video/intro.npy
+
+# File completion — absolute path
+$ flux clip load /home/user/clips/<TAB>
+/home/user/clips/show_a.npy  /home/user/clips/show_b.npy
+
+# Project file completion
+$ flux project load <TAB>
+show_setup.json  festival_2026.json  test.json
+
+# Session file completion
+$ flux session load <TAB>
+20260424_154200.json  backup.json  default.json
+
+# Audio file completion
+$ flux audio sequencer load <TAB>
+track_01.mp3  drums.wav  ambient.flac
+
+# Codec completion
+$ flux convert run input.mp4 --codec <TAB>
+npy  hap  hap-alpha  hap-q  h264  h265  prores
+
+# GPU pipeline stage completion
+$ flux perf stage <TAB>
+artnet_gpu_sampler  audio_sequences  autosize_scale  clip_effects
+composite_download  composition_processing  frame_delivery  layer_composition
+output_routing  preview_downscale  slave_decode  slice_processing
+source_decode  transition_gpu  transport_preprocess
+
+# Plugin ID completion (fetched live from API)
+$ flux effect add <TAB>
+blur  brightness  chromakey  color  hue  mask  scale  transform  wipe
+
+# Playlist ID completion (fetched live from API)
+$ flux playlist activate <TAB>
+pl_main  pl_backup  pl_test_20260424
 ```
 
 **Fuzzy Matching:**

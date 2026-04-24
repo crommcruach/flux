@@ -24,6 +24,11 @@ class VideoSource(FrameSource):
         self._mmap_ref = None    # always the full memmap — kept alive for retrim()
         self._trim_start = 0     # first frame index of self.frames in full-file coordinates
 
+        # Apply config override for eager-load threshold
+        cfg_mb = (config or {}).get('performance', {}).get('eager_load_threshold_mb')
+        if cfg_mb is not None:
+            self._EAGER_LOAD_THRESHOLD_BYTES = int(cfg_mb) * 1024 * 1024
+
     def _find_best_resolution(self, path: str) -> str:
         """Resolve clip folder to the best-matching .npy file."""
         if not os.path.isdir(path):
@@ -108,7 +113,8 @@ class VideoSource(FrameSource):
     # between frames even when the data is in the page cache.
     # Clips larger than this threshold stay memory-mapped (only the accessed pages
     # are ever loaded from disk, saving RAM for large/long clips).
-    _EAGER_LOAD_THRESHOLD_BYTES = 512 * 1024 * 1024  # 512 MB
+    # Configurable via config.json: performance.eager_load_threshold_mb
+    _EAGER_LOAD_THRESHOLD_BYTES = 512 * 1024 * 1024  # 512 MB default (overridden in __init__)
 
     def get_next_frame(self):
         if self.frames is None or self.current_frame >= self.total_frames:

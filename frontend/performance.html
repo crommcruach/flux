@@ -4,11 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Performance Monitor - Flux</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <script>
+        // Apply saved theme before first paint to avoid flash
+        (function() {
+            var t = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
     <style>
         body {
-            background: #1a1a1a;
-            color: #fff;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
             padding: 20px;
@@ -19,14 +26,18 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #333;
+            padding: 16px 20px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border-left: 4px solid var(--accent-color);
+            box-shadow: var(--shadow-sm);
         }
         
         .header h1 {
             margin: 0;
-            font-size: 32px;
-            color: #4285f4;
+            font-size: 28px;
+            color: var(--text-primary);
+            font-weight: 600;
         }
         
         .header-controls {
@@ -35,34 +46,38 @@
         }
         
         .btn {
-            padding: 10px 20px;
-            background: #333;
-            color: #fff;
-            border: none;
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
             border-radius: 5px;
             cursor: pointer;
             font-size: 14px;
-            transition: background 0.3s;
+            transition: background 0.2s;
         }
         
         .btn:hover {
-            background: #444;
+            background: var(--border-color);
         }
         
         .btn-primary {
-            background: #4285f4;
+            background: var(--btn-primary);
+            border-color: var(--btn-primary);
+            color: #fff;
         }
         
         .btn-primary:hover {
-            background: #3367d6;
+            background: var(--btn-primary-hover);
         }
         
         .btn-danger {
-            background: #d32f2f;
+            background: var(--btn-danger);
+            border-color: var(--btn-danger);
+            color: #fff;
         }
         
         .btn-danger:hover {
-            background: #b71c1c;
+            background: var(--btn-danger-hover);
         }
         
         .players-container {
@@ -266,34 +281,124 @@
         
         .diagram-title {
             font-size: 18px;
-            margin-bottom: 15px;
+            margin-bottom: 8px;
             color: #4285f4;
             font-weight: bold;
         }
+
+        .diagram-legend {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+            font-size: 11px;
+        }
+        .legend-cpu  { background: #3a3a3a; color: #aaa;    padding: 2px 8px; border-radius: 4px; border: 1px solid #555; }
+        .legend-dma  { background: #1a3a4a; color: #4fc3f7; padding: 2px 8px; border-radius: 4px; border: 1px solid #4fc3f7; }
+        .legend-gpu  { background: #1a2a4a; color: #4285f4; padding: 2px 8px; border-radius: 4px; border: 1px solid #4285f4; }
+        .legend-opt  { background: #2a2a2a; color: #666;    padding: 2px 8px; border-radius: 4px; border: 1px dashed #555; }
         
         .diagram-flow {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: center;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 6px;
         }
-        
+
+        .diagram-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .diagram-group-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .diagram-group > .diagram-stage,
+        .diagram-group > .diagram-arrow {
+            /* lay out stages horizontally inside the group */
+        }
+
+        /* make inner group stages / arrows horizontal */
+        .diagram-group {
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: center;
+            border: 1px solid #383838;
+            border-radius: 10px;
+            padding: 10px 12px 8px;
+            position: relative;
+        }
+        .diagram-group-label {
+            position: absolute;
+            top: -9px;
+            left: 10px;
+            background: #2a2a2a;
+            padding: 0 6px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: #666;
+        }
+
         .diagram-stage {
-            background: #333;
-            padding: 15px 25px;
-            border-radius: 8px;
-            font-size: 14px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
             font-weight: 500;
             text-align: center;
-            min-width: 140px;
+            min-width: 70px;
         }
+        .diagram-stage.cpu  { background: #2e2e2e; color: #ccc;    border: 1px solid #555; }
+        .diagram-stage.dma  { background: #0d2535; color: #4fc3f7; border: 1px solid #1e5f80; }
+        .diagram-stage.gpu  { background: #0d1f40; color: #82b1ff; border: 1px solid #2a5298; }
+        .diagram-stage.opt  { opacity: 0.65; border-style: dashed; }
         
         .diagram-arrow {
-            color: #666;
-            font-size: 24px;
+            color: #555;
+            font-size: 18px;
             font-weight: bold;
+            padding: 0 2px;
         }
+        .diagram-arrow.major {
+            color: #4285f4;
+            font-size: 22px;
+            padding: 0 4px;
+            align-self: center;
+        }
+
+        /* Stage group dividers in the metrics list */
+        .stage-group-header {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #555;
+            padding: 8px 0 4px 4px;
+            border-bottom: 1px solid #333;
+            margin-top: 6px;
+        }
+        .stage-badge {
+            display: inline-block;
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 6px;
+            vertical-align: middle;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+        }
+        .badge-gpu  { background: #1a2f5a; color: #82b1ff; border: 1px solid #2a5298; }
+        .badge-dma  { background: #0d2535; color: #4fc3f7; border: 1px solid #1e5f80; }
+        .badge-cpu  { background: #2e2e2e; color: #aaa;    border: 1px solid #555; }
+        .badge-opt  { background: #222;    color: #666;    border: 1px dashed #444; }
+        .stage-row.zero-data { opacity: 0.4; }
+        .unaccounted-row { border-top: 1px solid #444; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -310,25 +415,55 @@
     </div>
     
     <div class="pipeline-diagram">
-        <div class="diagram-title">📊 Processing Pipeline</div>
+        <div class="diagram-title">📊 GPU Render Pipeline</div>
+        <div class="diagram-legend">
+            <span class="legend-cpu">CPU</span>
+            <span class="legend-dma">DMA</span>
+            <span class="legend-gpu">GPU</span>
+            <span class="legend-opt">optional</span>
+        </div>
         <div class="diagram-flow">
-            <div class="diagram-stage">Source Decode<br><small>(FFmpeg/HAP)</small></div>
-            <div class="diagram-arrow">→</div>
-            <div class="diagram-stage">Clip Effects<br><small>(Per-layer)</small></div>
-            <div class="diagram-arrow">→</div>
-            <div class="diagram-stage">Layer Composition<br><small>(Blending)</small></div>
-            <div class="diagram-arrow">→</div>
-            <div class="diagram-stage">Player Effects<br><small>(Global)</small></div>
-            <div class="diagram-arrow">→</div>
-            <div class="diagram-stage">Audio Sequences<br><small>(Modulation)</small></div>
-            <div class="diagram-arrow">→</div>
-            <div class="diagram-stage">Transitions<br><small>(Crossfade)</small></div>
-            <div class="diagram-arrow">→</div>
-            <div class="diagram-stage">Background<br><small>(Composite)</small></div>
-            <div class="diagram-arrow">→</div>
-            <div class="diagram-stage">Output Routing<br><small>(ArtNet)</small></div>
-            <div class="diagram-arrow">→</div>
-            <div class="diagram-stage">Frame Delivery<br><small>(Display)</small></div>
+            <div class="diagram-group">
+                <div class="diagram-group-label">Source</div>
+                <div class="diagram-stage cpu">Transport<br><small>preprocess</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage cpu">Source<br><small>decode .npy</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage dma">Source<br><small>upload DMA</small></div>
+            </div>
+            <div class="diagram-arrow major">→</div>
+            <div class="diagram-group">
+                <div class="diagram-group-label">GPU Render</div>
+                <div class="diagram-stage gpu">Autosize<br><small>scale pass</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage gpu">Clip<br><small>effects</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage cpu opt">Slave<br><small>decode ‖</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage gpu">Layer<br><small>composition</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage dma opt">GPU<br><small>download</small></div>
+            </div>
+            <div class="diagram-arrow major">→</div>
+            <div class="diagram-group">
+                <div class="diagram-group-label">Output</div>
+                <div class="diagram-stage gpu opt">ArtNet GPU<br><small>sampler</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage gpu opt">Slice /<br><small>composition</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage gpu opt">Transition<br><small>GPU blend</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage dma opt">Preview<br><small>downscale</small></div>
+            </div>
+            <div class="diagram-arrow major">→</div>
+            <div class="diagram-group">
+                <div class="diagram-group-label">Delivery</div>
+                <div class="diagram-stage cpu">Audio<br><small>sequences</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage cpu">Output<br><small>routing</small></div>
+                <div class="diagram-arrow">→</div>
+                <div class="diagram-stage cpu">Frame<br><small>delivery</small></div>
+            </div>
         </div>
     </div>
     
@@ -339,18 +474,43 @@
         let autoRefresh = true;
         let refreshInterval = null;
         
-        // Stage labels with emoji
-        const stageLabels = {
-            'source_decode': '🎬 Source Decode',
-            'clip_effects': '✨ Clip Effects',
-            'layer_composition': '🎨 Layer Composition',
-            'composite_download': '↳ GPU Download',
-            'player_effects': '🎭 Player Effects',
-            'audio_sequences': '🎵 Audio Sequences',
-            'transitions': '🔀 Transitions',
-            'background_composite': '🖼️ Background Composite',
-            'output_routing': '📡 Output Routing',
-            'frame_delivery': '📤 Frame Delivery'
+        // Stage metadata: label, badge type, group
+        const STAGE_GROUPS = [
+            { key: 'source',      label: 'Source Decode' },
+            { key: 'gpu_render',  label: 'GPU Render Chain' },
+            { key: 'gpu_output',  label: 'GPU Output' },
+            { key: 'delivery',    label: 'Delivery' },
+            { key: 'dynamic',     label: 'Dynamic Effect Shaders' },
+        ];
+
+        const stageMeta = {
+            // key: [display label, badge, group]
+            'transport_preprocess':   ['Transport Preprocess',    'cpu',  'source'],
+            'source_decode':          ['Source Decode',           'cpu',  'source'],
+            'source_upload':          ['Source Upload (DMA)',     'dma',  'source'],
+            'autosize_scale':         ['Autosize Scale',          'gpu',  'gpu_render'],
+            'clip_effects':           ['Clip Effects',            'gpu',  'gpu_render'],
+            'slave_decode':           ['Slave Decode ‖',          'cpu',  'gpu_render'],
+            'layer_composition':      ['Layer Composition',       'gpu',  'gpu_render'],
+            'composite_download':     ['GPU Download (DMA)',      'dma',  'gpu_render'],
+            'artnet_gpu_sampler':     ['ArtNet GPU Sampler',      'gpu',  'gpu_output'],
+            'slice_processing':       ['Slice Processing',        'gpu',  'gpu_output'],
+            'composition_processing': ['Composition Processing',  'gpu',  'gpu_output'],
+            'transition_gpu':         ['Transition GPU Blend',    'gpu',  'gpu_output'],
+            'preview_downscale':      ['Preview Downscale',       'dma',  'gpu_output'],
+            'preview_encode':         ['Preview Encode (MJPEG)',  'cpu',  'gpu_output'],
+            'audio_sequences':        ['Audio Sequences',         'cpu',  'delivery'],
+            'player_effects':         ['Player Effects',          'cpu',  'delivery'],
+            'background_composite':   ['Background Composite',   'cpu',  'delivery'],
+            'transitions':            ['Transitions (CPU)',       'cpu',  'delivery'],
+            'output_routing':         ['Output Routing',          'cpu',  'delivery'],
+            'frame_delivery':         ['Frame Delivery',          'cpu',  'delivery'],
+        };
+
+        const badgeHTML = {
+            'gpu': '<span class="stage-badge badge-gpu">GPU</span>',
+            'dma': '<span class="stage-badge badge-dma">DMA</span>',
+            'cpu': '<span class="stage-badge badge-cpu">CPU</span>',
         };
         
         async function fetchMetrics() {
@@ -389,18 +549,48 @@
             const card = document.createElement('div');
             card.className = 'player-card';
             
-            // Status indicator
             const statusIndicator = data.enabled ? 
                 '<span class="status-indicator active"></span>Profiling Active' :
                 '<span class="status-indicator inactive"></span>Profiling Disabled';
             
-            // Frame time classification
             const avgTime = data.total_frame_time.avg_ms;
+            const targetMs = data.total_frame_time.target_frame_time_ms;
             let timeClass = 'good';
-            if (avgTime > data.total_frame_time.target_frame_time_ms) {
-                timeClass = 'critical';
-            } else if (avgTime > data.total_frame_time.target_frame_time_ms * 0.8) {
-                timeClass = 'warning';
+            if (avgTime > targetMs) timeClass = 'critical';
+            else if (avgTime > targetMs * 0.8) timeClass = 'warning';
+
+            // Sort stages into groups, collect dynamic effect shaders separately
+            const grouped = {};
+            const dynamicShaders = [];
+            for (const stage of data.stages) {
+                const meta = stageMeta[stage.name];
+                if (meta) {
+                    const g = meta[2];
+                    if (!grouped[g]) grouped[g] = [];
+                    grouped[g].push(stage);
+                } else if (stage.name.startsWith('effects_shader_')) {
+                    dynamicShaders.push(stage);
+                }
+                // unknown stages that don't match either pattern are skipped
+            }
+
+            // Build stage rows HTML with group headers
+            let stageRowsHTML = '';
+            for (const group of STAGE_GROUPS) {
+                const stages = group.key === 'dynamic' ? dynamicShaders : (grouped[group.key] || []);
+                const hasData = stages.some(s => s.avg_ms > 0);
+                if (stages.length === 0) continue;
+                stageRowsHTML += `<div class="stage-group-header">${group.label}</div>`;
+                for (const stage of stages) {
+                    stageRowsHTML += createStageRow(stage, avgTime);
+                }
+            }
+
+            // Unaccounted time row
+            const unaccounted = data.unaccounted_ms ?? 0;
+            if (unaccounted > 0.5) {
+                stageRowsHTML += `<div class="stage-group-header">Untracked</div>`;
+                stageRowsHTML += createUnaccountedRow(unaccounted, avgTime);
             }
             
             card.innerHTML = `
@@ -426,47 +616,75 @@
                     <div class="frame-time-title">${statusIndicator}</div>
                     <div class="frame-time-value ${timeClass}">${avgTime.toFixed(2)} ms/frame</div>
                     <div class="frame-time-details">
-                        <span>Target: ${data.total_frame_time.target_frame_time_ms.toFixed(2)} ms</span>
+                        <span>Target: ${targetMs.toFixed(2)} ms (${data.total_frame_time.source_fps.toFixed(1)} fps)</span>
                         <span>Min: ${data.total_frame_time.min_ms.toFixed(2)} ms</span>
                         <span>Max: ${data.total_frame_time.max_ms.toFixed(2)} ms</span>
-                        <span>Performance: ${(data.total_frame_time.performance_ratio * 100).toFixed(1)}%</span>
+                        <span>Budget: ${(data.total_frame_time.performance_ratio * 100).toFixed(1)}%</span>
                     </div>
                 </div>
                 
-                <div class="pipeline-stages">
-                    ${data.stages.map(stage => createStageRow(stage, avgTime)).join('')}
-                </div>
+                <div class="pipeline-stages">${stageRowsHTML}</div>
             `;
             
             return card;
         }
         
         function createStageRow(stage, totalTime) {
-            const label = stageLabels[stage.name] || stage.name;
+            const meta = stageMeta[stage.name];
+            let label, badgeType;
+            if (meta) {
+                label = meta[0];
+                badgeType = meta[1];
+            } else if (stage.name.startsWith('effects_shader_')) {
+                // e.g. effects_shader_transform → "transform"
+                const effectId = stage.name.replace('effects_shader_', '');
+                label = `↳ ${effectId}`;
+                badgeType = 'gpu';
+            } else {
+                label = stage.name;
+                badgeType = 'cpu';
+            }
+
             const percentage = stage.percentage;
             const barWidth = Math.min(percentage, 100);
+            const hasData = stage.samples > 0;
             
-            // Color gradient based on percentage
-            let barColor = '#4285f4';
-            if (percentage > 40) {
-                barColor = '#ff9800';
-            }
-            if (percentage > 60) {
-                barColor = '#f44336';
-            }
-            
-            const isSubStage = stage.name === 'composite_download';
+            let barColor = 'linear-gradient(90deg,#2a5298,#4285f4)';
+            if (badgeType === 'dma') barColor = 'linear-gradient(90deg,#0d4f70,#0288d1)';
+            if (badgeType === 'cpu') barColor = 'linear-gradient(90deg,#2e4a2e,#388e3c)';
+            if (percentage > 40) barColor = 'linear-gradient(90deg,#7a4000,#ff9800)';
+            if (percentage > 60) barColor = 'linear-gradient(90deg,#7a0000,#f44336)';
+
             return `
-                <div class="stage-row" style="${isSubStage ? 'margin-left:20px;opacity:0.85;' : ''}">
-                    <div class="stage-name" style="${isSubStage ? 'font-size:0.9em;color:#aaa;' : ''}">${label}</div>
+                <div class="stage-row${hasData ? '' : ' zero-data'}">
+                    <div class="stage-name">${label}${badgeType ? badgeHTML[badgeType] : ''}</div>
                     <div class="stage-bar-container">
-                        <div class="stage-bar" style="width: ${barWidth}%; background: ${barColor};">
-                            ${percentage > 10 ? percentage.toFixed(1) + '%' : ''}
+                        <div class="stage-bar" style="width:${barWidth}%;background:${barColor};">
+                            ${percentage > 8 ? percentage.toFixed(1) + '%' : ''}
                         </div>
                     </div>
                     <div class="stage-metrics">
                         <div class="stage-time">${stage.avg_ms.toFixed(2)} ms</div>
-                        <div class="stage-percentage">min: ${stage.min_ms.toFixed(2)} ms | max: ${stage.max_ms.toFixed(2)} ms</div>
+                        <div class="stage-percentage">↓${stage.min_ms.toFixed(2)} ↑${stage.max_ms.toFixed(2)} ms</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function createUnaccountedRow(ms, totalTime) {
+            const pct = totalTime > 0 ? (ms / totalTime * 100) : 0;
+            const barWidth = Math.min(pct, 100);
+            return `
+                <div class="stage-row unaccounted-row zero-data">
+                    <div class="stage-name">Unaccounted<span class="stage-badge badge-opt">?</span></div>
+                    <div class="stage-bar-container">
+                        <div class="stage-bar" style="width:${barWidth}%;background:linear-gradient(90deg,#3a3a3a,#666);">
+                            ${pct > 8 ? pct.toFixed(1) + '%' : ''}
+                        </div>
+                    </div>
+                    <div class="stage-metrics">
+                        <div class="stage-time">${ms.toFixed(2)} ms</div>
+                        <div class="stage-percentage">ungapped</div>
                     </div>
                 </div>
             `;

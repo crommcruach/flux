@@ -250,6 +250,8 @@
   },
   "performance": {
     "_comment": "Performance monitoring and optimization. profiling_enabled: enable performance profiler (set to false in production for zero overhead). enable_loop_cache: cache decoded frames for short loops. enable_rgb_cache: cache pre-computed RGB frames. enable_gpu: use GPU (OpenCL) for resize/warp operations (set false to force CPU).",
+    "_eager_load_threshold_mb_comment": "Clips smaller than this (MB) are eagerly copied into heap RAM at load time — zero page-fault stalls during playback. Larger clips stay memory-mapped (OS pages on demand). Raise for smoother large-clip playback if you have enough RAM; lower to conserve RAM.",
+    "eager_load_threshold_mb": 512,
     "enable_gpu": true,
     "enable_loop_cache": true,
     "enable_rgb_cache": false,
