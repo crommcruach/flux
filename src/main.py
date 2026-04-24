@@ -658,39 +658,78 @@ def main():
     # console_capture = ConsoleCapture(rest_api)
     # sys.stdout = console_capture
     
-    # CLI Handler initialisieren
+    # CLI Handler initialisieren (legacy — kept for direct-object fallback)
     cli_handler = CLIHandler(player_manager, None, rest_api, video_dir, data_dir, config)
-    
+
+    # New argparse-based CLI
+    from modules.cli.parser import build_parser
+    from modules.cli.executor import execute
+    from modules.cli.errors import CLIError
+    from modules.cli.colors import colorize
+
+    flux_parser = build_parser()
+
     print("\n" + "=" * 80)
     print("Flux - Video Art-Net Controller")
     print("=" * 80)
-    print("Gib 'help' ein für alle Befehle")
+    print(f"Type {colorize('flux <command> --help', 'cyan')} or just {colorize('<command> [action]', 'cyan')}")
+    print(f"Examples: {colorize('player play', 'green')}  {colorize('clip load video.mp4', 'green')}  {colorize('player status', 'green')}")
     print("=" * 80)
-    
+
     # CLI-Loop
     while True:
         try:
             user_input = input("\n> ").strip()
-            
+
             if not user_input:
                 continue
-            
-            parts = user_input.split(maxsplit=1)
-            command = parts[0].lower()
-            args = parts[1] if len(parts) > 1 else None
-            
-            # Führe Befehl aus
-            continue_loop, new_player = cli_handler.execute_command(command, args)
-            
-            # Update Player wenn ersetzt
-            if new_player:
-                player_manager.set_player(new_player)
-            
-            # Exit wenn gewünscht
-            if not continue_loop:
+
+            # Exit shortcuts
+            if user_input.lower() in ('exit', 'quit', 'q'):
                 graceful_shutdown()
                 break
-        
+
+            # Legacy pass-through for bare commands the new parser doesn't own
+            # (browser, api, artnet, points, cache, plugin)
+            first_word = user_input.split()[0].lower()
+            _legacy_commands = {'browser', 'api', 'artnet', 'points', 'cache', 'plugin',
+                                 'next', 'back', 'clear', 'start', 'stop', 'pause', 'resume',
+                                 'brightness', 'speed', 'fps', 'loop', 'hue', 'blackout',
+                                 'test', 'ip', 'universe', 'delta', 'status', 'info', 'stats',
+                                 'debug', 'list', 'videos', 'scripts', 'help', 'video:', 'script:'}
+            if first_word in _legacy_commands or ':' in user_input.split()[0]:
+                parts = user_input.split(maxsplit=1)
+                command = parts[0].lower()
+                args_str = parts[1] if len(parts) > 1 else None
+                continue_loop, new_player = cli_handler.execute_command(command, args_str)
+                if new_player:
+                    player_manager.set_player(new_player)
+                if not continue_loop:
+                    graceful_shutdown()
+                    break
+                continue
+
+            # Parse as new-style command (argv without leading 'flux')
+            import shlex
+            try:
+                argv = shlex.split(user_input)
+            except ValueError as e:
+                print(colorize(f"Parse error: {e}", 'red'))
+                continue
+
+            try:
+                parsed = flux_parser.parse_args(argv)
+                execute(parsed)
+            except SystemExit:
+                # argparse called sys.exit() after printing --help or an error
+                pass
+            except CLIError as e:
+                e.display()
+            except Exception as e:
+                print(colorize(f"Error: {e}", 'red'))
+                import traceback
+                traceback.print_exc()
+
         except KeyboardInterrupt:
             graceful_shutdown()
         except Exception as e:

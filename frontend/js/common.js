@@ -57,6 +57,11 @@ export async function loadConfig() {
             const stored = JSON.parse(localStorage.getItem('colorPalettes') || '{}');
             window._colorPalettes = { ...config.color_palettes, ...stored };
         }
+
+        // Pixel pitch presets for output composer module grid
+        if (config.pixel_pitch_presets) {
+            window._pixelPitchPresets = config.pixel_pitch_presets;
+        }
         
         debug.log('Config loaded:', { 
             API_BASE, 

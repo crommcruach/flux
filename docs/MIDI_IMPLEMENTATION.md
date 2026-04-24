@@ -1,2355 +1,1349 @@
-# MIDI Control Implementation Guide
+﻿# MIDI Implementation Guide
 
 ## Overview
 
-This document outlines the implementation plan for MIDI control in Flux with **two complementary approaches**:
+MIDI in Flux is split into **two independent subsystems** that serve different purposes:
 
-1. **Primary: Web MIDI API** (Browser-based, no installation required)
-2. **Backup: Direct USB MIDI** (Server-side, for compatibility and reliability)
+| Subsystem | Purpose | Approach |
+|-----------|---------|----------|
+| **MIDI Parameter Control** | Map MIDI knobs/faders to effect/layer params | Web MIDI API (browser-based) |
+| **MIDI Clock** | Sync playback tempo with external devices/DAWs | Server-side Python (mido + rtmidi) |
 
-### Key Features
+These subsystems share REST endpoints under `/api/midi/` and use the existing **SocketIO** instance for real-time updates.
 
-**MIDI Profile Storage:**
-- Stored separately in `config/midi_profiles.json` (not session_state.json)
-- Reusable across different sessions/projects
-- Sharable between projects (studio setup, live setup, backup controller)
-- Independent from clip/session data
+---
 
-**Global vs Local Mapping:**
-- **Local**: `CC#14 → video.effect.0.brightness` (specific effect only)
-- **Global**: `CC#14 → *.brightness` (all brightness parameters everywhere)
-- Pattern matching: `video.layer.*.opacity`, `*.effect.*.blur`
-- Use cases: Master faders, group controls, synchronized parameters
-
-## Architecture Options
-
-### Option 1: Web MIDI API (Browser-based)
+## Architecture
 
 ```
-┌─────────────────┐
-│ MIDI Controller │
-└────────┬────────┘
-         │ USB/Bluetooth
-         ↓
-┌─────────────────┐
-│   Browser       │
-│ (Web MIDI API)  │
-└────────┬────────┘
-         │ WebSocket
-         ↓
-┌─────────────────┐
-│ Flask Backend   │
-│   (SocketIO)    │
-└────────┬────────┘
-         │
-         ↓
-┌─────────────────┐
-│   Parameters    │
-│ (Effects, etc.) │
-└─────────────────┘
+MIDI Controller (USB)
+    │
+    ├──────────────────────────────────────────────────────────┐
+    │                                                          │
+    │ (for parameter control)          (for clock sync)        │
+    ▼                                  ▼                       │
+Browser                         Server (Python)                │
+Web MIDI API                    mido + python-rtmidi           │
+    │                                  │                       │
+    │ WebSocket (SocketIO)             │ REST + SocketIO       │
+    ▼                                  ▼                       │
+┌──────────────────────────────────────────────────────────┐   │
+│              Flask Backend (src/modules/api_midi.py)     │   │
+│                                                          │   │
+│  /api/midi/mappings       (CRUD - param control)         │   │
+│  /api/midi/profiles       (CRUD - profile management)    │   │
+│  /api/midi/devices        (clock: list MIDI devices)     │   │
+│  /api/midi/clock/connect  (clock: connect input/output)  │   │
+│  /api/midi/clock/status   (clock: current BPM, beat)     │   │
+│  SocketIO: midi_clock_update  (20 Hz clock broadcast)    │   │
+└──────────────────────────────────────────────────────────┘   │
 ```
 
-### Option 2: Direct USB MIDI (Server-side)
+---
+
+## Part 1: MIDI Parameter Control
+
+### 1.1 Approach: Visual MIDI Frames (not Parameter Registry)
+
+**Decision:** Parameter control uses the **Visual Frame** approach — not a backend Parameter Registry.
+
+Why Visual Frames win:
+
+| | Parameter Registry | Visual Frames |
+|---|---|---|
+| Lines of code | ~1550 | ~150 |
+| Sync issues | Backend ↔ Frontend | Single source (DOM) |
+| Adding a param | Update 5+ places | Wrap control in a div |
+| Dynamic updates | Rescan on changes | Auto-discovered via DOM |
+
+**The key insight:** If a parameter is visible as a UI control, wrap it in a `.midi-param-frame` div. The DOM is the parameter registry.
+
+### 1.2 How It Works
+
+1. All controllable UI elements are wrapped in `.midi-param-frame` divs with `data-param-*` attributes.
+2. A toggle button activates **MIDI Learn Mode** (Ctrl+M).
+3. In MIDI Learn Mode, frames are highlighted — click one to arm it.
+4. Move a MIDI CC on the controller → mapping is saved.
+5. The backend stores mappings per profile in `config/midi_profiles.json`.
+6. On MIDI input, the backend broadcasts via SocketIO and the frontend updates the matching control.
+
+### 1.3 Dependencies
+
+No additional packages needed — uses the browser built-in Web MIDI API.
 
 ```
-┌─────────────────┐
-│ MIDI Controller │
-└────────┬────────┘
-         │ USB (Direct to Server)
-         ↓
-┌─────────────────┐
-│   Server        │
-│ (python-rtmidi) │
-│   MIDI Thread   │
-└────────┬────────┘
-         │ Direct
-         ↓
-┌─────────────────┐
-│   Parameters    │
-│ (Effects, etc.) │
-└─────────────────┘
+Supported browsers: Chrome, Edge, Opera
+Not supported: Firefox, Safari (no Web MIDI API)
 ```
 
-## Comparison: Web MIDI vs Direct USB
-
-| Feature | Web MIDI API | Direct USB MIDI |
-|---------|--------------|-----------------|
-| **Installation** | None | Python package (`python-rtmidi`) |
-| **Browser Required** | Chrome/Edge/Opera | Any browser |
-| **Location** | MIDI device on any machine | MIDI device on server only |
-| **Latency** | 5-15ms (WebSocket) | <1ms (direct) |
-| **Setup** | Click & grant permission | Configure Python backend |
-| **Hot-swap** | Automatic | Requires restart |
-| **Remote Control** | ✅ Yes | ❌ No |
-| **Firefox/Safari** | ❌ No | ✅ Yes |
-| **Reliability** | Network-dependent | Hardware-direct |
-| **Use Case** | Remote VJ, web-first | Server console, backup |
-
-## Why Web MIDI API?
-
-### ✅ Advantages:
-- **No additional software required** - Built into Chrome, Edge, Opera
-- **Remote control** - MIDI controller can be on different machine than server
-- **Browser-based device selection** - User-friendly UI
-- **Real-time performance** - Low latency via existing WebSocket infrastructure
-- **Cross-platform** - Works on Windows, macOS, Linux
-- **No drivers needed** - Browser handles MIDI device communication
-
-### ❌ Browser Compatibility:
-| Browser | Support | Notes |
-|---------|---------|-------|
-| Chrome/Chromium | ✅ Full | Best support since 2015 |
-| Edge (Chromium) | ✅ Full | Same as Chrome |
-| Opera | ✅ Full | Chromium-based |
-| Firefox | ❌ None | No Web MIDI API support |
-| Safari | ⚠️ Partial | Requires flag `Develop > Experimental Features > Web MIDI API` |
-
-### Alternative: Python MIDI (Not Recommended)
-Using `python-rtmidi` or `mido` would require:
-- ❌ MIDI controller physically connected to server
-- ❌ Additional Python dependencies
-- ❌ Platform-specific drivers
-- ❌ No remote control capability
-- ❌ More complex setup
-
-## Implementation Plan
-
-### Phase 0: Parameter Discovery System (3-4h)
-
-Before implementing MIDI control, we need a system to discover and track all controllable parameters.
-
-#### 0.1 Parameter Registry (`src/modules/parameter_registry.py`)
-
-```python
-"""
-Parameter Registry - Discovers and tracks all controllable parameters
-Provides unified parameter paths for MIDI mapping
-"""
-from typing import Dict, List, Any, Optional
-from ..logger import get_logger
-
-logger = get_logger(__name__)
-
-
-class Parameter:
-    """Single controllable parameter"""
-    
-    def __init__(self, path: str, name: str, value_type: str, 
-                 min_value: float, max_value: float, current_value: float,
-                 category: str, description: str = ""):
-        self.path = path  # Unique path: 'video.effect.0.brightness'
-        self.name = name  # Display name: 'Brightness'
-        self.value_type = value_type  # 'float', 'int', 'bool', 'enum'
-        self.min_value = min_value
-        self.max_value = max_value
-        self.current_value = current_value
-        self.category = category  # 'effect', 'generator', 'layer', 'global'
-        self.description = description
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'path': self.path,
-            'name': self.name,
-            'type': self.value_type,
-            'min': self.min_value,
-            'max': self.max_value,
-            'value': self.current_value,
-            'category': self.category,
-            'description': self.description
-        }
-
-
-class ParameterRegistry:
-    """Registry of all controllable parameters in the system"""
-    
-    def __init__(self, player_manager, plugin_manager):
-        self.player_manager = player_manager
-        self.plugin_manager = plugin_manager
-        self.parameters: Dict[str, Parameter] = {}
-        self.update_callbacks = []  # Callbacks when parameters change
-    
-    def scan_all_parameters(self) -> Dict[str, Parameter]:
-        """
-        Scan entire system for controllable parameters
-        Called on startup and when structure changes (effect added, etc.)
-        """
-        self.parameters.clear()
-        
-        # Scan both players (video + artnet)
-        for player_id in ['video', 'artnet']:
-            player = self.player_manager.get_player(player_id)
-            if not player:
-                continue
-            
-            # Global player parameters
-            self._scan_player_global(player, player_id)
-            
-            # Effect chain parameters
-            self._scan_effect_chain(player, player_id)
-            
-            # Layer parameters (if multi-layer enabled)
-            self._scan_layers(player, player_id)
-            
-            # Generator parameters (if current clip is generator)
-            self._scan_generator(player, player_id)
-        
-        # Sequencer parameters (BPM, position, etc.)
-        self._scan_sequencer()
-        
-        # Audio analyzer parameters
-        self._scan_audio_analyzer()
-        
-        logger.info(f"🔍 Parameter scan complete: {len(self.parameters)} parameters found")
-        
-        # Notify callbacks about parameter structure change
-        self._notify_callbacks('structure_changed')
-        
-        return self.parameters
-    
-    def _scan_player_global(self, player, player_id: str):
-        """Scan global player parameters"""
-        base_path = f"{player_id}.global"
-        
-        # Playback speed
-        self.parameters[f"{base_path}.speed"] = Parameter(
-            path=f"{base_path}.speed",
-            name="Playback Speed",
-            value_type="float",
-            min_value=0.1,
-            max_value=4.0,
-            current_value=getattr(player, 'playback_speed', 1.0),
-            category="global",
-            description="Video playback speed"
-        )
-        
-        # Opacity
-        self.parameters[f"{base_path}.opacity"] = Parameter(
-            path=f"{base_path}.opacity",
-            name="Master Opacity",
-            value_type="float",
-            min_value=0.0,
-            max_value=100.0,
-            current_value=100.0,
-            category="global"
-        )
-    
-    def _scan_effect_chain(self, player, player_id: str):
-        """Scan effect chain parameters"""
-        effect_chain = getattr(player, 'video_effect_chain', None) or \
-                      getattr(player, 'artnet_effect_chain', None)
-        
-        if not effect_chain:
-            return
-        
-        for idx, effect_dict in enumerate(effect_chain):
-            effect_id = effect_dict.get('id')
-            effect_instance = effect_dict.get('instance')
-            
-            if not effect_instance or not effect_id:
-                continue
-            
-            # Get effect metadata from plugin
-            plugin = self.plugin_manager.get_effect(effect_id)
-            if not plugin:
-                continue
-            
-            base_path = f"{player_id}.effect.{idx}"
-            
-            # Get parameters from plugin metadata
-            for param in plugin.get('parameters', []):
-                param_name = param['name']
-                param_path = f"{base_path}.{param_name}"
-                
-                # Get current value from effect config
-                current_value = effect_dict.get('config', {}).get(param_name, param.get('default', 0))
-                
-                self.parameters[param_path] = Parameter(
-                    path=param_path,
-                    name=param.get('label', param_name),
-                    value_type=param.get('type', 'float'),
-                    min_value=param.get('min', 0),
-                    max_value=param.get('max', 100),
-                    current_value=current_value,
-                    category="effect",
-                    description=f"{plugin['name']} - {param.get('label', param_name)}"
-                )
-    
-    def _scan_layers(self, player, player_id: str):
-        """Scan layer parameters (multi-layer system)"""
-        if not hasattr(player, 'layer_manager') or not player.layer_manager:
-            return
-        
-        for layer_idx, layer in enumerate(player.layer_manager.layers):
-            base_path = f"{player_id}.layer.{layer_idx}"
-            
-            # Layer opacity
-            self.parameters[f"{base_path}.opacity"] = Parameter(
-                path=f"{base_path}.opacity",
-                name=f"Layer {layer_idx} Opacity",
-                value_type="float",
-                min_value=0.0,
-                max_value=100.0,
-                current_value=layer.opacity,
-                category="layer"
-            )
-            
-            # Layer enabled
-            self.parameters[f"{base_path}.enabled"] = Parameter(
-                path=f"{base_path}.enabled",
-                name=f"Layer {layer_idx} Enabled",
-                value_type="bool",
-                min_value=0,
-                max_value=1,
-                current_value=1 if layer.enabled else 0,
-                category="layer"
-            )
-            
-            # Layer effects (if any)
-            for effect_idx, effect in enumerate(layer.effects):
-                effect_id = effect.get('id')
-                plugin = self.plugin_manager.get_effect(effect_id)
-                if not plugin:
-                    continue
-                
-                effect_base_path = f"{base_path}.effect.{effect_idx}"
-                
-                for param in plugin.get('parameters', []):
-                    param_name = param['name']
-                    param_path = f"{effect_base_path}.{param_name}"
-                    current_value = effect.get('config', {}).get(param_name, param.get('default', 0))
-                    
-                    self.parameters[param_path] = Parameter(
-                        path=param_path,
-                        name=f"L{layer_idx} {plugin['name']} {param.get('label', param_name)}",
-                        value_type=param.get('type', 'float'),
-                        min_value=param.get('min', 0),
-                        max_value=param.get('max', 100),
-                        current_value=current_value,
-                        category="layer_effect"
-                    )
-    
-    def _scan_generator(self, player, player_id: str):
-        """Scan generator parameters (if current source is generator)"""
-        if not hasattr(player, 'source'):
-            return
-        
-        from ..frame_source import GeneratorSource
-        
-        if not isinstance(player.source, GeneratorSource):
-            return
-        
-        generator_id = player.source.generator_id
-        plugin = self.plugin_manager.get_generator(generator_id)
-        if not plugin:
-            return
-        
-        base_path = f"{player_id}.generator"
-        
-        for param in plugin.get('parameters', []):
-            param_name = param['name']
-            param_path = f"{base_path}.{param_name}"
-            current_value = player.source.parameters.get(param_name, param.get('default', 0))
-            
-            self.parameters[param_path] = Parameter(
-                path=param_path,
-                name=param.get('label', param_name),
-                value_type=param.get('type', 'float'),
-                min_value=param.get('min', 0),
-                max_value=param.get('max', 100),
-                current_value=current_value,
-                category="generator",
-                description=f"{plugin['name']} - {param.get('label', param_name)}"
-            )
-    
-    def _scan_sequencer(self):
-        """Scan sequencer parameters"""
-        if not hasattr(self.player_manager, 'sequencer') or not self.player_manager.sequencer:
-            return
-        
-        base_path = "sequencer"
-        
-        # BPM
-        self.parameters[f"{base_path}.bpm"] = Parameter(
-            path=f"{base_path}.bpm",
-            name="Sequencer BPM",
-            value_type="float",
-            min_value=20.0,
-            max_value=300.0,
-            current_value=120.0,
-            category="sequencer"
-        )
-    
-    def _scan_audio_analyzer(self):
-        """Scan audio analyzer parameters"""
-        if not hasattr(self.player_manager, 'audio_analyzer'):
-            return
-        
-        base_path = "audio"
-        
-        # Gain
-        self.parameters[f"{base_path}.gain"] = Parameter(
-            path=f"{base_path}.gain",
-            name="Audio Gain",
-            value_type="float",
-            min_value=0.0,
-            max_value=10.0,
-            current_value=1.0,
-            category="audio"
-        )
-    
-    def get_parameter(self, path: str) -> Optional[Parameter]:
-        """Get parameter by path"""
-        return self.parameters.get(path)
-    
-    def get_all_parameters(self) -> Dict[str, Parameter]:
-        """Get all parameters"""
-        return self.parameters
-    
-    def get_parameters_by_category(self, category: str) -> Dict[str, Parameter]:
-        """Get parameters filtered by category"""
-        return {
-            path: param 
-            for path, param in self.parameters.items() 
-            if param.category == category
-        }
-    
-    def update_parameter_value(self, path: str, value: float) -> bool:
-        """
-        Update parameter value via player manager
-        Returns True if successful
-        """
-        param = self.parameters.get(path)
-        if not param:
-            logger.warning(f"Parameter not found: {path}")
-            return False
-        
-        # Parse path and update via appropriate method
-        parts = path.split('.')
-        player_id = parts[0]  # 'video', 'artnet', 'sequencer', 'audio'
-        
-        try:
-            if player_id in ['video', 'artnet']:
-                player = self.player_manager.get_player(player_id)
-                if not player:
-                    return False
-                
-                if parts[1] == 'effect':
-                    # Effect parameter: video.effect.0.brightness
-                    effect_index = int(parts[2])
-                    param_name = parts[3]
-                    player.set_effect_parameter(effect_index, param_name, value)
-                    
-                elif parts[1] == 'layer':
-                    # Layer parameter: video.layer.0.opacity
-                    layer_index = int(parts[2])
-                    if parts[3] == 'opacity':
-                        player.layer_manager.layers[layer_index].opacity = value
-                    elif parts[3] == 'enabled':
-                        player.layer_manager.layers[layer_index].enabled = bool(value)
-                    elif parts[3] == 'effect':
-                        # Layer effect: video.layer.0.effect.1.brightness
-                        effect_index = int(parts[4])
-                        param_name = parts[5]
-                        layer = player.layer_manager.layers[layer_index]
-                        if effect_index < len(layer.effects):
-                            effect = layer.effects[effect_index]
-                            effect['config'][param_name] = value
-                            # Reinitialize effect if needed
-                            if effect.get('instance'):
-                                effect['instance'].set_parameter(param_name, value)
-                
-                elif parts[1] == 'generator':
-                    # Generator parameter: video.generator.speed
-                    param_name = parts[2]
-                    if hasattr(player, 'source') and hasattr(player.source, 'parameters'):
-                        player.source.parameters[param_name] = value
-                        player.source.set_parameter(param_name, value)
-                
-                elif parts[1] == 'global':
-                    # Global parameter: video.global.speed
-                    if parts[2] == 'speed':
-                        player.playback_speed = value
-            
-            elif player_id == 'sequencer':
-                if parts[1] == 'bpm':
-                    if hasattr(self.player_manager, 'sequencer'):
-                        self.player_manager.sequencer.set_bpm(value)
-            
-            elif player_id == 'audio':
-                if parts[1] == 'gain':
-                    if hasattr(self.player_manager, 'audio_analyzer'):
-                        self.player_manager.audio_analyzer.set_gain(value)
-            
-            # Update cached value
-            param.current_value = value
-            
-            # Notify callbacks
-            self._notify_callbacks('value_changed', path, value)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to update parameter {path}: {e}")
-            return False
-    
-    def register_callback(self, callback):
-        """Register callback for parameter changes"""
-        self.update_callbacks.append(callback)
-    
-    def _notify_callbacks(self, event_type: str, *args):
-        """Notify all callbacks of parameter change"""
-        for callback in self.update_callbacks:
-            try:
-                callback(event_type, *args)
-            except Exception as e:
-                logger.error(f"Callback error: {e}")
-    
-    def export_parameter_list(self) -> List[Dict[str, Any]]:
-        """Export all parameters as list (for UI/API)"""
-        return [param.to_dict() for param in self.parameters.values()]
-```
-
-#### 0.2 Dynamic Parameter Tracking
-
-The parameter registry automatically rescans when:
-1. **Effect added/removed** → Rescan effect chain
-2. **Layer added/removed** → Rescan layers
-3. **Generator loaded** → Rescan generator parameters
-4. **Clip changed** → Rescan all (different effects per clip)
-
-**Hook into existing events:**
-
-```python
-# In player_core.py - when adding effect
-def add_effect(self, effect_id, config=None):
-    # ... existing code ...
-    
-    # Trigger parameter rescan
-    if hasattr(self.player_manager, 'parameter_registry'):
-        self.player_manager.parameter_registry.scan_all_parameters()
-
-# In layer_manager.py - when adding layer
-def add_layer(self, source, blend_mode='normal', opacity=100.0):
-    # ... existing code ...
-    
-    # Trigger parameter rescan
-    if hasattr(self.player, 'player_manager') and \
-       hasattr(self.player.player_manager, 'parameter_registry'):
-        self.player.player_manager.parameter_registry.scan_all_parameters()
-```
-
-#### 0.3 API Endpoints for Parameter Discovery
-
-```python
-@app.route('/api/parameters', methods=['GET'])
-def get_all_parameters():
-    """Get all controllable parameters"""
-    try:
-        if parameter_registry:
-            parameters = parameter_registry.export_parameter_list()
-            return jsonify({
-                'success': True,
-                'parameters': parameters,
-                'count': len(parameters)
-            })
-        return jsonify({'success': False, 'error': 'Parameter registry not available'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/parameters/category/<category>', methods=['GET'])
-def get_parameters_by_category(category):
-    """Get parameters filtered by category"""
-    try:
-        if parameter_registry:
-            params = parameter_registry.get_parameters_by_category(category)
-            return jsonify({
-                'success': True,
-                'parameters': [p.to_dict() for p in params.values()],
-                'category': category
-            })
-        return jsonify({'success': False, 'error': 'Parameter registry not available'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/parameters/rescan', methods=['POST'])
-def rescan_parameters():
-    """Trigger parameter rescan"""
-    try:
-        if parameter_registry:
-            parameters = parameter_registry.scan_all_parameters()
-            return jsonify({
-                'success': True,
-                'count': len(parameters)
-            })
-        return jsonify({'success': False, 'error': 'Parameter registry not available'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@socketio.on('parameter_value_changed')
-def handle_parameter_value_change(data):
-    """Handle parameter value change from frontend"""
-    try:
-        path = data.get('path')
-        value = data.get('value')
-        
-        if parameter_registry:
-            success = parameter_registry.update_parameter_value(path, value)
-            if success:
-                # Broadcast to all clients
-                socketio.emit('parameter_updated', {'path': path, 'value': value})
-    except Exception as e:
-        logger.error(f"Parameter update failed: {e}")
-```
-
-#### 0.4 Frontend Parameter Browser
-
-```javascript
-class ParameterBrowser {
-    constructor() {
-        this.parameters = [];
-        this.filteredParameters = [];
-        this.selectedCategory = 'all';
-    }
-    
-    async loadParameters() {
-        const response = await fetch('/api/parameters');
-        const data = await response.json();
-        if (data.success) {
-            this.parameters = data.parameters;
-            this.updateUI();
-        }
-    }
-    
-    filterByCategory(category) {
-        this.selectedCategory = category;
-        if (category === 'all') {
-            this.filteredParameters = this.parameters;
-        } else {
-            this.filteredParameters = this.parameters.filter(
-                p => p.category === category
-            );
-        }
-        this.updateUI();
-    }
-    
-    updateUI() {
-        const container = document.getElementById('parameterList');
-        container.innerHTML = '';
-        
-        this.filteredParameters.forEach(param => {
-            const row = document.createElement('div');
-            row.className = 'parameter-row';
-            row.innerHTML = `
-                <div class="param-name">${param.name}</div>
-                <div class="param-path">${param.path}</div>
-                <div class="param-value">${param.value.toFixed(2)}</div>
-                <div class="param-range">${param.min} - ${param.max}</div>
-                <button onclick="startMIDILearn('${param.path}')" 
-                        class="btn btn-sm btn-warning">
-                    🎹 Learn
-                </button>
-            `;
-            container.appendChild(row);
-        });
-    }
-}
-
-// Global instance
-window.parameterBrowser = new ParameterBrowser();
-```
-
-### Phase 1A: Core MIDI Infrastructure - Web MIDI API (4-6h)
-
-#### 1.1 Frontend MIDI Module (`frontend/js/midi-manager.js`)
-
-```javascript
-class MIDIManager {
-    constructor() {
-        this.midiAccess = null;
-        this.selectedDevice = null;
-        this.inputs = [];
-        this.outputs = [];
-        this.mappings = new Map(); // CC/note -> parameter path
-        this.learnMode = false;
-        this.learnCallback = null;
-    }
-    
-    async initialize() {
-        if (!navigator.requestMIDIAccess) {
-            throw new Error('Web MIDI API not supported');
-        }
-        
-        this.midiAccess = await navigator.requestMIDIAccess();
-        this.updateDeviceList();
-        
-        // Listen for device changes (plug/unplug)
-        this.midiAccess.onstatechange = () => this.updateDeviceList();
-    }
-    
-    updateDeviceList() {
-        this.inputs = Array.from(this.midiAccess.inputs.values());
-        this.outputs = Array.from(this.midiAccess.outputs.values());
-    }
-    
-    connectDevice(deviceId) {
-        const input = this.midiAccess.inputs.get(deviceId);
-        if (input) {
-            input.onmidimessage = (msg) => this.handleMIDIMessage(msg);
-            this.selectedDevice = input;
-        }
-    }
-    
-    handleMIDIMessage(message) {
-        const [status, data1, data2] = message.data;
-        const messageType = status & 0xF0;
-        const channel = status & 0x0F;
-        
-        // MIDI Learn mode
-        if (this.learnMode && this.learnCallback) {
-            this.learnCallback({ type: messageType, channel, data1, data2 });
-            return;
-        }
-        
-        // Control Change (CC)
-        if (messageType === 0xB0) {
-            const ccNumber = data1;
-            const value = data2; // 0-127
-            this.handleCC(ccNumber, value);
-        }
-        
-        // Note On/Off
-        else if (messageType === 0x90 || messageType === 0x80) {
-            const note = data1;
-            const velocity = data2;
-            const isNoteOn = messageType === 0x90 && velocity > 0;
-            this.handleNote(note, velocity, isNoteOn);
-        }
-    }
-    
-    handleCC(ccNumber, value) {
-        const mapping = this.mappings.get(`cc:${ccNumber}`);
-        if (mapping) {
-            // Send via WebSocket
-            socket.emit('midi_parameter_update', {
-                path: mapping.path,
-                value: this.scaleValue(value, mapping.min, mapping.max)
-            });
-        }
-    }
-    
-    scaleValue(midiValue, min, max) {
-        // Scale MIDI 0-127 to parameter range
-        return min + (midiValue / 127) * (max - min);
-    }
-    
-    startLearn(parameterPath, callback) {
-        this.learnMode = true;
-        this.learnCallback = (midiData) => {
-            // Create mapping
-            const key = `cc:${midiData.data1}`;
-            this.mappings.set(key, {
-                path: parameterPath,
-                min: 0,
-                max: 100
-            });
-            
-            // Save to backend
-            this.saveMappings();
-            
-            callback(midiData);
-            this.stopLearn();
-        };
-    }
-    
-    stopLearn() {
-        this.learnMode = false;
-        this.learnCallback = null;
-    }
-    
-    async loadMappings() {
-        const response = await fetch('/api/midi/mappings');
-        const data = await response.json();
-        if (data.success) {
-            this.mappings = new Map(Object.entries(data.mappings));
-        }
-    }
-    
-    async saveMappings() {
-        await fetch('/api/midi/mappings', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                mappings: Object.fromEntries(this.mappings)
-            })
-        });
-    }
-}
-
-// Global instance
-window.midiManager = new MIDIManager();
-```
-
-#### 1.2 Backend MIDI Handler (`src/modules/midi_manager.py`)
-
-```python
-"""
-MIDI Manager - Handles MIDI mappings and parameter updates
-"""
-from typing import Dict, Any, Optional
-from ..logger import get_logger
-
-logger = get_logger(__name__)
-
-
-class MIDIMapping:
-    """Single MIDI CC/Note to Parameter mapping with global/local support"""
-    
-    def __init__(self, midi_type: str, midi_number: int, parameter_path: str, 
-                 min_value: float = 0, max_value: float = 100, 
-                 mapping_mode: str = 'local', name: str = ''):
-        self.midi_type = midi_type  # 'cc' or 'note'
-        self.midi_number = midi_number  # CC number or note number
-        self.parameter_path = parameter_path  # 'video.effect.0.brightness' or '*.brightness'
-        self.min_value = min_value
-        self.max_value = max_value
-        self.mapping_mode = mapping_mode  # 'local' or 'global'
-        self.name = name  # User-friendly name: "Master Brightness", "Layer Opacity"
-        self.valid = True  # For validation tracking
-    
-    def is_global(self) -> bool:
-        """Check if this is a global pattern mapping"""
-        return self.mapping_mode == 'global' or '*' in self.parameter_path
-    
-    def matches_path(self, path: str) -> bool:
-        """Check if parameter path matches this mapping (supports wildcards)"""
-        if self.mapping_mode == 'local':
-            return path == self.parameter_path
-        
-        # Global pattern matching
-        pattern = self.parameter_path
-        
-        # Simple wildcard matching
-        pattern_parts = pattern.split('.')
-        path_parts = path.split('.')
-        
-        if len(pattern_parts) != len(path_parts):
-            return False
-        
-        for pattern_part, path_part in zip(pattern_parts, path_parts):
-            if pattern_part == '*':
-                continue  # Wildcard matches anything
-            if pattern_part != path_part:
-                return False
-        
-        return True
-    
-    def get_matching_paths(self, parameter_registry) -> List[str]:
-        """Get all parameter paths that match this mapping"""
-        if self.mapping_mode == 'local':
-            # Check if single path exists
-            param = parameter_registry.get_parameter(self.parameter_path)
-            return [self.parameter_path] if param else []
-        
-        # Global: Find all matching paths
-        matching = []
-        for path in parameter_registry.parameters.keys():
-            if self.matches_path(path):
-                matching.append(path)
-        
-        return matching
-    
-    def scale_value(self, midi_value: int) -> float:
-        """Scale MIDI value (0-127) to parameter range"""
-        normalized = midi_value / 127.0
-        return self.min_value + normalized * (self.max_value - self.min_value)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'type': self.midi_type,
-            'number': self.midi_number,
-            'path': self.parameter_path,
-            'min': self.min_value,
-            'max': self.max_value,
-            'mode': self.mapping_mode,
-            'name': self.name,
-            'is_global': self.is_global()
-        }
-
-
-class MIDIProfile:
-    """MIDI profile - collection of mappings that can be saved/loaded"""
-    
-    def __init__(self, name: str, description: str = ''):
-        self.name = name
-        self.description = description
-        self.mappings: Dict[str, MIDIMapping] = {}
-        self.created = datetime.now().isoformat()
-        self.modified = datetime.now().isoformat()
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'name': self.name,
-            'description': self.description,
-            'created': self.created,
-            'modified': self.modified,
-            'mappings': {
-                key: mapping.to_dict() 
-                for key, mapping in self.mappings.items()
-            }
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'MIDIProfile':
-        profile = cls(data['name'], data.get('description', ''))
-        profile.created = data.get('created', datetime.now().isoformat())
-        profile.modified = data.get('modified', datetime.now().isoformat())
-        
-        for key, mapping_data in data.get('mappings', {}).items():
-            profile.mappings[key] = MIDIMapping(
-                midi_type=mapping_data['type'],
-                midi_number=mapping_data['number'],
-                parameter_path=mapping_data['path'],
-                min_value=mapping_data.get('min', 0),
-                max_value=mapping_data.get('max', 100),
-                mapping_mode=mapping_data.get('mode', 'local'),
-                name=mapping_data.get('name', '')
-            )
-        
-        return profile
-
-
-class MIDIManager:
-    """Manages MIDI profiles, mappings and parameter updates"""
-    
-    def __init__(self, player_manager, parameter_registry):
-        self.player_manager = player_manager
-        self.parameter_registry = parameter_registry
-        self.profiles: Dict[str, MIDIProfile] = {}
-        self.active_profile_name: Optional[str] = None
-        self.learn_mode = False
-        self.learn_callback = None
-        
-        # Load profiles from file
-        self.profiles_file = 'config/midi_profiles.json'
-        self.load_profiles()
-    
-    @property
-    def active_profile(self) -> Optional[MIDIProfile]:
-        """Get currently active profile"""
-        return self.profiles.get(self.active_profile_name) if self.active_profile_name else None
-    
-    @property
-    def mappings(self) -> Dict[str, MIDIMapping]:
-        """Get mappings from active profile"""
-        return self.active_profile.mappings if self.active_profile else {}
-    
-    def load_profiles(self):
-        """Load MIDI profiles from config/midi_profiles.json"""
-        try:
-            if not os.path.exists(self.profiles_file):
-                # Create default profile
-                self.create_profile('Default', 'Default MIDI profile')
-                self.active_profile_name = 'Default'
-                self.save_profiles()
-                logger.info("📁 Created default MIDI profile")
-                return
-            
-            with open(self.profiles_file, 'r') as f:
-                data = json.load(f)
-            
-            # Load profiles
-            for profile_data in data.get('profiles', []):
-                profile = MIDIProfile.from_dict(profile_data)
-                self.profiles[profile.name] = profile
-            
-            # Set active profile
-            self.active_profile_name = data.get('active_profile', 'Default')
-            
-            logger.info(f"📁 Loaded {len(self.profiles)} MIDI profiles, active: {self.active_profile_name}")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to load MIDI profiles: {e}")
-            # Create default profile as fallback
-            self.create_profile('Default', 'Default MIDI profile')
-            self.active_profile_name = 'Default'
-    
-    def save_profiles(self):
-        """Save MIDI profiles to config/midi_profiles.json"""
-        try:
-            os.makedirs(os.path.dirname(self.profiles_file), exist_ok=True)
-            
-            data = {
-                'active_profile': self.active_profile_name,
-                'profiles': [
-                    profile.to_dict() 
-                    for profile in self.profiles.values()
-                ]
-            }
-            
-            with open(self.profiles_file, 'w') as f:
-                json.dump(data, f, indent=2)
-            
-            logger.info(f"💾 Saved {len(self.profiles)} MIDI profiles")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to save MIDI profiles: {e}")
-    
-    def create_profile(self, name: str, description: str = '') -> MIDIProfile:
-        """Create new MIDI profile"""
-        profile = MIDIProfile(name, description)
-        self.profiles[name] = profile
-        self.save_profiles()
-        logger.info(f"📝 Created MIDI profile: {name}")
-        return profile
-    
-    def delete_profile(self, name: str) -> bool:
-        """Delete MIDI profile"""
-        if name == 'Default':
-            logger.warning("Cannot delete Default profile")
-            return False
-        
-        if name in self.profiles:
-            del self.profiles[name]
-            if self.active_profile_name == name:
-                self.active_profile_name = 'Default'
-            self.save_profiles()
-            logger.info(f"🗑️ Deleted MIDI profile: {name}")
-            return True
-        return False
-    
-    def switch_profile(self, name: str) -> bool:
-        """Switch to different MIDI profile"""
-        if name not in self.profiles:
-            logger.warning(f"Profile not found: {name}")
-            return False
-        
-        self.active_profile_name = name
-        self.save_profiles()
-        logger.info(f"🔄 Switched to MIDI profile: {name}")
-        return True
-    
-    def duplicate_profile(self, source_name: str, new_name: str) -> Optional[MIDIProfile]:
-        """Duplicate existing profile with new name"""
-        if source_name not in self.profiles:
-            logger.warning(f"Source profile not found: {source_name}")
-            return None
-        
-        if new_name in self.profiles:
-            logger.warning(f"Profile already exists: {new_name}")
-            return None
-        
-        source = self.profiles[source_name]
-        new_profile = MIDIProfile(new_name, f"Copy of {source.description}")
-        
-        # Copy all mappings
-        for key, mapping in source.mappings.items():
-            new_profile.mappings[key] = MIDIMapping(
-                mapping.midi_type,
-                mapping.midi_number,
-                mapping.parameter_path,
-                mapping.min_value,
-                mapping.max_value,
-                mapping.mapping_mode,
-                mapping.name
-            )
-        
-        self.profiles[new_name] = new_profile
-        self.save_profiles()
-        logger.info(f"📋 Duplicated profile {source_name} → {new_name}")
-        return new_profile
-    
-    def add_mapping(self, midi_type: str, midi_number: int, parameter_path: str,
-                   min_value: float = 0, max_value: float = 100, 
-                   mapping_mode: str = 'local', name: str = ''):
-        """Add or update a MIDI mapping in active profile"""
-        if not self.active_profile:
-            logger.warning("No active profile")
-            return False
-        
-        key = f"{midi_type}:{midi_number}"
-        self.active_profile.mappings[key] = MIDIMapping(
-            midi_type, midi_number, parameter_path, min_value, max_value, 
-            mapping_mode, name
-        )
-        self.active_profile.modified = datetime.now().isoformat()
-        self.save_profiles()
-        
-        mode_str = '🌐 GLOBAL' if mapping_mode == 'global' else '📍 LOCAL'
-        logger.info(f"🎹 {mode_str} Mapped {key} → {parameter_path}")
-        return True
-    
-    def remove_mapping(self, midi_type: str, midi_number: int):
-        """Remove a MIDI mapping from active profile"""
-        if not self.active_profile:
-            return False
-        
-        key = f"{midi_type}:{midi_number}"
-        if key in self.active_profile.mappings:
-            del self.active_profile.mappings[key]
-            self.active_profile.modified = datetime.now().isoformat()
-            self.save_profiles()
-            logger.info(f"🗑️ Removed mapping {key}")
-            return True
-        return False
-    
-    def handle_midi_message(self, midi_type: str, midi_number: int, value: int,
-                           parameter_registry) -> bool:
-        """
-        Handle incoming MIDI message and update parameter(s)
-        Supports both local and global mappings
-        """
-        key = f"{midi_type}:{midi_number}"
-        mapping = self.mappings.get(key)
-        
-        if not mapping:
-            return False
-        
-        # Check if mapping is marked invalid
-        if not getattr(mapping, 'valid', True):
-            logger.warning(f"Skipping invalid mapping: {key}")
-            return False
-        
-        # Scale MIDI value to parameter range
-        param_value = mapping.scale_value(value)
-        
-        # Get matching parameter paths
-        matching_paths = mapping.get_matching_paths(parameter_registry)
-        
-        if not matching_paths:
-            logger.warning(f"No parameters match mapping: {key} → {mapping.parameter_path}")
-            mapping.valid = False
-            return False
-        
-        # Update all matching parameters
-        success_count = 0
-        for path in matching_paths:
-            if parameter_registry.update_parameter_value(path, param_value):
-                success_count += 1
-        
-        if success_count > 0:
-            if mapping.is_global():
-                logger.debug(f"🎹 {key} ({value}) → {success_count} parameters = {param_value:.2f}")
-            else:
-                logger.debug(f"🎹 {key} ({value}) → {mapping.parameter_path} = {param_value:.2f}")
-        
-        return success_count > 0
-    
-    def validate_all_mappings(self, parameter_registry) -> Dict[str, Any]:
-        """
-        Validate all MIDI mappings against current parameter registry
-        Returns validation report
-        """
-        valid_mappings = []
-        invalid_mappings = []
-        
-        for key, mapping in self.mappings.items():
-            matching_paths = mapping.get_matching_paths(parameter_registry)
-            
-            if matching_paths:
-                valid_mappings.append({
-                    'midi': key,
-                    'path': mapping.parameter_path,
-                    'name': mapping.name,
-                    'mode': mapping.mapping_mode,
-                    'matching_count': len(matching_paths),
-                    'matching_paths': matching_paths[:5]  # First 5 for display
-                })
-                mapping.valid = True
-            else:
-                invalid_mappings.append({
-                    'midi': key,
-                    'path': mapping.parameter_path,
-                    'name': mapping.name,
-                    'reason': 'No matching parameters found'
-                })
-                mapping.valid = False
-        
-        return {
-            'valid_count': len(valid_mappings),
-            'invalid_count': len(invalid_mappings),
-            'valid': valid_mappings,
-            'invalid': invalid_mappings
-        }
-    
-    def get_profile_list(self) -> List[Dict[str, Any]]:
-        """Get list of all profiles with metadata"""
-        return [
-            {
-                'name': profile.name,
-                'description': profile.description,
-                'mapping_count': len(profile.mappings),
-                'created': profile.created,
-                'modified': profile.modified,
-                'is_active': profile.name == self.active_profile_name
-            }
-            for profile in self.profiles.values()
-        ]
-                    parameter_path=data['path'],
-                    min_value=data.get('min', 0),
-                    max_value=data.get('max', 100)
-                )
-            logger.info(f"🎹 Loaded {len(self.mappings)} MIDI mappings")
-    
-    def save_mappings(self):
-        """Save MIDI mappings to session state"""
-        if self.session_state:
-            mappings_data = {
-                key: mapping.to_dict() 
-                for key, mapping in self.mappings.items()
-            }
-            self.session_state._state['midi_mappings'] = mappings_data
-            logger.info(f"💾 Saved {len(self.mappings)} MIDI mappings")
-    
-    def add_mapping(self, midi_type: str, midi_number: int, parameter_path: str,
-                   min_value: float = 0, max_value: float = 100):
-        """Add or update a MIDI mapping"""
-        key = f"{midi_type}:{midi_number}"
-        self.mappings[key] = MIDIMapping(
-            midi_type, midi_number, parameter_path, min_value, max_value
-        )
-        self.save_mappings()
-        logger.info(f"🎹 Mapped {key} → {parameter_path}")
-    
-    def remove_mapping(self, midi_type: str, midi_number: int):
-        """Remove a MIDI mapping"""
-        key = f"{midi_type}:{midi_number}"
-        if key in self.mappings:
-            del self.mappings[key]
-            self.save_mappings()
-            logger.info(f"🗑️ Removed mapping {key}")
-    
-    def handle_midi_message(self, midi_type: str, midi_number: int, value: int):
-        """Handle incoming MIDI message and update parameter"""
-        key = f"{midi_type}:{midi_number}"
-        mapping = self.mappings.get(key)
-        
-        if not mapping:
-            logger.debug(f"No mapping for {key}")
-            return False
-        
-        # Scale MIDI value to parameter range
-        param_value = mapping.scale_value(value)
-        
-        # Update parameter via player manager
-        success = self.update_parameter(mapping.parameter_path, param_value)
-        
-        if success:
-            logger.debug(f"🎹 MIDI {key} ({value}) → {mapping.parameter_path} = {param_value:.2f}")
-        
-        return success
-    
-    def update_parameter(self, parameter_path: str, value: float) -> bool:
-        """Update parameter via player manager"""
-        # Parse parameter path: 'video.effect.0.param.brightness'
-        parts = parameter_path.split('.')
-        
-        if len(parts) < 2:
-            logger.warning(f"Invalid parameter path: {parameter_path}")
-            return False
-        
-        player_id = parts[0]  # 'video' or 'artnet'
-        
-        try:
-            if parts[1] == 'effect':
-                # Effect parameter: video.effect.0.param.brightness
-                effect_index = int(parts[2])
-                param_name = parts[4]
-                
-                player = self.player_manager.get_player(player_id)
-                if player:
-                    player.set_effect_parameter(effect_index, param_name, value)
-                    return True
-            
-            elif parts[1] == 'generator':
-                # Generator parameter: video.generator.param.speed
-                param_name = parts[3]
-                
-                player = self.player_manager.get_player(player_id)
-                if player and hasattr(player, 'set_generator_parameter'):
-                    player.set_generator_parameter(param_name, value)
-                    return True
-            
-        except Exception as e:
-            logger.error(f"Failed to update parameter {parameter_path}: {e}")
-        
-        return False
-    
-    def get_all_mappings(self) -> Dict[str, Dict[str, Any]]:
-        """Get all mappings as dict"""
-        return {key: mapping.to_dict() for key, mapping in self.mappings.items()}
-```
-
-#### 1.3 SocketIO Event Handler (`src/modules/rest_api.py`)
-
-```python
-# Add to RestAPI class
-
-@socketio.on('midi_parameter_update')
-def handle_midi_parameter_update(data):
-    """Handle MIDI parameter update from browser"""
-    try:
-        midi_type = data.get('type', 'cc')
-        midi_number = data.get('number')
-        value = data.get('value')
-        
-        if midi_manager:
-            midi_manager.handle_midi_message(midi_type, midi_number, value)
-            
-    except Exception as e:
-        logger.error(f"MIDI parameter update failed: {e}")
-
-@app.route('/api/midi/mappings', methods=['GET'])
-def get_midi_mappings():
-    """Get all MIDI mappings"""
-    try:
-        if midi_manager:
-            mappings = midi_manager.get_all_mappings()
-            return jsonify({'success': True, 'mappings': mappings})
-        return jsonify({'success': False, 'error': 'MIDI manager not available'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/midi/mappings', methods=['POST'])
-def save_midi_mappings():
-    """Save MIDI mappings"""
-    try:
-        data = request.get_json()
-        mappings = data.get('mappings', {})
-        
-        if midi_manager:
-            # Clear existing mappings
-            midi_manager.mappings.clear()
-            
-            # Add new mappings
-            for key, mapping_data in mappings.items():
-                midi_manager.add_mapping(
-                    midi_type=mapping_data['type'],
-                    midi_number=mapping_data['number'],
-                    parameter_path=mapping_data['path'],
-                    min_value=mapping_data.get('min', 0),
-                    max_value=mapping_data.get('max', 100)
-                )
-            
-            return jsonify({'success': True})
-        
-        return jsonify({'success': False, 'error': 'MIDI manager not available'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/midi/learn', methods=['POST'])
-def midi_learn():
-    """Start MIDI learn for parameter"""
-    try:
-        data = request.get_json()
-        parameter_path = data.get('parameter_path')
-        
-        # Store learn request
-        socketio.emit('midi_learn_started', {'path': parameter_path})
-        
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-```
-
-### Phase 1B: Direct USB MIDI Backend (3-4h)
-
-#### 1.4 Python MIDI Backend (`src/modules/midi_input.py`)
-
-```python
-"""
-Direct USB MIDI Input Handler
-Runs in separate thread, provides backup when Web MIDI not available
-"""
-import threading
-import time
-from typing import Optional, Callable
-from ..logger import get_logger
-
-try:
-    import rtmidi
-    RTMIDI_AVAILABLE = True
-except ImportError:
-    RTMIDI_AVAILABLE = False
-
-logger = get_logger(__name__)
-
-
-class DirectMIDIInput:
-    """Direct USB MIDI input handler using python-rtmidi"""
-    
-    def __init__(self, midi_manager, enabled=False):
-        self.midi_manager = midi_manager
-        self.enabled = enabled
-        self.midi_in = None
-        self.selected_port = None
-        self.running = False
-        self.thread = None
-        
-        if not RTMIDI_AVAILABLE:
-            logger.warning("⚠️ python-rtmidi not installed. Direct USB MIDI disabled.")
-            logger.info("   Install with: pip install python-rtmidi")
-            return
-        
-        if self.enabled:
-            self.initialize()
-    
-    def initialize(self):
-        """Initialize MIDI input"""
-        if not RTMIDI_AVAILABLE:
-            return False
-        
-        try:
-            self.midi_in = rtmidi.MidiIn()
-            logger.info("🎹 Direct MIDI input initialized")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize MIDI input: {e}")
-            return False
-    
-    def get_available_ports(self):
-        """Get list of available MIDI input ports"""
-        if not self.midi_in:
-            return []
-        
-        try:
-            ports = self.midi_in.get_ports()
-            logger.info(f"🎹 Available MIDI ports: {ports}")
-            return ports
-        except Exception as e:
-            logger.error(f"❌ Failed to get MIDI ports: {e}")
-            return []
-    
-    def open_port(self, port_index: int = 0, port_name: Optional[str] = None):
-        """Open MIDI input port"""
-        if not self.midi_in:
-            return False
-        
-        try:
-            # Close existing port if open
-            if self.midi_in.is_port_open():
-                self.midi_in.close_port()
-            
-            # Open by index or name
-            if port_name:
-                ports = self.get_available_ports()
-                if port_name in ports:
-                    port_index = ports.index(port_name)
-                else:
-                    logger.error(f"❌ Port '{port_name}' not found")
-                    return False
-            
-            self.midi_in.open_port(port_index)
-            self.selected_port = port_index
-            
-            # Set callback
-            self.midi_in.set_callback(self._midi_callback)
-            
-            port_name = self.get_available_ports()[port_index]
-            logger.info(f"✅ Opened MIDI port {port_index}: {port_name}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to open MIDI port {port_index}: {e}")
-            return False
-    
-    def _midi_callback(self, event, data=None):
-        """Callback for MIDI messages (runs in MIDI thread)"""
-        message, deltatime = event
-        
-        if len(message) < 2:
-            return
-        
-        status = message[0]
-        data1 = message[1]
-        data2 = message[2] if len(message) > 2 else 0
-        
-        message_type = status & 0xF0
-        channel = status & 0x0F
-        
-        # Control Change (CC)
-        if message_type == 0xB0:
-            cc_number = data1
-            value = data2
-            logger.debug(f"🎹 CC {cc_number} = {value}")
-            self.midi_manager.handle_midi_message('cc', cc_number, value)
-        
-        # Note On/Off
-        elif message_type == 0x90 or message_type == 0x80:
-            note = data1
-            velocity = data2
-            is_note_on = message_type == 0x90 and velocity > 0
-            logger.debug(f"🎹 Note {note} {'ON' if is_note_on else 'OFF'} (vel={velocity})")
-            
-            # Treat note as toggle (0/127)
-            value = 127 if is_note_on else 0
-            self.midi_manager.handle_midi_message('note', note, value)
-    
-    def start_monitoring(self):
-        """Start MIDI monitoring thread (alternative to callback)"""
-        if not self.midi_in or not self.midi_in.is_port_open():
-            logger.error("❌ No MIDI port open")
-            return False
-        
-        self.running = True
-        self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.thread.start()
-        logger.info("🎹 MIDI monitoring started")
-        return True
-    
-    def _monitor_loop(self):
-        """Monitor MIDI input in separate thread"""
-        while self.running:
-            try:
-                message = self.midi_in.get_message()
-                if message:
-                    midi_message, deltatime = message
-                    self._process_message(midi_message)
-                time.sleep(0.001)  # 1ms polling
-            except Exception as e:
-                logger.error(f"❌ MIDI monitoring error: {e}")
-                time.sleep(0.1)
-    
-    def _process_message(self, message):
-        """Process MIDI message"""
-        if len(message) < 2:
-            return
-        
-        status = message[0]
-        data1 = message[1]
-        data2 = message[2] if len(message) > 2 else 0
-        
-        message_type = status & 0xF0
-        
-        if message_type == 0xB0:  # CC
-            self.midi_manager.handle_midi_message('cc', data1, data2)
-        elif message_type == 0x90 or message_type == 0x80:  # Note
-            velocity = data2 if message_type == 0x90 else 0
-            value = 127 if velocity > 0 else 0
-            self.midi_manager.handle_midi_message('note', data1, value)
-    
-    def stop_monitoring(self):
-        """Stop MIDI monitoring"""
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=1.0)
-        logger.info("🎹 MIDI monitoring stopped")
-    
-    def close(self):
-        """Close MIDI port and cleanup"""
-        self.stop_monitoring()
-        
-        if self.midi_in and self.midi_in.is_port_open():
-            self.midi_in.close_port()
-            logger.info("🎹 MIDI port closed")
-        
-        del self.midi_in
-        self.midi_in = None
-```
-
-#### 1.5 Configuration (`config.json`)
-
-Add MIDI configuration section:
-
-```json
-{
-  "midi": {
-    "enabled": true,
-    "web_midi": {
-      "enabled": true,
-      "comment": "Browser-based MIDI via Web MIDI API (primary)"
-    },
-    "direct_usb": {
-      "enabled": false,
-      "auto_connect": true,
-      "port_name": null,
-      "port_index": 0,
-      "comment": "Direct USB MIDI on server (backup/compatibility)"
-    }
-  }
-}
-```
-
-#### 1.6 Integration in `main.py`
-
-```python
-# Initialize MIDI Manager
-midi_manager = None
-direct_midi_input = None
-
-if config.get('midi', {}).get('enabled', True):
-    from modules.midi_manager import MIDIManager
-    from modules.midi_input import DirectMIDIInput
-    
-    midi_manager = MIDIManager(player_manager, session_state_instance)
-    logger.info("🎹 MIDI Manager initialized")
-    
-    # Direct USB MIDI (if enabled)
-    direct_config = config.get('midi', {}).get('direct_usb', {})
-    if direct_config.get('enabled', False):
-        direct_midi_input = DirectMIDIInput(
-            midi_manager, 
-            enabled=True
-        )
-        
-        # Auto-connect to first available port
-        if direct_config.get('auto_connect', True):
-            ports = direct_midi_input.get_available_ports()
-            if ports:
-                port_name = direct_config.get('port_name')
-                port_index = direct_config.get('port_index', 0)
-                
-                if direct_midi_input.open_port(port_index, port_name):
-                    logger.info(f"✅ Auto-connected to MIDI port: {ports[port_index]}")
-            else:
-                logger.warning("⚠️ No MIDI ports available for auto-connect")
-    
-    # Set MIDI manager in REST API for WebSocket events
-    rest_api.midi_manager = midi_manager
-    rest_api.direct_midi_input = direct_midi_input
-```
-
-#### 1.7 Backend API Endpoints for Direct MIDI
-
-Add to `src/modules/api_routes.py`:
-
-```python
-@app.route('/api/midi/ports', methods=['GET'])
-def get_midi_ports():
-    """Get available direct USB MIDI ports"""
-    try:
-        if direct_midi_input:
-            ports = direct_midi_input.get_available_ports()
-            return jsonify({
-                'success': True,
-                'ports': ports,
-                'selected': direct_midi_input.selected_port,
-                'available': True
-            })
-        return jsonify({
-            'success': True,
-            'ports': [],
-            'available': False,
-            'message': 'Direct MIDI not enabled or python-rtmidi not installed'
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/midi/ports/<int:port_index>', methods=['POST'])
-def connect_midi_port(port_index):
-    """Connect to direct USB MIDI port"""
-    try:
-        if direct_midi_input:
-            if direct_midi_input.open_port(port_index):
-                return jsonify({'success': True, 'port': port_index})
-            return jsonify({'success': False, 'error': 'Failed to open port'})
-        return jsonify({'success': False, 'error': 'Direct MIDI not available'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/midi/status', methods=['GET'])
-def get_midi_status():
-    """Get MIDI system status"""
-    try:
-        web_midi_enabled = config.get('midi', {}).get('web_midi', {}).get('enabled', True)
-        direct_midi_enabled = config.get('midi', {}).get('direct_usb', {}).get('enabled', False)
-        
-        status = {
-            'web_midi': {
-                'enabled': web_midi_enabled,
-                'supported': 'Requires Chrome/Edge/Opera'
-            },
-            'direct_usb': {
-                'enabled': direct_midi_enabled,
-                'available': direct_midi_input is not None,
-                'connected': direct_midi_input and direct_midi_input.midi_in and direct_midi_input.midi_in.is_port_open() if direct_midi_input else False,
-                'port': direct_midi_input.selected_port if direct_midi_input else None
-            },
-            'mappings_count': len(midi_manager.mappings) if midi_manager else 0
-        }
-        
-        return jsonify({'success': True, 'status': status})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-```
-
-### Phase 2: MIDI Learn UI (2-3h)
-
-#### 2.1 Dynamic Parameter Handling in MIDI Learn
-
-**Challenge:** Effects/layers/generators can be added/removed at runtime, making MIDI mappings invalid.
-
-**Solution:** Use parameter paths (strings) instead of object references + validation system.
-
-**Example Scenario:**
-1. User maps `CC#14 → video.effect.0.brightness` (Blur effect brightness)
-2. User removes Blur effect
-3. Parameter path `video.effect.0.brightness` no longer exists
-4. MIDI mapping should either:
-   - Gracefully fail (log warning, skip update)
-   - Auto-remap to new effect at index 0 (if user enables this)
-   - Show "Invalid Mappings" warning in UI
-
-**Backend Validation:**
-
-```python
-# Add to MIDIManager class in midi_manager.py
-
-def validate_all_mappings(self, parameter_registry) -> Dict[str, Any]:
-    """
-    Validate all MIDI mappings against current parameter registry
-    Returns validation report
-    """
-    valid_mappings = []
-    invalid_mappings = []
-    
-    for key, mapping in self.mappings.items():
-        param_path = mapping.parameter_path
-        param = parameter_registry.get_parameter(param_path)
-        
-        if param:
-            valid_mappings.append({
-                'midi': key,
-                'path': param_path,
-                'name': param.name,
-                'current_value': param.current_value
-            })
-            mapping.valid = True
-        else:
-            invalid_mappings.append({
-                'midi': key,
-                'path': param_path,
-                'reason': 'Parameter not found (effect/layer removed?)'
-            })
-            mapping.valid = False
-    
-    return {
-        'valid_count': len(valid_mappings),
-        'invalid_count': len(invalid_mappings),
-        'valid': valid_mappings,
-        'invalid': invalid_mappings
-    }
-
-def handle_midi_message(self, midi_type: str, midi_number: int, value: int, 
-                       parameter_registry) -> bool:
-    """
-    Handle incoming MIDI message with validation
-    """
-    key = f"{midi_type}:{midi_number}"
-    mapping = self.mappings.get(key)
-    
-    if not mapping:
-        return False
-    
-    # Check if mapping is marked invalid
-    if not getattr(mapping, 'valid', True):
-        logger.warning(f"Skipping invalid MIDI mapping: {key} → {mapping.parameter_path}")
-        return False
-    
-    # Verify parameter still exists (real-time validation)
-    param = parameter_registry.get_parameter(mapping.parameter_path)
-    if not param:
-        logger.warning(f"Parameter no longer exists: {mapping.parameter_path}")
-        mapping.valid = False  # Mark as invalid
-        return False
-    
-    # Scale and apply
-    param_value = mapping.scale_value(value)
-    success = parameter_registry.update_parameter_value(mapping.parameter_path, param_value)
-    
-    if success:
-        logger.debug(f"🎹 {key} ({value}) → {mapping.parameter_path} = {param_value:.2f}")
-    
-    return success
-```
-
-**Frontend Validation UI:**
-
-```javascript
-// Add to player.js
-
-class MIDILearnManager {
-    constructor(midiManager) {
-        this.midiManager = midiManager;
-        this.learnMode = false;
-        this.learnTargetPath = null;
-        this.learnCallback = null;
-    }
-    
-    async startLearn(parameterPath, parameterName) {
-        // Verify parameter exists
-        const param = await this.getParameter(parameterPath);
-        if (!param) {
-            showToast('Parameter not found! Try rescanning.', 'error');
-            return;
-        }
-        
-        this.learnMode = true;
-        this.learnTargetPath = parameterPath;
-        
-        // Show learn modal
-        const modal = new bootstrap.Modal(document.getElementById('midiLearnModal'));
-        document.getElementById('learnParameterName').textContent = parameterName;
-        document.getElementById('learnParameterPath').textContent = parameterPath;
-        modal.show();
-        
-        // Listen for MIDI input
-        this.learnCallback = (midiData) => {
-            this.completeLearn(midiData, param);
-        };
-        
-        this.midiManager.setLearnMode(true, this.learnCallback);
-    }
-    
-    async completeLearn(midiData, param) {
-        const mapping = {
-            midi_type: 'cc',  // or 'note'
-            midi_number: midiData.cc || midiData.note,
-            parameter_path: this.learnTargetPath,
-            min_value: param.min,
-            max_value: param.max
-        };
-        
-        // Send to backend
-        const response = await fetch('/api/midi/mappings', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(mapping)
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            showToast(`Mapped CC${midiData.cc} to ${param.name}`, 'success');
-            this.cancelLearn();
-            this.refreshMappingList();
-        }
-    }
-    
-    cancelLearn() {
-        this.learnMode = false;
-        this.learnTargetPath = null;
-        this.midiManager.setLearnMode(false, null);
-        
-        const modal = bootstrap.Modal.getInstance(document.getElementById('midiLearnModal'));
-        if (modal) modal.hide();
-    }
-    
-    async validateAllMappings() {
-        const response = await fetch('/api/midi/mappings/validate', {method: 'POST'});
-        const data = await response.json();
-        
-        if (data.success && data.report.invalid_count > 0) {
-            this.showInvalidMappingsWarning(data.report.invalid);
-        }
-        
-        return data.report;
-    }
-    
-    showInvalidMappingsWarning(invalidMappings) {
-        const list = invalidMappings.map(m => 
-            `<li><code>${m.midi}</code> → <code>${m.path}</code><br>
-             <small class="text-muted">${m.reason}</small></li>`
-        ).join('');
-        
-        const html = `
-            <div class="alert alert-warning">
-                <h6>⚠️ Invalid MIDI Mappings Detected</h6>
-                <p>The following MIDI mappings point to parameters that no longer exist:</p>
-                <ul>${list}</ul>
-                <button onclick="midiLearnManager.removeInvalidMappings()" class="btn btn-sm btn-danger">
-                    Remove All Invalid
-                </button>
-            </div>
-        `;
-        
-        document.getElementById('midiValidationWarning').innerHTML = html;
-    }
-    
-    async removeInvalidMappings() {
-        const response = await fetch('/api/midi/mappings/remove_invalid', {method: 'POST'});
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast(`Removed ${data.removed_count} invalid mappings`, 'success');
-            this.refreshMappingList();
-            document.getElementById('midiValidationWarning').innerHTML = '';
-        }
-    }
-    
-    async getParameter(path) {
-        const response = await fetch(`/api/parameters?path=${encodeURIComponent(path)}`);
-        const data = await response.json();
-        return data.success ? data.parameter : null;
-    }
-    
-    async refreshMappingList() {
-        const response = await fetch('/api/midi/mappings');
-        const data = await response.json();
-        
-        if (data.success) {
-            this.displayMappings(data.mappings);
-        }
-    }
-    
-    displayMappings(mappings) {
-        const container = document.getElementById('midiMappingList');
-        container.innerHTML = '';
-        
-        mappings.forEach(mapping => {
-            const row = document.createElement('div');
-            row.className = 'mapping-row d-flex align-items-center mb-2 p-2 bg-secondary rounded';
-            
-            const validClass = mapping.valid ? 'text-success' : 'text-danger';
-            const validIcon = mapping.valid ? '✓' : '✗';
-            
-            row.innerHTML = `
-                <span class="${validClass} me-2">${validIcon}</span>
-                <strong class="me-2">${mapping.midi}</strong>
-                <span class="flex-grow-1 font-monospace">${mapping.path}</span>
-                <span class="badge bg-info me-2">${mapping.min} - ${mapping.max}</span>
-                <button onclick="midiLearnManager.removeMapping('${mapping.midi}')" 
-                        class="btn btn-sm btn-danger">
-                    🗑️
-                </button>
-            `;
-            
-            container.appendChild(row);
-        });
-    }
-}
-
-// Initialize
-window.midiLearnManager = new MIDILearnManager(window.midiManager);
-
-// Auto-validate on parameter structure change
-socket.on('parameter_structure_changed', async () => {
-    console.log('🔄 Parameter structure changed, validating MIDI mappings...');
-    await midiLearnManager.validateAllMappings();
-});
-```
-
-**Backend API Endpoints:**
-
-```python
-@app.route('/api/midi/mappings/validate', methods=['POST'])
-def validate_midi_mappings():
-    """Validate all MIDI mappings"""
-    try:
-        if not midi_manager or not parameter_registry:
-            return jsonify({'success': False, 'error': 'MIDI or parameter registry not available'})
-        
-        report = midi_manager.validate_all_mappings(parameter_registry)
-        
-        return jsonify({
-            'success': True,
-            'report': report
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/midi/mappings/remove_invalid', methods=['POST'])
-def remove_invalid_mappings():
-    """Remove all invalid MIDI mappings"""
-    try:
-        if not midi_manager:
-            return jsonify({'success': False, 'error': 'MIDI manager not available'})
-        
-        removed = []
-        for key, mapping in list(midi_manager.mappings.items()):
-            if not getattr(mapping, 'valid', True):
-                del midi_manager.mappings[key]
-                removed.append(key)
-        
-        if removed:
-            midi_manager.save_mappings()
-        
-        return jsonify({
-            'success': True,
-            'removed_count': len(removed),
-            'removed': removed
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-```
-
-#### 2.2 MIDI Settings Modal (Add to `player.html`)
+### 1.4 HTML: Wrapping Parameters in MIDI Frames
 
 ```html
-<!-- MIDI Settings Modal -->
-<div class="modal fade" id="midiSettingsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content bg-dark text-light">
-            <div class="modal-header border-secondary">
-                <h5 class="modal-title">🎹 MIDI Control</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <!-- Mode Selection -->
-                <div class="mb-3">
-                    <label class="form-label">MIDI Mode</label>
-                    <select class="form-select bg-dark text-light border-secondary" id="midiModeSelect" onchange="midiModeChanged()">
-                        <option value="web">Web MIDI (Browser-based)</option>
-                        <option value="direct">Direct USB (Server-based)</option>
-                    </select>
-                    <small class="text-muted">Web MIDI = remote control, Direct USB = server console</small>
-                </div>
-                
-                <!-- Web MIDI Device Selection -->
-                <div class="mb-3" id="webMidiSection">
-                    <label class="form-label">Web MIDI Device</label>
-                    <select class="form-select bg-dark text-light border-secondary" id="midiDeviceSelect">
-                        <option value="">No device selected</option>
-                    </select>
-                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="midiRefreshDevices()">
-                        🔄 Refresh Devices
-                    </button>
-                </div>
-                
-                <!-- Direct USB MIDI Port Selection -->
-                <div class="mb-3" id="directMidiSection" style="display: none;">
-                    <label class="form-label">Direct USB MIDI Port</label>
-                    <select class="form-select bg-dark text-light border-secondary" id="directMidiPortSelect">
-                        <option value="">No port selected</option>
-                    </select>
-                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="refreshDirectMidiPorts()">
-                        🔄 Refresh Ports
-                    </button>
-                    <button class="btn btn-sm btn-success mt-2" onclick="connectDirectMidiPort()">
-                        🔌 Connect
-                    </button>
-                </div>
-                
-                <!-- Device Selection -->
-                <div class="mb-3">
-                    <label class="form-label">MIDI Device</label>
-                    <select class="form-select bg-dark text-light border-secondary" id="midiDeviceSelect">
-                        <option value="">No device selected</option>
-                    </select>
-                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="midiRefreshDevices()">
-                        🔄 Refresh Devices
-                    </button>
-                </div>
-                
-                <!-- MIDI Mappings Table -->
-                <div class="mb-3">
-                    <label class="form-label">Mappings</label>
-                    <table class="table table-dark table-sm">
-                        <thead>
-                            <tr>
-                                <th>MIDI</th>
-                                <th>Parameter</th>
-                                <th>Range</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="midiMappingsTable">
-                            <tr><td colspan="4" class="text-center text-muted">No mappings yet</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- Status -->
-                <div id="midiStatus" class="alert alert-info" style="display: none;"></div>
-            </div>
-            <div class="modal-footer border-secondary">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
+<!-- Before: Plain slider -->
+<div class="mb-3">
+    <label>Brightness</label>
+    <input type="range" id="brightness" min="0" max="100" value="75">
+</div>
+
+<!-- After: MIDI-mappable frame -->
+<div class="midi-param-frame"
+     data-param-path="video.effect.0.brightness"
+     data-param-name="Brightness"
+     data-param-min="0"
+     data-param-max="100">
+
+    <div class="midi-param-control">
+        <label>Brightness</label>
+        <input type="range" id="brightness" min="0" max="100" value="75">
+    </div>
+
+    <div class="midi-param-indicator" style="display: none;">
+        <span class="midi-code">Click to map</span>
+        <button class="midi-remove-btn" style="display: none;">x</button>
     </div>
 </div>
 ```
 
-#### 2.2 Parameter MIDI Learn Button
+#### Parameter Path Naming Convention
 
-Add to effect parameter controls:
+Format: `{player}.{category}.{index}.{parameter}`
 
-```html
-<button class="btn btn-sm btn-outline-warning" 
-        onclick="startMIDILearn('video.effect.0.param.brightness')"
-        title="MIDI Learn">
-    🎹
-</button>
-```
+| Path | Description |
+|------|-------------|
+| `video.global.speed` | Video playback speed |
+| `video.global.opacity` | Video master opacity |
+| `video.effect.0.brightness` | First effect brightness |
+| `video.effect.1.threshold` | Second effect threshold |
+| `video.layer.0.opacity` | Layer 0 opacity |
+| `video.layer.0.effect.0.blur` | Layer 0, effect 0, blur param |
+| `video.generator.speed` | Generator speed |
+| `artnet.effect.0.intensity` | Art-Net effect intensity |
+| `sequencer.bpm` | Sequencer BPM |
+| `audio.gain` | Audio analyzer gain |
 
-### Phase 3: Session State Integration (1h)
+### 1.5 CSS: MIDI Learn Mode Styles
 
-Update `src/modules/session_state.py` to persist MIDI mappings:
+**File:** `frontend/css/midi-display.css`
 
-```python
-def _build_state_dict(self, player_manager, clip_registry) -> Dict[str, Any]:
-    # ... existing code ...
-    
-    # MIDI mappings
-    if hasattr(player_manager, 'midi_manager') and player_manager.midi_manager:
-        state["midi_mappings"] = player_manager.midi_manager.get_all_mappings()
-        logger.debug(f"🎹 MIDI mappings saved: {len(state['midi_mappings'])} mappings")
-    
-    return state
-```
+```css
+.midi-param-frame {
+    position: relative;
+    padding: 8px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+}
 
-## Usage Workflow
+body.midi-learn-mode .midi-param-frame {
+    border: 2px solid rgba(255, 193, 7, 0.3);
+    background: rgba(255, 193, 7, 0.05);
+    cursor: pointer;
+}
 
-### Mode 1: Web MIDI (Remote Control)
+body.midi-learn-mode .midi-param-frame:hover {
+    border-color: rgba(255, 193, 7, 0.6);
+    background: rgba(255, 193, 7, 0.1);
+}
 
-#### 1. Connect MIDI Controller
-1. Plug MIDI controller into **your local machine** (not server)
-2. Open player page in Chrome/Edge
-3. Click "🎹 MIDI" button in toolbar
-4. Select "Web MIDI (Browser-based)" mode
-5. Select device from dropdown
-6. Browser requests MIDI permission (one-time)
-7. Controller is now active - works from anywhere on network
+body.midi-learn-mode .midi-param-frame.has-mapping {
+    border-color: rgba(40, 167, 69, 0.5);
+    background: rgba(40, 167, 69, 0.05);
+}
 
-#### 2. Map Parameters (MIDI Learn)
-1. Click 🎹 button next to any parameter slider
-2. Status shows "Waiting for MIDI input..."
-3. Move fader/knob on MIDI controller
-4. Mapping created automatically
-5. Test by moving controller - parameter updates
+.midi-param-frame.learning {
+    border-color: #ffc107;
+    background: rgba(255, 193, 7, 0.2);
+    animation: framePulse 1s infinite;
+}
 
-### Mode 2: Direct USB (Server Console)
+@keyframes framePulse {
+    0%, 100% { border-color: rgba(255, 193, 7, 0.8); box-shadow: 0 0 10px rgba(255, 193, 7, 0.3); }
+    50%       { border-color: rgba(255, 193, 7, 1);   box-shadow: 0 0 20px rgba(255, 193, 7, 0.6); }
+}
 
-#### 1. Connect MIDI Controller
-1. Plug MIDI controller into **server machine** via USB
-2. Open player page (any browser)
-3. Click "🎹 MIDI" button in toolbar
-4. Select "Direct USB (Server-based)" mode
-5. Click "🔄 Refresh Ports" to detect devices
-6. Select port from dropdown
-7. Click "🔌 Connect"
-8. Controller is now active - only works when plugged into server
+.midi-param-indicator {
+    display: none;
+    font-size: 0.75rem;
+    margin-top: 4px;
+    color: #ffc107;
+}
 
-#### 2. Map Parameters
-Same MIDI Learn workflow as Web MIDI - mappings work for both modes
+body.midi-learn-mode .midi-param-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
 
-### Automatic Fallback
+.midi-param-frame.has-mapping .midi-param-indicator { color: #28a745; }
 
-The system automatically uses the best available method:
-1. **Web MIDI detected** → Uses browser-based control (preferred)
-2. **Web MIDI unavailable** → Falls back to Direct USB (if configured)
-3. **Both available** → User can choose in settings
+.midi-code { font-family: "Courier New", monospace; font-weight: bold; }
 
-## Installation
+.midi-remove-btn {
+    background: #dc3545;
+    border: none;
+    color: white;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    display: none;
+}
 
-### Web MIDI API (No Installation)
-- ✅ Built into Chrome/Edge/Opera
-- ✅ Works out of the box
-- ✅ No dependencies
+.midi-param-frame.has-mapping .midi-remove-btn { display: block; }
 
-### Direct USB MIDI (Optional Backup)
+#midiLearnToggle { transition: all 0.3s ease; }
 
-#### Install python-rtmidi:
+#midiLearnToggle:not(.active) { background: transparent; border-color: #ffc107; color: #ffc107; }
 
-**Windows:**
-```bash
-pip install python-rtmidi
-```
+#midiLearnToggle.active {
+    background: #ffc107;
+    border-color: #ffc107;
+    color: #000;
+    box-shadow: 0 0 20px rgba(255, 193, 7, 0.5);
+    animation: pulse 2s infinite;
+}
 
-**macOS:**
-```bash
-brew install rtmidi
-pip install python-rtmidi
-```
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 193, 7, 0.5); }
+    50%       { box-shadow: 0 0 30px rgba(255, 193, 7, 0.8); }
+}
 
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt-get install libasound2-dev libjack-dev
-pip install python-rtmidi
-```
+/* Beat indicator dots (MIDI clock display) */
+.beat-dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: all 0.1s ease;
+}
 
-**Linux (Arch):**
-```bash
-sudo pacman -S rtmidi
-pip install python-rtmidi
-```
-
-#### Enable in config.json:
-
-```json
-{
-  "midi": {
-    "enabled": true,
-    "direct_usb": {
-      "enabled": true,
-      "auto_connect": true,
-      "port_index": 0
-    }
-  }
+.beat-dot.beat-active {
+    background: #2196f3;
+    box-shadow: 0 0 12px rgba(33, 150, 243, 0.8);
+    transform: scale(1.2);
 }
 ```
 
-#### Verify Installation:
+### 1.6 JavaScript: VisualMIDILearnManager
 
-```bash
-python -c "import rtmidi; print('✅ python-rtmidi available')"
+**File:** `frontend/js/midi-learn.js`
+
+```javascript
+class VisualMIDILearnManager {
+    constructor() {
+        this.learnModeActive = false;
+        this.activeLearnFrame = null;
+        this.frames = new Map(); // param_path -> frame element
+        this.midiAccess = null;
+        this._init();
+    }
+
+    async _init() {
+        this.scanParameterFrames();
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'm') { e.preventDefault(); this.toggleLearnMode(); }
+        });
+        socket.on('parameter_structure_changed', () => this.scanParameterFrames());
+
+        if (navigator.requestMIDIAccess) {
+            try {
+                this.midiAccess = await navigator.requestMIDIAccess();
+                this._listenMIDIInputs();
+                this.midiAccess.onstatechange = () => this._listenMIDIInputs();
+            } catch (e) {
+                console.error('Web MIDI access denied:', e);
+            }
+        } else {
+            console.warn('Web MIDI API not supported (use Chrome/Edge).');
+        }
+    }
+
+    _listenMIDIInputs() {
+        for (const input of this.midiAccess.inputs.values()) {
+            input.onmidimessage = (e) => this._onMIDIMessage(e);
+        }
+    }
+
+    _onMIDIMessage(event) {
+        const [status, number, value] = event.data;
+        if ((status & 0xF0) !== 0xB0) return; // Only CC messages
+        const type = 'cc';
+
+        if (this.learnModeActive && this.activeLearnFrame) {
+            this._completeLearning(this.activeLearnFrame, type, number);
+        } else {
+            socket.emit('midi_input', { type, number, value });
+        }
+    }
+
+    scanParameterFrames() {
+        const frames = document.querySelectorAll('.midi-param-frame');
+        this.frames.clear();
+        frames.forEach(frame => {
+            const path = frame.dataset.paramPath;
+            this.frames.set(path, frame);
+            frame.addEventListener('click', () => {
+                if (this.learnModeActive) this.startLearnForFrame(frame);
+            });
+            const removeBtn = frame.querySelector('.midi-remove-btn');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._removeMappingForFrame(frame);
+                });
+            }
+        });
+        console.log('MIDI: registered ' + this.frames.size + ' parameter frames');
+    }
+
+    toggleLearnMode() {
+        this.learnModeActive = !this.learnModeActive;
+        document.getElementById('midiLearnToggle')?.classList.toggle('active', this.learnModeActive);
+        document.body.classList.toggle('midi-learn-mode', this.learnModeActive);
+
+        if (this.learnModeActive) {
+            this._refreshFrameStates();
+            showToast('MIDI Learn Mode Active - Click a parameter to map', 'info');
+        } else {
+            if (this.activeLearnFrame) this._cancelLearn();
+            showToast('MIDI Learn Mode Off', 'info');
+        }
+        this._updateMappingCount();
+    }
+
+    async startLearnForFrame(frame) {
+        if (this.activeLearnFrame) this._cancelLearn();
+        const path = frame.dataset.paramPath;
+        const existing = await this._getMappingForPath(path);
+        if (existing && !confirm('Already mapped to ' + existing.midi + '. Remap?')) return;
+
+        this.activeLearnFrame = frame;
+        frame.classList.add('learning');
+        frame.querySelector('.midi-code').textContent = 'Move MIDI control...';
+    }
+
+    async _completeLearning(frame, type, number) {
+        const path = frame.dataset.paramPath;
+        const name = frame.dataset.paramName;
+        const min  = parseFloat(frame.dataset.paramMin ?? 0);
+        const max  = parseFloat(frame.dataset.paramMax ?? 100);
+
+        frame.classList.remove('learning');
+        this.activeLearnFrame = null;
+
+        const isGlobal = confirm('"' + name + '" — map as GLOBAL (all matching params)?\nOK=Global  Cancel=Local');
+        const mode = isGlobal ? 'global' : 'local';
+
+        let finalPath = path;
+        if (mode === 'global') {
+            finalPath = await this._showPatternDialog(path);
+            if (!finalPath) return;
+        }
+
+        const res = await fetch('/api/midi/mappings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                midi_type: type, midi_number: number,
+                parameter_path: finalPath, min_value: min,
+                max_value: max, mapping_mode: mode, name
+            })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            this._setFrameMapping(frame, type.toUpperCase() + '#' + number, mode);
+            showToast('Mapped ' + type.toUpperCase() + '#' + number + ' to ' + name, 'success');
+        } else {
+            showToast('Mapping failed: ' + data.error, 'error');
+        }
+        this._updateMappingCount();
+    }
+
+    _cancelLearn() {
+        if (!this.activeLearnFrame) return;
+        this.activeLearnFrame.classList.remove('learning');
+        this.activeLearnFrame.querySelector('.midi-code').textContent = 'Click to map';
+        this.activeLearnFrame = null;
+    }
+
+    _setFrameMapping(frame, midiCode, mode) {
+        frame.classList.add('has-mapping');
+        const icon = mode === 'global' ? '[G]' : '[L]';
+        frame.querySelector('.midi-code').textContent = icon + ' ' + midiCode;
+    }
+
+    async _removeMappingForFrame(frame) {
+        const mapping = await this._getMappingForPath(frame.dataset.paramPath);
+        if (!mapping || !confirm('Remove ' + mapping.midi + ' from ' + frame.dataset.paramName + '?')) return;
+        const [type, number] = mapping.midi.split(':');
+        const res = await fetch('/api/midi/mappings/' + type + '/' + number, { method: 'DELETE' });
+        if ((await res.json()).success) {
+            frame.classList.remove('has-mapping');
+            frame.querySelector('.midi-code').textContent = 'Click to map';
+            this._updateMappingCount();
+        }
+    }
+
+    async _refreshFrameStates() {
+        const data = await (await fetch('/api/midi/mappings')).json();
+        if (!data.success) return;
+        this.frames.forEach(f => f.classList.remove('has-mapping'));
+        data.mappings.forEach(m => {
+            const frame = this.frames.get(m.path);
+            if (frame) this._setFrameMapping(frame, m.type.toUpperCase() + '#' + m.number, m.mode);
+        });
+    }
+
+    async _getMappingForPath(path) {
+        const data = await (await fetch('/api/midi/mappings')).json();
+        return data.success ? data.mappings.find(m => m.path === path) : null;
+    }
+
+    async _updateMappingCount() {
+        const data = await (await fetch('/api/midi/mappings')).json();
+        const badge = document.getElementById('midiMappingCount');
+        if (!badge) return;
+        const count = data.success ? data.mappings.length : 0;
+        badge.textContent = count + ' mappings';
+        badge.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+
+    _showPatternDialog(paramPath) {
+        const parts = paramPath.split('.');
+        const paramName = parts[parts.length - 1];
+        const options = [
+            '*.' + paramName,
+            'video.effect.*.' + paramName,
+            'video.layer.*.' + paramName,
+            '*.effect.*.' + paramName,
+            paramPath
+        ];
+        const choice = prompt(
+            'Select global pattern:\n' +
+            options.map((o, i) => (i + 1) + '. ' + o).join('\n') +
+            '\n\nEnter number:', '1'
+        );
+        const idx = parseInt(choice) - 1;
+        return Promise.resolve(options[idx] ?? null);
+    }
+}
+
+// Apply MIDI values from backend broadcast
+socket.on('midi_apply', ({ type, number, value, path, mode, min, max }) => {
+    window.midiLearnManager?.frames.forEach((frame, framePath) => {
+        if (matchesMidiPattern(framePath, path)) {
+            const fMin = parseFloat(frame.dataset.paramMin ?? min ?? 0);
+            const fMax = parseFloat(frame.dataset.paramMax ?? max ?? 100);
+            const scaled = fMin + (value / 127) * (fMax - fMin);
+            const input = frame.querySelector('input, select');
+            if (input) { input.value = scaled; input.dispatchEvent(new Event('input')); }
+        }
+    });
+});
+
+function matchesMidiPattern(path, pattern) {
+    const pp = pattern.split('.');
+    const lp = path.split('.');
+    if (pp.length !== lp.length) return false;
+    return pp.every((p, i) => p === '*' || p === lp[i]);
+}
+
+window.midiLearnManager = new VisualMIDILearnManager();
 ```
 
-## Use Cases
+### 1.7 MIDI Learn Toggle (Playlist Bar)
 
-### Scenario 1: Remote VJ (Web MIDI Recommended)
-**Setup:** VJ operates from laptop, server runs on different machine/rack  
-**MIDI Controller:** On VJ laptop  
-**Mode:** Web MIDI API  
-**Benefits:** Full remote control, no cables to server, works from anywhere on network
+Add to `player.html`:
 
-### Scenario 2: Server Console (Direct USB Recommended)
-**Setup:** Server has keyboard/mouse/display, operated directly  
-**MIDI Controller:** Plugged into server  
-**Mode:** Direct USB  
-**Benefits:** Zero latency, no network dependency, works without browser support
+```html
+<button id="midiLearnToggle"
+        class="btn btn-outline-warning"
+        onclick="midiLearnManager.toggleLearnMode()"
+        title="MIDI Learn Mode (Ctrl+M)">
+    MIDI
+</button>
+<span class="badge bg-info" id="midiMappingCount" style="display: none;">0 mappings</span>
+```
 
-### Scenario 3: Hybrid Setup (Both Enabled)
-**Setup:** Primary control via Web MIDI, backup Direct USB on server  
-**MIDI Controllers:** Both laptop and server  
-**Mode:** Both active  
-**Benefits:** Flexibility - switch between remote and local control
+---
 
-### Scenario 4: Firefox/Safari Users (Direct USB Required)
-**Setup:** Browser doesn't support Web MIDI API  
-**MIDI Controller:** Plugged into server  
-**Mode:** Direct USB (only option)  
-**Benefits:** MIDI control still works despite browser limitations
+## Part 2: MIDI Profiles
 
-## Performance Considerations
+### 2.1 Storage
 
-### Web MIDI:
-- **Latency**: ~5-15ms (network + WebSocket)
-- **Throughput**: 30-60 messages/sec recommended
-- **Network**: Requires stable connection
-- **CPU**: Minimal (browser handles MIDI)
+MIDI profiles are stored separately from sessions because they are hardware-specific.
 
-### Direct USB:
-- **Latency**: <1ms (hardware direct)
-- **Throughput**: Unlimited (hardware dependent)
-- **Network**: Independent
-- **CPU**: Minimal (separate thread)
+**File:** `config/midi_profiles.json`
 
-### Best Practices:
-- **Throttle updates**: Limit to 30-60 parameter updates/sec
-- **Queue messages**: Don't block on parameter updates
-- **Use separate thread**: Direct USB should run in daemon thread
-- **Graceful degradation**: Fall back to Direct USB if Web MIDI fails
+```json
+{
+  "active_profile": "Studio Setup",
+  "profiles": [
+    {
+      "name": "Studio Setup",
+      "description": "Main BCF2000 controller",
+      "mappings": {
+        "cc:1":  { "type": "cc", "number": 1,  "path": "*.brightness",         "min": 0, "max": 100, "mode": "global", "name": "Master Brightness" },
+        "cc:14": { "type": "cc", "number": 14, "path": "video.effect.0.blur",  "min": 0, "max": 50,  "mode": "local",  "name": "Blur Effect" }
+      }
+    },
+    {
+      "name": "Live Show",
+      "description": "Backup Korg controller",
+      "mappings": {}
+    }
+  ]
+}
+```
+
+Why separate from `session_state.json`:
+- Same hardware setup is reused across different projects
+- Shareable between machines (copy one file)
+- Switch profiles on-the-fly without affecting session data
+
+### 2.2 Profile REST API
+
+```
+GET    /api/midi/profiles              list all
+POST   /api/midi/profiles              create
+POST   /api/midi/profiles/switch       activate
+POST   /api/midi/profiles/duplicate    duplicate
+GET    /api/midi/profiles/<name>/export  download as JSON
+POST   /api/midi/profiles/import       upload JSON
+DELETE /api/midi/profiles/<name>       delete
+```
+
+### 2.3 Profile Manager UI (JavaScript)
+
+```javascript
+class MIDIProfileManager {
+    async loadProfiles() {
+        const data = await (await fetch('/api/midi/profiles')).json();
+        if (data.success) { this.profiles = data.profiles; this._updateUI(); }
+    }
+
+    async switchProfile(name) {
+        await fetch('/api/midi/profiles/switch', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name })
+        });
+        showToast('Switched to: ' + name, 'success');
+        this.loadProfiles();
+    }
+
+    async createProfile(name, description) {
+        await fetch('/api/midi/profiles', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name, description })
+        });
+        this.loadProfiles();
+    }
+
+    async duplicateProfile(source) {
+        const newName = prompt('Name for duplicated profile:', source + ' Copy');
+        if (!newName) return;
+        await fetch('/api/midi/profiles/duplicate', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ source, name: newName })
+        });
+        this.loadProfiles();
+    }
+
+    exportProfile(name) { window.open('/api/midi/profiles/' + name + '/export', '_blank'); }
+
+    async importProfile(file) {
+        const profileData = JSON.parse(await file.text());
+        await fetch('/api/midi/profiles/import', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(profileData)
+        });
+        this.loadProfiles();
+    }
+}
+
+window.midiProfileManager = new MIDIProfileManager();
+```
+
+---
+
+## Part 3: Global vs Local Mapping
+
+### 3.1 Concept
+
+| Mode | Example | Effect |
+|------|---------|--------|
+| **Local** | `CC#14 -> video.effect.0.brightness` | One fader, one parameter |
+| **Global** | `CC#1 -> *.brightness` | One fader, all brightness params |
+
+### 3.2 Pattern Syntax
+
+| Pattern | Matches |
+|---------|---------|
+| `*.brightness` | All brightness parameters anywhere |
+| `video.effect.*.blur` | All blur params in video effects |
+| `video.layer.*.opacity` | All layer opacities |
+| `*.effect.*.intensity` | All effect intensities everywhere |
+
+### 3.3 Backend Pattern Matching
+
+```python
+def matches_pattern(path: str, pattern: str) -> bool:
+    pp = pattern.split('.')
+    lp = path.split('.')
+    if len(pp) != len(lp):
+        return False
+    return all(p == '*' or p == l for p, l in zip(pp, lp))
+```
+
+### 3.4 Common Global Mapping Examples
+
+```json
+{
+  "cc:1":  { "path": "*.brightness",         "mode": "global", "name": "Master Brightness" },
+  "cc:7":  { "path": "video.layer.*.opacity", "mode": "global", "name": "All Layers Opacity" },
+  "cc:14": { "path": "*.effect.*.blur",       "mode": "global", "name": "All Blur Effects" }
+}
+```
+
+---
+
+## Part 4: Backend — `src/modules/api_midi.py`
+
+### 4.1 Mappings + Profiles CRUD
+
+```python
+"""
+MIDI API — Mappings, Profiles, Clock
+Uses existing SocketIO instance (no separate WebSocket library).
+"""
+from flask import Blueprint, jsonify, request
+import json, copy, logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+midi_bp = Blueprint('midi', __name__)
+
+PROFILES_FILE = Path('config/midi_profiles.json')
+
+def _load_profiles():
+    if PROFILES_FILE.exists():
+        return json.loads(PROFILES_FILE.read_text())
+    return {'active_profile': 'Default', 'profiles': [{'name': 'Default', 'description': '', 'mappings': {}}]}
+
+def _save_profiles(data):
+    PROFILES_FILE.parent.mkdir(exist_ok=True)
+    PROFILES_FILE.write_text(json.dumps(data, indent=2))
+
+def _active_mappings():
+    data = _load_profiles()
+    active = data.get('active_profile', 'Default')
+    for p in data.get('profiles', []):
+        if p['name'] == active:
+            return p.get('mappings', {})
+    return {}
+
+def _save_active_mappings(mappings):
+    data = _load_profiles()
+    active = data.get('active_profile', 'Default')
+    for p in data.get('profiles', []):
+        if p['name'] == active:
+            p['mappings'] = mappings
+    _save_profiles(data)
+
+# Mappings
+
+@midi_bp.route('/api/midi/mappings', methods=['GET'])
+def get_mappings():
+    mappings = _active_mappings()
+    result = [{'midi': k, 'type': v['type'], 'number': v['number'],
+               'path': v['path'], 'mode': v.get('mode', 'local'), 'name': v.get('name', '')}
+              for k, v in mappings.items()]
+    return jsonify({'success': True, 'mappings': result})
+
+@midi_bp.route('/api/midi/mappings', methods=['POST'])
+def add_mapping():
+    d = request.get_json() or {}
+    midi_type   = d.get('midi_type', 'cc')
+    midi_number = d.get('midi_number')
+    path        = d.get('parameter_path')
+    if midi_number is None or not path:
+        return jsonify({'success': False, 'error': 'midi_number and parameter_path required'}), 400
+    key = f"{midi_type}:{midi_number}"
+    mappings = _active_mappings()
+    mappings[key] = {
+        'type': midi_type, 'number': midi_number, 'path': path,
+        'min': d.get('min_value', 0), 'max': d.get('max_value', 100),
+        'mode': d.get('mapping_mode', 'local'), 'name': d.get('name', path)
+    }
+    _save_active_mappings(mappings)
+    return jsonify({'success': True})
+
+@midi_bp.route('/api/midi/mappings/<midi_type>/<int:midi_number>', methods=['DELETE'])
+def delete_mapping(midi_type, midi_number):
+    key = f"{midi_type}:{midi_number}"
+    mappings = _active_mappings()
+    if key not in mappings:
+        return jsonify({'success': False, 'error': 'Mapping not found'}), 404
+    del mappings[key]
+    _save_active_mappings(mappings)
+    return jsonify({'success': True})
+
+# Profiles
+
+@midi_bp.route('/api/midi/profiles', methods=['GET'])
+def get_profiles():
+    data   = _load_profiles()
+    active = data.get('active_profile')
+    result = [{'name': p['name'], 'description': p.get('description', ''),
+               'mapping_count': len(p.get('mappings', {})), 'is_active': p['name'] == active}
+              for p in data.get('profiles', [])]
+    return jsonify({'success': True, 'profiles': result, 'active': active})
+
+@midi_bp.route('/api/midi/profiles', methods=['POST'])
+def create_profile():
+    d = request.get_json() or {}
+    name = d.get('name')
+    if not name:
+        return jsonify({'success': False, 'error': 'name required'}), 400
+    data = _load_profiles()
+    if any(p['name'] == name for p in data['profiles']):
+        return jsonify({'success': False, 'error': 'Profile already exists'}), 409
+    data['profiles'].append({'name': name, 'description': d.get('description', ''), 'mappings': {}})
+    _save_profiles(data)
+    return jsonify({'success': True})
+
+@midi_bp.route('/api/midi/profiles/switch', methods=['POST'])
+def switch_profile():
+    name = (request.get_json() or {}).get('name')
+    data = _load_profiles()
+    if not any(p['name'] == name for p in data['profiles']):
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+    data['active_profile'] = name
+    _save_profiles(data)
+    return jsonify({'success': True, 'active_profile': name})
+
+@midi_bp.route('/api/midi/profiles/duplicate', methods=['POST'])
+def duplicate_profile():
+    d = request.get_json() or {}
+    source, new_name = d.get('source'), d.get('name')
+    data = _load_profiles()
+    src = next((p for p in data['profiles'] if p['name'] == source), None)
+    if not src:
+        return jsonify({'success': False, 'error': 'Source not found'}), 404
+    new_profile = copy.deepcopy(src)
+    new_profile['name'] = new_name
+    data['profiles'].append(new_profile)
+    _save_profiles(data)
+    return jsonify({'success': True})
+
+@midi_bp.route('/api/midi/profiles/<name>/export', methods=['GET'])
+def export_profile(name):
+    data    = _load_profiles()
+    profile = next((p for p in data['profiles'] if p['name'] == name), None)
+    if not profile:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    from flask import make_response
+    r = make_response(json.dumps(profile, indent=2))
+    r.headers['Content-Type'] = 'application/json'
+    r.headers['Content-Disposition'] = f'attachment; filename={name}.midi_profile.json'
+    return r
+
+@midi_bp.route('/api/midi/profiles/import', methods=['POST'])
+def import_profile():
+    profile = request.get_json()
+    if not profile or 'name' not in profile:
+        return jsonify({'success': False, 'error': 'Invalid profile data'}), 400
+    data = _load_profiles()
+    if any(p['name'] == profile['name'] for p in data['profiles']):
+        profile['name'] += ' (imported)'
+    data['profiles'].append(profile)
+    _save_profiles(data)
+    return jsonify({'success': True, 'profile': profile['name']})
+
+@midi_bp.route('/api/midi/profiles/<name>', methods=['DELETE'])
+def delete_profile(name):
+    if name == 'Default':
+        return jsonify({'success': False, 'error': 'Cannot delete Default profile'}), 400
+    data = _load_profiles()
+    data['profiles'] = [p for p in data['profiles'] if p['name'] != name]
+    if data.get('active_profile') == name:
+        data['active_profile'] = 'Default'
+    _save_profiles(data)
+    return jsonify({'success': True})
+```
+
+### 4.2 SocketIO: MIDI Input Handler
+
+```python
+# In src/modules/rest_api.py (register on existing socketio instance)
+from .api_midi import _active_mappings, matches_pattern
+
+@socketio.on('midi_input')
+def handle_midi_input(data):
+    """Browser sends raw MIDI CC; backend resolves mapping and broadcasts midi_apply."""
+    midi_type   = data.get('type', 'cc')
+    midi_number = data.get('number')
+    value       = data.get('value', 0)
+
+    key     = f"{midi_type}:{midi_number}"
+    mapping = _active_mappings().get(key)
+    if not mapping:
+        return
+
+    socketio.emit('midi_apply', {
+        'type':   midi_type,
+        'number': midi_number,
+        'value':  value,
+        'path':   mapping['path'],
+        'mode':   mapping.get('mode', 'local'),
+        'min':    mapping.get('min', 0),
+        'max':    mapping.get('max', 100)
+    })
+```
+
+---
+
+## Part 5: MIDI Clock (Server-side)
+
+### 5.1 Protocol Reference
+
+| Message | Byte | Description |
+|---------|------|-------------|
+| Timing Clock  | 0xF8 | 24 times per quarter note (24 PPQN) |
+| Start         | 0xFA | Start playback from beginning |
+| Continue      | 0xFB | Continue from current position |
+| Stop          | 0xFC | Stop playback |
+| Active Sensing| 0xFE | Keepalive (optional) |
+
+```
+BPM = 60 / (avg_clock_interval_seconds * 24)
+Clock Interval (ms) = 60000 / (BPM * 24)
+Example: 120 BPM -> 20.833ms between clock ticks
+```
+
+### 5.2 Dependencies
+
+```txt
+# requirements.txt
+mido>=1.3.0
+python-rtmidi>=1.5.0
+```
+
+### 5.3 MIDIClockManager
+
+**File:** `src/modules/midi_clock.py`
+
+```python
+"""
+MIDI Clock Manager
+Server-side clock input/output for tempo synchronization.
+"""
+import mido
+import time
+import threading
+import logging
+from collections import deque
+
+logger = logging.getLogger(__name__)
+
+
+class MIDIClockManager:
+    CLOCK    = 0xF8
+    START    = 0xFA
+    CONTINUE = 0xFB
+    STOP     = 0xFC
+    PPQN     = 24
+
+    def __init__(self):
+        self.input_port         = None
+        self.input_device_name  = None
+        self.input_thread       = None
+        self.is_receiving       = False
+
+        self.output_port        = None
+        self.output_device_name = None
+        self.output_thread      = None
+        self.is_sending         = False
+
+        self.bpm            = 0.0
+        self.is_playing     = False
+        self.beat_position  = 0.0      # 0.0-4.0 (quarter notes)
+        self.clock_times    = deque(maxlen=24)
+        self.last_clock_time = 0
+        self.clock_count    = 0
+
+        self.output_bpm     = 120.0
+        self.output_running = False
+
+        self.on_start_callback = None
+        self.on_stop_callback  = None
+        self.on_beat_callback  = None
+
+    def get_input_devices(self):
+        try:
+            return mido.get_input_names()
+        except Exception as e:
+            logger.error(f"MIDI input devices error: {e}")
+            return []
+
+    def get_output_devices(self):
+        try:
+            return mido.get_output_names()
+        except Exception as e:
+            logger.error(f"MIDI output devices error: {e}")
+            return []
+
+    def connect_input(self, device_name=None):
+        try:
+            if self.is_receiving:
+                self.disconnect_input()
+            if device_name is None:
+                devices = self.get_input_devices()
+                if not devices:
+                    raise RuntimeError("No MIDI input devices found")
+                device_name = devices[0]
+            self.input_port        = mido.open_input(device_name)
+            self.input_device_name = device_name
+            self.is_receiving      = True
+            self.input_thread      = threading.Thread(target=self._input_loop, daemon=True)
+            self.input_thread.start()
+            logger.info(f"MIDI input connected: {device_name}")
+            return True
+        except Exception as e:
+            logger.error(f"MIDI connect input: {e}")
+            return False
+
+    def disconnect_input(self):
+        self.is_receiving = False
+        if self.input_thread:
+            self.input_thread.join(timeout=2)
+        if self.input_port:
+            self.input_port.close()
+            self.input_port = None
+
+    def _input_loop(self):
+        try:
+            for msg in self.input_port:
+                if not self.is_receiving:
+                    break
+                if   msg.type == 'clock':    self._handle_clock()
+                elif msg.type == 'start':    self._handle_start()
+                elif msg.type == 'continue': self._handle_continue()
+                elif msg.type == 'stop':     self._handle_stop()
+        except Exception as e:
+            logger.error(f"MIDI input loop: {e}")
+
+    def _handle_clock(self):
+        now = time.time()
+        if self.last_clock_time > 0:
+            self.clock_times.append(now - self.last_clock_time)
+        self.last_clock_time = now
+        self.clock_count += 1
+        if len(self.clock_times) >= 24:
+            avg = sum(self.clock_times) / len(self.clock_times)
+            if avg > 0:
+                self.bpm = 60.0 / (avg * 24)
+        self.beat_position = (self.clock_count % 96) / 24.0
+        if self.clock_count % 24 == 0 and self.on_beat_callback:
+            self.on_beat_callback(int(self.beat_position))
+
+    def _handle_start(self):
+        self.is_playing    = True
+        self.clock_count   = 0
+        self.beat_position = 0.0
+        if self.on_start_callback:
+            self.on_start_callback()
+
+    def _handle_continue(self):
+        self.is_playing = True
+        if self.on_start_callback:
+            self.on_start_callback()
+
+    def _handle_stop(self):
+        self.is_playing = False
+        if self.on_stop_callback:
+            self.on_stop_callback()
+
+    def connect_output(self, device_name=None, bpm=120.0):
+        try:
+            if self.is_sending:
+                self.disconnect_output()
+            if device_name is None:
+                devices = self.get_output_devices()
+                if not devices:
+                    raise RuntimeError("No MIDI output devices found")
+                device_name = devices[0]
+            self.output_port        = mido.open_output(device_name)
+            self.output_device_name = device_name
+            self.output_bpm         = bpm
+            self.is_sending         = True
+            self.output_thread      = threading.Thread(target=self._output_loop, daemon=True)
+            self.output_thread.start()
+            logger.info(f"MIDI output connected: {device_name} @ {bpm} BPM")
+            return True
+        except Exception as e:
+            logger.error(f"MIDI connect output: {e}")
+            return False
+
+    def disconnect_output(self):
+        self.is_sending     = False
+        self.output_running = False
+        if self.output_thread:
+            self.output_thread.join(timeout=2)
+        if self.output_port:
+            try:
+                self.output_port.send(mido.Message.from_bytes([self.STOP]))
+            except Exception:
+                pass
+            self.output_port.close()
+            self.output_port = None
+
+    def _output_loop(self):
+        while self.is_sending:
+            if self.output_running:
+                interval = 60.0 / (self.output_bpm * self.PPQN)
+                self.output_port.send(mido.Message.from_bytes([self.CLOCK]))
+                time.sleep(interval)
+            else:
+                time.sleep(0.01)
+
+    def send_start(self):
+        if self.output_port and self.is_sending:
+            self.output_port.send(mido.Message.from_bytes([self.START]))
+            self.output_running = True
+
+    def send_continue(self):
+        if self.output_port and self.is_sending:
+            self.output_port.send(mido.Message.from_bytes([self.CONTINUE]))
+            self.output_running = True
+
+    def send_stop(self):
+        if self.output_port and self.is_sending:
+            self.output_port.send(mido.Message.from_bytes([self.STOP]))
+            self.output_running = False
+
+    def set_output_bpm(self, bpm):
+        self.output_bpm = max(20.0, min(300.0, float(bpm)))
+
+    def get_status(self):
+        return {
+            'input':  {
+                'connected':    self.is_receiving,
+                'device':       self.input_device_name,
+                'bpm':          round(self.bpm, 1),
+                'playing':      self.is_playing,
+                'beat_position': round(self.beat_position, 2)
+            },
+            'output': {
+                'connected': self.is_sending,
+                'device':    self.output_device_name,
+                'bpm':       self.output_bpm,
+                'running':   self.output_running
+            }
+        }
+
+
+_instance = None
+
+def get_midi_clock_manager() -> MIDIClockManager:
+    global _instance
+    if _instance is None:
+        _instance = MIDIClockManager()
+    return _instance
+```
+
+### 5.4 Clock REST API + SocketIO Broadcast
+
+Add to `src/modules/api_midi.py`:
+
+```python
+from .midi_clock import get_midi_clock_manager
+import threading, time as _time
+
+# MIDI Clock REST endpoints
+
+@midi_bp.route('/api/midi/devices', methods=['GET'])
+def get_midi_devices():
+    mgr = get_midi_clock_manager()
+    return jsonify({'success': True,
+                    'input_devices':  mgr.get_input_devices(),
+                    'output_devices': mgr.get_output_devices()})
+
+@midi_bp.route('/api/midi/clock/connect-input', methods=['POST'])
+def clock_connect_input():
+    d  = request.get_json() or {}
+    ok = get_midi_clock_manager().connect_input(d.get('device'))
+    return jsonify({'success': ok, 'device': get_midi_clock_manager().input_device_name})
+
+@midi_bp.route('/api/midi/clock/disconnect-input', methods=['POST'])
+def clock_disconnect_input():
+    get_midi_clock_manager().disconnect_input()
+    return jsonify({'success': True})
+
+@midi_bp.route('/api/midi/clock/connect-output', methods=['POST'])
+def clock_connect_output():
+    d  = request.get_json() or {}
+    ok = get_midi_clock_manager().connect_output(d.get('device'), d.get('bpm', 120.0))
+    return jsonify({'success': ok, 'device': get_midi_clock_manager().output_device_name})
+
+@midi_bp.route('/api/midi/clock/disconnect-output', methods=['POST'])
+def clock_disconnect_output():
+    get_midi_clock_manager().disconnect_output()
+    return jsonify({'success': True})
+
+@midi_bp.route('/api/midi/clock/start',    methods=['POST'])
+def clock_send_start():    get_midi_clock_manager().send_start();    return jsonify({'success': True})
+
+@midi_bp.route('/api/midi/clock/continue', methods=['POST'])
+def clock_send_continue(): get_midi_clock_manager().send_continue(); return jsonify({'success': True})
+
+@midi_bp.route('/api/midi/clock/stop',     methods=['POST'])
+def clock_send_stop():     get_midi_clock_manager().send_stop();     return jsonify({'success': True})
+
+@midi_bp.route('/api/midi/clock/set-bpm', methods=['POST'])
+def clock_set_bpm():
+    d = request.get_json() or {}
+    get_midi_clock_manager().set_output_bpm(d.get('bpm', 120.0))
+    return jsonify({'success': True, 'bpm': get_midi_clock_manager().output_bpm})
+
+@midi_bp.route('/api/midi/clock/status', methods=['GET'])
+def clock_status():
+    return jsonify({'success': True, 'status': get_midi_clock_manager().get_status()})
+
+
+def _start_clock_broadcast(socketio_instance):
+    """Push MIDI clock status at 20 Hz via SocketIO."""
+    def _loop():
+        while True:
+            try:
+                socketio_instance.emit('midi_clock_update', get_midi_clock_manager().get_status())
+            except Exception:
+                pass
+            _time.sleep(0.05)
+    threading.Thread(target=_loop, daemon=True).start()
+
+
+def init_midi_api(app, socketio_instance):
+    app.register_blueprint(midi_bp)
+    _start_clock_broadcast(socketio_instance)
+    logger.info("MIDI API initialized")
+```
+
+**Call from `main.py`:**
+
+```python
+from src.modules.api_midi import init_midi_api
+init_midi_api(app, rest_api.socketio)
+```
+
+### 5.5 Frontend Clock Display
+
+**File:** `frontend/components/midi-clock.html`
+
+```html
+<div class="midi-clock-container p-3">
+    <!-- Input -->
+    <div class="midi-section mb-3">
+        <div class="d-flex justify-content-between mb-2">
+            <strong>Clock In</strong>
+            <span id="clockInStatus" class="badge bg-secondary">Disconnected</span>
+        </div>
+        <div class="d-flex gap-2 mb-2">
+            <select id="clockInputDevice" class="form-select form-select-sm flex-grow-1"></select>
+            <button class="btn btn-sm btn-primary" onclick="midiClock.connectInput()">Connect</button>
+        </div>
+        <div class="d-flex gap-3 mb-2">
+            <span>BPM: <strong id="clockInBPM">--</strong></span>
+            <span>Beat: <strong id="clockInBeat">--</strong></span>
+        </div>
+        <div class="d-flex gap-2">
+            <div class="beat-dot" id="beat-0"></div>
+            <div class="beat-dot" id="beat-1"></div>
+            <div class="beat-dot" id="beat-2"></div>
+            <div class="beat-dot" id="beat-3"></div>
+        </div>
+    </div>
+
+    <!-- Output -->
+    <div class="midi-section">
+        <div class="d-flex justify-content-between mb-2">
+            <strong>Clock Out</strong>
+            <span id="clockOutStatus" class="badge bg-secondary">Disconnected</span>
+        </div>
+        <div class="d-flex gap-2 mb-2">
+            <select id="clockOutputDevice" class="form-select form-select-sm flex-grow-1"></select>
+            <button class="btn btn-sm btn-primary" onclick="midiClock.connectOutput()">Connect</button>
+        </div>
+        <div class="mb-2">
+            <label class="small">BPM: <strong id="clockOutBPMValue">120</strong></label>
+            <input type="range" class="form-range" id="clockOutBPM"
+                   min="20" max="300" value="120"
+                   oninput="midiClock.setBPM(this.value)">
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-success" onclick="midiClock.start()">Start</button>
+            <button class="btn btn-sm btn-warning" onclick="midiClock.continue()">Continue</button>
+            <button class="btn btn-sm btn-danger"  onclick="midiClock.stop()">Stop</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const midiClock = {
+    async init() {
+        const data = await (await fetch('/api/midi/devices')).json();
+        if (data.success) {
+            this._fill('clockInputDevice',  data.input_devices);
+            this._fill('clockOutputDevice', data.output_devices);
+        }
+        socket.on('midi_clock_update', (s) => this._update(s));
+    },
+    _fill(id, devices) {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '<option value="">Select device...</option>';
+        devices.forEach(d => {
+            const o = document.createElement('option');
+            o.value = o.textContent = d;
+            sel.appendChild(o);
+        });
+    },
+    async connectInput() {
+        const device = document.getElementById('clockInputDevice').value;
+        if (!device) return;
+        await fetch('/api/midi/clock/connect-input', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ device })
+        });
+    },
+    async connectOutput() {
+        const device = document.getElementById('clockOutputDevice').value;
+        const bpm    = parseFloat(document.getElementById('clockOutBPM').value);
+        if (!device) return;
+        await fetch('/api/midi/clock/connect-output', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ device, bpm })
+        });
+    },
+    async setBPM(bpm) {
+        document.getElementById('clockOutBPMValue').textContent = bpm;
+        await fetch('/api/midi/clock/set-bpm', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ bpm: parseFloat(bpm) })
+        });
+    },
+    async start()    { await fetch('/api/midi/clock/start',    { method: 'POST' }); },
+    async continue() { await fetch('/api/midi/clock/continue', { method: 'POST' }); },
+    async stop()     { await fetch('/api/midi/clock/stop',     { method: 'POST' }); },
+    _update(s) {
+        document.getElementById('clockInStatus').textContent =
+            s.input.connected ? 'Connected: ' + s.input.device : 'Disconnected';
+        document.getElementById('clockInStatus').className =
+            'badge ' + (s.input.connected ? 'bg-success' : 'bg-secondary');
+        document.getElementById('clockInBPM').textContent  = s.input.bpm  || '--';
+        document.getElementById('clockInBeat').textContent = s.input.beat_position || '--';
+
+        const beat = Math.floor(s.input.beat_position) % 4;
+        for (let i = 0; i < 4; i++)
+            document.getElementById('beat-' + i).classList.toggle('beat-active', i === beat && s.input.playing);
+
+        const running = s.output.running;
+        document.getElementById('clockOutStatus').textContent =
+            s.output.connected ? s.output.device + (running ? ' (Running)' : '') : 'Disconnected';
+        document.getElementById('clockOutStatus').className =
+            'badge ' + (running ? 'bg-primary' : s.output.connected ? 'bg-success' : 'bg-secondary');
+    }
+};
+document.addEventListener('DOMContentLoaded', () => midiClock.init());
+</script>
+```
+
+### 5.6 Integration Examples
+
+```python
+# Sync sequencer to MIDI clock
+from src.modules.midi_clock import get_midi_clock_manager
+
+midi = get_midi_clock_manager()
+midi.on_start_callback = sequencer.play
+midi.on_stop_callback  = sequencer.pause
+```
+
+```python
+# Beat-synced GLSL effect — pass beat phase as uniform
+class StrobeEffect(EffectPlugin):
+    def get_uniforms(self, parameters, frame_count, fps):
+        midi = get_midi_clock_manager()
+        return {
+            'u_beat_phase': midi.beat_position % 1.0,
+            'u_playing':    float(midi.is_playing)
+        }
+```
+
+```javascript
+// Sync MIDI output BPM from detected audio BPM
+async function onBPMDetected(bpm) {
+    await fetch('/api/midi/clock/set-bpm', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ bpm })
+    });
+}
+```
+
+---
+
+## File Reference
+
+| File | Purpose |
+|------|---------|
+| `src/modules/midi_clock.py` | MIDI Clock Manager (server-side mido/rtmidi) |
+| `src/modules/api_midi.py` | All REST + SocketIO handlers |
+| `frontend/js/midi-learn.js` | VisualMIDILearnManager (Web MIDI API) |
+| `frontend/components/midi-clock.html` | Clock display component |
+| `frontend/css/midi-display.css` | MIDI Learn + Clock styles |
+| `config/midi_profiles.json` | MIDI mappings/profiles (auto-created) |
+
+---
+
+## Performance
+
+| Component | CPU | Latency |
+|-----------|-----|---------|
+| MIDI Clock input (rtmidi) | <1% | <5ms |
+| MIDI Clock output | ~1-2% | <1ms jitter |
+| SocketIO clock broadcast (20 Hz) | <0.5% | 50ms (UI only) |
+| Web MIDI API -> SocketIO -> apply | <1% | 5-15ms |
+
+---
+
+## Troubleshooting
+
+**No MIDI devices found:**
+- Verify device connected, drivers installed
+- Test: `python -c "import mido; print(mido.get_input_names())"`
+- Restart the application
+
+**Clock drift / jitter:**
+- Close other MIDI applications on the same device
+- Use a dedicated USB port (not a hub)
+
+**Web MIDI API not working:**
+- Must use Chrome, Edge, or Opera (Firefox/Safari not supported)
+- Browser shows permission prompt on first use
+
+**MIDI Learn not detecting input:**
+- Check browser console for Web MIDI permission errors
+- Confirm controller sends CC messages (not just SysEx/Note)
+
+---
 
 ## Future Enhancements
 
-### Phase 4: Advanced Features (Optional)
-- **MIDI Feedback**: Send parameter values back to controller (LED rings, motorized faders)
-- **Preset switching**: Map MIDI program change to effect presets
-- **Note velocity mapping**: Use velocity as parameter value
-- **MIDI Clock sync**: Sync BPM to external MIDI clock
-- **Multi-page mappings**: Bank switching for more than 127 parameters
-- **Learning curves**: Different curve types (linear, S-curve, exponential)
-
-## Testing Checklist
-
-### Web MIDI:
-- [ ] MIDI device detection and selection (browser)
-- [ ] MIDI Learn workflow (click → move controller → map)
-- [ ] Parameter updates via MIDI
-- [ ] Multiple mappings (different CCs)
-- [ ] Browser permission handling
-- [ ] Device hot-swap (plug/unplug during operation)
-- [ ] WebSocket reconnection (network interruption)
-- [ ] Chrome/Edge/Opera compatibility
-
-### Direct USB:
-- [ ] MIDI port detection (python-rtmidi)
-- [ ] Port connection/disconnection
-- [ ] MIDI Learn workflow (same as Web MIDI)
-- [ ] Parameter updates via MIDI
-- [ ] Thread safety (separate MIDI thread)
-- [ ] Auto-connect on startup
-- [ ] Graceful error handling (no device connected)
-- [ ] Windows/macOS/Linux compatibility
-
-### Both Modes:
-- [ ] Session state persistence (mappings survive restart)
-- [ ] Mode switching (Web → Direct, Direct → Web)
-- [ ] Concurrent operation (both active simultaneously)
-- [ ] Mapping sharing (same mappings work for both modes)
-- [ ] Status reporting (which mode active, which device connected)
-
-## Security Considerations
-
-- Web MIDI API requires **HTTPS** in production (localhost works with HTTP)
-- User must **explicitly grant permission** for MIDI access
-- No access to other system MIDI applications
-- MIDI data only sent to your backend via WebSocket
-
-## Browser Fallback
-
-For Firefox/Safari users without Web MIDI support:
-
-```javascript
-if (!navigator.requestMIDIAccess) {
-    showToast('MIDI not supported. Please use Chrome, Edge, or Opera.', 'warning');
-}
-```
-
-## Example Configuration
-
-```json
-{
-  "midi_mappings": {
-    "cc:1": {
-      "type": "cc",
-      "number": 1,
-      "path": "video.effect.0.param.brightness",
-      "min": 0,
-      "max": 100
-    },
-    "cc:2": {
-      "type": "cc",
-      "number": 2,
-      "path": "video.effect.0.param.contrast",
-      "min": -50,
-      "max": 50
-    },
-    "note:60": {
-      "type": "note",
-      "number": 60,
-      "path": "video.play_pause",
-      "min": 0,
-      "max": 1
-    }
-  }
-}
-```
-
-## Documentation References
-
-- [Web MIDI API Specification](https://www.w3.org/TR/webmidi/)
-- [MDN Web MIDI API](https://developer.mozilla.org/en-US/docs/Web/API/Web_MIDI_API)
-- [Can I Use Web MIDI](https://caniuse.com/midi)
-
-## Summary
-
-This dual-mode implementation provides:
-
-### Web MIDI API (Primary):
-- ✅ **Zero installation** MIDI control via browser
-- ✅ **Remote control** capability (VJ on laptop, server in rack)
-- ✅ **MIDI Learn** for easy mapping
-- ✅ **Session persistence** of mappings
-- ✅ **Real-time updates** via existing WebSocket
-- ✅ **Professional workflow** for VJ performances
-
-### Direct USB MIDI (Backup):
-- ✅ **Ultra-low latency** (<1ms hardware direct)
-- ✅ **Browser-independent** (works in Firefox, Safari)
-- ✅ **Network-independent** (no WebSocket required)
-- ✅ **Reliable** hardware connection
-- ✅ **Server console** control option
-- ✅ **Auto-connect** on startup
-
-### Combined Benefits:
-- ✅ **Best of both worlds** - choose mode per use case
-- ✅ **Automatic fallback** - Direct USB when Web MIDI unavailable
-- ✅ **Unified mappings** - same parameter mappings work for both
-- ✅ **Flexible deployment** - remote or local control
-- ✅ **Maximum compatibility** - supports all browsers and setups
-
-**Total implementation time:** ~12-16 hours for complete dual-mode MIDI system.
-
-**Dependencies:**
-- Web MIDI: None (built into browser)
-- Direct USB: `python-rtmidi` (optional, 5MB install)
+- Note triggers — MIDI notes trigger clip playback / scene switching
+- Program Change — switch MIDI profiles or scenes
+- MIDI Thru — pass-through to daisy-chained devices
+- Ableton Link — network tempo sync
+- MTC (MIDI Time Code) — frame-accurate sync
+- Multiple simultaneous input devices

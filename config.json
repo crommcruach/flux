@@ -198,6 +198,35 @@
     "theme": "dark",
     "verbose_logging": false
   },
+  "pixel_pitch_presets": [
+    {
+      "label": "320 × 160 mm modules",
+      "presets": [
+        {"name": "P5",    "w": 64,  "h": 32},
+        {"name": "P4",    "w": 80,  "h": 40},
+        {"name": "P3",    "w": 107, "h": 53},
+        {"name": "P2.5",  "w": 128, "h": 64},
+        {"name": "P2",    "w": 160, "h": 80},
+        {"name": "P1.86", "w": 172, "h": 86},
+        {"name": "P1.53", "w": 209, "h": 105},
+        {"name": "P1.25", "w": 256, "h": 128}
+      ]
+    },
+    {
+      "label": "250 × 250 mm modules",
+      "presets": [
+        {"name": "P5",      "w": 50,  "h": 50},
+        {"name": "P3.91",   "w": 64,  "h": 64},
+        {"name": "P2.976",  "w": 84,  "h": 84},
+        {"name": "P2.604",  "w": 96,  "h": 96},
+        {"name": "P2.5",    "w": 100, "h": 100},
+        {"name": "P1.953",  "w": 128, "h": 128},
+        {"name": "P1.5625", "w": 160, "h": 160},
+        {"name": "P1.25",   "w": 200, "h": 200},
+        {"name": "P0.93",   "w": 269, "h": 269}
+      ]
+    }
+  ],
   "outputs": {
     "_comment": "Output definitions - hardware/infrastructure configuration",
     "_info": "These are the available outputs. Actual routing is in session_state.json",

@@ -4643,30 +4643,15 @@ const app = {
                     </div>
                     <div style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.75); padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px;">
                         <label style="font-size: 10px; color: #aaa; margin: 0; white-space: nowrap;">⊞ Module Grid:</label>
+                        <button id="composerSnapBtn" onclick="app.toggleSnapToGrid('${outputId}')" title="Snap slices to grid"
+                                style="background: #2a2a2a; border: 1px solid #555; color: #888; border-radius: 3px; font-size: 10px; padding: 2px 6px; cursor: pointer; white-space: nowrap;">⊹ Snap</button>
                         <select id="composerGridSelect" onchange="app.setComposerGrid('${outputId}', this.value)"
                                 style="background: #2a2a2a; border: 1px solid #555; color: #fff; border-radius: 3px; font-size: 10px; padding: 2px 4px; cursor: pointer;">
                             <option value="">None</option>
-                            <optgroup label="320 × 160 mm modules">
-                                <option value="64,32">P5 — 64 × 32 px</option>
-                                <option value="80,40">P4 — 80 × 40 px</option>
-                                <option value="107,53">P3 — 107 × 53 px</option>
-                                <option value="128,64">P2.5 — 128 × 64 px</option>
-                                <option value="160,80">P2 — 160 × 80 px</option>
-                                <option value="172,86">P1.86 — 172 × 86 px</option>
-                                <option value="209,105">P1.53 — 209 × 105 px</option>
-                                <option value="256,128">P1.25 — 256 × 128 px</option>
-                            </optgroup>
-                            <optgroup label="250 × 250 mm modules">
-                                <option value="50,50">P5 — 50 × 50 px</option>
-                                <option value="64,64">P3.91 — 64 × 64 px</option>
-                                <option value="84,84">P2.976 — 84 × 84 px</option>
-                                <option value="96,96">P2.604 — 96 × 96 px</option>
-                                <option value="100,100">P2.5 — 100 × 100 px</option>
-                                <option value="128,128">P1.953 — 128 × 128 px</option>
-                                <option value="160,160">P1.5625 — 160 × 160 px</option>
-                                <option value="200,200">P1.25 — 200 × 200 px</option>
-                                <option value="269,269">P0.93 — 269 × 269 px</option>
-                            </optgroup>
+                            ${(window._pixelPitchPresets || []).map(group => `
+                            <optgroup label="${group.label}">
+                                ${group.presets.map(p => `<option value="${p.w},${p.h}">${p.name} — ${p.w} × ${p.h} px</option>`).join('')}
+                            </optgroup>`).join('')}
                         </select>
                     </div>
                     <div id="composerHint" style="position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px; font-size: 11px;">
@@ -4743,7 +4728,8 @@ const app = {
             isDragging: false,
             dragIndex: -1,
             dragOffset: { x: 0, y: 0 },
-            gridPreset: null
+            gridPreset: null,
+            snapToGrid: false
         };
         
         // Setup drag and drop from sidebar
@@ -4773,11 +4759,21 @@ const app = {
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
             
+            // Snap to grid on drop
+            const dropState = this.composerState[outputId];
+            let dropX = Math.round(x - slice.width / 2);
+            let dropY = Math.round(y - slice.height / 2);
+            if (dropState.snapToGrid && dropState.gridPreset) {
+                const { gridW, gridH } = dropState.gridPreset;
+                dropX = Math.round(dropX / gridW) * gridW;
+                dropY = Math.round(dropY / gridH) * gridH;
+            }
+
             // Add slice to composition
             composition.slices.push({
                 sliceId: slice.id,
-                x: Math.round(x - slice.width / 2),
-                y: Math.round(y - slice.height / 2),
+                x: dropX,
+                y: dropY,
                 width: Math.round(slice.width),
                 height: Math.round(slice.height),
                 scale: 1.0
@@ -4821,8 +4817,15 @@ const app = {
             const y = (e.clientY - rect.top) * scaleY;
             
             const compSlice = composition.slices[state.dragIndex];
-            compSlice.x = Math.round(x - state.dragOffset.x);
-            compSlice.y = Math.round(y - state.dragOffset.y);
+            let newX = Math.round(x - state.dragOffset.x);
+            let newY = Math.round(y - state.dragOffset.y);
+            if (state.snapToGrid && state.gridPreset) {
+                const { gridW, gridH } = state.gridPreset;
+                newX = Math.round(newX / gridW) * gridW;
+                newY = Math.round(newY / gridH) * gridH;
+            }
+            compSlice.x = newX;
+            compSlice.y = newY;
             
             this.renderComposition(outputId);
         });
@@ -5007,11 +5010,37 @@ const app = {
         if (!this.composerState?.[outputId]) return;
         if (!value) {
             this.composerState[outputId].gridPreset = null;
+            // Disable snap when grid is removed
+            this.composerState[outputId].snapToGrid = false;
+            const btn = document.getElementById('composerSnapBtn');
+            if (btn) { btn.style.color = '#888'; btn.style.borderColor = '#555'; btn.style.background = '#2a2a2a'; }
         } else {
             const [w, h] = value.split(',').map(Number);
             this.composerState[outputId].gridPreset = { gridW: w, gridH: h };
         }
         this.renderComposition(outputId);
+    },
+
+    toggleSnapToGrid(outputId) {
+        const state = this.composerState?.[outputId];
+        if (!state) return;
+        if (!state.gridPreset) {
+            // No grid selected — nothing to snap to
+            return;
+        }
+        state.snapToGrid = !state.snapToGrid;
+        const btn = document.getElementById('composerSnapBtn');
+        if (btn) {
+            if (state.snapToGrid) {
+                btn.style.color = '#fff';
+                btn.style.borderColor = '#4caf50';
+                btn.style.background = '#1b5e20';
+            } else {
+                btn.style.color = '#888';
+                btn.style.borderColor = '#555';
+                btn.style.background = '#2a2a2a';
+            }
+        }
     },
 
     autoArrangeComposition(outputId) {
