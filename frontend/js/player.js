@@ -404,7 +404,33 @@ async function init() {
         setupLayerPanelDropZone(); // Set up layer panel drop zone once
         initializeTransitionMenus(); // Initialize transition menu components
         updatePlaylistButtonStates(); // Set initial button states
-        
+
+        // Restore player UI state (active tab, preview visibility)
+        if (window.sessionStateManager) {
+            await window.sessionStateManager.load();
+            const playerUI = window.sessionStateManager.get('player_ui');
+            if (playerUI) {
+                // Restore active left tab
+                if (playerUI.activeLeftTab) {
+                    const tabBtn = document.querySelector(`.tab-btn[onclick*="'${playerUI.activeLeftTab}'"]`);
+                    if (tabBtn) {
+                        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                        tabBtn.classList.add('active');
+                        const pane = document.getElementById(`tab-${playerUI.activeLeftTab}`);
+                        if (pane) pane.classList.add('active');
+                        activeLeftTab = playerUI.activeLeftTab;
+                    }
+                }
+                // Restore preview visibility
+                if (playerUI.previewVisible === false) {
+                    const img = document.getElementById('videoPreviewImg');
+                    if (img) img.style.display = 'none';
+                    updatePreviewMenuLabel();
+                }
+            }
+        }
+
         // REMOVED: Master/Slave sync polling - no longer needed
     } catch (error) {
         console.error('❌ Init failed:', error);
@@ -744,6 +770,9 @@ async function updateCurrentFromPlayer(playerId) {
 // TAB SWITCHING
 // ========================================
 
+// Current active left panel tab (Effects / Sources / Files)
+let activeLeftTab = 'effects';
+
 window.switchTab = function(tabName) {
     // Remove active from all tabs
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -752,6 +781,12 @@ window.switchTab = function(tabName) {
     // Add active to selected tab
     event.target.classList.add('active');
     document.getElementById(`tab-${tabName}`).classList.add('active');
+
+    // Persist to session state
+    activeLeftTab = tabName;
+    if (window.sessionStateManager) {
+        window.sessionStateManager.savePlayerUI({ activeLeftTab, previewVisible: isPreviewVisible() }, { debounce: 500 }).catch(() => {});
+    }
 };
 
 // ========================================
@@ -7389,6 +7424,15 @@ function onPreviewToggleChange() {
         img.style.display = 'none';
     }
     updatePreviewMenuLabel();
+    // Persist preview visibility
+    if (window.sessionStateManager) {
+        window.sessionStateManager.savePlayerUI({ activeLeftTab, previewVisible: isPreviewVisible() }, { debounce: 500 }).catch(() => {});
+    }
+}
+
+function isPreviewVisible() {
+    const img = document.getElementById('videoPreviewImg');
+    return !!(img && img.style.display !== 'none');
 }
 
 function togglePreview() {

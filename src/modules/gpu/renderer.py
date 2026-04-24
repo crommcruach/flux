@@ -233,6 +233,8 @@ class Renderer:
         uniforms: dict = None,
         textures=None,
         encoder: 'wgpu.GPUCommandEncoder | None' = None,
+        load_op=None,
+        viewport: 'tuple | None' = None,
     ) -> None:
         """Run one shader pass.
 
@@ -252,6 +254,16 @@ class Renderer:
             ``device.queue.submit([encoder.finish()])``.  Use this to batch
             multiple render passes into one submission (saves one
             kernel-transition round-trip per pass on AMD Vulkan).
+        load_op : wgpu.LoadOp or None
+            LoadOp for the render pass colour attachment.  Defaults to
+            ``wgpu.LoadOp.clear`` (black background).  Pass
+            ``wgpu.LoadOp.load`` to preserve existing target contents (used
+            by GPUCompositionRenderer to accumulate slice blits).
+        viewport : tuple or None
+            If set, ``(x, y, width, height, min_depth, max_depth)`` is applied
+            to the render pass via ``set_viewport()``.  Restricts rasterisation
+            to the given rectangle so the full-screen triangle only fills the
+            target region (used for composition blit passes).
         """
         if wgsl_source is None or target is None:
             raise ValueError("render() requires wgsl_source and target")
@@ -323,7 +335,7 @@ class Renderer:
                 {
                     "view": target.view,
                     "resolve_target": None,
-                    "load_op": wgpu.LoadOp.clear,
+                    "load_op": load_op if load_op is not None else wgpu.LoadOp.clear,
                     "store_op": wgpu.StoreOp.store,
                     "clear_value": (0.0, 0.0, 0.0, 1.0),
                 }
@@ -331,6 +343,8 @@ class Renderer:
         )
         pass_.set_pipeline(pipeline)
         pass_.set_bind_group(0, bind_group)
+        if viewport is not None:
+            pass_.set_viewport(*viewport)
         pass_.draw(3)   # full-screen triangle
         pass_.end()
 

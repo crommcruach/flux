@@ -150,6 +150,13 @@ class Player:
         
         # Transition Manager
         self.transition_manager = TransitionManager()
+        # Outgoing clip source kept alive during a GPU transition so the
+        # A-buffer can be updated with live frames instead of a frozen snapshot.
+        self._transition_outgoing_source = None
+        # Frame-rate throttle for the outgoing source so it plays at its native
+        # FPS regardless of the compositor tick rate.
+        self._transition_a_last_time: float = 0.0
+        self._transition_a_frame_delay: float = 1.0 / 25.0  # updated on first pull
         
         # Transition Config (default settings for inter-clip transitions)
         self.transition_config = {
@@ -246,14 +253,73 @@ class Player:
                         logger.debug(f"Output state restored for {self.player_name}: {len(saved_state.get('outputs', {}))} output configs, {len(saved_state.get('slices', {}))} slices")
                     except Exception as e:
                         logger.warning(f"Failed to restore output state: {e}")
-
                 else:
                     logger.debug(f"No saved output state found for {self.player_name}")
-                
+
+                # Always ensure a default full-canvas slice and main_display output exist.
+                # This is idempotent: add_slice() is an upsert; register_output() only
+                # runs if the output is absent.  Handles both clean starts AND sessions
+                # where previous state had slice='full' (reserved, never shown in UI).
+                try:
+                    from .outputs.plugins import DisplayOutput
+
+                    # --- always upsert 'main_canvas' slice (add_slice overwrites) ---
+                    self.output_manager.slice_manager.add_slice(
+                        slice_id='main_canvas',
+                        x=0, y=0,
+                        width=self.canvas_width,
+                        height=self.canvas_height,
+                        description='Default Slice',
+                    )
+
+                    # --- guarantee 'main_display' output exists and is wired correctly ---
+                    if 'main_display' not in self.output_manager.outputs:
+                        _default_cfg = {
+                            'type': 'display',
+                            'enabled': True,
+                            'source': 'canvas',
+                            'slice': 'main_canvas',
+                            'monitor_index': 0,
+                            'resolution': [self.canvas_width, self.canvas_height],
+                            'fps': 30,
+                            'fullscreen': False,
+                            'window_title': 'Main Display',
+                        }
+                        _default_out = DisplayOutput('main_display', _default_cfg)
+                        self.output_manager.register_output('main_display', _default_out)
+                        _default_out.enable()
+                        logger.info(
+                            '%s: auto-created main_display output (windowed, monitor 0)',
+                            self.player_name,
+                        )
+                    else:
+                        # Output restored from session — fix stale state
+                        _existing = self.output_manager.outputs['main_display']
+                        if _existing.config.get('slice') in ('full', None, ''):
+                            _existing.config['slice'] = 'main_canvas'
+                            logger.info(
+                                '%s: rewired main_display slice: full → main_canvas',
+                                self.player_name,
+                            )
+                        # Always ensure main_display is enabled on startup
+                        if not _existing.enabled:
+                            _existing.config['fullscreen'] = False
+                            _existing.config['window_title'] = 'Main Display'
+                            _existing.enable()
+                            logger.info(
+                                '%s: enabled main_display (was disabled in session state)',
+                                self.player_name,
+                            )
+                except Exception as _e:
+                    logger.warning('Failed to ensure default output/slice: %s', _e)
+
                 # Register auto-save callback
                 self.output_manager.set_state_save_callback(
                     lambda player_name, state: session_state.save_output_state(player_name, state)
                 )
+                # Persist whatever state we have now (including clean-start defaults
+                # created above, which were registered before the callback existed).
+                self.output_manager._save_state()
 
                 # Inject player reference into DisplayOutput instances so they
                 # can call _on_display_gpu_ready() after WGL sharing is confirmed.
@@ -274,6 +340,20 @@ class Player:
                 except Exception:
                     pass
 
+                # Register output GPU hook now that output_manager is confirmed active.
+                # (_init_preview_downscaler ran earlier, before output_manager existed.)
+                if hasattr(self, 'layer_manager') and self.layer_manager is not None:
+                    def _output_gpu_hook_fn(composite, _om=self.output_manager):
+                        # Skip raw-composite push to display while a GPU transition is
+                        # active — the transition hook already pushes the blended result
+                        # directly to glfw_display.  Without this guard the display
+                        # receives two conflicting pushes per tick (raw + blended),
+                        # causing the visible flicker during cross-fades.
+                        if self.transition_manager.active:
+                            return
+                        _om.update_gpu_frame(composite)
+                    self.layer_manager.set_output_gpu_hook(_output_gpu_hook_fn)
+
                 logger.debug(f"✅ Output Manager initialized for {self.player_name}")
             except Exception as e:
                 logger.error(f"Output Manager initialization failed: {e}", exc_info=True)
@@ -290,40 +370,29 @@ class Player:
 
         Consumers:
         - Fullscreen stream viewers — always need full-res CPU download.
-        - Thumbnail MJPEG streams — only when GPU preview downscaler is NOT
-          active.  When _preview_downscaler is set the GPU hook handles
-          encoding and the full-resolution SSBO download is skipped.
-        - Any enabled output plugin (DisplayOutput, VirtualOutput, …) — but
-          NOT when the display GPU hook is active, because the GL display path
-          handles the frame on the GPU without a CPU round-trip.
+        - Thumbnail MJPEG streams — only when GPU preview downscaler is NOT active.
+        - Any enabled output plugin whose needs_cpu_frame flag is True.
+          Outputs served by GPU hooks (display GPU sharing, GPU slices, preview
+          downscaler) set needs_cpu_frame=False on their OutputBase instance so
+          they are excluded here automatically.
+
         When False, composite_layers() skips the SSBO download.
         """
-        # Transitions are now pure GPU (apply_gpu via _transition_gpu_hook).
-        # No composite download needed for the transition path.
         if self._fullscreen_subscriber_count > 0 and self._fullscreen_downscaler is None:
             self._log_needs_cpu_once('fullscreen_subscriber')
             return True
         if self._mjpeg_subscriber_count > 0 and self._preview_downscaler is None:
             self._log_needs_cpu_once('mjpeg_no_downscaler')
             return True
-        if self.output_manager:
+        if self.output_manager and self.output_manager.needs_cpu_frame:
+            # Find the first reason for logging.
             for out in self.output_manager.outputs.values():
-                if out.enabled:
-                    from .outputs.plugins import DisplayOutput, VirtualOutput
-                    # Display outputs: served by GPU hook when WGL sharing is active.
-                    if isinstance(out, DisplayOutput) and self._display_gpu_active:
-                        continue
-                    # Virtual outputs: fed from preview downscaler's small download (~2 ms)
-                    # instead of the full 1080p SSBO download (~26 ms).
-                    if isinstance(out, VirtualOutput) and self._preview_downscaler is not None:
-                        continue
-                    reason = (
-                        f'output:{out.output_id}(DisplayOutput,gpu_active=False)'
-                        if isinstance(out, DisplayOutput)
-                        else f'output:{out.output_id}(type={type(out).__name__})'
+                if out.enabled and out.needs_cpu_frame:
+                    self._log_needs_cpu_once(
+                        f'output:{out.output_id}(type={type(out).__name__})'
                     )
-                    self._log_needs_cpu_once(reason)
-                    return True
+                    break
+            return True
         return False
 
     def _log_needs_cpu_once(self, reason: str) -> None:
@@ -354,7 +423,15 @@ class Player:
             return  # Art-Net player has no display window
 
         def _display_hook(composite) -> None:
-            """Copy composite GPUFrame → GLFWDisplay internal buffer, then wake GLFW."""
+            """Fallback: push full composite to GLFW when output_manager is not active.
+
+            When output_manager exists, DisplayOutput.queue_gpu_frame() handles
+            the GLFW push with the slice already applied via update_gpu_frame().
+            This hook is therefore a no-op in normal operation and only fires
+            during the brief startup window before the output_manager is ready.
+            """
+            if self.output_manager is not None:
+                return  # slice pipeline handles it via DisplayOutput.queue_gpu_frame
             try:
                 from ..gpu.glfw_display import get_glfw_display
                 get_glfw_display().push_gpu_frame(composite)
@@ -373,6 +450,14 @@ class Player:
         """
         self._display_gpu_active = True
         logger.info('%s: GPU display path active (zero-copy GLFW/wgpu)', self.player_name)
+
+        # Mark all enabled DisplayOutput instances as GPU-served so they no
+        # longer force the 26 ms SSBO download via needs_cpu_frame.
+        if self.output_manager:
+            from .outputs.plugins import DisplayOutput
+            for out in self.output_manager.outputs.values():
+                if isinstance(out, DisplayOutput) and out.enabled:
+                    out.needs_cpu_frame = False
 
     # ------------------------------------------------------------------
     def _init_preview_downscaler(self) -> None:
@@ -451,6 +536,8 @@ class Player:
                 for out in self.output_manager.outputs.values():
                     if isinstance(out, VirtualOutput) and out.enabled:
                         out.latest_frame = raw
+                        # VirtualOutput is served here; no full-res CPU download needed.
+                        out.needs_cpu_frame = False
 
         # ── Fullscreen downscaler (canvas-res sync readback) ─────────────────
         if self._fullscreen_downscaler is not None and self._fullscreen_subscriber_count > 0:
@@ -468,12 +555,36 @@ class Player:
         push the blended GPUFrame to display AND re-feed the preview encoder
         so MJPEG streams show the cross-fade instead of the raw composite.
 
+        The A-buffer is kept LIVE by decoding one frame per tick from
+        _transition_outgoing_source (the outgoing clip's source, kept alive
+        for the duration of the transition).  This makes the outgoing clip
+        appear to continue playing instead of freezing on its last frame.
+
         When idle: keep the A-buffer up-to-date for the next transition via
         a GPU-to-GPU texture copy (~0.1 ms).
         """
         if self.transition_manager.active:
+            # ── Update A-buffer with a live frame at the outgoing clip's native FPS ─
+            if self._transition_outgoing_source is not None:
+                try:
+                    now = time.monotonic()
+                    if now - self._transition_a_last_time >= self._transition_a_frame_delay:
+                        a_frame, delay = self._transition_outgoing_source.get_next_frame()
+                        if delay > 0:
+                            self._transition_a_frame_delay = delay
+                        self._transition_a_last_time = now
+                        if a_frame is None:
+                            # Outgoing clip ended — loop it so it keeps playing
+                            self._transition_outgoing_source.reset()
+                            a_frame, _ = self._transition_outgoing_source.get_next_frame()
+                        if a_frame is not None and isinstance(a_frame, np.ndarray) \
+                                and self.transition_manager._gpu_renderer is not None:
+                            self.transition_manager._gpu_renderer.store_cpu_frame(a_frame)
+                except Exception as e:
+                    logger.debug('Transition outgoing source error: %s', e)
             try:
                 from ..gpu.glfw_display import get_glfw_display
+                _profiler = getattr(self, 'profiler', None)
                 def _display_blended(blended):
                     get_glfw_display().push_gpu_frame(blended)
                     # Encode blended result directly — cannot call _on_preview_gpu_frame
@@ -486,11 +597,23 @@ class Player:
                         fs_result = self._fullscreen_downscaler.encode(blended)
                         if fs_result is not None:
                             self.last_fullscreen_jpeg = fs_result
-                self.transition_manager.apply_gpu(gpu_frame, _display_blended)
+                if _profiler:
+                    with _profiler.profile_stage('transition_gpu'):
+                        self.transition_manager.apply_gpu(gpu_frame, _display_blended)
+                else:
+                    self.transition_manager.apply_gpu(gpu_frame, _display_blended)
             except Exception as e:
                 logger.debug('Transition GPU blend error: %s', e)
         else:
+            # Transition not active — release any lingering outgoing source.
+            if self._transition_outgoing_source is not None:
+                try:
+                    self._transition_outgoing_source.cleanup()
+                except Exception:
+                    pass
+                self._transition_outgoing_source = None
             self.transition_manager.store_gpu_frame(gpu_frame)
+
 
     def update_resolution(self, new_width: int, new_height: int, autosize_mode: str = None):
         """Update player canvas resolution dynamically
@@ -513,6 +636,9 @@ class Player:
             if 'player_resolution' not in self.config[self.player_name]:
                 self.config[self.player_name]['player_resolution'] = {}
             self.config[self.player_name]['player_resolution']['autosize'] = autosize_mode
+            # Propagate to the GPU compositor immediately (lives on layer_manager)
+            if hasattr(self, 'layer_manager') and self.layer_manager:
+                self.layer_manager.autosize_mode = autosize_mode
         
         # Update layer manager resolution
         if hasattr(self, 'layer_manager') and self.layer_manager:
@@ -942,20 +1068,34 @@ class Player:
             # Start transition BEFORE replacing the old source so the A-buffer
             # (last frame from the outgoing clip) is still intact.
             # Only when was_playing — no buffer if the player wasn't running.
+            # Capture outgoing source BEFORE start() to keep it alive for live updates.
+            _outgoing = None
             if was_playing:
+                _outgoing = self.layers[0].source if self.layers else self.source
                 self.transition_manager.start(self.player_name)
             
-            # Cleanup old source and replace (after thread stopped)
+            # Replace source — keep outgoing alive if a GPU transition is now active.
             if self.layers:
                 # Multi-Layer: Replace Layer 0 source
-                if self.layers[0].source:
-                    self.layers[0].source.cleanup()
+                if self.transition_manager.active and _outgoing is not None:
+                    if self._transition_outgoing_source is not None:
+                        self._transition_outgoing_source.cleanup()
+                    self._transition_outgoing_source = _outgoing
+                    self._transition_a_last_time = 0.0  # force immediate first frame pull
+                elif _outgoing is not None:
+                    _outgoing.cleanup()
                 self.layers[0].source = new_source
             else:
                 # Single-Source: Legacy behavior
-                if self.source:
-                    self.source.cleanup()
+                if self.transition_manager.active and _outgoing is not None:
+                    if self._transition_outgoing_source is not None:
+                        self._transition_outgoing_source.cleanup()
+                    self._transition_outgoing_source = _outgoing
+                    self._transition_a_last_time = 0.0  # force immediate first frame pull
+                elif _outgoing is not None:
+                    _outgoing.cleanup()
                 self.source = new_source
+
             
             self.current_loop = 0
             
@@ -1623,20 +1763,35 @@ class Player:
                             break
                         
                         # Start transition if enabled
+                        # Capture the outgoing source BEFORE start() so we can keep it
+                        # alive for live A-buffer updates during the transition.
+                        _outgoing = self.layers[0].source if self.layers else self.source
                         self.transition_manager.start(self.player_name)
                         
-                        # Cleanup alte Source
+                        # Replace source — keep outgoing alive if a GPU transition is now
+                        # active so _on_transition_gpu_frame can decode live frames from it.
                         if self.layers:
                             # Multi-Layer: Ersetze Layer 0 Source
-                            if self.layers[0].source:
-                                self.layers[0].source.cleanup()
+                            if self.transition_manager.active:
+                                if self._transition_outgoing_source is not None:
+                                    self._transition_outgoing_source.cleanup()
+                                self._transition_outgoing_source = _outgoing
+                                self._transition_a_last_time = 0.0  # force immediate first frame pull
+                            elif _outgoing is not None:
+                                _outgoing.cleanup()
                             self.layers[0].source = new_source
                             debug_layers(logger, f"🔧 [{self.player_name}] Layer 0 source replaced with new source")
                         else:
                             # Single-Source: Legacy behavior
-                            if self.source:
-                                self.source.cleanup()
+                            if self.transition_manager.active:
+                                if self._transition_outgoing_source is not None:
+                                    self._transition_outgoing_source.cleanup()
+                                self._transition_outgoing_source = _outgoing
+                                self._transition_a_last_time = 0.0  # force immediate first frame pull
+                            elif _outgoing is not None:
+                                _outgoing.cleanup()
                             self.source = new_source
+
                         
                         # Update indices (playlist_manager already advanced)
                         self.current_clip_index = self.playlist_manager.playlist_index

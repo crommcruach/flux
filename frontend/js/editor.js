@@ -289,31 +289,37 @@ function updateCanvasOverflow() {
 document.getElementById('showConnectionLines').addEventListener('change', e => {
     showConnectionLines = e.target.checked;
     markForRedraw();
+    saveEditorStateToSession();
 });
 
 // Snapping controls
 document.getElementById('snapToGrid').addEventListener('change', e => {
     snapToGrid = e.target.checked;
     markForRedraw();
+    saveEditorStateToSession();
 });
 
 document.getElementById('showGrid').addEventListener('change', e => {
     showGrid = e.target.checked;
     markForRedraw();
+    saveEditorStateToSession();
 });
 
 document.getElementById('gridSize').addEventListener('change', e => {
     gridSize = parseInt(e.target.value, 10);
     markForRedraw();
+    saveEditorStateToSession();
 });
 
 document.getElementById('snapToObjects').addEventListener('change', e => {
     snapToObjects = e.target.checked;
+    saveEditorStateToSession();
 });
 
 document.getElementById('allowOutOfBounds').addEventListener('change', e => {
     allowOutOfBounds = e.target.checked;
     updateCanvasOverflow();
+    saveEditorStateToSession();
 });
 
 document.getElementById('bgImageInput').addEventListener('change', e => {
@@ -4179,14 +4185,14 @@ function handleContextMenuAction(action) {
             if (selectedShape) {
                 selectedShape.scaleX = -selectedShape.scaleX;
                 markForRedraw();
-                saveSessionStateDebounced();
+                saveEditorStateToSession();
             }
             break;
         case 'flipVertical':
             if (selectedShape) {
                 selectedShape.scaleY = -selectedShape.scaleY;
                 markForRedraw();
-                saveSessionStateDebounced();
+                saveEditorStateToSession();
             }
             break;
     }

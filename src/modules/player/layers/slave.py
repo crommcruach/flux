@@ -27,6 +27,7 @@ def render_slave_layer(
     get_texture_pool_fn,
     player_name: str = "",
     warned_layers_set: set | None = None,
+    profiler=None,
 ):
     """
     Decode, effect-process, and FPS-rate-limit a single slave layer.
@@ -75,8 +76,13 @@ def render_slave_layer(
 
         if now >= layer._slave_next_time or layer._slave_cached_frame is None:
             # Time to advance — fetch a new frame.
-            preprocess_callback(layer)
-            overlay_frame, _ = layer.source.get_next_frame()
+            if profiler:
+                with profiler.profile_stage('slave_decode'):
+                    preprocess_callback(layer)
+                    overlay_frame, _ = layer.source.get_next_frame()
+            else:
+                preprocess_callback(layer)
+                overlay_frame, _ = layer.source.get_next_frame()
 
             if overlay_frame is None:
                 debug_layers(

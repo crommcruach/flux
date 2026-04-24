@@ -83,14 +83,14 @@ class VideoSource(FrameSource):
             file_bytes = mmap_frames.nbytes
             if file_bytes <= self._EAGER_LOAD_THRESHOLD_BYTES:
                 self.frames = np.ascontiguousarray(mmap_frames)
-                logger.info(
+                logger.debug(
                     f"[NpySource] {os.path.basename(self.video_path)} "
                     f"{self.total_frames} frames @ {self.fps:.1f}fps "
                     f"(eager-loaded {file_bytes // (1024*1024)} MB into RAM)"
                 )
             else:
                 self.frames = mmap_frames
-                logger.info(
+                logger.debug(
                     f"[NpySource] {os.path.basename(self.video_path)} "
                     f"{self.total_frames} frames @ {self.fps:.1f}fps "
                     f"(memory-mapped — {file_bytes // (1024*1024)} MB > {self._EAGER_LOAD_THRESHOLD_BYTES // (1024*1024)} MB threshold)"

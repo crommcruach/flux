@@ -10,6 +10,7 @@ import threading
 
 from .slices import SliceManager
 from .base import OutputBase
+from ...performance.profiler import get_profiler
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,105 @@ class OutputManager:
         
         # State persistence callback
         self._state_save_callback = None
-        
+
+        # GPU slice renderer — lazy-init on first update_gpu_frame() call.
+        self._gpu_slice_renderer = None
+        # GPU composition renderer — lazy-init on first update_gpu_frame() call.
+        self._gpu_composition_renderer = None
+
         logger.debug(f"✅ OutputManager initialized for '{player_name}' ({canvas_width}x{canvas_height})")
+
+    # ------------------------------------------------------------------
+    # GPU output path
+    # ------------------------------------------------------------------
+
+    @property
+    def needs_cpu_frame(self) -> bool:
+        """True if any enabled output still requires a full-resolution CPU frame."""
+        for out in self.outputs.values():
+            if out.enabled and out.needs_cpu_frame:
+                return True
+        return False
+
+    def update_gpu_frame(self, composite_gpu_frame) -> None:
+        """Route the composite GPUFrame to every GPU-capable output via the slice pipeline.
+
+        Called inside composite_layers() while the texture is still live on the GPU,
+        BEFORE any CPU SSBO download.  Outputs that handle their frame here should
+        have ``needs_cpu_frame = False`` so the CPU download is skipped.
+
+        For 'full' slice outputs the composite frame is passed through unchanged
+        (no GPU copy).  For named slice outputs a single-pass WGSL render crops,
+        rotates, applies soft-edge and colour adjustments.
+        """
+        if not self.outputs:
+            return
+
+        # Lazy-init GPU slice renderer.
+        if self._gpu_slice_renderer is None:
+            try:
+                from ...gpu.slice_renderer import GPUSliceRenderer
+                self._gpu_slice_renderer = GPUSliceRenderer()
+                logger.debug('[%s] GPUSliceRenderer ready', self.player_name)
+            except Exception as exc:
+                logger.error('OutputManager: GPUSliceRenderer init failed: %s', exc, exc_info=True)
+                self._gpu_slice_renderer = False  # sentinel — don't retry
+
+        # Lazy-init GPU composition renderer.
+        if self._gpu_composition_renderer is None:
+            try:
+                from ...gpu.composition_renderer import GPUCompositionRenderer
+                self._gpu_composition_renderer = GPUCompositionRenderer()
+                logger.debug('[%s] GPUCompositionRenderer ready', self.player_name)
+            except Exception as exc:
+                logger.error('OutputManager: GPUCompositionRenderer init failed: %s', exc, exc_info=True)
+                self._gpu_composition_renderer = False  # sentinel — don't retry
+
+        for output_id, output in list(self.outputs.items()):
+            if not output.enabled:
+                continue
+            if not hasattr(output, 'queue_gpu_frame'):
+                continue
+            try:
+                # Composition path: multi-slice layout defined in output config.
+                composition = output.config.get('composition', None)
+                if (
+                    composition
+                    and isinstance(composition, dict)
+                    and 'slices' in composition
+                    and self._gpu_composition_renderer not in (None, False)
+                ):
+                    profiler = get_profiler(self.player_name)
+                    with profiler.profile_stage('composition_processing'):
+                        composed = self._gpu_composition_renderer.render(
+                            output_id, composition, composite_gpu_frame,
+                            self.canvas_width, self.canvas_height, self.slice_manager,
+                        )
+                    if composed is not None:
+                        output.needs_cpu_frame = False  # GPU handles this output entirely
+                        output.queue_gpu_frame(composed)
+                        continue
+                    # Fall through to full-canvas fallback if composition fails.
+
+                # Single slice / full-canvas path.
+                slice_cfg = output.config.get('slice', 'full')
+                if isinstance(slice_cfg, str) and slice_cfg not in ('full', '', None):
+                    profiler = get_profiler(self.player_name)
+                    with profiler.profile_stage('slice_processing'):
+                        sliced = self.slice_manager.get_slice_gpu(
+                            slice_cfg, composite_gpu_frame,
+                            self.canvas_width, self.canvas_height,
+                        )
+                    if sliced is None:
+                        sliced = composite_gpu_frame
+                else:
+                    sliced = composite_gpu_frame
+                output.queue_gpu_frame(sliced)
+            except Exception as exc:
+                logger.error(
+                    '[%s] GPU frame routing error for \'%s\': %s',
+                    self.player_name, output_id, exc, exc_info=True,
+                )
     
     def load_outputs_from_config(self, output_definitions: list) -> int:
         """
@@ -412,12 +510,13 @@ class OutputManager:
             if transform_corners and len(transform_corners) == 4:
                 logger.debug(f"Applying perspective transform with corners: {transform_corners}")
                 try:
-                    # Convert transform corners to numpy array
+                    # transformCorners are stored relative to the slice origin.
+                    # Convert to absolute canvas coordinates before warping.
                     src_points = np.float32([
-                        [transform_corners[0]['x'], transform_corners[0]['y']],  # top-left
-                        [transform_corners[1]['x'], transform_corners[1]['y']],  # top-right
-                        [transform_corners[2]['x'], transform_corners[2]['y']],  # bottom-right
-                        [transform_corners[3]['x'], transform_corners[3]['y']]   # bottom-left
+                        [x + transform_corners[0]['x'], y + transform_corners[0]['y']],  # top-left
+                        [x + transform_corners[1]['x'], y + transform_corners[1]['y']],  # top-right
+                        [x + transform_corners[2]['x'], y + transform_corners[2]['y']],  # bottom-right
+                        [x + transform_corners[3]['x'], y + transform_corners[3]['y']]   # bottom-left
                     ])
                     
                     # Define destination rectangle (output size)
@@ -967,8 +1066,9 @@ class OutputManager:
             height = int(slice_data.get('height', self.canvas_height))
             rotation = float(slice_data.get('rotation', 0))
             
-            # Ignore complex soft_edge for now (SliceDefinition only supports int)
-            soft_edge = None
+            # Pass soft_edge through as-is: SliceDefinition accepts int (legacy)
+            # or the frontend dict format {enabled, width:{top,bottom,left,right}, curve}.
+            soft_edge = slice_data.get('soft_edge', None)
             
             # Convert masks array to numpy mask
             masks = slice_data.get('masks', [])

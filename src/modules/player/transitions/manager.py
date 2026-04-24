@@ -46,11 +46,11 @@ class TransitionManager:
     def start(self, player_name=""):
         """Activate the transition. Returns False if not enabled or no A-buffer."""
         if not self.config.get("enabled"):
-            logger.info(f"⏭️ [{player_name}] Transition skipped: enabled=False")
+            logger.debug(f"⏭️ [{player_name}] Transition skipped: enabled=False")
             return False
         has_frame = self._gpu_renderer is not None and self._gpu_renderer._has_a
         if not has_frame:
-            logger.info(
+            logger.debug(
                 f"⏭️ [{player_name}] Transition skipped: no A-buffer "
                 f"(renderer={'None' if self._gpu_renderer is None else 'ok'}, "
                 f"_has_a={getattr(self._gpu_renderer, '_has_a', '?')})"
@@ -59,7 +59,7 @@ class TransitionManager:
         self.active = True
         self.start_time = time.time()
         self.frames = 0
-        logger.info(f"⚡ [{player_name}] Transition STARTED: {self.config['effect']} {self.config.get('duration', 1.0)}s")
+        logger.debug(f"⚡ [{player_name}] Transition STARTED: {self.config['effect']} {self.config.get('duration', 1.0)}s")
         return True
 
     def apply_gpu(self, gpu_frame_b, display_fn) -> bool:
@@ -82,7 +82,7 @@ class TransitionManager:
 
         if elapsed >= duration:
             self.active = False
-            logger.info(f"✅ GPU transition complete ({self.frames} frames blended)")
+            logger.debug(f"✅ GPU transition complete ({self.frames} frames blended)")
             return False
 
         progress = min(1.0, elapsed / duration)

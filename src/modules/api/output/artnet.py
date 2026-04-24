@@ -260,15 +260,102 @@ def register_info_routes(app, player_manager, api=None, config=None):
     
     @app.route('/api/preview/stream')
     def preview_stream():
-        """MJPEG Video-Stream des aktuellen Frames."""
-        from flask import Response
+        """MJPEG Video-Stream des aktuellen Frames.
+        
+        Optional query parameter:
+            ?slice=<url-encoded JSON>  — crop to a slice region before streaming.
+            Slice JSON fields: x, y, width, height (canvas coordinates).
+        """
+        from flask import Response, request
         import time
+        import json
 
         cfg = config if config else {}
         preview_config = cfg.get('video', {}).get('preview_stream', {}).get('video', {})
         stream_fps = preview_config.get('fps', 30)
         frame_delay = 1.0 / stream_fps
-        
+
+        # Parse optional slice crop parameter (canvas coordinates)
+        slice_cfg = None
+        slice_raw = request.args.get('slice')
+        if slice_raw:
+            try:
+                slice_cfg = json.loads(slice_raw)
+            except (ValueError, TypeError):
+                slice_cfg = None
+
+        # Canvas and preview dimensions for coordinate scaling.
+        # Read from player so we match the actual running resolution.
+        _p = player_manager.player
+        canvas_w = int(getattr(_p, 'canvas_width', 1920))
+        canvas_h = int(getattr(_p, 'canvas_height', 1080))
+        preview_w = preview_config.get('preview_width', 640)
+        preview_h = preview_config.get('preview_height', 360)
+        scale_x = preview_w / canvas_w if canvas_w else 1.0
+        scale_y = preview_h / canvas_h if canvas_h else 1.0
+
+        def _crop_frame_to_slice(raw: 'np.ndarray') -> 'bytes | None':
+            """Crop/warp a BGR preview numpy frame to the requested slice region."""
+            import numpy as np
+            import cv2 as _cv2
+            try:
+                import simplejpeg
+                quality = preview_config.get('jpeg_quality', 85)
+            except ImportError:
+                simplejpeg = None
+                quality = 85
+
+            sc = slice_cfg
+            if sc is None or raw is None:
+                return None
+
+            # Output dimensions in preview coords
+            pw = max(1, int(round(sc.get('width', canvas_w) * scale_x)))
+            ph = max(1, int(round(sc.get('height', canvas_h) * scale_y)))
+
+            tc = sc.get('transformCorners')
+            if tc and len(tc) == 4:
+                # Check whether corners differ from the default rectangle
+                defaults = [(0, 0), (sc.get('width', 0), 0),
+                            (sc.get('width', 0), sc.get('height', 0)), (0, sc.get('height', 0))]
+                is_warped = any(
+                    abs(tc[i].get('x', 0) - defaults[i][0]) > 1 or
+                    abs(tc[i].get('y', 0) - defaults[i][1]) > 1
+                    for i in range(4)
+                )
+                if is_warped:
+                    # transformCorners are relative to slice origin — convert to
+                    # absolute canvas coords, then scale to preview resolution.
+                    ox, oy = sc.get('x', 0), sc.get('y', 0)
+                    src = np.float32([
+                        [(ox + c.get('x', 0)) * scale_x, (oy + c.get('y', 0)) * scale_y]
+                        for c in tc
+                    ])
+                    dst = np.float32([[0, 0], [pw, 0], [pw, ph], [0, ph]])
+                    M = _cv2.getPerspectiveTransform(src, dst)
+                    cropped = _cv2.warpPerspective(raw, M, (pw, ph))
+                    if simplejpeg is not None:
+                        return simplejpeg.encode_jpeg(cropped, quality=quality, colorspace='BGR')
+                    ok, buf = _cv2.imencode('.jpg', cropped, [_cv2.IMWRITE_JPEG_QUALITY, quality])
+                    return bytes(buf) if ok else None
+
+            # Plain rect crop (no perspective warp)
+            px = max(0, int(round(sc.get('x', 0) * scale_x)))
+            py = max(0, int(round(sc.get('y', 0) * scale_y)))
+
+            h, w = raw.shape[:2]
+            px2 = min(px + pw, w)
+            py2 = min(py + ph, h)
+            if px >= px2 or py >= py2:
+                return None
+
+            cropped = raw[py:py2, px:px2].copy()  # copy to avoid race on buffer
+
+            if simplejpeg is not None:
+                return simplejpeg.encode_jpeg(cropped, quality=quality, colorspace='BGR')
+            ok, buf = _cv2.imencode('.jpg', cropped, [_cv2.IMWRITE_JPEG_QUALITY, quality])
+            return bytes(buf) if ok else None
+
         def generate_frames():
             """Generator für MJPEG-Stream."""
             _player = player_manager.player
@@ -277,7 +364,16 @@ def register_info_routes(app, player_manager, api=None, config=None):
             try:
                 while True:
                     player = player_manager.player
-                    frame_bytes = getattr(player, 'last_preview_jpeg', None) if player else None
+                    if player is not None and slice_cfg is not None:
+                        # Slice preview: crop the raw preview frame on-the-fly
+                        raw = None
+                        ds = getattr(player, '_preview_downscaler', None)
+                        if ds is not None:
+                            raw = getattr(ds, 'last_raw', None)
+                        frame_bytes = _crop_frame_to_slice(raw) if raw is not None else None
+                    else:
+                        frame_bytes = getattr(player, 'last_preview_jpeg', None) if player else None
+
                     if frame_bytes is not None:
                         api.stream_traffic['preview']['bytes'] += len(frame_bytes)
                         api.stream_traffic['preview']['frames'] += 1

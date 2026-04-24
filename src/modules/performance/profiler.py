@@ -56,6 +56,13 @@ class PerformanceProfiler:
         'audio_sequences',      # Audio-driven parameter modulation
         'transitions',          # Crossfade/transition effects
         'background_composite', # Background image overlay
+        'autosize_scale',       # GPU scale pass when source res ≠ canvas (scale_mode.wgsl)
+        'slice_processing',     # Single-slice GPU crop/rotate/colour/mask
+        'composition_processing', # Multi-slice composition blit
+        'slave_decode',         # Parallel slave layer decode + effects (thread pool)
+        'artnet_gpu_sampler',   # ArtNet GPU compute sampler dispatch (on_gpu_composite)
+        'transition_gpu',       # GPU crossfade blend (apply_gpu)
+        'preview_downscale',    # GPU→JPEG preview/fullscreen downscale encode
         'output_routing',       # ArtNet pixel mapping
         'frame_delivery',       # Final output delivery
     ]

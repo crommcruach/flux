@@ -57,6 +57,11 @@ class LayerManager:
         self._layer_effect_log_frame = {}  # Frame counter for logging
         self.player = None  # Will be set by player after initialization
 
+        # Autosize mode for the master layer scale pass (off/stretch/fit/fill).
+        # 'stretch' (default) = full stretch to canvas, same as legacy behaviour.
+        # Set via Player.update_resolution() when user changes settings.
+        self.autosize_mode: str = 'stretch'
+
         # ─── Phase 2: Thread pools for parallel loading and rendering ─────────
         # _render_lock protects self.layers list during swap and property updates
         self._render_lock = threading.RLock()
@@ -79,6 +84,14 @@ class LayerManager:
         # a compute shader to sample only the N LED positions without a full
         # frame download.  Set via set_artnet_gpu_hook().
         self._artnet_gpu_hook = None
+
+        # ─── Output GPU hook ─────────────────────────────────────────────────
+        # Optional callback fired alongside _artnet_gpu_hook.  Used by
+        # OutputManager.update_gpu_frame() to run per-output GPU slice passes
+        # (viewport crop, rotation, soft-edge, colour) before any CPU download.
+        # Outputs that handle the frame here set needs_cpu_frame=False so the
+        # 26 ms SSBO download is skipped entirely.  Set via set_output_gpu_hook().
+        self._output_gpu_hook = None
 
         # ─── Preview GPU hook ────────────────────────────────────────────────
         # Optional callback fired alongside _artnet_gpu_hook.  Used by the
@@ -612,6 +625,16 @@ class LayerManager:
         Pass None to disable.
         """
         self._artnet_gpu_hook = callback
+
+    def set_output_gpu_hook(self, callback) -> None:
+        """
+        Register a callback that receives the final composite GPUFrame before
+        it is downloaded to CPU.  Used by OutputManager.update_gpu_frame() to
+        run GPU slice passes for each output and eliminate CPU SSBO downloads.
+
+        Pass None to disable.
+        """
+        self._output_gpu_hook = callback
 
     def set_preview_gpu_hook(self, callback) -> None:
         """

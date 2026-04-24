@@ -10,7 +10,7 @@ data/
 thumbnails/
 audio/
 backgrounds/
-
+data/
 # C extensions
 *.so
 

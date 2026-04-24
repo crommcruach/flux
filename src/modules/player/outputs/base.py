@@ -36,7 +36,15 @@ class OutputBase(ABC):
         self.output_id = output_id
         self.config = config
         self.enabled = False
-        
+
+        # True  → this output requires a full-resolution CPU (numpy) frame.
+        # False → this output is served entirely via GPU hooks (queue_gpu_frame);
+        #         no CPU SSBO download needed for it.
+        # Subclasses or the player core can set this to False at runtime once
+        # the GPU path is confirmed active (e.g. GLFW context sharing, GPU
+        # slice renderer, preview downscaler).
+        self.needs_cpu_frame: bool = True
+
         # Statistics
         self.frames_sent = 0
         self.frames_dropped = 0

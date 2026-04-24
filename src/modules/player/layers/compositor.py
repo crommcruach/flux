@@ -117,6 +117,20 @@ def download_composite_ring(mgr, composite, w: int, h: int) -> np.ndarray:
 
 def _fire_single_layer_hooks(mgr, master_frame, profiler):
     """Fire preview / display / transition hooks for single-layer or no-slave paths."""
+    if mgr._artnet_gpu_hook is not None:
+        try:
+            if profiler:
+                with profiler.profile_stage('artnet_gpu_sampler'):
+                    mgr._artnet_gpu_hook(master_frame)
+            else:
+                mgr._artnet_gpu_hook(master_frame)
+        except Exception as e:
+            logger.error(f'ArtNet GPU hook error: {e}')
+    if mgr._output_gpu_hook is not None:
+        try:
+            mgr._output_gpu_hook(master_frame)
+        except Exception as e:
+            logger.debug('Output GPU hook error: %s', e)
     if mgr._preview_gpu_hook is not None:
         try:
             if profiler:
@@ -136,6 +150,68 @@ def _fire_single_layer_hooks(mgr, master_frame, profiler):
             mgr._transition_gpu_hook(master_frame)
         except Exception as e:
             logger.debug('Transition GPU hook error: %s', e)
+
+
+# ─── Autosize scale-mode helper ──────────────────────────────────────────────
+
+def _compute_scale_rects(mode: str, sw: int, sh: int, tw: int, th: int):
+    """Compute (src_rect, dst_rect) UV tuples for a given autosize mode.
+
+    Returns two (x0, y0, x1, y1) tuples in 0-1 UV space:
+      src_rect — which portion of the *source* texture to sample
+      dst_rect — where on the *canvas* to place the content (rest is black)
+
+    Modes:
+      'stretch' — full stretch, src=(0,0,1,1) dst=(0,0,1,1)
+      'fit'     — letterbox / pillarbox, preserve aspect ratio
+      'fill'    — crop to fill canvas, preserve aspect ratio
+      'off'     — 1:1 pixel mapping centred, excess cropped / pad with black
+    """
+    full = (0.0, 0.0, 1.0, 1.0)
+    if mode == 'stretch':
+        return full, full
+
+    ar_s = sw / sh
+    ar_d = tw / th
+
+    if mode == 'fit':
+        if ar_s > ar_d:
+            # Source wider than canvas → fit by width, black bars top/bottom
+            dh = sh / sw * (tw / th)          # = sh*tw/(sw*th), always <= 1
+            dy = (1.0 - dh) / 2.0
+            return full, (0.0, dy, 1.0, 1.0 - dy)
+        else:
+            # Source taller/squarer → fit by height, black bars left/right
+            dw = sw / sh * (th / tw)          # = sw*th/(sh*tw), always <= 1
+            dx = (1.0 - dw) / 2.0
+            return full, (dx, 0.0, 1.0 - dx, 1.0)
+
+    if mode == 'fill':
+        if ar_s > ar_d:
+            # Source wider → scale to fill height, crop left/right of source
+            cw = sw * th / sh                 # content width at canvas height
+            cx0 = (cw - tw) / (2.0 * cw)     # source UV left crop
+            return (cx0, 0.0, 1.0 - cx0, 1.0), full
+        else:
+            # Source taller → scale to fill width, crop top/bottom of source
+            ch = sh * tw / sw                 # content height at canvas width
+            cy0 = (ch - th) / (2.0 * ch)     # source UV top crop
+            return (0.0, cy0, 1.0, 1.0 - cy0), full
+
+    # mode == 'off' — 1:1 pixel, centred, excess cropped / padded with black
+    dw = sw / tw    # > 1 if source wider than canvas
+    dh = sh / th
+    dx = (1.0 - dw) / 2.0  # negative when source > canvas
+    dy = (1.0 - dh) / 2.0
+    dst_x0 = max(0.0, dx)
+    dst_y0 = max(0.0, dy)
+    dst_x1 = min(1.0, 1.0 - dx)
+    dst_y1 = min(1.0, 1.0 - dy)
+    src_x0 = (dst_x0 - dx) / dw
+    src_y0 = (dst_y0 - dy) / dh
+    src_x1 = (dst_x1 - dx) / dw
+    src_y1 = (dst_y1 - dy) / dh
+    return (src_x0, src_y0, src_x1, src_y1), (dst_x0, dst_y0, dst_x1, dst_y1)
 
 
 # ─── Main compositor ─────────────────────────────────────────────────────────
@@ -206,6 +282,38 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
             _gf.upload(master_frame)
             master_frame = _gf
 
+    # ─── Autosize scale pass ──────────────────────────────────────────────────
+    # Apply the player's autosize mode to scale the master frame to canvas size.
+    # Skipped when the frame is already canvas-sized and mode is 'stretch'
+    # (the default) to avoid an unnecessary GPU pass every frame.
+    _autosize = getattr(mgr, 'autosize_mode', 'stretch')
+    _cw, _ch = mgr.canvas_width, mgr.canvas_height
+    _fw, _fh = master_frame.width, master_frame.height
+    if _fw != _cw or _fh != _ch or _autosize not in ('stretch', None):
+        _src_rect, _dst_rect = _compute_scale_rects(
+            _autosize or 'stretch', _fw, _fh, _cw, _ch
+        )
+        _scale_out = get_texture_pool().acquire(_cw, _ch)
+        _scale_src = load_shader('scale_mode.wgsl')
+        _do_scale = lambda: get_renderer().render(
+            wgsl_source=_scale_src,
+            target=_scale_out,
+            uniforms={
+                'src_x0': _src_rect[0], 'src_y0': _src_rect[1],
+                'src_x1': _src_rect[2], 'src_y1': _src_rect[3],
+                'dst_x0': _dst_rect[0], 'dst_y0': _dst_rect[1],
+                'dst_x1': _dst_rect[2], 'dst_y1': _dst_rect[3],
+            },
+            textures=[master_frame],
+        )
+        if profiler:
+            with profiler.profile_stage('autosize_scale'):
+                _do_scale()
+        else:
+            _do_scale()
+        get_texture_pool().release(master_frame)
+        master_frame = _scale_out
+
     if profiler:
         with profiler.profile_stage('clip_effects'):
             master_frame = _apply_effects(mgr, layers_snap[0], master_frame, player_name, stay_on_gpu=True)
@@ -264,6 +372,7 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
             get_texture_pool_fn=get_texture_pool,
             player_name=player_name,
             warned_layers_set=mgr._warned_layers,
+            profiler=profiler,
         )
 
     futures_map = {
@@ -389,9 +498,18 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
         # ── Output hooks ──────────────────────────────────────────────────────
         if mgr._artnet_gpu_hook is not None:
             try:
-                mgr._artnet_gpu_hook(composite)
+                if profiler:
+                    with profiler.profile_stage('artnet_gpu_sampler'):
+                        mgr._artnet_gpu_hook(composite)
+                else:
+                    mgr._artnet_gpu_hook(composite)
             except Exception as e:
                 logger.error(f"ArtNet GPU hook error: {e}")
+        if mgr._output_gpu_hook is not None:
+            try:
+                mgr._output_gpu_hook(composite)
+            except Exception as e:
+                logger.debug('Output GPU hook error (multi-layer): %s', e)
         if mgr._preview_gpu_hook is not None:
             try:
                 mgr._preview_gpu_hook(composite)

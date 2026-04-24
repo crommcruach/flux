@@ -160,21 +160,29 @@ class SliceManager:
             return frame
         
         slice_def = self.slices[slice_id]
-        
-        # Extract based on shape
-        if slice_def.shape == 'rectangle':
-            sliced = self._extract_rectangle(frame, slice_def)
-        elif slice_def.shape == 'polygon':
-            sliced = self._extract_polygon(frame, slice_def)
-        elif slice_def.shape == 'circle':
-            sliced = self._extract_circle(frame, slice_def)
+
+        # Perspective transform takes precedence over normal shape extraction
+        # when corners have been moved from their default rectangular positions.
+        if (slice_def.transformCorners
+                and len(slice_def.transformCorners) == 4
+                and self._is_transformed(slice_def)):
+            sliced = self._apply_perspective_transform(frame, slice_def)
         else:
-            logger.warning(f"Unknown shape '{slice_def.shape}', using rectangle")
-            sliced = self._extract_rectangle(frame, slice_def)
-        
-        # Apply rotation if needed
-        if slice_def.rotation != 0:
-            sliced = self._apply_rotation(sliced, slice_def.rotation)
+            # Extract based on shape
+            if slice_def.shape == 'rectangle':
+                sliced = self._extract_rectangle(frame, slice_def)
+            elif slice_def.shape == 'polygon':
+                sliced = self._extract_polygon(frame, slice_def)
+            elif slice_def.shape == 'circle':
+                sliced = self._extract_circle(frame, slice_def)
+            else:
+                logger.warning(f"Unknown shape '{slice_def.shape}', using rectangle")
+                sliced = self._extract_rectangle(frame, slice_def)
+
+            # Apply rotation (only when not using perspective transform — warpPerspective
+            # already encodes the desired geometry).
+            if slice_def.rotation != 0:
+                sliced = self._apply_rotation(sliced, slice_def.rotation)
         
         # Apply soft edge if configured
         if slice_def.soft_edge:
@@ -198,6 +206,51 @@ class SliceManager:
         
         return sliced
     
+    # ------------------------------------------------------------------
+    # Perspective / transform helpers
+    # ------------------------------------------------------------------
+
+    def _is_transformed(self, slice_def: 'SliceDefinition') -> bool:
+        """Return True when transformCorners deviate from the default rectangle."""
+        corners = slice_def.transformCorners
+        defaults = [
+            (0, 0),
+            (slice_def.width, 0),
+            (slice_def.width, slice_def.height),
+            (0, slice_def.height),
+        ]
+        for i, c in enumerate(corners):
+            if abs(c.get('x', 0) - defaults[i][0]) > 1 or abs(c.get('y', 0) - defaults[i][1]) > 1:
+                return True
+        return False
+
+    def _apply_perspective_transform(self, frame: np.ndarray, slice_def: 'SliceDefinition') -> np.ndarray:
+        """Warp a quadrilateral region of *frame* into a width×height rectangle.
+
+        transformCorners stores corner offsets RELATIVE to the slice origin
+        (slice_def.x, slice_def.y).  Converting to absolute canvas coords:
+            abs_x = slice_def.x + corner['x']
+            abs_y = slice_def.y + corner['y']
+
+        Corner order expected by the frontend: TL, TR, BR, BL.
+        """
+        try:
+            src = np.float32([
+                [slice_def.x + c.get('x', 0), slice_def.y + c.get('y', 0)]
+                for c in slice_def.transformCorners
+            ])
+            dst = np.float32([
+                [0, 0],
+                [slice_def.width, 0],
+                [slice_def.width, slice_def.height],
+                [0, slice_def.height],
+            ])
+            M = cv2.getPerspectiveTransform(src, dst)
+            return cv2.warpPerspective(frame, M, (slice_def.width, slice_def.height))
+        except Exception as exc:
+            logger.error("Perspective transform failed for slice '%s': %s", slice_def.slice_id, exc)
+            return self._extract_rectangle(frame, slice_def)
+
     def _extract_rectangle(self, frame: np.ndarray, slice_def: SliceDefinition) -> np.ndarray:
         """Extract rectangular region from frame"""
         h, w = frame.shape[:2]
@@ -298,41 +351,71 @@ class SliceManager:
         
         return rotated
     
-    def _apply_soft_edge(self, frame: np.ndarray, blur_radius) -> np.ndarray:
-        """Apply soft edge (fade to black at edges)"""
-        # Handle dict format (legacy) - convert to int or skip
-        if isinstance(blur_radius, dict):
-            logger.warning(f"Soft edge dict format not supported, skipping soft edge")
+    def _apply_soft_edge(self, frame: np.ndarray, soft_edge_cfg) -> np.ndarray:
+        """Apply soft edge fade to black.
+
+        Accepts:
+        - int/float  : legacy symmetric pixel-radius fade on all four edges
+        - dict       : frontend format {enabled, width:{top,bottom,left,right}, curve}
+        """
+        if soft_edge_cfg is None:
             return frame
-        
-        if blur_radius is None or blur_radius <= 0:
-            return frame
-        
-        # Ensure blur_radius is an integer
-        blur_radius = int(blur_radius)
-        
+
         h, w = frame.shape[:2]
-        
-        # Create gradient mask
+
+        # ── dict format (frontend per-edge) ──────────────────────────────────
+        if isinstance(soft_edge_cfg, dict):
+            if not soft_edge_cfg.get('enabled'):
+                return frame
+            ew = soft_edge_cfg.get('width', {})
+            top_px    = max(0, int(ew.get('top',    0)))
+            bot_px    = max(0, int(ew.get('bottom', 0)))
+            left_px   = max(0, int(ew.get('left',   0)))
+            right_px  = max(0, int(ew.get('right',  0)))
+            curve     = soft_edge_cfg.get('curve', 'smooth')
+
+            if not any([top_px, bot_px, left_px, right_px]):
+                return frame
+
+            mask = np.ones((h, w), dtype=np.float32)
+
+            # Build per-edge linear ramps, then apply curve.
+            for i in range(h):
+                t_top = min(i / top_px, 1.0)    if top_px    else 1.0
+                t_bot = min((h-1-i) / bot_px, 1.0) if bot_px else 1.0
+                row_alpha = min(t_top, t_bot)
+                if row_alpha < 1.0:
+                    mask[i, :] *= row_alpha
+
+            for j in range(w):
+                t_left  = min(j / left_px,  1.0)    if left_px  else 1.0
+                t_right = min((w-1-j) / right_px, 1.0) if right_px else 1.0
+                col_alpha = min(t_left, t_right)
+                if col_alpha < 1.0:
+                    mask[:, j] *= col_alpha
+
+            # Apply curve
+            if curve == 'smooth':
+                mask = mask * mask * (3.0 - 2.0 * mask)
+            elif curve == 'exponential':
+                mask = mask * mask
+
+            return (frame.astype(np.float32) * mask[:, :, np.newaxis]).clip(0, 255).astype(np.uint8)
+
+        # ── legacy int/float symmetric mode ──────────────────────────────────
+        blur_radius = int(soft_edge_cfg)
+        if blur_radius <= 0:
+            return frame
+
         mask = np.ones((h, w), dtype=np.float32)
-        
-        # Apply gradient at edges
         for i in range(blur_radius):
             alpha = i / blur_radius
-            mask[i, :] *= alpha  # Top
-            mask[h-1-i, :] *= alpha  # Bottom
-            mask[:, i] *= alpha  # Left
-            mask[:, w-1-i] *= alpha  # Right
-        
-        # OPTIMIZED: Apply mask to frame without float conversion
-        # Use integer multiplication with proper scaling
-        mask_uint16 = mask.astype(np.uint16)
-        if frame.shape[2] == 3:  # BGR
-            result = (frame.astype(np.uint16) * mask_uint16[:, :, np.newaxis] / 255).astype(np.uint8)
-        else:
-            result = (frame.astype(np.uint16) * mask_uint16[:, :, np.newaxis] / 255).astype(np.uint8)
-        
-        return result
+            mask[i, :]     *= alpha  # top
+            mask[h-1-i, :] *= alpha  # bottom
+            mask[:, i]     *= alpha  # left
+            mask[:, w-1-i] *= alpha  # right
+
+        return (frame.astype(np.float32) * mask[:, :, np.newaxis]).clip(0, 255).astype(np.uint8)
     
     def _apply_mask(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Apply custom mask to frame"""
@@ -452,6 +535,41 @@ class SliceManager:
             for slice_id, slice_def in self.slices.items()
         }
     
+    def get_slice_gpu(self, slice_id: str, composite_gpu_frame,
+                       canvas_w: int, canvas_h: int):
+        """Apply the named slice as a single GPU render pass.
+
+        Returns
+        -------
+        GPUFrame  : the same *composite_gpu_frame* for slice_id='full' (no-op),
+                    or a cached GPUFrame owned by the internal GPUSliceRenderer
+                    for any other slice — do NOT release it.
+        None if the GPU renderer is unavailable.
+        """
+        if slice_id == 'full':
+            return composite_gpu_frame
+
+        if slice_id not in self.slices:
+            if slice_id not in self._logged_warnings:
+                logger.warning("[GPU] Slice '%s' not found; passing through full frame", slice_id)
+                self._logged_warnings.add(slice_id)
+            return composite_gpu_frame
+
+        if not hasattr(self, '_gpu_renderer'):
+            try:
+                from ...gpu.slice_renderer import GPUSliceRenderer
+                self._gpu_renderer = GPUSliceRenderer()
+            except Exception as exc:
+                logger.warning("GPUSliceRenderer unavailable: %s", exc)
+                self._gpu_renderer = None
+
+        if self._gpu_renderer is None:
+            return composite_gpu_frame
+
+        return self._gpu_renderer.slice(
+            composite_gpu_frame, self.slices[slice_id], canvas_w, canvas_h
+        )
+
     def set_state(self, slices_dict: dict):
         """Restore slice definitions from session"""
         self.slices.clear()

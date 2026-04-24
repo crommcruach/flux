@@ -127,7 +127,7 @@ def register_artnet_effects_api(app, player_manager):
                 return jsonify({"success": False, "error": "No player available"}), 404
             
             # Always use artnet_effect_chain
-            chain = player.artnet_effect_chain
+            chain = player.effect_processor.artnet_effect_chain
             
             if index < 0 or index >= len(chain):
                 return jsonify({"success": False, "error": "Invalid index"}), 400

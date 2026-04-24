@@ -95,6 +95,7 @@ const app = {
     draggingCorner: null,
     dragStart: null,
     resizeHandle: null,
+    _dragMoved: false,      // true only when mouse actually moved during drag/resize/rotate
     
     // Grid & Snapping
     snapToGrid: false,
@@ -629,6 +630,8 @@ const app = {
         const clickedItem = this.getSliceAt(pos);
         console.log('🔍 getSliceAt returned:', clickedItem ? clickedItem.id : 'null');
         
+        this._dragMoved = false; // reset on every new mousedown
+
         if (clickedItem) {
             console.log('🖱️ Clicked on shape:', clickedItem.shape, clickedItem.type || 'slice', 'ID:', clickedItem.id);
             console.log('   Shape bounds:', clickedItem.x, clickedItem.y, clickedItem.width, clickedItem.height);
@@ -718,6 +721,7 @@ const app = {
 
         if (this.isTransforming && this.draggingCorner !== null && this.selectedSlice) {
     this.moveTransformCorner(pos);
+    this._dragMoved = true;
     this.render();
     return;
         }
@@ -744,6 +748,7 @@ const app = {
 
         if (this.isRotating && this.selectedSlice) {
             this.rotateSlice(pos);
+            this._dragMoved = true;
             this.render();
         } else if (this.isDragging && (this.selectedMask || this.selectedSlice)) {
             const dx = pos.x - this.dragStart.x;
@@ -752,9 +757,11 @@ const app = {
             const shapeToMove = this.selectedMask || this.selectedSlice;
             this.moveShape(shapeToMove, dx, dy);
             this.dragStart = pos;
+            this._dragMoved = true;
             this.render();
         } else if (this.isResizing && (this.selectedMask || this.selectedSlice)) {
             this.resizeSlice(pos);
+            this._dragMoved = true;
             this.render();
         }
     },
@@ -809,12 +816,14 @@ const app = {
     }
         }
 
+        const hadManipulation = this._dragMoved;
         this.isDragging = false;
         this.isResizing = false;
         this.isRotating = false;
         this.isTransforming = false;
         this.draggingCorner = null;
         this.resizeHandle = null;
+        this._dragMoved = false;
         
         // Clean up bounding box cache from resize operation
         const shape = this.selectedMask || this.selectedSlice;
@@ -822,8 +831,8 @@ const app = {
             delete shape._boundingBox;
         }
 
-        if (!this.drawingMode) {
-            this.saveToBackend(); // Auto-save to backend
+        if (!this.drawingMode && hadManipulation) {
+            this.saveToBackend(); // Save only when slice was actually moved/resized/rotated
         }
         this.updateUI();
         this.render();
@@ -2309,6 +2318,7 @@ const app = {
     toggleSnap() {
         this.snapToGrid = !this.snapToGrid;
         document.getElementById('snapBtn').textContent = `📐 Snap: ${this.snapToGrid ? 'ON' : 'OFF'}`;
+        this.saveToBackend();
     },
 
     // ========================================
@@ -3340,6 +3350,10 @@ const app = {
                     <div style="padding: 10px; background: #1a1a1a; border-radius: 4px; margin-top: 8px;">
                         <div style="font-size: 11px; color: #888; margin-bottom: 8px;">Properties:</div>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                            <div style="grid-column: 1 / -1;">
+                                <label style="font-size: 10px; color: #666;">Name</label>
+                                <input type="text" value="${slice.label || ''}" onchange="app.updateProperty('${slice.id}', 'label', this.value); requestAnimationFrame(() => app.updateUI());" onclick="event.stopPropagation();" style="width: 100%; padding: 4px; background: #2a2a2a; border: 1px solid #555; color: #fff; border-radius: 3px; box-sizing: border-box;">
+                            </div>
                             <div>
                                 <label style="font-size: 10px; color: #666;">X</label>
                                 <input type="number" value="${Math.round(slice.x)}" onchange="app.updateProperty('${slice.id}', 'x', parseFloat(this.value))" style="width: 100%; padding: 4px; background: #2a2a2a; border: 1px solid #444; color: #fff; border-radius: 3px;">
@@ -3946,11 +3960,19 @@ const app = {
                 compositions: this.compositions || {},
                 ui_state: {
                     mode: this.currentMode,
-                    tool: this.tool,
-                    shapeType: this.shapeType,
+                    currentType: this.currentType,
+                    currentShape: this.currentShape,
                     zoom: this.canvasZoom,
                     selectedSliceId: this.selectedSlice ? this.selectedSlice.id : null,
-                    selectedArtNetObjectId: this.selectedArtNetObject ? this.selectedArtNetObject.id : null
+                    selectedArtNetObjectId: this.selectedArtNetObject ? this.selectedArtNetObject.id : null,
+                    snapToGrid: this.snapToGrid,
+                    showPointIds: this.showPointIds,
+                    showUniverseBounds: this.showUniverseBounds,
+                    showColoredOutlines: this.showColoredOutlines,
+                    showObjectNames: this.showObjectNames,
+                    showBoundingBox: this.showBoundingBox,
+                    showColorPreview: this.showColorPreview,
+                    showGrid: this.showGrid
                 }
             };
             
@@ -3995,11 +4017,28 @@ const app = {
                     this.currentMode = data.ui_state.mode;
                     this.setMode(data.ui_state.mode, true); // silent = true
                 }
-                if (data.ui_state.tool) {
-                    this.tool = data.ui_state.tool;
+                if (data.ui_state.currentType) {
+                    this.setType(data.ui_state.currentType);
                 }
-                if (data.ui_state.shapeType) {
-                    this.shapeType = data.ui_state.shapeType;
+                if (data.ui_state.currentShape) {
+                    this.setShape(data.ui_state.currentShape);
+                }
+                if (data.ui_state.snapToGrid !== undefined) {
+                    this.snapToGrid = data.ui_state.snapToGrid;
+                    const snapBtn = document.getElementById('snapBtn');
+                    if (snapBtn) snapBtn.textContent = `📐 Snap: ${this.snapToGrid ? 'ON' : 'OFF'}`;
+                }
+                const artnetToggles = ['showPointIds', 'showUniverseBounds', 'showColoredOutlines',
+                                       'showObjectNames', 'showBoundingBox', 'showColorPreview', 'showGrid'];
+                let anyToggleRestored = false;
+                artnetToggles.forEach(key => {
+                    if (data.ui_state[key] !== undefined) {
+                        this[key] = data.ui_state[key];
+                        anyToggleRestored = true;
+                    }
+                });
+                if (anyToggleRestored) {
+                    this.updateToggleButtonStates();
                 }
                 if (data.ui_state.zoom && data.ui_state.zoom !== 1.0) {
                     this.canvasZoom = data.ui_state.zoom;
@@ -4602,8 +4641,36 @@ const app = {
                     <div style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 8px; border-radius: 4px; font-size: 11px;">
                         <strong>${outputId}</strong> - ${outputWidth}×${outputHeight}
                     </div>
+                    <div style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.75); padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px;">
+                        <label style="font-size: 10px; color: #aaa; margin: 0; white-space: nowrap;">⊞ Module Grid:</label>
+                        <select id="composerGridSelect" onchange="app.setComposerGrid('${outputId}', this.value)"
+                                style="background: #2a2a2a; border: 1px solid #555; color: #fff; border-radius: 3px; font-size: 10px; padding: 2px 4px; cursor: pointer;">
+                            <option value="">None</option>
+                            <optgroup label="320 × 160 mm modules">
+                                <option value="64,32">P5 — 64 × 32 px</option>
+                                <option value="80,40">P4 — 80 × 40 px</option>
+                                <option value="107,53">P3 — 107 × 53 px</option>
+                                <option value="128,64">P2.5 — 128 × 64 px</option>
+                                <option value="160,80">P2 — 160 × 80 px</option>
+                                <option value="172,86">P1.86 — 172 × 86 px</option>
+                                <option value="209,105">P1.53 — 209 × 105 px</option>
+                                <option value="256,128">P1.25 — 256 × 128 px</option>
+                            </optgroup>
+                            <optgroup label="250 × 250 mm modules">
+                                <option value="50,50">P5 — 50 × 50 px</option>
+                                <option value="64,64">P3.91 — 64 × 64 px</option>
+                                <option value="84,84">P2.976 — 84 × 84 px</option>
+                                <option value="96,96">P2.604 — 96 × 96 px</option>
+                                <option value="100,100">P2.5 — 100 × 100 px</option>
+                                <option value="128,128">P1.953 — 128 × 128 px</option>
+                                <option value="160,160">P1.5625 — 160 × 160 px</option>
+                                <option value="200,200">P1.25 — 200 × 200 px</option>
+                                <option value="269,269">P0.93 — 269 × 269 px</option>
+                            </optgroup>
+                        </select>
+                    </div>
                     <div id="composerHint" style="position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px; font-size: 11px;">
-                        Drag slices onto canvas to add them to composition
+                        Drag slices onto canvas · click to select · type X/Y to position
                     </div>
                 </div>
             </div>
@@ -4675,7 +4742,8 @@ const app = {
         this.composerState[outputId] = {
             isDragging: false,
             dragIndex: -1,
-            dragOffset: { x: 0, y: 0 }
+            dragOffset: { x: 0, y: 0 },
+            gridPreset: null
         };
         
         // Setup drag and drop from sidebar
@@ -4818,7 +4886,38 @@ const app = {
                 ctx.strokeRect(handleX - handleSize, handleY - handleSize, handleSize * 2, handleSize * 2);
             }
         });
-        
+
+        // Draw pixel pitch module grid overlay
+        const gridPreset = this.composerState?.[outputId]?.gridPreset;
+        if (gridPreset && gridPreset.gridW > 0 && gridPreset.gridH > 0) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+            ctx.lineWidth = 0.5;
+            ctx.setLineDash([3, 3]);
+            for (let x = gridPreset.gridW; x < canvas.width; x += gridPreset.gridW) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = gridPreset.gridH; y < canvas.height; y += gridPreset.gridH) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            // Draw module count label in bottom-right corner
+            const colCount = Math.ceil(canvas.width / gridPreset.gridW);
+            const rowCount = Math.ceil(canvas.height / gridPreset.gridH);
+            ctx.setLineDash([]);
+            ctx.font = 'bold 11px Arial';
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.textAlign = 'right';
+            ctx.fillText(`${colCount} × ${rowCount} modules`, canvas.width - 6, canvas.height - 6);
+            ctx.textAlign = 'left';
+            ctx.restore();
+        }
+
         // Update composition list
         this.updateCompositionList(outputId);
     },
@@ -4842,14 +4941,22 @@ const app = {
             html += `
                 <div style="padding: 6px; margin-bottom: 6px; background: #2a2a2a; border-radius: 3px; border-left: 3px solid ${slice.color};">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <div>
+                        <div style="flex: 1; min-width: 0;">
                             <div style="font-weight: bold; font-size: 11px;">${slice.label}</div>
-                            <div style="font-size: 9px; color: #888;">
-                                Pos: ${compSlice.x},${compSlice.y} Size: ${compSlice.width}×${compSlice.height}
-                            </div>
+                            <div style="font-size: 9px; color: #666;">${compSlice.width} × ${compSlice.height} px</div>
                         </div>
                         <button onclick="app.removeFromComposition('${outputId}', ${index}); event.stopPropagation();" 
                                 style="padding: 2px 6px; font-size: 10px; background: #d32f2f; border: none; color: white; border-radius: 3px; cursor: pointer;">×</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
+                        <label style="font-size: 9px; color: #aaa; min-width: 10px;">X:</label>
+                        <input type="number" value="${compSlice.x}" step="1"
+                               onchange="app.updateCompositionPosition('${outputId}', ${index}, 'x', parseInt(this.value))"
+                               style="width: 52px; padding: 2px 3px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 2px; font-size: 9px;">
+                        <label style="font-size: 9px; color: #aaa; min-width: 10px;">Y:</label>
+                        <input type="number" value="${compSlice.y}" step="1"
+                               onchange="app.updateCompositionPosition('${outputId}', ${index}, 'y', parseInt(this.value))"
+                               style="width: 52px; padding: 2px 3px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 2px; font-size: 9px;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 5px; font-size: 10px;">
                         <label style="color: #aaa;">Scale:</label>
@@ -4883,6 +4990,27 @@ const app = {
         compSlice.width = Math.round(slice.width * scale);
         compSlice.height = Math.round(slice.height * scale);
         
+        this.renderComposition(outputId);
+    },
+
+    updateCompositionPosition(outputId, index, field, value) {
+        const composition = this.compositions?.[outputId];
+        if (!composition) return;
+        const compSlice = composition.slices[index];
+        if (!compSlice) return;
+        if (isNaN(value)) return;
+        compSlice[field] = value;
+        this.renderComposition(outputId);
+    },
+
+    setComposerGrid(outputId, value) {
+        if (!this.composerState?.[outputId]) return;
+        if (!value) {
+            this.composerState[outputId].gridPreset = null;
+        } else {
+            const [w, h] = value.split(',').map(Number);
+            this.composerState[outputId].gridPreset = { gridW: w, gridH: h };
+        }
         this.renderComposition(outputId);
     },
 
@@ -6595,19 +6723,7 @@ app.toggleColorPreview = function() {
         btn.style.color = this.showColorPreview ? '#fff' : '';
     }
     this.render();
-};
-
-/**
- * Toggle color preview display
- */
-app.toggleColorPreview = function() {
-    this.showColorPreview = !this.showColorPreview;
-    const btn = document.getElementById('toggleColorPreviewBtn');
-    if (btn) {
-        btn.style.background = this.showColorPreview ? '#0d47a1' : '';
-        btn.style.color = this.showColorPreview ? '#fff' : '';
-    }
-    this.render();
+    this.saveToBackend();
 };
 
 /**
@@ -6621,6 +6737,7 @@ app.toggleGrid = function() {
         btn.style.color = this.showGrid ? '#fff' : '';
     }
     this.render();
+    this.saveToBackend();
 };
 
 /**
@@ -6634,6 +6751,7 @@ app.togglePointIds = function() {
         btn.style.color = this.showPointIds ? '#fff' : '';
     }
     this.render();
+    this.saveToBackend();
 };
 
 /**
@@ -6647,6 +6765,7 @@ app.toggleUniverseBounds = function() {
         btn.style.color = this.showUniverseBounds ? '#fff' : '';
     }
     this.render();
+    this.saveToBackend();
 };
 
 /**
@@ -6660,6 +6779,7 @@ app.toggleColoredOutlines = function() {
         btn.style.color = this.showColoredOutlines ? '#fff' : '';
     }
     this.render();
+    this.saveToBackend();
 };
 
 /**
@@ -6673,6 +6793,7 @@ app.toggleObjectNames = function() {
         btn.style.color = this.showObjectNames ? '#fff' : '';
     }
     this.render();
+    this.saveToBackend();
 };
 
 /**
@@ -6686,6 +6807,7 @@ app.toggleBoundingBox = function() {
         btn.style.color = this.showBoundingBox ? '#fff' : '';
     }
     this.render();
+    this.saveToBackend();
 };
 
 /**

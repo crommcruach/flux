@@ -87,6 +87,23 @@ class GPUTransitionRenderer:
             pool.release(buf_out)
             return None
 
+    def store_cpu_frame(self, frame: np.ndarray) -> None:
+        """Upload a CPU numpy BGR/BGRA frame directly as the A-buffer.
+
+        Called each tick during a live transition so the outgoing clip keeps
+        playing (not frozen) in the A-buffer.  The caller decodes one frame
+        from the outgoing source and passes it here — no GPU-to-GPU copy
+        needed; GPUFrame.upload() queues an async DMA via write_texture().
+        """
+        h, w = frame.shape[:2]
+        pool = get_texture_pool()
+        if self._buf_a is None or self._buf_a.width != w or self._buf_a.height != h:
+            if self._buf_a is not None:
+                pool.release(self._buf_a)
+            self._buf_a = pool.acquire(w, h)
+        self._buf_a.upload(frame)
+        self._has_a = True
+
     def release(self) -> None:
         """Return the A-buffer GPU resource to the pool."""
         if self._buf_a is not None:

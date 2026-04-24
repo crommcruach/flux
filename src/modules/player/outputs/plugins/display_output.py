@@ -108,6 +108,18 @@ class DisplayOutput(OutputBase):
         display.push_frame(frame)
         return True
 
+    def queue_gpu_frame(self, gpu_frame) -> None:
+        """Receive a (possibly sliced) GPUFrame from the GPU output pipeline
+        and forward it directly to the GLFW display — no CPU round-trip.
+
+        This method makes DisplayOutput visible to OutputManager.update_gpu_frame()
+        so slice cropping, rotation, and colour adjustments are applied before
+        the frame reaches the window.
+        """
+        if self._using_glfw:
+            from ....gpu.glfw_display import get_glfw_display
+            get_glfw_display().push_gpu_frame(gpu_frame)
+
     # ---------------------------------------------------------------- cleanup
 
     def cleanup(self):

@@ -106,6 +106,13 @@ class SessionStateManager {
     }
 
     /**
+     * Save player UI state to backend (active tab, preview visibility)
+     */
+    async savePlayerUI(uiState, options = {}) {
+        return this._saveSection('player_ui', uiState, '/api/session/player_ui', options);
+    }
+
+    /**
      * Save editor state to backend
      */
     async saveEditor(editorState, options = {}) {

@@ -250,6 +250,27 @@ def register_session_routes(app, session_state_manager):
             return jsonify({"success": False, "error": str(e)}), 500
     
     
+    @app.route('/api/session/player_ui', methods=['POST'])
+    def update_player_ui_state():
+        """Update player UI state (active tab, preview visibility)."""
+        try:
+            data = request.get_json()
+
+            if not data:
+                return jsonify({"success": False, "error": "No data provided"}), 400
+
+            session_state_manager.set_player_ui_state(data)
+
+            return jsonify({
+                "success": True,
+                "message": "Player UI state updated"
+            })
+
+        except Exception as e:
+            logger.error(f"Error updating player UI state: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
+
     @app.route('/api/session/mapper', methods=['GET', 'POST'])
     def mapper_config():
         """Get or update LED mapper configuration."""

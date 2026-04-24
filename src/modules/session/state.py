@@ -568,6 +568,17 @@ class SessionStateManager:
         """
         return self._state.get('artnet_player_settings', {}).copy()
     
+    def set_player_ui_state(self, ui_data: dict):
+        """Save player page UI state (active tab, preview visibility, etc.)"""
+        self._state['player_ui'] = ui_data.copy()
+        self._pending_save = True
+        self._pending_save_data = self._state.copy()
+        logger.debug(f"🎬 Player UI state updated")
+
+    def get_player_ui_state(self) -> dict:
+        """Get player page UI state."""
+        return self._state.get('player_ui', {}).copy()
+
     def set_editor_state(self, editor_data: dict):
         """
         Save editor state (canvas, shapes, settings, etc.)
