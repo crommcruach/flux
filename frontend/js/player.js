@@ -139,6 +139,7 @@ async function initializeTabComponents() {
     // Default: show only converted clip folders; toggle button lets user show all files
     filesTab = new FilesTab('fileBrowser', 'filesSearchContainer', 'list', false, true, '?converted_only=true');
     await filesTab.init();
+    window.filesTab = filesTab; // expose for MIDI control
     
     debug.log('✅ Tab components initialized');
 }
@@ -297,6 +298,28 @@ async function init() {
             console.warn('⚠️ SequenceManager not available');
         }
         
+        // Listen for playlist add requests from sources tab context menu
+        window.addEventListener('addSourceToPlaylistRequested', async (e) => {
+            const { generatorId, generatorName, playerId } = e.detail;
+            const config = playerConfigs[playerId];
+            if (!config) {
+                console.error(`Player config not found for: ${playerId}`);
+                return;
+            }
+            const newItem = {
+                path: `generator:${generatorId}`,
+                name: `🌟 ${generatorName}`,
+                id: crypto.randomUUID(),
+                type: 'generator',
+                generator_id: generatorId,
+                parameters: {}
+            };
+            config.files.push(newItem);
+            await updatePlaylist(playerId);
+            renderPlaylist(playerId);
+            console.log(`✅ Added generator ${generatorName} to ${playerId} playlist`);
+        });
+
         // Listen for playlist add requests from file browser context menu
         window.addEventListener('addToPlaylistRequested', async (e) => {
             const {playerId, filePath, fileType, fileName} = e.detail;
@@ -651,50 +674,16 @@ function updateTransportPositionDisplay(data) {
 function updatePlaylistButtonStates() {
     // Update video player buttons
     const videoAutoplayBtn = document.getElementById('videoAutoplayBtn');
-    const videoLoopBtn = document.getElementById('videoLoopBtn');
     
     if (videoAutoplayBtn) {
-        if (playerConfigs.video.autoplay) {
-            videoAutoplayBtn.classList.remove('btn-outline-primary');
-            videoAutoplayBtn.classList.add('btn-primary');
-        } else {
-            videoAutoplayBtn.classList.remove('btn-primary');
-            videoAutoplayBtn.classList.add('btn-outline-primary');
-        }
-    }
-    
-    if (videoLoopBtn) {
-        if (playerConfigs.video.loop) {
-            videoLoopBtn.classList.remove('btn-outline-primary');
-            videoLoopBtn.classList.add('btn-primary');
-        } else {
-            videoLoopBtn.classList.remove('btn-primary');
-            videoLoopBtn.classList.add('btn-outline-primary');
-        }
+        videoAutoplayBtn.checked = playerConfigs.video.autoplay;
     }
     
     // Update artnet player buttons
     const artnetAutoplayBtn = document.getElementById('artnetAutoplayBtn');
-    const artnetLoopBtn = document.getElementById('artnetLoopBtn');
     
     if (artnetAutoplayBtn) {
-        if (playerConfigs.artnet.autoplay) {
-            artnetAutoplayBtn.classList.remove('btn-outline-primary');
-            artnetAutoplayBtn.classList.add('btn-primary');
-        } else {
-            artnetAutoplayBtn.classList.remove('btn-primary');
-            artnetAutoplayBtn.classList.add('btn-outline-primary');
-        }
-    }
-    
-    if (artnetLoopBtn) {
-        if (playerConfigs.artnet.loop) {
-            artnetLoopBtn.classList.remove('btn-outline-primary');
-            artnetLoopBtn.classList.add('btn-primary');
-        } else {
-            artnetLoopBtn.classList.remove('btn-primary');
-            artnetLoopBtn.classList.add('btn-outline-primary');
-        }
+        artnetAutoplayBtn.checked = playerConfigs.artnet.autoplay;
     }
 }
 
@@ -773,14 +762,17 @@ async function updateCurrentFromPlayer(playerId) {
 // Current active left panel tab (Effects / Sources / Files)
 let activeLeftTab = 'effects';
 
-window.switchTab = function(tabName) {
+window.switchTab = function(tabName, _srcBtn = null) {
     // Remove active from all tabs
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
     
-    // Add active to selected tab
-    event.target.classList.add('active');
-    document.getElementById(`tab-${tabName}`).classList.add('active');
+    // Add active to selected tab — works both from onclick (event.target) and programmatic calls
+    const btn = _srcBtn ||
+        (typeof event !== 'undefined' && event?.target?.classList?.contains('tab-btn') ? event.target : null) ||
+        document.querySelector(`.tab-btn[onclick*="'${tabName}'"]`);
+    if (btn) btn.classList.add('active');
+    document.getElementById(`tab-${tabName}`)?.classList.add('active');
 
     // Persist to session state
     activeLeftTab = tabName;
@@ -839,6 +831,7 @@ function renderAvailableEffects() {
         <div class="effect-card" 
              draggable="true" 
              data-effect-id="${effect.id}"
+             data-effect-name="${effect.name}"
              ondragstart="startEffectDrag(event, '${effect.id}')">
             <div class="effect-card-title">🎨 ${effect.name}</div>
             <div class="effect-card-description">${effect.description || 'No description'}</div>
@@ -846,7 +839,8 @@ function renderAvailableEffects() {
         </div>
     `).join('');
     
-    // Tab component handles search refresh automatically
+    // Re-attach context menu listeners after overwriting innerHTML
+    effectsTab?.attachEventListeners();
 }
 
 // ========================================
@@ -915,6 +909,8 @@ function renderAvailableGenerators() {
         <div class="generator-card" 
              draggable="true" 
              data-generator-id="${generator.id}"
+             data-source-id="${generator.id}"
+             data-source-name="${generator.name}"
              ondragstart="startGeneratorDrag(event, '${generator.id}')"
              ondragend="endGeneratorDrag(event)">
             <div class="generator-card-title">🌟 ${generator.name}</div>
@@ -923,7 +919,8 @@ function renderAvailableGenerators() {
         </div>
     `).join('');
     
-    // Tab component handles search refresh automatically
+    // Re-attach context menu listeners after overwriting innerHTML
+    sourcesTab?.attachEventListeners();
 }
 
 // Drag & Drop for Effects
@@ -2140,9 +2137,6 @@ function renderPlaylistGeneric(playlistId) {
     if (files.length === 0) {
         container.innerHTML = `
             <div class="empty-state drop-zone" data-drop-index="0" data-playlist="${playlistId}">
-                <div class="empty-state-icon-large">📂</div>
-                <p class="empty-state-title">Playlist leer</p>
-                <small class="empty-state-subtitle">Drag & Drop aus Files Tab oder Sources</small>
             </div>
         `;
         
@@ -2415,6 +2409,7 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
                         }
                         window.currentGeneratorParams = params;
                         displayGeneratorParameters(fileItem.generator_id, paramsData.parameters || []);
+                        await refreshClipEffects();
                     }
                 } else {
                     window.currentGeneratorId = null;
@@ -2428,7 +2423,7 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
         })();
     };
     
-    // Single click handler - delegated to container
+    // Single click handler - play clip immediately
     const clickHandler = async (e) => {
         const item = e.target.closest('.playlist-item');
         if (!item || isDragging || e.target.classList.contains('playlist-item-remove')) return;
@@ -2438,55 +2433,20 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
         const fileItem = files[index];
         if (!fileItem) return;
         
-        // Select clip
-        selectedClipId = fileItem.id;
-        selectedClipPath = fileItem.path;
-        selectedClipPlayerType = playlistId;
-        
-        // Always load clip layers (auto-show if layers exist)
-        await loadClipLayers(fileItem.id);
-        renderSelectedClipLayers();
-        
-        // Load effects/generator parameters
-        if (fileItem.type === 'generator' && fileItem.generator_id) {
-            const generator = generatorsMap.get(fileItem.generator_id) || availableGenerators.find(g => g.id === fileItem.generator_id);
-            if (generator) {
-                window.currentGeneratorId = fileItem.generator_id;
-                window.currentGeneratorMeta = generator;
-                
-                const paramsResponse = await fetch(`${API_BASE}/api/plugins/${fileItem.generator_id}/parameters`);
-                const paramsData = await paramsResponse.json();
-                
-                window.currentGeneratorParameters = paramsData.parameters || [];
-                
-                const params = {};
-                if (paramsData.parameters) {
-                    paramsData.parameters.forEach(param => {
-                        params[param.name] = fileItem.parameters?.[param.name] ?? param.default;
-                    });
-                }
-                window.currentGeneratorParams = params;
-                displayGeneratorParameters(fileItem.generator_id, paramsData.parameters || []);
-            }
-        } else {
-            window.currentGeneratorId = null;
-            window.currentGeneratorParams = null;
-            window.currentGeneratorMeta = null;
-            await refreshClipEffects();
-        }
-    };
-    
-    // Double click handler - delegated to container
-    const dblclickHandler = async (e) => {
-        const item = e.target.closest('.playlist-item');
-        if (!item || isDragging || e.target.classList.contains('playlist-item-remove')) return;
-        
-        const indexAttr = item.getAttribute(cfg.dataAttr);
-        const index = parseInt(indexAttr);
-        const fileItem = files[index];
-        if (!fileItem) return;
-        
+        // Load the clip first so the play loop starts correctly (was_playing=True)
         await cfg.loadFunc(fileItem);
+        
+        // After clip is loaded and playing, disable auto-advance so it loops.
+        // Doing this AFTER loadFile avoids a race where updatePlaylist could stop
+        // the player before loadFile captures was_playing=True.
+        const playerConfig = playerConfigs[playlistId];
+        if (playerConfig && playerConfig.autoplay) {
+            playerConfig.autoplay = false;
+            const advBtn = document.getElementById(playerConfig.autoplayBtnId);
+            if (advBtn) advBtn.checked = false;
+            // Push autoplay=false to backend AFTER loading
+            await updatePlaylist(playlistId);
+        }
     };
     
     // Drag start handler - delegated to container
@@ -2538,7 +2498,6 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
     // Attach delegated event listeners to container
     container.addEventListener('click', fxTabClickHandler); // FX tab first (stopPropagation)
     container.addEventListener('click', clickHandler);
-    container.addEventListener('dblclick', dblclickHandler);
     container.addEventListener('contextmenu', contextmenuHandler);
     container.addEventListener('dragstart', dragstartHandler, true); // Use capture for drag events
     container.addEventListener('dragend', dragendHandler, true);
@@ -2547,7 +2506,6 @@ function attachPlaylistItemHandlers(container, playlistId, files, cfg) {
     container._playlistHandlers = [
         { event: 'click', handler: fxTabClickHandler },
         { event: 'click', handler: clickHandler },
-        { event: 'dblclick', handler: dblclickHandler },
         { event: 'contextmenu', handler: contextmenuHandler },
         { event: 'dragstart', handler: dragstartHandler },
         { event: 'dragend', handler: dragendHandler }
@@ -2999,35 +2957,30 @@ window.toggleAutoplay = async function(playerId) {
     if (!config) return;
     
     config.autoplay = !config.autoplay;
-    const btn = document.getElementById(config.autoplayBtnId);
+    const checkbox = document.getElementById(config.autoplayBtnId);
+    if (checkbox) checkbox.checked = config.autoplay;
     
     if (config.autoplay) {
-        btn.classList.remove('btn-outline-primary');
-        btn.classList.add('btn-primary');
-        showToast(`${config.name} Autoplay aktiviert`, 'success');
+        showToast(`${config.name} Auto-Advance aktiviert`, 'success');
     } else {
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-outline-primary');
-        showToast(`${config.name} Autoplay deaktiviert`, 'info');
+        showToast(`${config.name} Auto-Advance deaktiviert — Loop-Modus`, 'info');
     }
     
-    // Update Player ZUERST - damit autoplay flag gesetzt ist
+    // Push state to backend first
     await updatePlaylist(playerId);
     
-    // Dann starte Wiedergabe wenn autoplay aktiviert und Playlist vorhanden
-    if (config.autoplay && config.files.length > 0) {
-        const statusResponse = await fetch(`${API_BASE}${config.apiBase}/status`);
-        const statusData = await statusResponse.json();
-        if (statusData.success && !statusData.is_playing) {
-            // Lade und starte erstes Video wenn keins läuft
-            const firstFile = config.files[0];
-            if (firstFile.type === 'generator' && firstFile.generator_id) {
-                await loadGeneratorClip(firstFile.generator_id, playerId, firstFile.id, firstFile.parameters);
+    if (config.autoplay) {
+        // Re-enabling auto-advance: reload current clip so transport switches to play_once.
+        // If nothing is loaded yet, start the first clip.
+        const currentItem = config.files.find(f => f.id === config.currentItemId)
+                         ?? config.files[0];
+        if (currentItem) {
+            if (currentItem.type === 'generator' && currentItem.generator_id) {
+                await loadGeneratorClip(currentItem.generator_id, playerId, currentItem.id, currentItem.parameters);
             } else {
-                await loadFile(playerId, firstFile.path, firstFile.id, false);
+                await loadFile(playerId, currentItem.path, currentItem.id, false);
             }
-            await play(playerId);
-            debug.log(`🎬 ${config.name} Autoplay: Starte erstes Video`);
+            debug.log(`▶▶ ${config.name} Auto-Advance: reloaded current clip with play_once`);
         }
     }
 };
@@ -3164,12 +3117,15 @@ function generateLayerPreviewsHtml(clipId, playerId, clipThumbnailUrl) {
         return ''; // No layers, no preview
     }
     
-    const layers = clipLayers[clipId];
+    // Only show overlay layers (layer_id > 0); layer 0 is the clip itself already shown
+    const layers = clipLayers[clipId].filter(l => l.layer_id > 0);
+    if (layers.length === 0) return '';
+    
     let layersHtml = '<div class="layer-previews">';
     
-    layers.forEach((layer, idx) => {
-        const layerName = layer.name || `Layer ${idx + 1}`;
-        const layerPath = layer.source || layer.path;
+    layers.forEach((layer) => {
+        const layerName = layer.name || `Layer ${layer.layer_id}`;
+        const layerPath = layer.source_path;
         
         // Generate thumbnail URL - each layer shows its own thumbnail only
         let layerStyle = '';
@@ -3179,7 +3135,6 @@ function generateLayerPreviewsHtml(clipId, playerId, clipThumbnailUrl) {
             layerStyle = `background-image: url('${thumbnailUrl}');`;
             hasThumb = true;
         }
-        // No fallback - each layer should only show its own thumbnail
         
         // Get blend mode if available
         const blendMode = layer.blend_mode || 'normal';
@@ -3187,10 +3142,7 @@ function generateLayerPreviewsHtml(clipId, playerId, clipThumbnailUrl) {
         
         layersHtml += `
             <div class="layer-preview ${hasThumb ? 'has-thumbnail' : ''}" style="${layerStyle}">
-                <span class="layer-preview-label">
-                    ${layerName}<br>
-                    <small>${blendMode} · ${opacity}</small>
-                </span>
+                <span class="layer-preview-label">${layerName} · ${blendMode} · ${opacity}</span>
             </div>
         `;
     });
@@ -3575,6 +3527,8 @@ function renderVideoEffects() {
             element.classList.add('expanded');
         }
     });
+
+    setupEffectDragAndDrop('videoFxList', 'video', null);
 }
 
 let clearVideoEffectsClicks = 0;
@@ -3687,6 +3641,8 @@ function renderArtnetEffects() {
             element.classList.add('expanded');
         }
     });
+
+    setupEffectDragAndDrop('artnetFxList', 'artnet', null);
 }
 
 let clearArtnetEffectsClicks = 0;
@@ -3962,6 +3918,9 @@ function renderClipEffects() {
             window.sequenceManager.restoreInlineTimelineControls();
         });
     }
+
+    const targetClipIdForDnD = selectedLayerClipId || selectedClipId;
+    setupEffectDragAndDrop('clipFxList', 'clip', targetClipIdForDnD);
 }
 
 let clearClipEffectsClicks = 0;
@@ -4013,6 +3972,124 @@ window.clearClipEffects = async function() {
         showToast('Error clearing clip effects', 'error');
     }
 };
+
+// ========================================
+// EFFECT DRAG-AND-DROP (REORDER)
+// ========================================
+
+/**
+ * Sets up drag-and-drop reordering for a FX list container.
+ * Only effects with .effect-drag-handle can be dragged (system plugins are excluded).
+ *
+ * @param {string} containerId - DOM id of the list container
+ * @param {string} player - 'video' | 'artnet' | 'clip'
+ * @param {string|null} clipId - clip ID (required when player === 'clip')
+ */
+function setupEffectDragAndDrop(containerId, player, clipId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    let dragSrc = null;
+
+    // All items with data-effect-index (includes system plugins for correct order)
+    const allEffectItems = () => [...container.querySelectorAll('.effect-item[data-effect-index]')];
+
+    // Allow drop in gaps between items (container background area)
+    container.addEventListener('dragover', (e) => {
+        if (!dragSrc) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    });
+    container.addEventListener('drop', (e) => { e.preventDefault(); });
+
+    container.querySelectorAll('.effect-item[data-effect-index]').forEach(item => {
+        const handle = item.querySelector('.effect-drag-handle');
+
+        if (handle) {
+            // Make draggable only via the handle
+            handle.addEventListener('mousedown', () => { item.draggable = true; });
+
+            item.addEventListener('dragstart', (e) => {
+                dragSrc = item;
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', item.dataset.effectIndex);
+                setTimeout(() => item.classList.add('fx-dragging'), 0);
+            });
+
+            item.addEventListener('dragend', () => {
+                item.draggable = false;
+                item.classList.remove('fx-dragging');
+                container.querySelectorAll('.effect-item').forEach(el => el.classList.remove('fx-drag-over'));
+                dragSrc = null;
+            });
+        }
+
+        // ALL items are valid drop targets (system plugins stay fixed but hold their index slot)
+        item.addEventListener('dragover', (e) => {
+            if (!dragSrc || dragSrc === item) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            container.querySelectorAll('.effect-item').forEach(el => el.classList.remove('fx-drag-over'));
+            item.classList.add('fx-drag-over');
+        });
+
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('fx-drag-over');
+        });
+
+        item.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            item.classList.remove('fx-drag-over');
+            if (!dragSrc || dragSrc === item) return;
+
+            // Build full order from ALL items (including system plugins at their fixed positions)
+            const items = allEffectItems();
+            const srcIdx = parseInt(dragSrc.dataset.effectIndex, 10);
+            const dstIdx = parseInt(item.dataset.effectIndex, 10);
+
+            const order = items.map(el => parseInt(el.dataset.effectIndex, 10));
+            order.splice(order.indexOf(srcIdx), 1);
+            // Insert before dstIdx when dragging up, after when dragging down
+            const insertAt = order.indexOf(dstIdx) + (srcIdx > dstIdx ? 0 : 1);
+            order.splice(insertAt, 0, srcIdx);
+
+            // Determine endpoint
+            let endpoint;
+            if (player === 'clip') {
+                endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${clipId}/effects/reorder`;
+            } else if (player === 'video') {
+                endpoint = `${API_BASE}/api/player/video/effects/reorder`;
+            } else if (player === 'artnet') {
+                endpoint = `${API_BASE}/api/player/artnet/effects/reorder`;
+            }
+
+            try {
+                const resp = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_order: order })
+                });
+                const data = await resp.json();
+                if (!data.success) {
+                    showToast(`Reorder failed: ${data.message || data.error}`, 'error');
+                }
+            } catch (err) {
+                console.error('❌ Effect reorder error:', err);
+                showToast('Error reordering effects', 'error');
+            }
+
+            // Refresh the relevant panel
+            if (player === 'video') {
+                await refreshVideoEffects();
+            } else if (player === 'artnet') {
+                await refreshArtnetEffects();
+            } else {
+                await refreshClipEffects();
+            }
+        });
+    });
+}
 
 // ========================================
 // EFFECT RENDERING
@@ -4082,7 +4159,7 @@ function renderEffectItem(effect, index, player, clipId = null) {
     // Use custom transport UI for transport effect
     if (pluginId === 'transport' && typeof window.renderTransportControls === 'function') {
         return `
-            <div class="effect-item system-plugin transport-effect" id="${player}-effect-${index}">
+            <div class="effect-item system-plugin transport-effect" id="${player}-effect-${index}" data-effect-index="${index}">
                 <div class="effect-header" onclick="toggleEffect('${player}', ${index}, event)">
                     <div class="effect-title">
                         <span class="effect-toggle"></span>
@@ -4117,18 +4194,23 @@ function renderEffectItem(effect, index, player, clipId = null) {
     const groupNames = Object.keys(groups);
     
     return `
-        <div class="effect-item ${isSystemPlugin ? 'system-plugin' : ''} ${!isEnabled ? 'effect-disabled' : ''}" id="${player}-effect-${index}">
+        <div class="effect-item ${isSystemPlugin ? 'system-plugin' : ''} ${!isEnabled ? 'effect-disabled' : ''}" id="${player}-effect-${index}" data-effect-index="${index}">
             <div class="effect-header" onclick="toggleEffect('${player}', ${index}, event)">
                 <div class="effect-title">
+                    ${!isSystemPlugin ? '<span class="effect-drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">⠿</span>' : ''}
                     <span class="effect-toggle"></span>
                     <span>${metadata.name || effect.plugin_id}${isSystemPlugin ? ' 🔒' : ''}</span>
                 </div>
                 <div class="effect-actions">
                     ${!isSystemPlugin ? `
-                        <span class="effect-enable-switch" onclick="toggleEffectEnabledClick('${player}', ${index}, event)">
-                            <input type="checkbox" ${isEnabled ? 'checked' : ''}>
-                            <span class="effect-enable-slider"></span>
-                        </span>
+                        <div class="midi-param-frame" data-param-path="${player}.effect.${index}.enabled" data-param-type="boolean" data-param-name="Enable" data-param-min="0" data-param-max="1"
+                             onclick="if(document.body.classList.contains('midi-learn-mode')) { event.stopPropagation(); window.midiLearnManager?.selectFrame(this); }">
+                            <span class="effect-enable-switch" onclick="toggleEffectEnabledClick('${player}', ${index}, event)">
+                                <input type="checkbox" ${isEnabled ? 'checked' : ''}>
+                                <span class="effect-enable-slider"></span>
+                            </span>
+                            <span class="midi-addr-badge"></span>
+                        </div>
                         <button class="btn btn-sm btn-danger btn-icon" onclick="removeEffect('${player}', ${index}, event)">🗑️</button>
                     ` : ''}
                 </div>
@@ -4183,9 +4265,11 @@ window.toggleEffectEnabledClick = async function(player, index, event) {
     
     try {
         // Determine endpoint based on player type
+        // Use layer's clip_id if a layer is selected (same as what refreshClipEffects uses)
+        const targetClipId = selectedLayerClipId || selectedClipId;
         let endpoint;
         if (player === 'clip') {
-            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${selectedClipId}/effects/${index}/toggle`;
+            endpoint = `${API_BASE}/api/player/${selectedClipPlayerType}/clip/${targetClipId}/effects/${index}/toggle`;
         } else if (player === 'video') {
             endpoint = `${API_BASE}/api/player/video/effects/${index}/toggle`;
         } else if (player === 'artnet') {
@@ -4438,11 +4522,11 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
         }
     }
     
-    // Hide sequence button for system plugins
+    // Hide sequence button for system plugins or parameters with dynamic: false
     const paramLabel = (param.label || param.name).replace(/'/g, "\\'").replace(/"/g, '&quot;');
     // Extract actual value (handle metadata wrapper)
     const actualValue = (currentValue !== undefined && typeof currentValue === 'object' && currentValue._value !== undefined) ? currentValue._value : value;
-    const sequenceBtn = isSystemPlugin ? '' : `<button class="sequence-btn" 
+    const sequenceBtn = (isSystemPlugin || param.dynamic === false) ? '' : `<button class="sequence-btn" 
         data-param-path="${paramPath}" 
         data-param-label="${paramLabel}" 
         data-param-value="${actualValue}" 
@@ -4947,6 +5031,9 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             
         case 'COLOR':
             const colorPickerId = `${controlId}_colorpicker`;
+            // Restore saved range if present (used by sequence cycling to define min/max of hue 0–1 or palette fraction)
+            const colorRangeMin = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMin !== undefined ? currentValue._rangeMin : 0.0;
+            const colorRangeMax = currentValue !== undefined && typeof currentValue === 'object' && currentValue._rangeMax !== undefined ? currentValue._rangeMax : 1.0;
             control = `
                 <div class="parameter-grid-row param-row-color">
                     <div class="param-cogwheel">
@@ -4957,16 +5044,129 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                     </div>
                     <div class="param-slider">
                         <div id="${colorPickerId}" class="color-picker-wrapper"></div>
+                        <!-- Hidden anchor required by restoreInlineAudioControls to locate _audio/_timeline/_bpm_controls -->
+                        <div id="${controlId}" class="triple-slider-container" style="display:none;height:0;overflow:hidden;margin:0;padding:0"></div>
+                    </div>
+                    <!-- Audio Reactive Inline Controls (hidden by default) -->
+                    <div id="${controlId}_audio_controls" class="param-dynamic-settings audio-sequence" style="display: none;">
+                        <div class="dynamic-settings-content">
+                            <div class="audio-inline-bands">
+                                <button class="audio-band-btn-inline active" data-band="bass" data-param="${paramPath}" title="Bass">B</button>
+                                <button class="audio-band-btn-inline" data-band="mid" data-param="${paramPath}" title="Mid">M</button>
+                                <button class="audio-band-btn-inline" data-band="treble" data-param="${paramPath}" title="Treble">T</button>
+                            </div>
+                            <div class="audio-inline-directions">
+                                <button class="audio-dir-btn-inline active" data-direction="rise-from-max" data-param="${paramPath}" title="Rise from max">◄</button>
+                                <button class="audio-dir-btn-inline" data-direction="rise-from-min" data-param="${paramPath}" title="Rise from min">►</button>
+                                <button class="audio-dir-btn-inline" data-direction="beat-forward" data-param="${paramPath}" title="Beat forward">+</button>
+                                <button class="audio-dir-btn-inline" data-direction="beat-backward" data-param="${paramPath}" title="Beat backward">−</button>
+                            </div>
+                            <div id="${controlId}_attack_release" class="audio-inline-knob"></div>
+                        </div>
+                    </div>
+                    <!-- Timeline Inline Controls (hidden by default) -->
+                    <div id="${controlId}_timeline_controls" class="param-dynamic-settings timeline-sequence" style="display: none;">
+                        <div class="dynamic-settings-content">
+                            <div class="timeline-inline-playback">
+                                <button class="timeline-play-btn-inline" data-direction="backward" data-param="${paramPath}" title="Play Backward">◄</button>
+                                <button class="timeline-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">⏸</button>
+                                <button class="timeline-play-btn-inline" data-direction="forward" data-param="${paramPath}" title="Play Forward">►</button>
+                            </div>
+                            <div class="timeline-inline-loop">
+                                <select class="timeline-loop-dropdown-inline" data-param="${paramPath}">
+                                    <option value="once">Once</option>
+                                    <option value="loop">Loop</option>
+                                    <option value="ping_pong">Ping-Pong</option>
+                                    <option value="random">Random</option>
+                                </select>
+                            </div>
+                            <div class="timeline-inline-duration">
+                                <input type="number" class="timeline-duration-input-inline" data-param="${paramPath}"
+                                       value="5.0" min="0.1" max="300" step="0.1" title="Duration (seconds)">s
+                            </div>
+                            <div id="${controlId}_timeline_speed" class="timeline-inline-knob"></div>
+                        </div>
+                    </div>
+                    <!-- BPM Inline Controls (hidden by default) -->
+                    <div id="${controlId}_bpm_controls" class="param-dynamic-settings bpm-sequence" style="display: none;">
+                        <div class="dynamic-settings-content">
+                            <div class="bpm-inline-playback">
+                                <button class="bpm-play-btn-inline" data-direction="backward" data-param="${paramPath}" title="Play Backward">◄</button>
+                                <button class="bpm-play-btn-inline" data-direction="pause" data-param="${paramPath}" title="Pause">⏸</button>
+                                <button class="bpm-play-btn-inline" data-direction="forward" data-param="${paramPath}" title="Play Forward">►</button>
+                            </div>
+                            <div class="bpm-inline-loop">
+                                <select class="bpm-loop-dropdown-inline" data-param="${paramPath}">
+                                    <option value="once">Once</option>
+                                    <option value="loop">Loop</option>
+                                    <option value="ping_pong">Ping-Pong</option>
+                                    <option value="random">Random</option>
+                                </select>
+                            </div>
+                            <div class="bpm-inline-division">
+                                <select class="bpm-division-dropdown-inline" data-param="${paramPath}" title="Beat Division">
+                                    <option value="0.0625">1/16</option>
+                                    <option value="0.125">1/8</option>
+                                    <option value="0.25">1/4</option>
+                                    <option value="0.5">1/2</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="4">4</option>
+                                    <option value="8" selected>8</option>
+                                    <option value="16">16</option>
+                                    <option value="32">32</option>
+                                </select>
+                            </div>
+                            <div id="${controlId}_bpm_speed" class="bpm-inline-knob"></div>
+                        </div>
                     </div>
                 </div>
             `;
             
-            // Initialize color picker after render
+            // Initialize color picker and range slider after render
             setTimeout(() => {
                 if (!document.getElementById(colorPickerId)) return;
-                const picker = new ColorPicker(colorPickerId, value || param.default || '#FFFFFF', (hexColor) => {
-                    updateParameter(player, effectIndex, param.name, hexColor);
-                });
+                const picker = new ColorPicker(
+                    colorPickerId,
+                    value || param.default || '#FFFFFF',
+                    (hexColor) => {
+                        updateParameter(player, effectIndex, param.name, hexColor);
+                    },
+                    (paletteColors) => {
+                        // Notify backend so sequence cycling uses palette colors instead of hue
+                        if (paramUid) {
+                            fetch('/api/sequences/color-mode', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ param_uid: paramUid, palette_colors: paletteColors })
+                            }).catch(() => {});
+                        }
+                    },
+                    {
+                        showRangeHandles: true,
+                        rangeMin: colorRangeMin,
+                        rangeMax: colorRangeMax,
+                        onRangeChange: (() => {
+                            let _debounce = null;
+                            return (rangeMin, rangeMax) => {
+                                clearTimeout(_debounce);
+                                _debounce = setTimeout(() => {
+                                    if (window.sequenceManager && paramUid) {
+                                        const seq = window.sequenceManager.sequences?.find(
+                                            s => s.target_parameter === paramUid
+                                        );
+                                        if (seq) {
+                                            window.sequenceManager.updateSequenceInline(paramUid, {
+                                                min_value: rangeMin,
+                                                max_value: rangeMax
+                                            });
+                                        }
+                                    }
+                                }, 600);
+                            };
+                        })()
+                    }
+                );
                 // Store reference for cleanup
                 if (!window.colorPickers) window.colorPickers = {};
                 window.colorPickers[colorPickerId] = picker;
@@ -5050,13 +5250,21 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
             }
     }
     
-    return control;
+    return `<div class="midi-param-frame"
+         data-param-path="${paramPath}"
+         data-param-name="${(param.label || param.name).replace(/"/g, '&quot;')}"
+         data-param-min="${param.min ?? 0}"
+         data-param-max="${param.max ?? 100}"
+         onclick="if(document.body.classList.contains('midi-learn-mode')) { event.stopPropagation(); window.midiLearnManager?.selectFrame(this); }">
+    ${control}
+    <span class="midi-addr-badge"></span>
+</div>`;
 }
 
 // Make renderParameterControl globally available (needed by transport-ui.js)
 window.renderParameterControl = renderParameterControl;
 
-// Debounce timer für Parameter-Updates
+// Debounce timer for parameter updates
 const parameterUpdateTimers = {};
 
 /**
@@ -5119,7 +5327,7 @@ window.resetGeneratorParameterToDefaultTriple = function(event, paramName, defau
 
 window.updateParameter = async function(player, effectIndex, paramName, value, valueDisplayId = null, paramUid = null) {
     try {
-        // Sofort UI-Update für responsives Feedback mit korrekter Formatierung
+        // Immediate UI update for responsive feedback with correct formatting
         if (valueDisplayId) {
             const displayElement = document.getElementById(valueDisplayId);
             if (displayElement) {
@@ -5571,7 +5779,7 @@ window.refreshPlaylistModal = async function() {
                         <button type="button" 
                                 class="btn btn-danger btn-delete" 
                                 onclick="deletePlaylist('${playlist.name}', event)"
-                                title="Playlist löschen">
+                                title="Delete playlist">
                             🗑️
                         </button>
                     </div>
@@ -5711,11 +5919,11 @@ window.deletePlaylist = async function(playlistName, event) {
             const data = await response.json();
             
             if (data.success) {
-                showToast(`Playlist "${playlistName}" gelöscht`, 'success');
+                showToast(`Playlist "${playlistName}" deleted`, 'success');
                 // Refresh the playlist list without closing modal
                 await refreshPlaylistModal();
             } else {
-                showToast(`Fehler beim Löschen: ${data.message}`, 'error');
+                showToast(`Error deleting: ${data.message}`, 'error');
                 // Reset button on error
                 button.innerHTML = originalText;
                 button.classList.remove('btn-warning');
@@ -5724,7 +5932,7 @@ window.deletePlaylist = async function(playlistName, event) {
             }
         } catch (error) {
             console.error('❌ Error deleting playlist:', error);
-            showToast('Fehler beim Löschen der Playlist', 'error');
+            showToast('Error deleting playlist', 'error');
             // Reset button on error
             button.innerHTML = originalText;
             button.classList.remove('btn-warning');
@@ -5877,7 +6085,7 @@ window.refreshSnapshotModal = async function() {
                         <button type="button" 
                                 class="btn btn-danger btn-delete" 
                                 onclick="deleteSnapshot('${snapshot.filename}', event)"
-                                title="Snapshot löschen">
+                                title="Delete snapshot">
                             🗑️
                         </button>
                     </div>
@@ -6150,13 +6358,20 @@ function renderSelectedClipLayers() {
                         ${!isBaseLayer ? '<span class="layer-drag-handle" title="Drag to reorder">☰</span>' : ''}
                         🎞️ Layer ${layer.layer_id} ${isBaseLayer ? '(Base Clip)' : ''}
                     </span>
-                    ${!isBaseLayer ? `
+                    <div class="layer-header-actions">
+                        <button class="btn btn-sm layer-visibility-toggle ${isEnabled ? 'enabled' : 'layer-off'}"
+                                onclick="toggleClipLayerEnabled('${selectedClipId}', ${layer.layer_id}, ${!isEnabled}, event)"
+                                title="${isEnabled ? 'Disable layer (skip rendering)' : 'Enable layer (resume rendering)'}">
+                            ${isEnabled ? '👁️' : '🚫'}
+                        </button>
+                        ${!isBaseLayer ? `
                         <button class="btn btn-sm btn-danger layer-remove" 
                                 onclick="removeLayerFromClip('${selectedClipId}', ${layer.layer_id}, event)"
                                 title="Remove Layer">
-                            ❌
+                            🗑️
                         </button>
-                    ` : '<span class="layer-lock-icon">🔒</span>'}
+                        ` : '<span class="layer-lock-icon">🔒</span>'}
+                    </div>
                 </div>
                 <div class="layer-source">
                     ${sourceName}
@@ -6662,6 +6877,48 @@ window.updateLayerOpacity = async function(playerId, layerId, value) {
 /**
  * Toggle layer enabled/disabled
  */
+window.toggleClipLayerEnabled = async function(clipId, layerId, newEnabled, e) {
+    e.stopPropagation();
+
+    try {
+        const response = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: newEnabled })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            // Update UI immediately without full reload
+            const card = document.querySelector(`.layer-card[data-layer-id="${layerId}"]`);
+            if (card) {
+                if (newEnabled) {
+                    card.classList.remove('disabled');
+                } else {
+                    card.classList.add('disabled');
+                }
+                const btn = card.querySelector('.layer-visibility-toggle');
+                if (btn) {
+                    btn.innerHTML = newEnabled ? '👁️' : '🚫';
+                    btn.title = newEnabled ? 'Disable layer (skip rendering)' : 'Enable layer (resume rendering)';
+                    btn.classList.toggle('enabled', newEnabled);
+                    btn.classList.toggle('layer-off', !newEnabled);
+                    btn.setAttribute('onclick', `toggleClipLayerEnabled('${clipId}', ${layerId}, ${!newEnabled}, event)`);
+                }
+            }
+            debug.log(`✅ Layer ${layerId} ${newEnabled ? 'enabled' : 'disabled'}`);
+        } else {
+            showToast(`Failed to toggle layer: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        debug.error('Error toggling layer:', error);
+        showToast('Error toggling layer', 'error');
+    }
+};
+
+/**
+ * Toggle layer enabled/disabled
+ */
 window.toggleLayer = async function(playerId, layerId) {
     // OLD: Now using clip-based layers
     const newEnabled = true; // Default value
@@ -6689,7 +6946,7 @@ window.toggleLayer = async function(playerId, layerId) {
 
 /**
  * Setup drag and drop for layer reordering (clip-based layers)
- * Drag nur über Burger-Icon aktivierbar
+ * Drag only activatable via burger icon
  */
 function setupLayerDragAndDrop() {
     const container = document.getElementById('layerStackItems');
@@ -6929,6 +7186,15 @@ function showPlaylistContextMenu(x, y, playlistId, index, fileItem) {
             <span>🗑️ Remove Clip</span>
             <small>Delete from playlist</small>
         </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" data-action="updateThumbnail">
+            <span>📷 Update Thumbnail</span>
+            <small>Capture current frame as thumbnail</small>
+        </div>
+        <div class="context-menu-item" data-action="recordClip">
+            <span>⏺️ Record Clip</span>
+            <small>Export clip with effects to .npy</small>
+        </div>
     `;
     
     document.body.appendChild(menu);
@@ -6975,6 +7241,12 @@ function showPlaylistContextMenu(x, y, playlistId, index, fileItem) {
                 case 'remove':
                     await removePlaylistItem(playlistId, index);
                     break;
+                case 'updateThumbnail':
+                    await updateClipThumbnail(playlistId, fileItem);
+                    break;
+                case 'recordClip':
+                    await recordClip(playlistId, fileItem);
+                    break;
             }
         } catch (error) {
             console.error(`Error executing ${action}:`, error);
@@ -6992,6 +7264,88 @@ function showPlaylistContextMenu(x, y, playlistId, index, fileItem) {
         }
     };
     setTimeout(() => document.addEventListener('click', closeHandler), 0);
+}
+
+// ── Update Thumbnail ──────────────────────────────────────────────────────────
+async function updateClipThumbnail(playlistId, fileItem) {
+    if (!fileItem.path) {
+        showToast('No file path for this clip', 'error');
+        return;
+    }
+    try {
+        const resp = await fetch(`${API_BASE}/api/files/thumbnail/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_path: fileItem.path, player_id: playlistId }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Update failed');
+
+        // Bust the browser cache on all thumbnail images for this path
+        const encodedPath = encodeURIComponent(fileItem.path);
+        const cacheBuster = `?t=${data.timestamp || Date.now()}`;
+        document.querySelectorAll(`[style*="${encodedPath}"]`).forEach(el => {
+            el.style.backgroundImage =
+                `url('${API_BASE}/api/files/thumbnail/${encodedPath}${cacheBuster}')`;
+        });
+        document.querySelectorAll(`img[src*="${encodedPath}"]`).forEach(img => {
+            img.src = `${API_BASE}/api/files/thumbnail/${encodedPath}${cacheBuster}`;
+        });
+
+        showToast(`📷 Thumbnail updated for ${fileItem.name}`, 'success');
+    } catch (err) {
+        console.error('updateClipThumbnail error:', err);
+        showToast(`Error updating thumbnail: ${err.message}`, 'error');
+    }
+}
+
+// ── Record Clip ───────────────────────────────────────────────────────────────
+async function recordClip(playlistId, fileItem) {
+    const clipName = fileItem.name || 'export';
+    try {
+        const resp = await fetch(`${API_BASE}/api/player/${playlistId}/record`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ output_name: clipName }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Failed to start recording');
+
+        const jobId = data.job_id;
+        showToast(`⏺️ Recording "${clipName}" — will save when clip finishes playing`, 'info');
+
+        // Poll until done
+        const pollInterval = setInterval(async () => {
+            try {
+                const statusResp = await fetch(
+                    `${API_BASE}/api/player/${playlistId}/record/status`
+                );
+                const status = await statusResp.json();
+                if (!status.success) {
+                    clearInterval(pollInterval);
+                    showToast(`Recording error: ${status.error}`, 'error');
+                    return;
+                }
+                if (status.done) {
+                    clearInterval(pollInterval);
+                    if (status.error) {
+                        showToast(`❌ Recording failed: ${status.error}`, 'error');
+                    } else {
+                        const shortPath = status.output_path
+                            ? status.output_path.replace(/\\/g, '/').split('/').slice(-2).join('/')
+                            : 'video/exports';
+                        showToast(`✅ Clip exported: ${shortPath}`, 'success');
+                    }
+                }
+            } catch (pollErr) {
+                clearInterval(pollInterval);
+                console.error('Recording poll error:', pollErr);
+            }
+        }, 1500);
+    } catch (err) {
+        console.error('recordClip error:', err);
+        showToast(`Error: ${err.message}`, 'error');
+    }
 }
 
 async function clonePlaylistItem(playlistId, index, fileItem) {

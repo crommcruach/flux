@@ -1,6 +1,6 @@
-"""
+﻿"""
 Video Converter Module - Universal Video Converter mit HAP Codec Support
-Unterstützt Batch-Processing, Auto-Resize, Loop-Optimierung, Multi-Resolution
+Supports batch processing, auto-resize, loop optimization, multi-resolution
 """
 
 import os
@@ -68,7 +68,7 @@ def _scale_frame_fit(frame: np.ndarray, target_w: int, target_h: int) -> np.ndar
 
 
 class OutputFormat(Enum):
-    """Unterstützte Output-Formate"""
+    """Supported output formats"""
     HAP = "hap"
     HAP_ALPHA = "hap_alpha"
     HAP_Q = "hap_q"
@@ -94,7 +94,7 @@ class ConversionJob:
     target_size: Optional[Tuple[int, int]] = None
     resize_mode: ResizeMode = ResizeMode.NONE
     optimize_loop: bool = False
-    bitrate: Optional[str] = None  # z.B. "5M" für H.264
+    bitrate: Optional[str] = None  # e.g. "5M" for H.264
     fps: Optional[int] = None
     
     
@@ -129,7 +129,7 @@ class VideoConverter:
         self._verify_ffmpeg()
         
     def _verify_ffmpeg(self):
-        """Überprüfe ob FFmpeg verfügbar ist und HAP Codec unterstützt"""
+        """Check if FFmpeg is available and supports HAP codec"""
         try:
             # Check FFmpeg
             result = subprocess.run(
@@ -212,7 +212,7 @@ class VideoConverter:
     
     def _build_ffmpeg_command(self, job: ConversionJob) -> List[str]:
         """
-        Baue FFmpeg-Command für Conversion-Job
+        Build FFmpeg command for conversion job
         
         Args:
             job: ConversionJob
@@ -243,7 +243,7 @@ class VideoConverter:
                 # Simple stretch
                 filters.append(f"scale={width}:{height}")
         
-        # Loop Optimization (für nahtlose Loops)
+        # Loop optimization (for seamless loops)
         if job.optimize_loop:
             # Fade out last frames and fade in first frames for smooth loop
             filters.append("fade=t=out:st=0:d=0.5,fade=t=in:st=0:d=0.5")
@@ -579,7 +579,7 @@ class VideoConverter:
         Batch-Convert mehrere Videos
         
         Args:
-            input_pattern: Glob pattern für Input-Files (z.B. "kanal_1/*.mp4")
+            input_pattern: Glob pattern for input files (e.g. "kanal_1/*.mp4")
             output_dir: Output-Verzeichnis
             format: Output-Format
             target_size: Optional target size (width, height)

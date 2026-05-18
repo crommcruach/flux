@@ -1,4 +1,4 @@
-<!-- Einheitliche Menu-Bar für alle Seiten -->
+<!-- Unified menu bar for all pages -->
 <div class="menu-bar d-flex align-items-center justify-content-between flex-nowrap px-2" style="gap: 1.2rem; flex-wrap: nowrap;">
     <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem;">
         <img src="/static/logo.svg" alt="Flux Logo"
@@ -24,6 +24,16 @@
             <button class="btn btn-success btn-sm" onclick="SessionManager.saveSession()" title="Session speichern">💾</button>
             <button class="btn btn-warning btn-sm" onclick="SessionManager.showLoadModal()" title="Session oder Snapshot laden">📂</button>
             <button class="btn btn-info btn-sm" onclick="SessionManager.createSnapshot()" title="Schneller Snapshot">📸</button>
+        </div>
+
+        <!-- MIDI Learn Toggle -->
+        <div style="display: flex; align-items: center; gap: 0.4rem; margin-left: 0.8rem; padding-left: 0.8rem; border-left: 2px solid var(--border-color);">
+            <button id="midiLearnToggle"
+                    class="btn btn-outline-warning btn-sm"
+                    onclick="window.midiLearnManager?.toggleLearnMode()"
+                    title="MIDI Learn Mode (Ctrl+M)"
+                    style="font-size: 0.75rem; padding: 2px 8px;">MIDI</button>
+            <span class="badge bg-info" id="midiMappingCount" style="display: none; font-size: 0.7rem;">0</span>
         </div>
         
         <div style="display: flex; align-items: center; gap: 2rem; margin-left: 2.2rem;">

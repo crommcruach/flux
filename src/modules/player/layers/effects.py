@@ -38,21 +38,17 @@ def apply_layer_effects(mgr, layer, frame, player_name: str = "", stay_on_gpu: b
     else:
         h, w = frame.shape[:2]
 
-    enabled_effects = [e for e in layer.effects if e.get('enabled', True)]
-    if not enabled_effects:
-        if _frame_is_gpu:
-            return frame
-        if stay_on_gpu:
-            _gf = get_texture_pool().acquire(w, h)
-            _gf.upload(frame)
-            return _gf
-        return frame
-
-    # Filter mathematical no-ops to avoid unnecessary GPU upload/download cycles.
-    enabled_effects = [
-        e for e in enabled_effects
-        if not (hasattr(e['instance'], 'is_noop') and e['instance'].is_noop())
-    ]
+    # Single-pass filter: skip disabled effects AND mathematical no-ops.
+    # Merges what was previously two list comprehensions into one loop to
+    # halve the allocation and iteration overhead in the per-frame hot path.
+    enabled_effects = []
+    for _e in layer.effects:
+        if not _e.get('enabled', True):
+            continue
+        _inst = _e['instance']
+        if hasattr(_inst, 'is_noop') and _inst.is_noop():
+            continue
+        enabled_effects.append(_e)
     if not enabled_effects:
         if _frame_is_gpu:
             return frame
@@ -263,7 +259,10 @@ def load_layer_effects_from_registry(mgr, layer, player_name: str = "") -> None:
                 )
             else:
                 if hasattr(plugin_instance, '_frame_source'):
-                    plugin_instance._frame_source = layer.source
+                    # Keep _frame_source as None so _initialize_state sees source_changed=True
+                    # on first frame. If we set it to layer.source here, _initialize_state
+                    # would skip initialization (source_changed=False) and leave out_point=0.
+                    plugin_instance._frame_source = None
                 debug_transport(
                     logger,
                     f"🎬 [{player_name}] Transport restored from saved params for "

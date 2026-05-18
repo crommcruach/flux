@@ -1,5 +1,5 @@
 """
-Points Loader - Lädt und verarbeitet Punkte-Konfigurationen
+Points Loader - Loads and processes points configurations
 """
 import json
 import numpy as np
@@ -16,16 +16,16 @@ logger = get_logger(__name__)
 
 
 class PointsLoader:
-    """Lädt Points-JSON und berechnet Universe-Mapping."""
+    """Loads points JSON and calculates universe mapping."""
     
     @staticmethod
     def load_points(points_json_path, validate_bounds=True):
         """
-        Lädt Points-Konfiguration aus JSON-Datei.
+        Loads points configuration from JSON file.
         
         Args:
             points_json_path: Pfad zur JSON-Datei
-            validate_bounds: Ob Punkte auf Canvas-Größe validiert werden sollen
+            validate_bounds: Whether to validate points against canvas size
             
         Returns:
             dict: {
@@ -41,7 +41,7 @@ class PointsLoader:
         with open(points_json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        # Canvas-Größe
+        # Canvas size
         canvas = data.get('canvas', {})
         canvas_width = canvas.get('width', DEFAULT_CANVAS_WIDTH)
         canvas_height = canvas.get('height', DEFAULT_CANVAS_HEIGHT)
@@ -63,7 +63,7 @@ class PointsLoader:
             obj_id = obj.get('id', f'object-{obj_idx}')
             points = obj.get('points', [])
             
-            # Validiere Punkte falls gewünscht
+            # Validate points if requested
             if validate_bounds:
                 valid_points = []
                 for point in points:
@@ -72,7 +72,7 @@ class PointsLoader:
                         if 0 <= x < canvas_width and 0 <= y < canvas_height:
                             valid_points.append((x, y))
                         else:
-                            logger.debug(f"Punkt außerhalb Canvas: ({x}, {y})")
+                            logger.debug(f"Point outside canvas: ({x}, {y})")
             else:
                 # Keine Validierung - nutze alle Punkte
                 valid_points = [(p.get('x'), p.get('y')) for p in points 
@@ -85,15 +85,15 @@ class PointsLoader:
             obj_start_channel = current_channel + universe_offset
             obj_end_channel = obj_start_channel + obj_channels
             
-            # Prüfe ob Objekt über 8-Universen-Grenze geht
+            # Check if object exceeds 8-universe boundary
             if obj_start_channel < max_channels_8_universes and obj_end_channel > max_channels_8_universes:
-                # Objekt würde Grenze überschreiten -> verschiebe komplett zu Universum 9
+                # Object would cross boundary -> move entirely to universe 9
                 universe_offset = max_channels_8_universes - current_channel
                 obj_start_channel = current_channel + universe_offset
                 obj_end_channel = obj_start_channel + obj_channels
-                logger.debug(f"Objekt '{obj_id}' verschoben zu Universum 9+ (würde Grenze überschreiten)")
+                logger.debug(f"Object '{obj_id}' moved to universe 9+ (would cross boundary)")
             
-            # Füge Punkte hinzu und speichere Universe-Mapping
+            # Add points and save universe mapping
             for point in valid_points:
                 point_list.append(point)
                 point_idx = len(point_list) - 1
@@ -101,7 +101,7 @@ class PointsLoader:
             
             current_channel += obj_channels
         
-        # Als Numpy-Array für schnelleren Zugriff
+        # As numpy array for faster access
         point_coords = np.array(point_list, dtype=np.int32) if point_list else np.array([])
         total_points = len(point_list)
         total_channels = total_points * channels_per_point + universe_offset

@@ -97,6 +97,11 @@ class GLFWDisplay:
         self._ready_event = threading.Event()
         # Kept for backward-compat with display_output.send_frame() logging.
         self._frame_seq: int = 0
+        # Tracks current fullscreen state (may differ from self._fullscreen after toggle).
+        self._is_fullscreen: bool = False
+        # Saved windowed position/size for restoring when leaving fullscreen.
+        self._windowed_x: int = 100
+        self._windowed_y: int = 100
 
     @classmethod
     def instance(cls) -> 'GLFWDisplay':
@@ -123,6 +128,16 @@ class GLFWDisplay:
         self._title = title
         self._monitor_index = monitor_index
         self._fullscreen = fullscreen
+
+        # Reset the ready event so start() blocks until the new thread signals.
+        self._ready_event.clear()
+
+        # Wait for any previous event-loop thread to fully exit (it calls
+        # glfw.terminate() in _shutdown(), which must complete before the
+        # new thread calls glfw.init() again).
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=5.0)
+        self._thread = None
 
         self._thread = threading.Thread(
             target=self._event_loop, daemon=True, name="GLFWDisplay"
@@ -239,13 +254,6 @@ class GLFWDisplay:
                 # limiting without blocking on compositor events.
                 _glfw_mod.poll_events()
 
-                # If Windows iconified the window (e.g. clicking another monitor
-                # app, Win+D, taskbar), restore it immediately.  This must be done
-                # from the event-loop thread — not from a GLFW callback — to avoid
-                # corrupting GLFW's internal window state.
-                if _glfw_mod.get_window_attrib(self._window, _glfw_mod.ICONIFIED):
-                    _glfw_mod.restore_window(self._window)
-
                 self._render()
                 time.sleep(1.0 / 60)  # cap at ~60 fps; player pushes at its own rate
         except Exception as exc:
@@ -259,7 +267,8 @@ class GLFWDisplay:
             raise RuntimeError("glfw.init() failed")
 
         _glfw_mod.window_hint(_glfw_mod.CLIENT_API, _glfw_mod.NO_API)
-        _glfw_mod.window_hint(_glfw_mod.RESIZABLE, False)
+        # Allow resizing so Windows shows both the minimize and maximize buttons.
+        _glfw_mod.window_hint(_glfw_mod.RESIZABLE, True)
         # Keep the output window above all other windows at all times so it
         # is never hidden when another application receives focus.
         _glfw_mod.window_hint(_glfw_mod.FLOATING, True)
@@ -276,6 +285,17 @@ class GLFWDisplay:
         if not self._window:
             _glfw_mod.terminate()
             raise RuntimeError("glfw.create_window() returned None")
+
+        # Register Ctrl+F toggle-fullscreen key callback.
+        def _on_key(window, key, scancode, action, mods):
+            if (action == _glfw_mod.PRESS
+                    and key == _glfw_mod.KEY_F
+                    and (mods & _glfw_mod.MOD_CONTROL)):
+                self._toggle_fullscreen()
+        _glfw_mod.set_key_callback(self._window, _on_key)
+
+        # Track initial fullscreen state.
+        self._is_fullscreen = self._fullscreen
 
         # Pump the Win32 message loop so WM_CREATE is fully processed and the
         # HWND is backed by a real drawable surface before we hand it to wgpu.
@@ -308,13 +328,7 @@ class GLFWDisplay:
                 import ctypes.wintypes
                 _user32 = ctypes.windll.user32
 
-                # ── 1. Remove WS_MINIMIZEBOX so Windows can never minimize the window ──
-                GWL_STYLE    = -16
-                WS_MINIMIZEBOX = 0x00020000
-                style = _user32.GetWindowLongW(int(hwnd), GWL_STYLE)
-                _user32.SetWindowLongW(int(hwnd), GWL_STYLE, style & ~WS_MINIMIZEBOX)
-
-                # ── 2. HWND_TOPMOST: keep window above all non-topmost windows ─────────
+                # ── HWND_TOPMOST: keep window above all non-topmost windows ───────────
                 # HWND_TOPMOST must be passed as a pointer-sized value (-1), not c_int.
                 SWP_NOMOVE      = 0x0002
                 SWP_NOSIZE      = 0x0001
@@ -411,6 +425,47 @@ class GLFWDisplay:
             },
             primitive={"topology": "triangle-strip", "strip_index_format": "uint32"},
         )
+
+    def _toggle_fullscreen(self) -> None:
+        """Switch between fullscreen and windowed mode (called from the event-loop thread)."""
+        if self._window is None:
+            return
+        if self._is_fullscreen:
+            # → windowed: restore saved position and original resolution
+            _glfw_mod.set_window_monitor(
+                self._window, None,
+                self._windowed_x, self._windowed_y,
+                self._width, self._height, 0,
+            )
+            self._is_fullscreen = False
+            logger.info("GLFWDisplay: switched to windowed mode (%dx%d)", self._width, self._height)
+        else:
+            # Save current windowed position and size before going fullscreen.
+            win_x, win_y = _glfw_mod.get_window_pos(self._window)
+            self._windowed_x, self._windowed_y = win_x, win_y
+            win_w, win_h = _glfw_mod.get_window_size(self._window)
+            self._width, self._height = win_w, win_h
+            # Find the monitor the window is currently on (by window centre).
+            win_cx = win_x + win_w // 2
+            win_cy = win_y + win_h // 2
+            monitors = _glfw_mod.get_monitors()
+            monitor = monitors[0]  # fallback
+            for m in monitors:
+                mx, my = _glfw_mod.get_monitor_pos(m)
+                vm_check = _glfw_mod.get_video_mode(m)
+                if (mx <= win_cx < mx + vm_check.size.width and
+                        my <= win_cy < my + vm_check.size.height):
+                    monitor = m
+                    break
+            vm = _glfw_mod.get_video_mode(monitor)
+            _glfw_mod.set_window_monitor(
+                self._window, monitor,
+                0, 0, vm.size.width, vm.size.height, vm.refresh_rate,
+            )
+            self._is_fullscreen = True
+            logger.info("GLFWDisplay: switched to fullscreen (%dx%d)", vm.size.width, vm.size.height)
+        # Surface dimensions changed — reconfigure the swapchain.
+        self._surface_configured = False
 
     def _do_configure(self, device=None) -> None:
         """Call wgpuSurfaceConfigure on the underlying surface.

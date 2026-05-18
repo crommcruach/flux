@@ -9,10 +9,23 @@
  */
 
 class ColorPicker {
-    constructor(containerId, initialColor = '#ff0000', onChange = null) {
+    /**
+     * @param {string} containerId - The DOM element id to render into
+     * @param {string} initialColor - Initial hex color
+     * @param {function|null} onChange - Called with hex color on every change
+     * @param {function|null} onPaletteChange - Called with palette colors array when palette changes
+     */
+    constructor(containerId, initialColor = '#ff0000', onChange = null, onPaletteChange = null, options = {}) {
         this.containerId = containerId;
         this.onChange = onChange;
+        this.onPaletteChange = onPaletteChange;
         this._initializing = true;
+        this.currentMode = 'hsb';
+        // Range handles for sequence cycling
+        this.showRangeHandles = options.showRangeHandles || false;
+        this._rangeMin = options.rangeMin !== undefined ? options.rangeMin : 0.0;
+        this._rangeMax = options.rangeMax !== undefined ? options.rangeMax : 1.0;
+        this.onRangeChange = options.onRangeChange || null;
         
         // Color state
         this.hsb = { h: 0, s: 100, b: 100, a: 255 };
@@ -29,6 +42,13 @@ class ColorPicker {
         this.render();
         this.attachEventListeners();
         this._initializing = false;
+    }
+
+    /** Fire onPaletteChange callback with current palette colors (only in palette mode) */
+    _notifyPaletteChange() {
+        if (this.onPaletteChange && this.currentMode === 'palette') {
+            this.onPaletteChange([...this.paletteColors]);
+        }
     }
     
     render() {
@@ -57,6 +77,11 @@ class ColorPicker {
                             <div class="slider-container">
                                 <div class="color-slider hue-slider" data-slider="hue">
                                     <div class="slider-thumb" id="${this.containerId}_hueThumb"></div>
+                                </div>
+                                <div class="hue-range-track${this.showRangeHandles ? '' : ' hidden'}" id="${this.containerId}_hueRangeTrack">
+                                    <div class="hue-range-fill" id="${this.containerId}_hueRangeFill"></div>
+                                    <div class="hue-range-handle hue-range-min" id="${this.containerId}_hueRangeMin" title="Drag to set min hue for sequence cycling"></div>
+                                    <div class="hue-range-handle hue-range-max" id="${this.containerId}_hueRangeMax" title="Drag to set max hue for sequence cycling"></div>
                                 </div>
                             </div>
                             <span class="slider-value" id="${this.containerId}_hueValue">0°</span>
@@ -127,7 +152,24 @@ class ColorPicker {
                         <button class="palette-btn palette-btn-delete" id="${this.containerId}_deleteNamedBtn" title="Delete selected palette">🗑</button>
                     </div>
                     <div class="palette-grid" id="${this.containerId}_paletteGrid"></div>
-                    <div class="palette-actions">
+                    <!-- Inline color wheel for adding colors (hidden until + Add Color clicked) -->
+                    <div class="palette-wheel-picker" id="${this.containerId}_wheelPicker" style="display:none">
+                        <div class="palette-wheel-body">
+                            <canvas class="palette-wheel-canvas" id="${this.containerId}_wheelCanvas" width="150" height="150"></canvas>
+                            <div class="palette-wheel-right">
+                                <div class="palette-wheel-swatch" id="${this.containerId}_wheelSwatch"></div>
+                                <div class="palette-wheel-bright-label">V</div>
+                                <div class="palette-wheel-bright-track" id="${this.containerId}_brightTrack">
+                                    <div class="palette-wheel-bright-thumb" id="${this.containerId}_brightThumb"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="palette-wheel-actions">
+                            <button class="palette-btn palette-btn-confirm" id="${this.containerId}_wheelAddBtn">✓ Add</button>
+                            <button class="palette-btn" id="${this.containerId}_wheelCancelBtn">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="palette-actions" id="${this.containerId}_paletteActions">
                         <button class="palette-btn" id="${this.containerId}_addColorBtn">+ Add Color</button>
                         <button class="palette-btn" id="${this.containerId}_clearPalette">Clear</button>
                     </div>
@@ -206,7 +248,7 @@ class ColorPicker {
         
         // Palette actions
         document.getElementById(`${this.containerId}_addColorBtn`)?.addEventListener('click', () => {
-            this.startAddingToPalette();
+            this._showWheelPicker();
         });
         document.getElementById(`${this.containerId}_clearPalette`)?.addEventListener('click', (e) => {
             const btn = e.currentTarget;
@@ -229,6 +271,7 @@ class ColorPicker {
                 btn.onclick = null;
                 this.paletteColors = [];
                 this.renderPalette();
+                this._notifyPaletteChange();
             };
         });
         
@@ -241,6 +284,7 @@ class ColorPicker {
             if (colors) {
                 this.paletteColors = [...colors];
                 this.renderPalette();
+                this._notifyPaletteChange();
             }
         });
         
@@ -313,6 +357,72 @@ class ColorPicker {
 
         // Populate dropdown with any palettes already in window._colorPalettes
         this._refreshNamedSelect();
+
+        // Wire wheel picker buttons
+        document.getElementById(`${this.containerId}_wheelAddBtn`)?.addEventListener('click', () => {
+            this._addColorFromWheel();
+        });
+        document.getElementById(`${this.containerId}_wheelCancelBtn`)?.addEventListener('click', () => {
+            this._hideWheelPicker();
+        });
+
+        // Range handles for sequence cycling
+        if (this.showRangeHandles) {
+            this._attachRangeHandles();
+        }
+    }
+
+    _attachRangeHandles() {
+        const track = document.getElementById(`${this.containerId}_hueRangeTrack`);
+        const minHandle = document.getElementById(`${this.containerId}_hueRangeMin`);
+        const maxHandle = document.getElementById(`${this.containerId}_hueRangeMax`);
+        if (!track || !minHandle || !maxHandle) return;
+
+        this._updateRangeHandlePositions();
+
+        const makeHandleDragger = (isMin) => {
+            const handle = isMin ? minHandle : maxHandle;
+            let dragging = false;
+
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dragging = true;
+            });
+
+            const onMove = (e) => {
+                if (!dragging) return;
+                const rect = track.getBoundingClientRect();
+                let val = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                val = Math.round(val * 100) / 100;
+                if (isMin) {
+                    this._rangeMin = Math.min(val, this._rangeMax - 0.01);
+                } else {
+                    this._rangeMax = Math.max(val, this._rangeMin + 0.01);
+                }
+                this._updateRangeHandlePositions();
+                if (this.onRangeChange) this.onRangeChange(this._rangeMin, this._rangeMax);
+            };
+
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', () => { dragging = false; });
+        };
+
+        makeHandleDragger(true);
+        makeHandleDragger(false);
+    }
+
+    _updateRangeHandlePositions() {
+        const minHandle = document.getElementById(`${this.containerId}_hueRangeMin`);
+        const maxHandle = document.getElementById(`${this.containerId}_hueRangeMax`);
+        const fill = document.getElementById(`${this.containerId}_hueRangeFill`);
+        if (!minHandle || !maxHandle) return;
+        minHandle.style.left = `${this._rangeMin * 100}%`;
+        maxHandle.style.left = `${this._rangeMax * 100}%`;
+        if (fill) {
+            fill.style.left = `${this._rangeMin * 100}%`;
+            fill.style.width = `${(this._rangeMax - this._rangeMin) * 100}%`;
+        }
     }
     
     _refreshNamedSelect() {
@@ -359,11 +469,34 @@ class ColorPicker {
         container.querySelector(`[data-mode="${mode}"]`)?.classList.add('active');
         container.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
         document.getElementById(`${this.containerId}_${mode}Mode`)?.classList.add('active');
+        const previousMode = this.currentMode;
+        this.currentMode = mode;
         
         if (mode === 'palette') {
             this._refreshNamedSelect();
             this.renderPalette();
+            this._notifyPaletteChange();
+        } else if (previousMode === 'palette') {
+            // Leaving palette mode — clear palette cycling on the backend (send empty list)
+            if (this.onPaletteChange) this.onPaletteChange([]);
         }
+
+        // Range handles only visible in HSB mode
+        if (this.showRangeHandles) {
+            const track = document.getElementById(`${this.containerId}_hueRangeTrack`);
+            if (track) track.classList.toggle('hidden', mode !== 'hsb');
+        }
+    }
+
+    /** Returns the currently loaded palette colors (empty array if not in palette mode or no palette loaded) */
+    getPaletteColors() {
+        return this.paletteColors || [];
+    }
+
+    /** Returns the name of the currently selected named palette, or null */
+    getActivePaletteName() {
+        const sel = document.getElementById(`${this.containerId}_namedSelect`);
+        return sel?.value || null;
     }
     
     updateFromHsb() {
@@ -462,21 +595,141 @@ class ColorPicker {
     }
     
     startAddingToPalette() {
-        this.isAddingToPalette = true;
-        document.getElementById(`${this.containerId}_addToPaletteBtn`)?.classList.remove('hidden');
-        document.getElementById(`${this.containerId}_addToPaletteRgbBtn`)?.classList.remove('hidden');
-        this.switchMode('hsb');
+        // Legacy — now uses inline wheel picker
+        this._showWheelPicker();
     }
-    
-    addToPalette() {
-        const hex = this.getValue();
-        this.paletteColors.push(hex);
-        
-        this.isAddingToPalette = false;
-        document.getElementById(`${this.containerId}_addToPaletteBtn`)?.classList.add('hidden');
-        document.getElementById(`${this.containerId}_addToPaletteRgbBtn`)?.classList.add('hidden');
-        
-        this.switchMode('palette');
+
+    _showWheelPicker() {
+        const wheel = document.getElementById(`${this.containerId}_wheelPicker`);
+        const actions = document.getElementById(`${this.containerId}_paletteActions`);
+        if (!wheel) return;
+        wheel.style.display = 'block';
+        if (actions) actions.style.display = 'none';
+        // Init wheel state
+        this._wheelHsv = { h: 0, s: 1, v: 1 };
+        this._drawWheelCanvas();
+        this._attachWheelDrag();
+        this._updateWheelBrightness();
+        this._updateWheelSwatch();
+    }
+
+    _hideWheelPicker() {
+        const wheel = document.getElementById(`${this.containerId}_wheelPicker`);
+        const actions = document.getElementById(`${this.containerId}_paletteActions`);
+        if (wheel) wheel.style.display = 'none';
+        if (actions) actions.style.display = '';
+    }
+
+    _addColorFromWheel() {
+        if (!this._wheelHsv) return;
+        const { h, s, v } = this._wheelHsv;
+        const rgb = this.hsbToRgb(h, s * 100, v * 100);
+        const hex = this.rgbToHex(rgb.r, rgb.g, rgb.b);
+        this.paletteColors.push(hex + 'ff');
+        this.renderPalette();
+        this._notifyPaletteChange();
+        this._hideWheelPicker();
+    }
+
+    _drawWheelCanvas() {
+        const canvas = document.getElementById(`${this.containerId}_wheelCanvas`);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const r = Math.min(cx, cy) - 2;
+        // Draw hue+saturation wheel
+        const imgData = ctx.createImageData(canvas.width, canvas.height);
+        const data = imgData.data;
+        for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+                const dx = x - cx;
+                const dy = y - cy;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > r) { data[(y * canvas.width + x) * 4 + 3] = 0; continue; }
+                const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+                const sat = dist / r;
+                const rgb = this.hsbToRgb(angle, sat * 100, 100);
+                const i = (y * canvas.width + x) * 4;
+                data[i] = rgb.r; data[i+1] = rgb.g; data[i+2] = rgb.b; data[i+3] = 255;
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        // Draw selector dot
+        if (this._wheelHsv) {
+            const { h, s } = this._wheelHsv;
+            const angle = h * Math.PI / 180;
+            const dotX = cx + s * r * Math.cos(angle);
+            const dotY = cy + s * r * Math.sin(angle);
+            ctx.beginPath();
+            ctx.arc(dotX, dotY, 5, 0, Math.PI * 2);
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(dotX, dotY, 5, 0, Math.PI * 2);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+    }
+
+    _attachWheelDrag() {
+        const canvas = document.getElementById(`${this.containerId}_wheelCanvas`);
+        if (!canvas || canvas._wheelDragAttached) return;
+        canvas._wheelDragAttached = true;
+        let dragging = false;
+        const pick = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const r = Math.min(cx, cy) - 2;
+            // scale mouse to canvas coords
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const dx = (e.clientX - rect.left) * scaleX - cx;
+            const dy = (e.clientY - rect.top) * scaleY - cy;
+            const dist = Math.min(Math.sqrt(dx * dx + dy * dy), r);
+            const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+            this._wheelHsv.h = angle;
+            this._wheelHsv.s = dist / r;
+            this._drawWheelCanvas();
+            this._updateWheelSwatch();
+        };
+        canvas.addEventListener('mousedown', (e) => { dragging = true; pick(e); });
+        document.addEventListener('mousemove', (e) => { if (dragging) pick(e); });
+        document.addEventListener('mouseup', () => { dragging = false; });
+        // Brightness track
+        const track = document.getElementById(`${this.containerId}_brightTrack`);
+        if (track && !track._wheelDragAttached) {
+            track._wheelDragAttached = true;
+            let bdrag = false;
+            const pickB = (e) => {
+                const rect = track.getBoundingClientRect();
+                const v = 1 - Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+                this._wheelHsv.v = v;
+                this._updateWheelBrightness();
+                this._updateWheelSwatch();
+            };
+            track.addEventListener('mousedown', (e) => { bdrag = true; pickB(e); });
+            document.addEventListener('mousemove', (e) => { if (bdrag) pickB(e); });
+            document.addEventListener('mouseup', () => { bdrag = false; });
+        }
+    }
+
+    _updateWheelBrightness() {
+        const thumb = document.getElementById(`${this.containerId}_brightThumb`);
+        if (thumb && this._wheelHsv) {
+            thumb.style.top = `${(1 - this._wheelHsv.v) * 100}%`;
+        }
+    }
+
+    _updateWheelSwatch() {
+        if (!this._wheelHsv) return;
+        const { h, s, v } = this._wheelHsv;
+        const rgb = this.hsbToRgb(h, s * 100, v * 100);
+        const swatch = document.getElementById(`${this.containerId}_wheelSwatch`);
+        if (swatch) swatch.style.background = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
     }
     
     renderPalette() {
@@ -538,6 +791,15 @@ class ColorPicker {
     setPalette(colors) {
         this.paletteColors = colors;
         this.renderPalette();
+    }
+
+    getRangeMin() { return this._rangeMin; }
+    getRangeMax() { return this._rangeMax; }
+
+    setRange(min, max) {
+        this._rangeMin = Math.max(0, Math.min(1, min));
+        this._rangeMax = Math.max(0, Math.min(1, max));
+        this._updateRangeHandlePositions();
     }
     
     getPalette() {

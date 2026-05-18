@@ -10,6 +10,20 @@ _SHADER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'modul
 
 logger = logging.getLogger(__name__)
 
+# Known content aspect ratios for auto black-bar removal.
+# Maps the SELECT option string → float ratio (width / height).
+_SOURCE_AR: dict[str, float] = {
+    '4:3':    4 / 3,
+    '3:2':    3 / 2,
+    '5:4':    5 / 4,
+    '1:1':    1.0,
+    '16:9':   16 / 9,
+    '16:10':  16 / 10,
+    '2.35:1': 2.35,
+    '2.39:1': 2.39,
+    '9:16':   9 / 16,
+}
+
 
 class TransformEffect(PluginBase):
     """
@@ -123,6 +137,27 @@ class TransformEffect(PluginBase):
             'group': 'Rotation',
             'description': 'Rotation um Z-Achse in Grad (2D-Rotation im Uhrzeigersinn)'
         },
+        # Auto Fit Group
+        {
+            'name': 'source_ar',
+            'label': 'Source AR',
+            'type': ParameterType.SELECT,
+            'default': 'off',
+            'options': ['off', '4:3', '3:2', '5:4', '1:1', '16:9', '16:10', '2.35:1', '2.39:1', '9:16'],
+            'group': 'Auto Fit',
+            'dynamic': False,
+            'description': 'Actual content aspect ratio baked into the encoded frame — enables automatic black-bar removal'
+        },
+        {
+            'name': 'ar_mode',
+            'label': 'Mode',
+            'type': ParameterType.SELECT,
+            'default': 'fill',
+            'options': ['fill', 'stretch'],
+            'group': 'Auto Fit',
+            'dynamic': False,
+            'description': 'fill: uniform zoom, removes bars, may crop opposite edges slightly | stretch: axis-only scale, removes bars, distorts AR'
+        },
         # Anchor Group
         {
             'name': 'anchor_x',
@@ -173,6 +208,8 @@ class TransformEffect(PluginBase):
         self.anchor_x = self._get_param_value('anchor_x', 50.0)
         self.anchor_y = self._get_param_value('anchor_y', 50.0)
         self.anchor_z = config.get('anchor_z', 50.0)
+        self.source_ar = self._get_param_value('source_ar', 'off')
+        self.ar_mode = self._get_param_value('ar_mode', 'fill')
 
     def process_frame(self, frame, **kwargs):
         """GPU-native plugin — rendered via GLSL shader. This stub is never called on live frames."""
@@ -194,6 +231,33 @@ class TransformEffect(PluginBase):
         scale_xy = self.scale_xy / 100.0
         sx = (self.scale_x / 100.0) * scale_xy
         sy = (self.scale_y / 100.0) * scale_xy
+
+        # ── Auto black-bar removal ────────────────────────────────────────────
+        # When source_ar is set, compute a correction scale so that the content
+        # inside the encoded frame fills (or stretches to) the canvas.
+        # This multiplies on top of the manual scale values so the user can still
+        # fine-tune position / scale independently.
+        if self.source_ar != 'off':
+            content_ar = _SOURCE_AR.get(self.source_ar)
+            if content_ar is not None and content_ar > 0:
+                canvas_ar = frame_w / frame_h
+                # ratio > 1 → content narrower than canvas (pillarboxes left/right)
+                # ratio < 1 → content wider than canvas  (letterboxes top/bottom)
+                ratio = canvas_ar / content_ar
+                if self.ar_mode == 'stretch':
+                    # Non-uniform: scale only on the axis that has bars.
+                    # Removes bars exactly, distorts content AR.
+                    sx *= max(ratio, 1.0)
+                    sy *= max(1.0 / ratio, 1.0)
+                else:  # 'fill' — uniform zoom to cover canvas
+                    # Scale both axes equally by the factor needed to just cover.
+                    # Removes bars; may crop a small amount of actual content on
+                    # the non-bar axis (e.g. 12.5% top/bottom for 4:3 in 16:9).
+                    k = max(ratio, 1.0 / ratio)
+                    sx *= k
+                    sy *= k
+        # ─────────────────────────────────────────────────────────────────────
+
         return {
             'anchor':    (self.anchor_x / 100.0, self.anchor_y / 100.0),
             'scale':     (sx, sy),
@@ -247,6 +311,12 @@ class TransformEffect(PluginBase):
         elif name == 'anchor_z':
             self.anchor_z = float(value)
             return True
+        elif name == 'source_ar':
+            self.source_ar = str(value)
+            return True
+        elif name == 'ar_mode':
+            self.ar_mode = str(value)
+            return True
         return False
     
     def is_noop(self):
@@ -255,9 +325,10 @@ class TransformEffect(PluginBase):
         Returns:
             bool: True if effect will not modify the frame
         """
-        return (self.position_x == 0 and self.position_y == 0 and 
+        return (self.position_x == 0 and self.position_y == 0 and
                 self.scale_xy == 100.0 and self.scale_x == 100.0 and self.scale_y == 100.0 and
-                self.rotation_x == 0 and self.rotation_y == 0 and self.rotation_z == 0)
+                self.rotation_x == 0 and self.rotation_y == 0 and self.rotation_z == 0 and
+                self.source_ar == 'off')
     
     def get_parameters(self):
         """Gibt aktuelle Parameter zurück."""
@@ -272,5 +343,7 @@ class TransformEffect(PluginBase):
             'rotation_z': self.rotation_z,
             'anchor_x': self.anchor_x,
             'anchor_y': self.anchor_y,
-            'anchor_z': self.anchor_z
+            'anchor_z': self.anchor_z,
+            'source_ar': self.source_ar,
+            'ar_mode': self.ar_mode,
         }

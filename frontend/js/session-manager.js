@@ -59,7 +59,7 @@ const SessionManager = (function() {
             const modalInstance = getModal();
             if (!modalInstance) {
                 console.error('❌ ModalManager not available. Check console for details.');
-                showToast('Modal-Komponente nicht verfügbar. Bitte Konsole prüfen.', 'error');
+                showToast('Modal component not available. Please check the console.', 'error');
                 return;
             }
             
@@ -68,12 +68,12 @@ const SessionManager = (function() {
             modalInstance.setContent(`
                 <div class="mb-3">
                     <label for="sessionName" class="form-label">Session Name</label>
-                    <input type="text" class="form-control" id="sessionName" placeholder="z.B. Meine Show" autofocus>
-                    <small class="text-muted">Ein Timestamp wird automatisch hinzugefügt</small>
+                    <input type="text" class="form-control" id="sessionName" placeholder="e.g. My Show" autofocus>
+                    <small class="text-muted">A timestamp will be added automatically</small>
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
-                    <button class="btn btn-secondary" onclick="SessionManager.closeModal()">Abbrechen</button>
-                    <button class="btn btn-primary" onclick="SessionManager.confirmSaveSession()">💾 Speichern</button>
+                    <button class="btn btn-secondary" onclick="SessionManager.closeModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="SessionManager.confirmSaveSession()">&#x1F4BE; Save</button>
                 </div>
             `);
             
@@ -104,7 +104,7 @@ const SessionManager = (function() {
         const name = input ? input.value.trim() : '';
         
         if (!name) {
-            showToast('Bitte geben Sie einen Namen ein', 'error');
+            showToast('Please enter a name', 'error');
             input?.focus();
             return;
         }
@@ -121,14 +121,14 @@ const SessionManager = (function() {
             const data = await response.json();
             
             if (data.success) {
-                showToast(`💾 Session gespeichert: ${data.filename}`, 'success');
+                showToast(`💾 Session saved: ${data.filename}`, 'success');
             } else {
-                showToast(`Fehler beim Speichern: ${data.error}`, 'error');
+                showToast(`Error saving: ${data.error}`, 'error');
             }
             
         } catch (error) {
             console.error('❌ Error saving session:', error);
-            showToast('Fehler beim Speichern der Session', 'error');
+            showToast('Error saving session', 'error');
         }
     }
     
@@ -236,7 +236,7 @@ const SessionManager = (function() {
             const data = await response.json();
             
             if (data.success) {
-                showToast('✅ Session wiederhergestellt! Seite wird neu geladen...', 'success');
+                showToast('✅ Session restored! Reloading page...', 'success');
                 
                 // Reload page after short delay with restore flag
                 if (data.requires_reload) {
@@ -250,13 +250,13 @@ const SessionManager = (function() {
                 
                 return true;
             } else {
-                showToast(`Fehler beim Wiederherstellen: ${data.error}`, 'error');
+                showToast(`Error restoring: ${data.error}`, 'error');
                 return false;
             }
             
         } catch (error) {
             console.error('❌ Error restoring session:', error);
-            showToast('Fehler beim Wiederherstellen der Session', 'error');
+            showToast('Error restoring session', 'error');
             return false;
         }
     }
@@ -296,16 +296,16 @@ const SessionManager = (function() {
             const data = await response.json();
             
             if (data.success) {
-                showToast(`Session "${filename}" gelöscht`, 'success');
+                showToast(`Session "${filename}" deleted`, 'success');
                 return true;
             } else {
-                showToast(`Fehler beim Löschen: ${data.error}`, 'error');
+                showToast(`Error deleting: ${data.error}`, 'error');
                 return false;
             }
             
         } catch (error) {
             console.error('❌ Error deleting session:', error);
-            showToast('Fehler beim Löschen der Session', 'error');
+            showToast('Error deleting session', 'error');
             return false;
         }
     }
@@ -363,16 +363,16 @@ const SessionManager = (function() {
             const data = await response.json();
             
             if (data.success) {
-                showToast(`Snapshot "${filename}" gelöscht`, 'success');
+                showToast(`Snapshot "${filename}" deleted`, 'success');
                 return true;
             } else {
-                showToast(`Fehler beim Löschen: ${data.error}`, 'error');
+                showToast(`Error deleting: ${data.error}`, 'error');
                 return false;
             }
             
         } catch (error) {
             console.error('❌ Error deleting snapshot:', error);
-            showToast('Fehler beim Löschen des Snapshots', 'error');
+            showToast('Error deleting snapshot', 'error');
             return false;
         }
     }
@@ -385,7 +385,7 @@ const SessionManager = (function() {
             const modalInstance = getModal();
             if (!modalInstance) {
                 console.error('❌ ModalManager not available. Check console for details.');
-                showToast('Modal-Komponente nicht verfügbar. Bitte Konsole prüfen.', 'error');
+                showToast('Modal component not available. Please check the console.', 'error');
                 return;
             }
             
@@ -403,8 +403,8 @@ const SessionManager = (function() {
                 modalInstance.setContent(`
                     <div class="text-center py-4">
                         <div style="font-size: 48px; margin-bottom: 16px;">💾</div>
-                        <p class="mb-2">Keine gespeicherten Sessions gefunden</p>
-                        <p class="text-muted small">Speichern Sie eine Session, um sie später wiederherzustellen</p>
+                        <p class="mb-2">No saved sessions found</p>
+                        <p class="text-muted small">Save a session to restore it later</p>
                     </div>
                 `);
                 return;
@@ -414,11 +414,11 @@ const SessionManager = (function() {
             
             // Saved Sessions Section
             if (sessions.length > 0) {
-                html += '<h6 class="mb-3">💾 Gespeicherte Sessions</h6>';
+                html += '<h6 class="mb-3">💾 Saved Sessions</h6>';
                 html += '<div class="list-group mb-4">';
                 
                 sessions.forEach((session) => {
-                    const date = new Date(session.created).toLocaleDateString('de-DE', {
+                    const date = new Date(session.created).toLocaleDateString('en-US', {
                         year: 'numeric',
                         month: '2-digit',
                         day: '2-digit',
@@ -459,7 +459,7 @@ const SessionManager = (function() {
                                 <button type="button" 
                                         class="btn btn-danger" 
                                         onclick="SessionManager.deleteWithConfirm('${session.filename}', 'session', event)"
-                                        title="Session löschen"
+                                        title="Delete session"
                                         style="min-width: 48px;">
                                     🗑️
                                 </button>
@@ -477,7 +477,7 @@ const SessionManager = (function() {
                 html += '<div class="list-group">';
                 
                 snapshots.forEach((snapshot) => {
-                    const date = new Date(snapshot.created).toLocaleDateString('de-DE', {
+                    const date = new Date(snapshot.created).toLocaleDateString('en-US', {
                         year: 'numeric',
                         month: '2-digit',
                         day: '2-digit',
@@ -511,7 +511,7 @@ const SessionManager = (function() {
                                 <button type="button" 
                                         class="btn btn-danger" 
                                         onclick="SessionManager.deleteWithConfirm('${snapshot.filename}', 'snapshot', event)"
-                                        title="Snapshot löschen"
+                                        title="Delete snapshot"
                                         style="min-width: 48px;">
                                     🗑️
                                 </button>
@@ -537,7 +537,7 @@ const SessionManager = (function() {
     async function loadSession(filename, type) {
         // Confirm restore
         const typeName = type === 'session' ? 'Session' : 'Snapshot';
-        if (!confirm(`${typeName} "${filename}" laden?\n\nDies wird die aktuelle Session überschreiben und die Seite neu laden.`)) {
+        if (!confirm(`${typeName} "${filename}" load?\n\nThis will overwrite the current session and reload the page.`)) {
             return;
         }
         

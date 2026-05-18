@@ -9,7 +9,7 @@ logger = get_logger(__name__)
 
 
 class DummySource(FrameSource):
-    """Dummy Source für leere Playlists - zeigt schwarzes Bild."""
+    """Dummy source for empty playlists - shows black image."""
 
     def __init__(self, canvas_width, canvas_height):
         super().__init__(canvas_width, canvas_height)
@@ -25,7 +25,7 @@ class DummySource(FrameSource):
         return True
 
     def get_next_frame(self):
-        """Gibt schwarzes Frame zurück."""
+        """Returns black frame."""
         if self.frame is None:
             self.initialize()
         return self.frame, 1.0 / self.fps

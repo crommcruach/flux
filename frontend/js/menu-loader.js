@@ -1,10 +1,10 @@
-// Menu-Bar Loader - Lädt die Menu-Bar dynamisch in alle Seiten
+// Menu-Bar Loader - Dynamically loads the menu bar into all pages
 (function() {
-    // Erstelle einen Platzhalter für die Menu-Bar
+    // Create a placeholder for the menu bar
     const menuBarPlaceholder = document.createElement('div');
     menuBarPlaceholder.id = 'menu-bar-placeholder';
     
-    // Füge den Platzhalter am Anfang des Body ein
+    // Insert the placeholder at the beginning of the body
     if (document.body.firstChild) {
         document.body.insertBefore(menuBarPlaceholder, document.body.firstChild);
     } else {
@@ -17,13 +17,13 @@
         .then(html => {
             menuBarPlaceholder.innerHTML = html;
             
-            // Führe das Theme-Toggle-Script aus, nachdem die Menu-Bar eingefügt wurde
+            // Execute the theme toggle script after the menu bar has been inserted
             initThemeToggle();
             
-            // Falls die Seite bereits ein Theme-Toggle hatte, entferne Duplikate
+            // If the page already had a theme toggle, remove duplicates
             const existingToggles = document.querySelectorAll('#themeToggle');
             if (existingToggles.length > 1) {
-                // Behalte nur das erste (aus der Menu-Bar)
+                // Keep only the first one (from the menu bar)
                 for (let i = 1; i < existingToggles.length; i++) {
                     const parent = existingToggles[i].closest('.form-check');
                     if (parent) parent.remove();
@@ -31,10 +31,10 @@
             }
         })
         .catch(error => {
-            console.error('Fehler beim Laden der Menu-Bar:', error);
+            console.error('Error loading menu bar:', error);
         });
     
-    // Theme Toggle Funktionalität
+    // Theme toggle functionality
     function initThemeToggle() {
         const themeToggle = document.getElementById('themeToggle');
         const themeLabel = document.getElementById('themeLabel');

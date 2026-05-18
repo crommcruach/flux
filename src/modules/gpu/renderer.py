@@ -188,7 +188,10 @@ class Renderer:
         return bgl
 
     def _get_pipeline(self, wgsl_source: str, tex_count: int) -> wgpu.GPURenderPipeline:
-        key = (wgsl_source, tex_count)
+        # Intern the source string so id() is stable; avoids full-string hashing
+        # on every dict lookup (WGSL sources are 500–2000 bytes each).
+        wgsl_source = _intern_shader(wgsl_source)
+        key = (id(wgsl_source), tex_count)
         if key in self._pipelines:
             self._pipelines.move_to_end(key)
             return self._pipelines[key]
@@ -305,8 +308,19 @@ class Renderer:
             self._unif_last[slot] = uniform_data
 
         # --- bind group (cached by unifbuf slot + texture object identity) ---
+        # Build a flat tuple key without a generator or nested tuple:
+        # (id(unifbuf), id(tex0), id(tex1), …).  GPUFrame objects are pool-reused
+        # stable Python objects so id() is safe here.
         sampler = self._get_sampler()
-        bg_key = (id(unifbuf), tuple(id(tf) for tf in tex_list))
+        _n = len(tex_list)
+        if _n == 0:
+            bg_key = (id(unifbuf),)
+        elif _n == 1:
+            bg_key = (id(unifbuf), id(tex_list[0]))
+        elif _n == 2:
+            bg_key = (id(unifbuf), id(tex_list[0]), id(tex_list[1]))
+        else:
+            bg_key = (id(unifbuf),) + tuple(id(tf) for tf in tex_list)
         if bg_key in self._bg_cache:
             self._bg_cache.move_to_end(bg_key)
             bind_group = self._bg_cache[bg_key]
@@ -389,11 +403,44 @@ def _reset_renderer() -> None:
     _warmup_done.clear()
 
 
+# File-level shader source cache: reads each .wgsl file once per process run.
+# load_shader() is called every frame from the compositor hot path; repeated
+# open() + read() are avoided after the first call.
+_shader_file_cache: dict[str, str] = {}
+
+# Shader intern table: maps content → canonical string object.
+# Once a shader source is interned, id(canonical) is stable for the lifetime
+# of the process, allowing the pipeline LRU cache to use id()-based keys
+# instead of hashing the full WGSL text on every lookup.
+_shader_intern: dict[str, str] = {}
+
+
 def load_shader(filename: str) -> str:
-    """Load a WGSL source file from src/modules/gpu/shaders/."""
+    """Load a WGSL source file from src/modules/gpu/shaders/ (cached)."""
+    cached = _shader_file_cache.get(filename)
+    if cached is not None:
+        return cached
     path = os.path.join(_SHADER_DIR, filename)
     with open(path, 'r', encoding='utf-8') as f:
-        return f.read()
+        src = f.read()
+    # Intern immediately so the pipeline cache can use id()-based keys.
+    _shader_intern[src] = src
+    _shader_file_cache[filename] = src
+    return src
+
+
+def _intern_shader(src: str) -> str:
+    """Return the canonical string object for *src*, interning on first call.
+
+    Using id(canonical) as the pipeline cache key avoids rehashing the full
+    WGSL source text on every render() call.  Safe because _shader_intern
+    holds a strong reference so the id is never reused.
+    """
+    canonical = _shader_intern.get(src)
+    if canonical is None:
+        _shader_intern[src] = src
+        return src
+    return canonical
 
 
 # ---------------------------------------------------------------------------

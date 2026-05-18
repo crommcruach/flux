@@ -1,8 +1,8 @@
 """
-Layer - Einzelne Compositing-Ebene im Multi-Layer System
+Layer - Single compositing layer in the multi-layer system
 
-Ein Layer kapselt eine Frame-Quelle (Video/Generator/Script) zusammen mit
-seinen spezifischen Effekten und Compositing-Einstellungen.
+A layer encapsulates a frame source (video/generator/script) together with
+its specific effects and compositing settings.
 """
 
 import numpy as np
@@ -14,13 +14,13 @@ logger = get_logger(__name__)
 
 class Layer:
     """
-    Einzelne Layer-Ebene für Multi-Layer Compositing.
+    Single layer for multi-layer compositing.
     
-    Ein Layer besteht aus:
-    - Frame-Quelle (VideoSource, GeneratorSource)
-    - Layer-spezifische Effekte
-    - Compositing-Einstellungen (Blend Mode, Opacity)
-    - Metadaten (Clip-ID, enabled-Status)
+    A layer consists of:
+    - Frame source (VideoSource, GeneratorSource)
+    - Layer-specific effects
+    - Compositing settings (blend mode, opacity)
+    - Metadata (clip ID, enabled status)
     """
     
     def __init__(
@@ -32,14 +32,14 @@ class Layer:
         clip_id: Optional[str] = None
     ):
         """
-        Initialisiert einen neuen Layer.
+        Initializes a new layer.
         
         Args:
-            layer_id: Eindeutige Layer-ID innerhalb des Players
-            source: FrameSource-Instanz (VideoSource, GeneratorSource, etc.)
-            blend_mode: Blend-Modus für Compositing ('normal', 'multiply', 'screen', etc.)
-            opacity: Layer-Opazität in Prozent (0-100)
-            clip_id: Optional UUID aus ClipRegistry für Effekt-Management
+            layer_id: Unique layer ID within the player
+            source: FrameSource instance (VideoSource, GeneratorSource, etc.)
+            blend_mode: Blend mode for compositing ('normal', 'multiply', 'screen', etc.)
+            opacity: Layer opacity in percent (0-100)
+            clip_id: Optional UUID from ClipRegistry for effect management
         """
         self.layer_id = layer_id
         self.source = source
@@ -51,7 +51,7 @@ class Layer:
         # Layer-spezifische Effekte (Liste von {id, instance, config})
         self.effects: List[Dict[str, Any]] = []
         
-        # Cache für letztes Frame (für HOLD-Mode oder Frame-Blending)
+        # Cache for last frame (for HOLD mode or frame blending)
         self.last_frame: Optional[np.ndarray] = None
         
         debug_layers(
@@ -61,15 +61,15 @@ class Layer:
         )
     
     def get_source_name(self) -> str:
-        """Gibt den Namen der Source zurück."""
+        """Returns the name of the source."""
         return self.source.get_source_name() if self.source else "No Source"
     
     def get_source_type(self) -> str:
-        """Gibt den Typ der Source zurück."""
+        """Returns the type of the source."""
         return type(self.source).__name__
     
     def cleanup(self):
-        """Räumt Layer-Ressourcen auf (z.B. bei Entfernung)."""
+        """Cleans up layer resources (e.g. when removed)."""
         if self.source:
             self.source.cleanup()
         self.effects.clear()
@@ -78,12 +78,12 @@ class Layer:
     
     def to_dict(self) -> Dict[str, Any]:
         """
-        Serialisiert Layer zu Dict (für API/Session State).
+        Serializes layer to dict (for API/session state).
         
         Returns:
-            Dict mit Layer-Konfiguration
+            Dict with layer configuration
         """
-        # Bestimme Source-Typ und Pfad
+        # Determine source type and path
         source_type = "unknown"
         source_path = ""
         generator_id = None
@@ -116,7 +116,7 @@ class Layer:
             layer_dict['generator_id'] = generator_id
             layer_dict['parameters'] = parameters
         
-        # Effekte serialisieren (ohne instance)
+        # Serialize effects (without instance)
         layer_dict['effects'] = [
             {
                 'plugin_id': effect['id'],
@@ -128,7 +128,7 @@ class Layer:
         return layer_dict
     
     def __repr__(self) -> str:
-        """String-Repräsentation für Debugging."""
+        """String representation for debugging."""
         enabled_str = "enabled" if self.enabled else "disabled"
         return (
             f"Layer(id={self.layer_id}, source={self.get_source_name()}, "

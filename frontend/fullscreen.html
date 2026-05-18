@@ -120,7 +120,7 @@
 </head>
 <body class="fullscreen-body">
     <div id="streamContainer" class="fullscreen-container">
-        <img id="previewStream" class="fullscreen-stream" src="/api/fullscreen/stream" alt="Fullscreen Stream">
+        <img id="previewStream" class="fullscreen-stream" src="" alt="Fullscreen Stream">
         <div id="fpsOverlay" class="fullscreen-fps-overlay" style="display: none;">
             <div class="fullscreen-fps-content">
                 <div class="fullscreen-fps-label">FPS</div>
@@ -321,7 +321,7 @@
             // Context menu disabled - direct player streaming
         });
         
-        // FPS Berechnung durch Überwachung des Stream-Updates
+        // FPS calculation by monitoring stream updates
         function updateFPS() {
             frameCount++;
             const now = Date.now();
@@ -335,7 +335,7 @@
             }
         }
         
-        // Überwache Stream-Updates
+        // Monitor stream updates
         let lastSrc = streamImg.src;
         setInterval(() => {
             if (streamImg.complete && streamImg.naturalHeight !== 0) {

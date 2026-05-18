@@ -63,7 +63,9 @@ class HueRotateEffect(PluginBase):
 
         if name == 'hue_shift':
             self.hue_shift = float(value)
-    
+            return True
+        return False
+
     def get_parameters(self):
         """Gibt aktuelle Parameter zurück."""
         return {'hue_shift': self.hue_shift}

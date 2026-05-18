@@ -1,11 +1,11 @@
-/* Fix: Menübar-Buttons und Toggle immer nebeneinander */
+/* Fix: Menu bar buttons and toggle always side by side */
 .menu-bar > .d-flex.align-items-center.flex-nowrap {
     display: flex !important;
     flex-direction: row !important;
     align-items: center !important;
     gap: 0.7rem !important;
 }
-/* Menüleiste: Buttons quadratisch */
+/* Menu bar: Square buttons */
 .menu-bar .menu-btn {
     width: 40px !important;
     min-width: 40px !important;
@@ -38,19 +38,19 @@
 .array-item .btn {
     flex: 0 0 auto;
 }
-/* Canvas Schlagschatten unten rechts */
+/* Canvas drop shadow bottom right */
 #canvasContainer {
     box-shadow: 0 8px 24px 0 rgba(0,0,0,0.25), 0 2px 8px 0 rgba(0,0,0,0.18);
     border-radius: 8px;
     background: #222;
 }
-/* Toolbar insgesamt schmaler */
+/* Toolbar overall narrower */
 .toolbar {
     width: 250px;
     max-width: 250px;
     min-width: 250px;
 }
-/* Toolbar Shape Buttons: quadratisch und größere Symbole */
+/* Toolbar Shape Buttons: square and larger icons */
 .toolbar-shape-btn {
     width: 44px !important;
     height: 44px !important;
@@ -1127,7 +1127,7 @@ body.editor-page {
     transition: all 0.2s;
 }
 
-/* Spezifischer Hover-Effekt für Color-Buttons */
+/* Specific hover effect for color buttons */
 .color-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);

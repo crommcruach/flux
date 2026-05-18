@@ -1,5 +1,5 @@
 """
-Zentrales Logging-System für Flux
+Central logging system for Flux
 """
 import logging
 import os
@@ -60,9 +60,9 @@ class FluxLogger:
         Richtet das Logging-System ein.
         
         Args:
-            log_dir: Verzeichnis für Log-Dateien
-            log_level: Logging-Level für Datei (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-            console_level: Logging-Level für Konsole (Standard: WARNING)
+            log_dir: Directory for log files
+            log_level: Logging level for file (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+            console_level: Logging level for console (default: WARNING)
             max_log_files: Maximum number of log files to keep (0 = infinite)
         """
         # Log-Verzeichnis erstellen
@@ -72,7 +72,7 @@ class FluxLogger:
         # Cleanup old log files (keep only last N files, or all if max_log_files=0)
         self._cleanup_old_logs(log_path, max_files=max_log_files)
         
-        # Timestamp für Log-Datei
+        # Timestamp for log file
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         log_file = log_path / f'flux_{timestamp}.log'
         
@@ -110,11 +110,11 @@ class FluxLogger:
         console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
         
-        # Speichere Handler für spätere Level-Änderungen
+        # Save handlers for later level changes
         self.console_handler = console_handler
         self.file_handler = file_handler
         
-        # Spezielle Logger für externe Bibliotheken dämpfen
+        # Suppress loggers for external libraries
         logging.getLogger('werkzeug').setLevel(logging.WARNING)
         logging.getLogger('socketio').setLevel(logging.WARNING)
         logging.getLogger('engineio').setLevel(logging.WARNING)
@@ -123,18 +123,18 @@ class FluxLogger:
         self.module_log_levels = {}
         
         # Startup-Log (nur in Datei, nicht auf Konsole)
-        # Temporär Console-Handler entfernen
+        # Temporarily remove console handler
         root_logger.removeHandler(console_handler)
         root_logger.info("=" * 80)
         root_logger.info("Flux Video Art-Net Controller gestartet")
         root_logger.info(f"Log-Datei: {log_file}")
         root_logger.info("=" * 80)
-        # Console-Handler wieder hinzufügen
+        # Re-add console handler
         root_logger.addHandler(console_handler)
     
     def set_console_log_level(self, level):
         """
-        Ändert das Log-Level für die Konsolen-Ausgabe.
+        Changes the log level for console output.
         
         Args:
             level: logging.DEBUG, logging.INFO, logging.WARNING, etc.
@@ -148,7 +148,7 @@ class FluxLogger:
     
     def get_console_log_level(self):
         """
-        Gibt das aktuelle Console-Log-Level zurück.
+        Returns the current console log level.
         
         Returns:
             int: Aktuelles Log-Level (z.B. logging.WARNING)
@@ -159,7 +159,7 @@ class FluxLogger:
     
     def set_module_log_level(self, module_pattern, level=logging.DEBUG):
         """
-        Setzt Log-Level für ein bestimmtes Modul oder Modul-Pattern.
+        Sets the log level for a specific module or module pattern.
         
         Args:
             module_pattern: Modulname oder Pattern (z.B. 'modules.player.core' oder 'modules.player.*')
@@ -185,7 +185,7 @@ class FluxLogger:
     
     def apply_debug_modules(self, debug_modules):
         """
-        Aktiviert DEBUG-Level für eine Liste von Modulen.
+        Activates DEBUG level for a list of modules.
         
         Args:
             debug_modules: Liste von Modul-Patterns (z.B. ['modules.player.*', 'modules.api.artnet'])
@@ -205,7 +205,7 @@ class FluxLogger:
     
     def get_module_log_levels(self):
         """
-        Gibt alle konfigurierten Modul-Log-Levels zurück.
+        Returns all configured module log levels.
         
         Returns:
             dict: Module patterns und ihre Log-Levels
@@ -243,7 +243,7 @@ def get_logger(name):
 
 def set_console_log_level(level):
     """
-    Ändert das Console-Log-Level.
+    Changes the console log level.
     
     Args:
         level: logging.DEBUG, logging.INFO, logging.WARNING, etc.
@@ -254,7 +254,7 @@ def set_console_log_level(level):
 
 def get_console_log_level():
     """
-    Gibt das aktuelle Console-Log-Level zurück.
+    Returns the current console log level.
     
     Returns:
         int: Aktuelles Log-Level
@@ -263,7 +263,7 @@ def get_console_log_level():
     return flux_logger.get_console_log_level()
 
 
-# Hilfsfunktionen für strukturiertes Logging
+# Helper functions for structured logging
 def log_function_call(logger, func_name, **kwargs):
     """
     Loggt einen Funktionsaufruf mit Parametern.
@@ -304,7 +304,7 @@ def log_video_info(logger, video_path, frames, fps, dimensions):
         dimensions: Tuple (width, height)
     """
     logger.debug(f"Video geladen: {os.path.basename(video_path)}")
-    logger.debug(f"  └─ Frames: {frames}, FPS: {fps:.2f}, Auflösung: {dimensions[0]}x{dimensions[1]}")
+    logger.debug(f"  └─ Frames: {frames}, FPS: {fps:.2f}, Resolution: {dimensions[0]}x{dimensions[1]}")
 
 
 def log_cache_operation(logger, operation, video_hash, success, details=None):
@@ -316,7 +316,7 @@ def log_cache_operation(logger, operation, video_hash, success, details=None):
         operation: Art der Operation (load, save, delete)
         video_hash: Hash des Videos
         success: Ob Operation erfolgreich war
-        details: Optionale Details (z.B. Dateigröße)
+        details: Optional details (e.g. file size)
     """
     status = "✓" if success else "✗"
     msg = f"Cache {operation}: {video_hash[:8]}... {status}"
@@ -336,20 +336,20 @@ def log_artnet_output(logger, universe, channel_count, first_values):
     Args:
         logger: Logger-Instanz
         universe: Universe-Nummer
-        channel_count: Anzahl der Kanäle
-        first_values: Liste der ersten paar Werte für Debug
+        channel_count: Number of channels
+        first_values: List of first few values for debug
     """
     values_str = ', '.join(str(v) for v in first_values[:6])
-    logger.debug(f"Art-Net Universe {universe}: {channel_count} Kanäle [{values_str}...]")
+    logger.debug(f"Art-Net Universe {universe}: {channel_count} channels [{values_str}...]")
 
 
 # ========== DEBUG CATEGORIES SYSTEM ==========
-# Granulare Kontrolle über Debug-Ausgaben nach Kategorie
+# Granular control over debug output by category
 
 class DebugCategories:
     """
-    Verwaltet Debug-Kategorien für granulare Log-Kontrolle.
-    Kategorien können zur Laufzeit aktiviert/deaktiviert werden.
+    Manages debug categories for granular log control.
+    Categories can be enabled/disabled at runtime.
     """
     
     # Definierte Debug-Kategorien
@@ -393,7 +393,7 @@ class DebugCategories:
     
     @classmethod
     def is_enabled(cls, category):
-        """Prüft, ob eine Kategorie aktiviert ist."""
+        """Checks whether a category is enabled."""
         if not cls._initialized:
             cls.initialize()
         return category in cls._enabled_categories
@@ -413,12 +413,12 @@ class DebugCategories:
     
     @classmethod
     def get_enabled(cls):
-        """Gibt Liste der aktivierten Kategorien zurück."""
+        """Returns list of enabled categories."""
         return list(cls._enabled_categories)
     
     @classmethod
     def get_all(cls):
-        """Gibt Liste aller verfügbaren Kategorien zurück."""
+        """Returns list of all available categories."""
         return [
             cls.TRANSPORT, cls.EFFECTS, cls.LAYERS, cls.PLAYBACK,
             cls.API, cls.WEBSOCKET, cls.ARTNET, cls.PERFORMANCE, cls.CACHE
@@ -433,8 +433,8 @@ def debug_log(logger, category, message, *args, **kwargs):
         logger: Logger-Instanz
         category: Debug-Kategorie (z.B. DebugCategories.TRANSPORT)
         message: Log-Nachricht (kann Formatierungs-Platzhalter enthalten)
-        *args: Argumente für String-Formatierung
-        **kwargs: Keyword-Argumente für String-Formatierung
+        *args: Arguments for string formatting
+        **kwargs: Keyword arguments for string formatting
     
     Example:
         debug_log(logger, DebugCategories.TRANSPORT, 
@@ -464,7 +464,7 @@ def info_log_conditional(logger, category, message, *args, **kwargs):
         logger.debug(f"[{category}] {message}")
 
 
-# Convenience-Funktionen für häufig genutzte Kategorien
+# Convenience functions for frequently used categories
 def debug_transport(logger, message, *args, **kwargs):
     """Transport-spezifisches Debug-Log."""
     debug_log(logger, DebugCategories.TRANSPORT, message, *args, **kwargs)

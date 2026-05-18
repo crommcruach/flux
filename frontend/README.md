@@ -1,77 +1,77 @@
 # Static Files Structure
 
-## Verzeichnisstruktur
+## Directory Structure
 
 ```
 static/
-├── js/                      # JavaScript Module
-│   ├── constants.js        # Konstanten und Konfiguration
-│   ├── state.js           # Globaler Zustand
-│   ├── utils.js           # Hilfsfunktionen
-│   ├── stroke-font.js     # Vektorbasierte Schriftarten
-│   ├── shapes.js          # Shape-Generator (geplant)
-│   ├── renderer.js        # Canvas-Rendering (geplant)
-│   ├── handlers.js        # Event-Handler (geplant)
-│   └── ui.js              # UI-Updates (geplant)
-├── bootstrap-icons/        # Bootstrap Icon-Bibliothek
-├── controls.html          # Video-Steuerung Interface
-├── controls.js            # Video-Steuerung Logik
-├── editor.js              # Haupt-Editor (zu refaktorisieren)
-├── index.html             # Hauptseite
-├── styles.css             # CSS-Styles
+├── js/                      # JavaScript Modules
+│   ├── constants.js        # Constants and configuration
+│   ├── state.js           # Global state
+│   ├── utils.js           # Helper functions
+│   ├── stroke-font.js     # Vector-based fonts
+│   ├── shapes.js          # Shape generator (planned)
+│   ├── renderer.js        # Canvas rendering (planned)
+│   ├── handlers.js        # Event handlers (planned)
+│   └── ui.js              # UI updates (planned)
+├── bootstrap-icons/        # Bootstrap icon library
+├── controls.html          # Video controls interface
+├── controls.js            # Video controls logic
+├── editor.js              # Main editor (to be refactored)
+├── index.html             # Main page
+├── styles.css             # CSS styles
 ├── favicon.svg            # Favicon
 └── logo.svg               # Logo
 
-## Module
+## Modules
 
 ### constants.js
-Zentrale Konstanten:
-- `MIN_SCALE`, `MAX_SCALE` - Skalierungsgrenzen
-- `HANDLE` - Handler-Konfiguration
-- `COLORS` - Farbpalette
-- `TOOLTIP` - Tooltip-Konfiguration
-- `POINT` - Punkt-Rendering-Konfiguration
+Central constants:
+- `MIN_SCALE`, `MAX_SCALE` - Scale limits
+- `HANDLE` - Handle configuration
+- `COLORS` - Color palette
+- `TOOLTIP` - Tooltip configuration
+- `POINT` - Point rendering configuration
 
 ### state.js
-Globaler Zustand und State-Management:
-- Shape-Verwaltung (`shapes`, `selectedShape`, `selectedShapes`)
-- Gruppierung (`groups`, `groupCounter`)
-- Drag-Zustand (`dragMode`, `offsetX`, `offsetY`, etc.)
-- Rendering-Zustand (`needsRedraw`, `hoveredPoint`, etc.)
-- Icon-Images
-- State-Setter-Funktionen
-- `loadIcons()` - Lädt alle Icon-Images
+Global state and state management:
+- Shape management (`shapes`, `selectedShape`, `selectedShapes`)
+- Grouping (`groups`, `groupCounter`)
+- Drag state (`dragMode`, `offsetX`, `offsetY`, etc.)
+- Rendering state (`needsRedraw`, `hoveredPoint`, etc.)
+- Icon images
+- State setter functions
+- `loadIcons()` - Loads all icon images
 
 ### utils.js
-Hilfsfunktionen:
-- `markForRedraw()` - Markiert Canvas für Neuzeichnung
-- `localToWorld()` - Transformiert lokale zu Weltkoordinaten
-- `worldToLocal()` - Transformiert Welt- zu lokalen Koordinaten
-- `worldLenBetweenLocal()` - Berechnet Weltdistanz zwischen lokalen Punkten
-- `distributeAlongEdges()` - Verteilt Punkte gleichmäßig entlang Kanten
+Helper functions:
+- `markForRedraw()` - Marks canvas for redrawing
+- `localToWorld()` - Transforms local to world coordinates
+- `worldToLocal()` - Transforms world to local coordinates
+- `worldLenBetweenLocal()` - Calculates world distance between local points
+- `distributeAlongEdges()` - Distributes points evenly along edges
 
 ### stroke-font.js
-Vektorbasierte Buchstaben-Definitionen:
-- `STROKE_FONT` - Objekt mit Buchstaben A-Z, 0-9, Sonderzeichen
-- `LETTER_WIDTHS` - Breiten der Buchstaben
-- `DEFAULT_LETTER_SPACING` - Standard-Buchstabenabstand
+Vector-based letter definitions:
+- `STROKE_FONT` - Object with letters A-Z, 0-9, special characters
+- `LETTER_WIDTHS` - Letter widths
+- `DEFAULT_LETTER_SPACING` - Default letter spacing
 
 ## Migration Status
 
-✅ Erstellt:
-- `constants.js` - Vollständig
-- `state.js` - Vollständig
-- `utils.js` - Vollständig
-- `stroke-font.js` - Vorhanden
+✅ Created:
+- `constants.js` - Complete
+- `state.js` - Complete
+- `utils.js` - Complete
+- `stroke-font.js` - Present
 
-🔄 In Arbeit:
-- Refaktorisierung von `editor.js` in weitere Module
+🔄 In progress:
+- Refactoring `editor.js` into further modules
 
-## Nächste Schritte
+## Next Steps
 
-1. Extrahiere Shape-Generatoren in `shapes.js`
-2. Extrahiere Rendering-Logik in `renderer.js`
-3. Extrahiere Event-Handler in `handlers.js`
-4. Extrahiere UI-Update-Logik in `ui.js`
-5. Aktualisiere `index.html` für ES6-Module
+1. Extract shape generators into `shapes.js`
+2. Extract rendering logic into `renderer.js`
+3. Extract event handlers into `handlers.js`
+4. Extract UI update logic into `ui.js`
+5. Update `index.html` for ES6 modules
 6. Erstelle `main.js` als Einstiegspunkt

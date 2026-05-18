@@ -157,7 +157,7 @@ class VideoSource(FrameSource):
         self._trim_start = in_point
 
         saved_mb = (old_bytes - slice_bytes) // (1024 * 1024)
-        logger.info(
+        logger.debug(
             f"[NpySource] retrim [{in_point}–{out_point}] "
             f"{out_point - in_point + 1} of {self.total_frames} frames "
             f"({slice_bytes // (1024*1024)} MB kept"

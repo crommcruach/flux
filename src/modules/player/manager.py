@@ -382,6 +382,8 @@ class PlayerManager:
         if player_id is not None:
             # Reset ALL players to index 0, frame 0 (master AND slaves)
             for pid in self.get_all_player_ids():
+                if 'preview' in pid:  # skip preview players — not part of playlist system
+                    continue
                 player = self.get_player(pid)
                 if player and len(player.playlist) > 0:
                     was_playing = player.is_playing

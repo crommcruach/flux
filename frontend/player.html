@@ -18,6 +18,7 @@
     <link href="css/color-picker.css" rel="stylesheet">
     <link href="css/sequences.css" rel="stylesheet">
     <link href="css/bpm-widget.css" rel="stylesheet">
+    <link href="css/midi-display.css" rel="stylesheet">
     <link href="css/circular-slider.css" rel="stylesheet">
     <link href="css/playlist-tabs.css" rel="stylesheet">
     <link href="css/transport-controls.css" rel="stylesheet">
@@ -40,6 +41,80 @@
     </style>
 </head>
 <body>
+
+<!-- ── MIDI Binding Sidebar ─────────────────────────────────────────────── -->
+<div id="midiSidebar" class="midi-sidebar">
+    <div class="midi-sidebar-header">
+        <span class="midi-sidebar-title">MIDI Binding</span>
+        <button class="midi-sidebar-flip" onclick="window.midiLearnManager?.flipSide()" title="Move to other side">⇄</button>
+        <button class="midi-sidebar-close" onclick="window.midiLearnManager?.closeSidebar()" title="Close (Esc)">✕</button>
+    </div>
+
+    <div id="midiSidebarInfo" class="midi-sidebar-selection">No parameter selected</div>
+
+    <div class="midi-sidebar-body">
+
+        <!-- Channel + CC -->
+        <div>
+            <div class="midi-field-label">Channel</div>
+            <input type="number" id="midiChannel" min="1" max="16" value="1">
+        </div>
+        <div>
+            <div class="midi-field-label">CC</div>
+            <div class="midi-cc-row">
+                <input type="number" id="midiCC" min="0" max="127" value="0">
+                <label class="midi-14bit-label">
+                    <input type="checkbox" id="midi14Bit"> 14Bit
+                </label>
+            </div>
+        </div>
+
+        <!-- Learn CC -->
+        <button id="midiLearnCCBtn" class="midi-learn-cc-btn"
+                onclick="window.midiLearnManager?.startListeningCC()">Learn CC</button>
+
+        <div class="midi-sidebar-divider"></div>
+
+        <!-- Mode -->
+        <div>
+            <div class="midi-field-label">Mode</div>
+            <div class="midi-mode-options">
+                <label><input type="radio" name="midiMode" value="absolute" checked> Absolute</label>
+                <label><input type="radio" name="midiMode" value="relative"> Relative</label>
+                <label><input type="radio" name="midiMode" value="button"> Button</label>
+                <label><input type="radio" name="midiMode" value="fake_relative"> Fake Relative</label>
+            </div>
+        </div>
+
+        <!-- Invert -->
+        <label class="midi-invert-label">
+            <input type="checkbox" id="midiInvert"> Invert
+        </label>
+
+        <div class="midi-sidebar-divider"></div>
+
+        <!-- Range -->
+        <div>
+            <div class="midi-field-label">Range</div>
+            <div class="midi-range-row">
+                <input type="number" id="midiRangeMin" value="0" step="any">
+                <span style="color:rgba(255,255,255,0.4)">–</span>
+                <input type="number" id="midiRangeMax" value="100" step="any">
+            </div>
+        </div>
+
+        <div class="midi-sidebar-divider"></div>
+
+        <!-- Actions -->
+        <div class="midi-action-row">
+            <button class="btn-map"   onclick="window.midiLearnManager?.applyMapping()">Map</button>
+            <button class="btn-unmap" onclick="window.midiLearnManager?.removeSelectedMapping()">Unmap</button>
+        </div>
+
+    </div>
+</div>
+<!-- ── end MIDI Sidebar ──────────────────────────────────────────────────── -->
+
     <div class="app-layout">
         <!-- 
         ⚠️ DEPRECATED: OLD PLAYLIST MANAGEMENT BAR - HIDDEN
@@ -148,15 +223,6 @@
                     <div class="context-menu-separator"></div>
                     <div class="context-menu-item" onclick="openVideoFullscreen(); hidePreviewContextMenu()">Fullscreen</div>
                 </div>
-                <div class="player-controls">
-                    <button class="btn btn-secondary btn-sm" onclick="previous('video')" title="Previous Video">⏮️</button>
-                    <button class="btn btn-success btn-sm" onclick="play('video')" title="Play / Restart">▶️</button>
-                    <button class="btn btn-warning btn-sm" onclick="pause('video')">⏸️</button>
-                    <button class="btn btn-danger btn-sm" onclick="stop('video')">⏹️</button>
-                    <button class="btn btn-secondary btn-sm" onclick="next('video')" title="Next Video">⏭️</button>
-                    <button class="btn btn-outline-primary btn-sm" id="videoAutoplayBtn" onclick="toggleAutoplay('video')" title="Autoplay">🔁</button>
-                    <button class="btn btn-outline-primary btn-sm" id="videoLoopBtn" onclick="toggleLoop('video')" title="Loop Playlist">🔂</button>
-                </div>
             </div>
             
             <!-- Transition Menu (dynamically loaded) -->
@@ -166,20 +232,50 @@
             <div class="playlist-area">
                 <div class="playlist-header" id="videoPlaylistHeader">
                     <span>📹 Video Playlist</span>
-                    <div class="master-toggle">
-                        <label class="master-switch">
-                            <input type="checkbox" id="videoMasterSwitch" onchange="toggleMasterPlaylist('video')">
-                            <span class="master-slider"></span>
-                        </label>
-                        <span class="master-label" id="videoMasterLabel">Master</span>
+                    <div class="playlist-header-controls">
+                        <div class="autoplay-toggle" title="Auto-Advance: playlist advances automatically. Off = loop current clip.">
+                            <label class="autoplay-switch">
+                                <input type="checkbox" id="videoAutoplayBtn" onchange="toggleAutoplay('video')">
+                                <span class="autoplay-slider"></span>
+                            </label>
+                            <span class="autoplay-label" id="videoAutoplayLabel">Auto</span>
+                        </div>
+                        <div class="master-toggle">
+                            <label class="master-switch">
+                                <input type="checkbox" id="videoMasterSwitch" onchange="toggleMasterPlaylist('video')">
+                                <span class="master-slider"></span>
+                            </label>
+                            <span class="master-label" id="videoMasterLabel">Master</span>
+                        </div>
                     </div>
                 </div>
-                <div class="playlist-scroll" id="videoPlaylist">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📂</div>
-                        <p>No videos loaded</p>
-                    </div>
+                <div class="midi-clip-controls" id="videoMidiClipControls">
+                    <div class="midi-param-frame"
+                         data-param-path="video.clip.cursor"
+                         data-param-type="clip-navigate"
+                         data-param-name="Video Clip Select"
+                         data-param-min="0"
+                         data-param-max="127"
+                         title="MIDI: navigate through video clips"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">← Clip →</span><span class="midi-addr-badge"></span></div>
+                    <div class="midi-param-frame"
+                         data-param-path="video.clip.load"
+                         data-param-type="trigger"
+                         data-param-name="Video Clip Load"
+                         data-param-min="0"
+                         data-param-max="1"
+                         title="MIDI: load focused clip"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">▶ Load</span><span class="midi-addr-badge"></span></div>
+                    <div class="midi-param-frame"
+                         data-param-path="video.clip.fx"
+                         data-param-type="trigger"
+                         data-param-name="Video Clip FX"
+                         data-param-min="0"
+                         data-param-max="1"
+                         title="MIDI: select clip FX / properties"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">🎛 FX</span><span class="midi-addr-badge"></span></div>
                 </div>
+                <div class="playlist-scroll" id="videoPlaylist"></div>
             </div>
         </div>
         
@@ -196,15 +292,6 @@
                          loading="lazy"
                          fetchpriority="low">
                 </div>
-                <div class="player-controls">
-                    <button class="btn btn-secondary btn-sm" onclick="previous('artnet')" title="Previous Video">⏮️</button>
-                    <button class="btn btn-success btn-sm" onclick="play('artnet')" title="Play / Restart">▶️</button>
-                    <button class="btn btn-warning btn-sm" onclick="pause('artnet')">⏸️</button>
-                    <button class="btn btn-danger btn-sm" onclick="stop('artnet')">⏹️</button>
-                    <button class="btn btn-secondary btn-sm" onclick="next('artnet')" title="Next Generator">⏭️</button>
-                    <button class="btn btn-outline-primary btn-sm" id="artnetAutoplayBtn" onclick="toggleAutoplay('artnet')" title="Autoplay">🔁</button>
-                    <button class="btn btn-outline-primary btn-sm" id="artnetLoopBtn" onclick="toggleLoop('artnet')" title="Loop Playlist">🔂</button>
-                </div>
             </div>
             
             <!-- Transition Menu (dynamically loaded) -->
@@ -214,20 +301,50 @@
             <div class="playlist-area">
                 <div class="playlist-header" id="artnetPlaylistHeader">
                     <span>🎨 Art-Net Playlist</span>
-                    <div class="master-toggle">
-                        <label class="master-switch">
-                            <input type="checkbox" id="artnetMasterSwitch" onchange="toggleMasterPlaylist('artnet')">
-                            <span class="master-slider"></span>
-                        </label>
-                        <span class="master-label" id="artnetMasterLabel">Master</span>
+                    <div class="playlist-header-controls">
+                        <div class="autoplay-toggle" title="Auto-Advance: playlist advances automatically. Off = loop current clip.">
+                            <label class="autoplay-switch">
+                                <input type="checkbox" id="artnetAutoplayBtn" onchange="toggleAutoplay('artnet')">
+                                <span class="autoplay-slider"></span>
+                            </label>
+                            <span class="autoplay-label" id="artnetAutoplayLabel">Auto</span>
+                        </div>
+                        <div class="master-toggle">
+                            <label class="master-switch">
+                                <input type="checkbox" id="artnetMasterSwitch" onchange="toggleMasterPlaylist('artnet')">
+                                <span class="master-slider"></span>
+                            </label>
+                            <span class="master-label" id="artnetMasterLabel">Master</span>
+                        </div>
                     </div>
                 </div>
-                <div class="playlist-scroll" id="artnetPlaylist">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📂</div>
-                        <p>No Art-Net sources loaded</p>
-                    </div>
+                <div class="midi-clip-controls" id="artnetMidiClipControls">
+                    <div class="midi-param-frame"
+                         data-param-path="artnet.clip.cursor"
+                         data-param-type="clip-navigate"
+                         data-param-name="Art-Net Clip Select"
+                         data-param-min="0"
+                         data-param-max="127"
+                         title="MIDI: navigate through Art-Net clips"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">← Clip →</span><span class="midi-addr-badge"></span></div>
+                    <div class="midi-param-frame"
+                         data-param-path="artnet.clip.load"
+                         data-param-type="trigger"
+                         data-param-name="Art-Net Clip Load"
+                         data-param-min="0"
+                         data-param-max="1"
+                         title="MIDI: load focused clip"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">▶ Load</span><span class="midi-addr-badge"></span></div>
+                    <div class="midi-param-frame"
+                         data-param-path="artnet.clip.fx"
+                         data-param-type="trigger"
+                         data-param-name="Art-Net Clip FX"
+                         data-param-min="0"
+                         data-param-max="1"
+                         title="MIDI: select clip FX / properties"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">🎛 FX</span><span class="midi-addr-badge"></span></div>
                 </div>
+                <div class="playlist-scroll" id="artnetPlaylist"></div>
             </div>
         </div>
         
@@ -246,15 +363,54 @@
                     </div>
                     <div class="bpm-display-row">
                         <label class="bpm-label">BPM:</label>
-                        <input type="number" id="bpm-value-input" class="bpm-value-input" min="20" max="300" step="0.1" value="" placeholder="--"/>
+                        <div class="midi-param-frame"
+                             data-param-path="bpm.value"
+                             data-param-type="bpm-set"
+                             data-param-name="BPM Value"
+                             data-param-min="20"
+                             data-param-max="300"
+                             title="MIDI: set BPM (20–300)"
+                             onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><input type="number" id="bpm-value-input" class="bpm-value-input" min="20" max="300" step="0.1" value="" placeholder="--"/><span class="midi-addr-badge"></span></div>
                     </div>
-                    <button class="bpm-action-btn" id="bpm-tap-btn" title="Tap Tempo">👆</button>
-                    <button class="bpm-action-btn" id="bpm-resync-btn" title="Resync">🔄</button>
+                    <div class="midi-param-frame"
+                         data-param-path="bpm.tap"
+                         data-param-type="trigger"
+                         data-param-name="Tap Tempo"
+                         data-param-min="0"
+                         data-param-max="1"
+                         title="MIDI: tap tempo"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><button class="bpm-action-btn" id="bpm-tap-btn" title="Tap Tempo">👆</button><span class="midi-addr-badge"></span></div>
+                    <div class="midi-param-frame"
+                         data-param-path="bpm.resync"
+                         data-param-type="trigger"
+                         data-param-name="BPM Resync"
+                         data-param-min="0"
+                         data-param-max="1"
+                         title="MIDI: resync BPM sequences"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><button class="bpm-action-btn" id="bpm-resync-btn" title="Resync">🔄</button><span class="midi-addr-badge"></span></div>
                 </div>
             </div>
             
             <!-- Playlist Tabs (Center) -->
             <div class="middle-section-center">
+                <div class="playlist-tabs-midi-wrapper">
+                    <div class="midi-param-frame"
+                         data-param-path="ui.playlist.select"
+                         data-param-type="playlist-select"
+                         data-param-name="Playlist Select"
+                         data-param-min="0"
+                         data-param-max="127"
+                         title="MIDI: scroll through playlists (view)"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">↕</span><span class="midi-addr-badge"></span></div>
+                    <div class="midi-param-frame"
+                         data-param-path="ui.playlist.activate"
+                         data-param-type="playlist-activate"
+                         data-param-name="Playlist Activate"
+                         data-param-min="0"
+                         data-param-max="1"
+                         title="MIDI: activate (launch) the currently viewed playlist"
+                         onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">▶</span><span class="midi-addr-badge"></span></div>
+                </div>
                 <div id="playlistTabsContainer"></div>
             </div>
             
@@ -275,10 +431,18 @@
         <div class="bottom-section">
             <!-- Left Tabs Panel -->
             <div class="tabs-panel">
-                <div class="tabs-header">
+                <div class="tabs-header midi-param-frame"
+                     data-param-path="ui.left.tab"
+                     data-param-type="tab-select"
+                     data-param-name="Tab Select"
+                     data-param-min="0"
+                     data-param-max="2"
+                     title="MIDI: 0=Effects · 1=Sources · 2=Files"
+                     onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}">
                     <button class="tab-btn" onclick="switchTab('effects')">Effects</button>
                     <button class="tab-btn" onclick="switchTab('sources')">Sources</button>
                     <button class="tab-btn active" onclick="switchTab('files')">Files</button>
+                    <span class="midi-addr-badge"></span>
                 </div>
                 <div class="tab-content">
                     <!-- Effects Tab -->
@@ -306,6 +470,32 @@
                     
                     <!-- Files Tab -->
                     <div class="tab-pane active" id="tab-files">
+                        <div class="midi-file-controls">
+                            <div class="midi-param-frame"
+                                 data-param-path="ui.files.cursor"
+                                 data-param-type="file-navigate"
+                                 data-param-name="File Cursor"
+                                 data-param-min="0"
+                                 data-param-max="127"
+                                 title="MIDI: scroll through files"
+                                 onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">↕ Navigate</span><span class="midi-addr-badge"></span></div>
+                            <div class="midi-param-frame"
+                                 data-param-path="ui.files.load.video"
+                                 data-param-type="trigger"
+                                 data-param-name="Load → Video"
+                                 data-param-min="0"
+                                 data-param-max="1"
+                                 title="MIDI: add focused file to Video playlist"
+                                 onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">▶ Video</span><span class="midi-addr-badge"></span></div>
+                            <div class="midi-param-frame"
+                                 data-param-path="ui.files.load.artnet"
+                                 data-param-type="trigger"
+                                 data-param-name="Load → Art-Net"
+                                 data-param-min="0"
+                                 data-param-max="1"
+                                 title="MIDI: add focused file to Art-Net playlist"
+                                 onclick="if(document.body.classList.contains('midi-learn-mode')){event.stopPropagation();window.midiLearnManager?.selectFrame(this);}"><span class="midi-file-ctrl-label">▶ Art-Net</span><span class="midi-addr-badge"></span></div>
+                        </div>
                         <div id="filesSearchContainer"></div>
                         <div id="fileBrowser">
                             <div class="empty-state">
@@ -458,7 +648,7 @@
                     <!-- Preview Stream Toggle -->
                     <div class="mb-3 d-flex align-items-center justify-content-between">
                         <div>
-                            <label class="form-label mb-0">👁️ Preview Stream</label>
+                            <label class="form-label mb-0">�️ Preview Stream</label>
                             <div><small class="text-muted">Disable to save GPU bandwidth when not monitoring</small></div>
                         </div>
                         <div class="form-check form-switch ms-3">
@@ -674,6 +864,7 @@
     <script src="js/sequences.js"></script>
     <script src="js/bpm-widget.js"></script>
     <script src="js/components/playlist-tabs.js"></script>
+    <script src="js/midi-learn.js"></script>
     <script src="js/player.js" type="module"></script>
     <script type="module" src="js/waveform-analyzer.js"></script>
 

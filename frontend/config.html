@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,7 +7,8 @@
     <link href="libs/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="bootstrap-icons/bootstrap-icons.css">
     <link rel="stylesheet" href="css/styles.css">
-    
+    <link rel="stylesheet" href="css/midi-display.css">
+
 </head>
 <body>
     <script src="js/menu-loader.js"></script>
@@ -16,8 +17,8 @@
       <div class="alert alert-info d-flex align-items-center" style="border-radius: 8px;">
         <span style="font-size: 1.5rem; margin-right: 0.5rem;">ℹ️</span>
         <div>
-          <strong>Hinweis:</strong> Änderungen werden erst nach einem Neustart der Anwendung wirksam.<br>
-          Klicken Sie auf <b>Speichern & Neustarten</b>, um die Konfiguration zu übernehmen.
+          <strong>Note:</strong> Changes take effect after restarting the application.<br>
+          Click <b>Save & Restart</b> to apply the configuration.
         </div>
       </div>
       <div id="configContainer" style="margin-top: 2rem;"></div>
@@ -25,7 +26,7 @@
 
     <!-- Floating Save Button -->
         <button class="btn btn-primary btn-lg btn-save-config" id="saveBtn" style="position: fixed; bottom: 32px; right: 32px; z-index: 1000; border-radius: 50px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); font-size: 1.2rem; padding: 0.75em 2em;">
-            � Speichern & Neustarten
+            � Save & Restart
         </button>
 
     <!-- Toast Component -->

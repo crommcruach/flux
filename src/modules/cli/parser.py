@@ -187,6 +187,32 @@ def _build_debug(sub):
     s.add_parser('status', help='Show current log level and debug modules', formatter_class=_Fmt)
 
 
+def _build_output(sub):
+    p = sub.add_parser('output', help='Manage video outputs (display, virtual, …)', formatter_class=_Fmt)
+    s = p.add_subparsers(dest='action', metavar='ACTION')
+    s.required = True
+
+    ls = s.add_parser('list', help='List all configured outputs and their state', formatter_class=_Fmt)
+    _add_player(ls)
+    _add_json(ls)
+
+    st = s.add_parser('status', help='Alias for list', formatter_class=_Fmt)
+    _add_player(st)
+    _add_json(st)
+
+    for cmd, hlp in (
+        ('start',   'Enable/start output(s)'),
+        ('stop',    'Disable/stop output(s)'),
+        ('restart', 'Restart output(s) (stop then start)'),
+    ):
+        sp = s.add_parser(cmd, help=hlp, formatter_class=_Fmt)
+        sp.add_argument(
+            'output_id', nargs='?', default='all',
+            help='Output ID to target, or "all" (default: all)',
+        )
+        _add_player(sp)
+
+
 def _build_perf(sub):
     p = sub.add_parser('perf', help='GPU pipeline performance metrics', formatter_class=_Fmt)
     s = p.add_subparsers(dest='action', metavar='ACTION')
@@ -231,6 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
     _build_content(sub)
     _build_debug(sub)
     _build_perf(sub)
+    _build_output(sub)
 
     return parser
 

@@ -1,9 +1,9 @@
 """
 API Console - Console & Command Execution Endpoints
 
-WICHTIG: Verwende NIEMALS print() Statements in API-Funktionen!
-Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
-Nutze stattdessen immer den Logger:
+IMPORTANT: NEVER use print() statements in API functions!
+This causes "write() before start_response" errors in Flask/Werkzeug.
+Always use the logger instead:
     from ...core.logger import get_logger
     logger = get_logger(__name__)
     logger.info("Message")
@@ -16,7 +16,7 @@ def register_console_routes(app, rest_api_instance):
     
     @app.route('/api/console/log', methods=['GET'])
     def console_log():
-        """Gibt Console Log zurück."""
+        """Returns console log."""
         lines = int(request.args.get('lines', 100))
         log_lines = list(rest_api_instance.console_log)[-lines:]
         return jsonify({
@@ -26,7 +26,7 @@ def register_console_routes(app, rest_api_instance):
     
     @app.route('/api/console/command', methods=['POST'])
     def console_command():
-        """Führt CLI-Befehl aus (in separatem Thread um Print-Statements zu isolieren)."""
+        """Executes a CLI command (in a separate thread to isolate print statements)."""
         import threading
         import io
         import sys
@@ -35,19 +35,19 @@ def register_console_routes(app, rest_api_instance):
         command = data.get('command', '').strip()
         
         if not command:
-            return jsonify({"status": "error", "message": "Kein Befehl angegeben"}), 400
+            return jsonify({"status": "error", "message": "No command specified"}), 400
         
         # Log Command
         rest_api_instance.add_log(f"> {command}")
         
-        # Führe Command in separatem Thread aus (verhindert Print-Probleme)
+        # Execute command in a separate thread (prevents print problems)
         result_container = {'result': None, 'error': None, 'done': False}
         
         def execute_in_thread():
             old_stdout = sys.stdout
             old_stderr = sys.stderr
             try:
-                # Umleite stdout/stderr zu StringIO
+                # Redirect stdout/stderr to StringIO
                 sys.stdout = io.StringIO()
                 sys.stderr = io.StringIO()
                 
@@ -57,7 +57,7 @@ def register_console_routes(app, rest_api_instance):
                 stdout_output = sys.stdout.getvalue()
                 stderr_output = sys.stderr.getvalue()
                 
-                # Kombiniere Ergebnis mit captured output
+                # Combine result with captured output
                 if stdout_output or stderr_output:
                     result = (result or '') + '\n' + stdout_output + stderr_output
                 
@@ -76,24 +76,24 @@ def register_console_routes(app, rest_api_instance):
         
         # Verarbeite Ergebnis
         if result_container['error']:
-            error_msg = f"Fehler: {result_container['error']}"
+            error_msg = f"Error: {result_container['error']}"
             rest_api_instance.add_log(error_msg)
             return jsonify({"status": "error", "message": error_msg}), 500
         
         result = result_container['result']
         if result:
             rest_api_instance.add_log(result)
-        return jsonify({"status": "success", "output": result or "Befehl ausgeführt"})
+        return jsonify({"status": "success", "output": result or "Command executed"})
     
     @app.route('/api/console/clear', methods=['POST'])
     def console_clear():
-        """Löscht Console Log."""
+        """Clears console log."""
         rest_api_instance.console_log.clear()
-        return jsonify({"status": "success", "message": "Console gelöscht"})
+        return jsonify({"status": "success", "message": "Console cleared"})
     
     @app.route('/api/console/help', methods=['GET'])
     def console_help():
-        """Gibt CLI-Hilfe zurück (dynamisch aus utils.print_help)."""
+        """Returns CLI help (dynamically from utils.print_help)."""
         import io
         import sys
         from ...core.utils import print_help

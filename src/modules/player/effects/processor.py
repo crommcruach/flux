@@ -122,7 +122,32 @@ class EffectProcessor:
         
         logger.debug(f"✅ {count} effects cleared from {chain_type} chain")
         return True, f"{count} effects cleared from {chain_type} chain"
-    
+
+    def reorder_chain(self, new_order, chain_type='video'):
+        """
+        Reorder effects in a player-level chain.
+
+        Args:
+            new_order: List of current indices in desired order e.g. [2, 0, 1]
+            chain_type: 'video' or 'artnet'
+
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        chain = self.artnet_effect_chain if chain_type == 'artnet' else self.video_effect_chain
+
+        if sorted(new_order) != list(range(len(chain))):
+            return False, f"Invalid reorder indices {new_order} for chain length {len(chain)}"
+
+        reordered = [chain[i] for i in new_order]
+        if chain_type == 'artnet':
+            self.artnet_effect_chain = reordered
+        else:
+            self.video_effect_chain = reordered
+
+        logger.debug(f"✅ {chain_type} effect chain reordered: {new_order}")
+        return True, f"{chain_type} effect chain reordered"
+
     def get_chain(self, chain_type='video', layers=None):
         """
         Get current effect chain info.

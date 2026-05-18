@@ -1,6 +1,6 @@
 /**
  * Utility Functions
- * Hilfsfunktionen für den Editor
+ * Helper functions for the editor
  */
 
 import { setNeedsRedraw } from './state.js';

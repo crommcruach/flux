@@ -2992,6 +2992,37 @@ class SequenceManager {
     }
     
     /**
+     * Convert a hue float (0.0–1.0) to an #RRGGBB hex string (full saturation/brightness).
+     */
+    static hueToHex(hue) {
+        const h = ((hue % 1.0) + 1.0) % 1.0;
+        const i = Math.floor(h * 6);
+        const f = h * 6 - i;
+        const vals = [
+            [1, f, 0], [1 - f, 1, 0], [0, 1, f],
+            [0, 1 - f, 1], [f, 0, 1], [1, 0, 1 - f]
+        ];
+        const [r, g, b] = vals[i % 6];
+        return '#' + [r, g, b].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+    }
+
+    /**
+     * Resolve a sequence scalar value (0.0–1.0) to a hex color.
+     * In palette mode, maps the scalar to a palette entry by index.
+     * In HSB/RGB mode, maps to hue cycling.
+     */
+    static resolveColorValue(value, picker) {
+        if (picker && picker.currentMode === 'palette') {
+            const colors = picker.getPaletteColors ? picker.getPaletteColors() : (picker.paletteColors || []);
+            if (colors.length > 0) {
+                const idx = Math.floor(((value % 1.0) + 1.0) % 1.0 * colors.length) % colors.length;
+                return colors[idx].slice(0, 7); // strip alpha if #rrggbbaa
+            }
+        }
+        return SequenceManager.hueToHex(value);
+    }
+
+    /**
      * Update visual feedback for parameter by UID (red line in triple slider)
      */
     updateParameterVisualFeedbackByUID(paramUid, value) {
@@ -3008,6 +3039,20 @@ class SequenceManager {
         const paramControl = button.closest('.parameter-grid-row');
         if (!paramControl) {
             console.debug('No parameter-grid-row found for:', paramUid);
+            return;
+        }
+
+        // For COLOR params: update the color picker swatch instead of a slider
+        const paramType = button.getAttribute('data-param-type');
+        if (paramType === 'color') {
+            const colorPickerWrapper = paramControl.querySelector('.color-picker-wrapper');
+            if (colorPickerWrapper && window.colorPickers) {
+                const picker = window.colorPickers[colorPickerWrapper.id];
+                if (picker && typeof picker.setValue === 'function') {
+                    const hex = SequenceManager.resolveColorValue(value, picker);
+                    picker.setValue(hex);
+                }
+            }
             return;
         }
         

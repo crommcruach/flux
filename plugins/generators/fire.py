@@ -15,11 +15,10 @@ _SHADER_PATH = os.path.join(
 class FireGenerator(PluginBase):
     """
     Fire Generator - Realistischer Feuer-Effekt.
-
-    _shader_src: str | None = None
-    
     Flackernde Flammen in Gelb/Orange/Rot die von unten nach oben züngeln.
     """
+
+    _shader_src: str | None = None
     
     METADATA = {
         'id': 'fire',

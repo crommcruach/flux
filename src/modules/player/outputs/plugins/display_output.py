@@ -31,7 +31,7 @@ class DisplayOutput(OutputBase):
         super().__init__(output_id, config)
 
         self.monitor_index = config.get('monitor_index', 0)
-        self.fullscreen = config.get('fullscreen', True)
+        self.fullscreen = config.get('fullscreen', False)
         self.resolution = config.get('resolution', [1920, 1080])
         self.window_title = config.get('window_title', f'Flux Output - {output_id}')
 

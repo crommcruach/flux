@@ -148,9 +148,9 @@ function updateLogDisplay(data) {
         
         lastLogLength = data.lines.length;
     } else {
-        logOutput.textContent = 'Keine Log-Einträge verfügbar';
+        logOutput.textContent = 'No log entries available';
         if (logInfo) {
-            logInfo.textContent = 'Keine Daten';
+            logInfo.textContent = 'No data';
             logInfo.style.color = 'var(--text-secondary)';
         }
     }
@@ -221,12 +221,12 @@ function displayHelp(data) {
     // Update title
     const title = helpSection.querySelector('h3');
     if (title) {
-        title.innerHTML = '<span class="help-toggle-icon collapsed" id="helpToggleIcon">▼</span> 📖 Verfügbare Befehle <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); fetchHelp()" style="margin-left: 10px;">🔄 Aktualisieren</button>';
+        title.innerHTML = '<span class="help-toggle-icon collapsed" id="helpToggleIcon">▼</span> 📖 Available Commands <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); fetchHelp()" style="margin-left: 10px;">🔄 Refresh</button>';
         title.onclick = toggleHelp;
     }
     
     if (!data.sections?.length) {
-        helpContent.innerHTML = '<p style="color: var(--text-secondary);">Keine Befehle verfügbar.</p>';
+        helpContent.innerHTML = '<p style="color: var(--text-secondary);">No commands available.</p>';
         return;
     }
     
@@ -248,7 +248,7 @@ function displayHelp(data) {
     helpContent.innerHTML = `
         ${sections}
         <div style="margin-top: 1rem; padding: 0.75rem; background: rgba(79, 70, 229, 0.1); border-left: 3px solid var(--accent-color); border-radius: 4px; font-size: 0.9rem;">
-            💡 <strong>Hinweis:</strong> REST API startet automatisch beim Programmstart. Alle Befehle sind auch via Web-Interface verfügbar!
+            💡 <strong>Note:</strong> REST API starts automatically on program startup. All commands are also available via the web interface!
         </div>
     `;
 }

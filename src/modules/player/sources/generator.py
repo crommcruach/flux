@@ -188,12 +188,12 @@ class GeneratorSource(FrameSource):
         return False
 
     def reset(self):
-        """Setzt Generator zurück."""
+        """Resets generator."""
         self.current_frame = 0
         self.start_time = time.time()
 
     def cleanup(self):
-        """Cleanup für Generator."""
+        """Cleanup for generator."""
         if self.plugin_instance:
             if hasattr(self.plugin_instance, 'cleanup'):
                 self.plugin_instance.cleanup()

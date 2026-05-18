@@ -426,7 +426,7 @@ def register_output_routes(app, player_manager):
                 output_config['name'] = config.get('name', f'Virtual Output {output_id}')
             elif output_type == 'display':
                 output_config['monitor_index'] = config.get('monitor_index', 0)
-                output_config['fullscreen'] = config.get('fullscreen', True)
+                output_config['fullscreen'] = config.get('fullscreen', False)
                 output_config['window_title'] = config.get('window_title', f'Flux {output_id}')
                 logger.info(f"🖥️ Display output config: monitor={output_config['monitor_index']}, fullscreen={output_config['fullscreen']}, title='{output_config['window_title']}'")
             

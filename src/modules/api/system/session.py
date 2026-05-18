@@ -101,8 +101,9 @@ def register_session_routes(app, session_state_manager):
                     try:
                         with open(filepath, 'r', encoding='utf-8') as f:
                             data = json.load(f)
-                            video_playlist_count = len(data.get('video_player', {}).get('playlist', []))
-                            artnet_playlist_count = len(data.get('artnet_player', {}).get('playlist', []))
+                            playlists_items = data.get('playlists', {}).get('items', {})
+                            video_playlist_count = len(playlists_items)
+                            artnet_playlist_count = 0
                     except:
                         video_playlist_count = 0
                         artnet_playlist_count = 0
@@ -159,8 +160,22 @@ def register_session_routes(app, session_state_manager):
             
             logger.debug(f"🔒 Injected restore_timestamp: {restore_timestamp}")
             
+            # CRITICAL: Restore clip_registry BEFORE playlists!
+            from ...player.clips.registry import get_clip_registry
+            clip_registry = get_clip_registry()
+            clip_registry_data = snapshot_data.get('clip_registry')
+            if clip_registry_data:
+                try:
+                    clip_registry.deserialize(clip_registry_data)
+                    logger.debug(f"📋 Clip registry restored from snapshot: {len(clip_registry.clips)} clips")
+                except Exception as e:
+                    logger.error(f"⚠️ Failed to restore clip registry from snapshot: {e}", exc_info=True)
+            else:
+                logger.warning("⚠️ No clip_registry data in snapshot file")
+
             # Actively restore playlists if available
             playlist_system = get_playlist_system()
+            playlist_count = 0
             if playlist_system:
                 playlists_data = snapshot_data.get('playlists', {})
                 logger.debug(f"🎵 Playlists data found: {bool(playlists_data)}")
@@ -171,30 +186,31 @@ def register_session_routes(app, session_state_manager):
                     
                     if playlist_system.load_from_dict(playlists_data):
                         playlist_count = len(playlist_system.playlists)
-                        logger.debug(f"✅ Snapshot restored with {playlist_count} playlists: {filename}")
-                        
-                        return jsonify({
-                            "success": True,
-                            "message": f"Snapshot '{filename}' restored successfully with {playlist_count} playlists",
-                            "filename": filename,
-                            "restore_timestamp": restore_timestamp,
-                            "playlists_restored": playlist_count,
-                            "requires_reload": True
-                        })
+                        logger.debug(f"✅ Playlists restored from snapshot: {playlist_count}")
                     else:
                         logger.warning("⚠️ load_from_dict returned False")
                 else:
                     logger.warning("⚠️ No valid playlists data in snapshot")
             else:
                 logger.warning("⚠️ playlist_system not available")
-            
-            logger.debug(f"🔄 Snapshot restored (file only): {filename}")
+
+            # Restore output state to running OutputManager
+            if hasattr(app, 'flux_player_manager'):
+                outputs_data = snapshot_data.get('outputs', {})
+                for player_name, output_state in outputs_data.items():
+                    player = app.flux_player_manager.get_player(player_name)
+                    if player and hasattr(player, 'output_manager') and player.output_manager:
+                        player.output_manager.set_state(output_state)
+                        logger.debug(f"🔌 Output state restored for player: {player_name}")
+
+            logger.debug(f"✅ Snapshot restored: {filename} ({playlist_count} playlists)")
             
             return jsonify({
                 "success": True,
-                "message": f"Snapshot '{filename}' restored. Please reload the page to apply changes.",
+                "message": f"Snapshot '{filename}' restored successfully with {playlist_count} playlists",
                 "filename": filename,
                 "restore_timestamp": restore_timestamp,
+                "playlists_restored": playlist_count,
                 "requires_reload": True
             })
             
@@ -528,8 +544,9 @@ def register_session_routes(app, session_state_manager):
                     try:
                         with open(filepath, 'r', encoding='utf-8') as f:
                             data = json.load(f)
-                            video_playlist_count = len(data.get('video_player', {}).get('playlist', []))
-                            artnet_playlist_count = len(data.get('artnet_player', {}).get('playlist', []))
+                            playlists_items = data.get('playlists', {}).get('items', {})
+                            video_playlist_count = len(playlists_items)
+                            artnet_playlist_count = 0
                     except:
                         video_playlist_count = 0
                         artnet_playlist_count = 0
@@ -607,6 +624,7 @@ def register_session_routes(app, session_state_manager):
             
             # Actively restore playlists if available
             playlist_system = get_playlist_system()
+            playlist_count = 0
             if playlist_system:
                 playlists_data = session_data.get('playlists', {})
                 logger.debug(f"🎵 Playlists data found: {bool(playlists_data)}")
@@ -617,30 +635,31 @@ def register_session_routes(app, session_state_manager):
                     
                     if playlist_system.load_from_dict(playlists_data):
                         playlist_count = len(playlist_system.playlists)
-                        logger.debug(f"✅ Session restored with {playlist_count} playlists: {filename}")
-                        
-                        return jsonify({
-                            "success": True,
-                            "message": f"Session '{filename}' restored successfully with {playlist_count} playlists",
-                            "filename": filename,
-                            "restore_timestamp": restore_timestamp,
-                            "playlists_restored": playlist_count,
-                            "requires_reload": True
-                        })
+                        logger.debug(f"✅ Playlists restored from session: {playlist_count}")
                     else:
                         logger.warning("⚠️ load_from_dict returned False")
                 else:
                     logger.warning("⚠️ No valid playlists data in session")
             else:
                 logger.warning("⚠️ playlist_system not available")
-            
-            logger.debug(f"🔄 Session restored (file only): {filename}")
-            
+
+            # Restore output state to running OutputManager
+            if hasattr(app, 'flux_player_manager'):
+                outputs_data = session_data.get('outputs', {})
+                for player_name, output_state in outputs_data.items():
+                    player = app.flux_player_manager.get_player(player_name)
+                    if player and hasattr(player, 'output_manager') and player.output_manager:
+                        player.output_manager.set_state(output_state)
+                        logger.debug(f"🔌 Output state restored for player: {player_name}")
+
+            logger.debug(f"✅ Session restored: {filename} ({playlist_count} playlists)")
+
             return jsonify({
                 "success": True,
-                "message": f"Session '{filename}' restored. Please reload the page to apply changes.",
+                "message": f"Session '{filename}' restored successfully with {playlist_count} playlists",
                 "filename": filename,
                 "restore_timestamp": restore_timestamp,
+                "playlists_restored": playlist_count,
                 "requires_reload": True
             })
             

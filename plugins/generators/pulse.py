@@ -13,12 +13,11 @@ _SHADER_PATH = os.path.join(
 
 class PulseGenerator(PluginBase):
     """
-
-    _shader_src: str | None = None
     Pulse Generator - Pulsierende Vollfarbe.
-    
     Einfaches pulsierendes Farbfeld mit konfigurierbarer Frequenz.
     """
+
+    _shader_src: str | None = None
     
     METADATA = {
         'id': 'pulse',

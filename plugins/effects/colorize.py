@@ -99,9 +99,12 @@ class ColorizeEffect(PluginBase):
         if name == 'color':
             self.color = str(value)
             self.hue, self.saturation, self.brightness, self.alpha = self._hex_to_opencv_hsva(self.color)
+            return True
         elif name == 'invert':
             self.invert = bool(value)
-    
+            return True
+        return False
+
     def get_parameters(self):
         """Gibt aktuelle Parameter zurück."""
         return {

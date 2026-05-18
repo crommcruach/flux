@@ -1,13 +1,13 @@
 """
-JSON Schema Validator für Punkte-Dateien
+JSON Schema Validator for points files
 """
 from jsonschema import validate, ValidationError, Draft7Validator
 
-# JSON Schema für Punkte-Export Format
+# JSON Schema for points export format
 POINTS_SCHEMA = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "Punkte Export Schema",
-    "description": "Schema für LED-Mapping Punkte mit Canvas-Informationen",
+    "description": "Schema for LED-mapping points with canvas information",
     "type": "object",
     "required": ["canvas", "objects"],
     "properties": {
@@ -26,7 +26,7 @@ POINTS_SCHEMA = {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 10000,
-                    "description": "Canvas Höhe in Pixeln"
+                    "description": "Canvas height in pixels"
                 }
             },
             "additionalProperties": False
@@ -96,7 +96,7 @@ def validate_points_json(data):
     errors = list(validator.iter_errors(data))
     
     if not errors:
-        # Zusätzliche logische Validierung
+        # Additional logical validation
         canvas = data['canvas']
         invalid_points = []
         
@@ -108,20 +108,20 @@ def validate_points_json(data):
                         'point': point_idx,
                         'x': point['x'],
                         'y': point['y'],
-                        'reason': f"Punkt außerhalb Canvas ({canvas['width']}x{canvas['height']})"
+                        'reason': f"Point outside canvas ({canvas['width']}x{canvas['height']})"
                     })
         
         if invalid_points:
             error_msgs = [f"Objekt {p['object']}, Punkt {p['point']}: ({p['x']},{p['y']}) - {p['reason']}" 
                          for p in invalid_points[:5]]  # Erste 5 Fehler
             if len(invalid_points) > 5:
-                error_msgs.append(f"... und {len(invalid_points) - 5} weitere Punkte außerhalb")
+                error_msgs.append(f"... and {len(invalid_points) - 5} more points outside")
             
-            return False, "Punkte außerhalb Canvas-Grenzen", error_msgs
+            return False, "Points outside canvas bounds", error_msgs
         
-        # Zähle valide Punkte
+        # Count valid points
         total_points = sum(len(obj.get('points', [])) for obj in data['objects'])
-        return True, f"✓ Gültig ({total_points} Punkte in {len(data['objects'])} Objekten)", []
+        return True, f"✓ Valid ({total_points} points in {len(data['objects'])} objects)", []
     
     # Schema-Validierungsfehler
     error_messages = []
@@ -137,7 +137,7 @@ def validate_points_json(data):
 
 def validate_points_file(file_path):
     """
-    Lädt und validiert eine Punkte-JSON-Datei.
+    Loads and validates a points JSON file.
     
     Args:
         file_path: Pfad zur JSON-Datei
@@ -153,7 +153,7 @@ def validate_points_file(file_path):
     except FileNotFoundError:
         return False, f"Datei nicht gefunden: {file_path}", [], None
     except json.JSONDecodeError as e:
-        return False, f"Ungültige JSON-Syntax: {e}", [], None
+        return False, f"Invalid JSON syntax: {e}", [], None
     except Exception as e:
         return False, f"Fehler beim Laden: {e}", [], None
     

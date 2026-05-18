@@ -1,5 +1,5 @@
-"""
-REST API Endpoints für Plugin-System
+﻿"""
+REST API endpoints for plugin system
 """
 from flask import Blueprint, jsonify, request
 from modules.plugins.manager import get_plugin_manager
@@ -7,14 +7,14 @@ from ...core.logger import get_logger, debug_api
 
 logger = get_logger(__name__)
 
-# Blueprint erstellen
+# Create blueprint
 plugins_bp = Blueprint('plugins', __name__, url_prefix='/api/plugins')
 
 
 @plugins_bp.route('/list', methods=['GET'])
 def list_plugins():
     """
-    Listet alle verfügbaren Plugins auf.
+    Lists all available plugins.
     
     Query Parameters:
         type (optional): Filtert nach Plugin-Typ (generator, effect, source, transition)
@@ -63,7 +63,7 @@ def list_plugins():
 @plugins_bp.route('/<plugin_id>/metadata', methods=['GET'])
 def get_plugin_metadata(plugin_id):
     """
-    Gibt METADATA eines Plugins zurück.
+    Returns METADATA of a plugin.
     
     Args:
         plugin_id: Plugin-ID (z.B. "blur")
@@ -91,7 +91,7 @@ def get_plugin_metadata(plugin_id):
 @plugins_bp.route('/<plugin_id>/parameters', methods=['GET'])
 def get_plugin_parameters(plugin_id):
     """
-    Gibt PARAMETERS eines Plugins zurück (für UI-Generierung).
+    Returns PARAMETERS of a plugin (for UI generation).
     
     Args:
         plugin_id: Plugin-ID
@@ -101,7 +101,7 @@ def get_plugin_parameters(plugin_id):
             "parameters": [
                 {
                     "name": "strength",
-                    "label": "Blur Stärke",
+                    "label": "Blur Strength",
                     "type": "float",
                     "default": 5.0,
                     "min": 0.0,
@@ -125,7 +125,7 @@ def get_plugin_parameters(plugin_id):
 @plugins_bp.route('/<plugin_id>/load', methods=['POST'])
 def load_plugin(plugin_id):
     """
-    Lädt Plugin mit Konfiguration.
+    Loads plugin with configuration.
     
     Args:
         plugin_id: Plugin-ID
@@ -166,7 +166,7 @@ def load_plugin(plugin_id):
 @plugins_bp.route('/<plugin_id>/unload', methods=['POST'])
 def unload_plugin(plugin_id):
     """
-    Entlädt Plugin-Instanz.
+    Unloads plugin instance.
     
     Args:
         plugin_id: Plugin-ID
@@ -248,7 +248,7 @@ def update_plugin_parameter(plugin_id, param_name):
 @plugins_bp.route('/<plugin_id>/parameters', methods=['GET'])
 def get_current_parameter_values(plugin_id):
     """
-    Gibt aktuelle Parameter-Werte einer geladenen Plugin-Instanz zurück.
+    Returns current parameter values of a loaded plugin instance.
     
     Args:
         plugin_id: Plugin-ID
@@ -278,7 +278,7 @@ def get_current_parameter_values(plugin_id):
 @plugins_bp.route('/stats', methods=['GET'])
 def get_plugin_stats():
     """
-    Gibt Statistiken über geladene Plugins zurück.
+    Returns statistics about loaded plugins.
     
     Returns:
         {
@@ -299,7 +299,7 @@ def get_plugin_stats():
 @plugins_bp.route('/reload', methods=['POST'])
 def reload_plugins():
     """
-    Lädt alle Plugins neu (Development).
+    Reloads all plugins (development).
     
     Returns:
         {

@@ -409,16 +409,44 @@ class MultiPlaylistSystem:
                     # Without this, any REST API call that arrives before autoplay reaches
                     # a clip will find the registry empty and create a FRESH UUID — which
                     # then diverges from the playlist UUID the layer ends up using.
+                    from ..clips.registry import get_clip_registry as _get_registry
+                    _clip_registry = _get_registry()
                     if hasattr(player, '_ensure_clip_registered'):
                         clips_list = player_state.clips
                         ids_list   = player_state.clip_ids
                         n_registered = 0
+                        n_gen_registered = 0
                         for _clip_item, _clip_id in zip(clips_list, ids_list):
-                            if _clip_item and _clip_id and not _clip_item.startswith('generator:'):
+                            if not _clip_item or not _clip_id:
+                                continue
+                            if _clip_item.startswith('generator:'):
+                                # Register generator clips manually so saved effects survive restart.
+                                # _ensure_clip_registered skips generators, so we handle them here.
+                                if _clip_registry and _clip_id not in _clip_registry.clips:
+                                    _clip_registry.register_clip(
+                                        player_id=player_id,
+                                        absolute_path=_clip_item,
+                                        relative_path=_clip_item,
+                                        metadata={'type': 'generator'},
+                                        clip_id=_clip_id,
+                                    )
+                                    # Inject saved effects from playlist_params into the new entry.
+                                    _saved_params = player_state.clip_params.get(_clip_id, {})
+                                    _saved_effects = _saved_params.get('effects', [])
+                                    if _saved_effects and _clip_registry:
+                                        _clip_registry.clips[_clip_id]['effects'] = list(_saved_effects)
+                                        logger.debug(
+                                            f"[RESTORE] Generator {_clip_id[:8]}… pre-registered "
+                                            f"with {len(_saved_effects)} effects"
+                                        )
+                                    n_gen_registered += 1
+                            else:
                                 player._ensure_clip_registered(_clip_item, _clip_id)
                                 n_registered += 1
                         if n_registered:
                             logger.debug(f"[RESTORE] Pre-registered {n_registered} playlist clips for {player_id}")
+                        if n_gen_registered:
+                            logger.debug(f"[RESTORE] Pre-registered {n_gen_registered} generator clips for {player_id}")
 
                     # Apply global effects to player
                     if hasattr(player, 'effect_processor') and player.effect_processor:

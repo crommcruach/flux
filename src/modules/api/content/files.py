@@ -1,4 +1,4 @@
-"""
+﻿"""
 API Files - File Browser and Directory Management
 
 Provides endpoints for browsing video directory structure.
@@ -23,7 +23,7 @@ def register_files_api(app, video_dir, config=None):
     thumbnail_gen.start_worker()
     
     def get_video_sources():
-        """Gibt alle konfigurierten Video-Quellen zurück."""
+        """Returns all configured video sources."""
         sources = [video_dir]  # Haupt video_dir ist immer dabei
         
         if config and 'paths' in config and 'video_sources' in config['paths']:
@@ -35,7 +35,7 @@ def register_files_api(app, video_dir, config=None):
     
     @app.route('/api/files/tree', methods=['GET'])
     def get_file_tree():
-        """Gibt Ordnerstruktur mit Videos und Bildern zurück."""
+        """Returns folder structure with videos and images."""
         try:
             sources = get_video_sources()
             
@@ -103,9 +103,9 @@ def register_files_api(app, video_dir, config=None):
                         elif file_lower.endswith(IMAGE_EXTENSIONS):
                             file_type = "image"
                         else:
-                            continue  # Überspringe andere Dateitypen
+                            continue  # Skip other file types
                         
-                        # Alle Videos und Bilder können Thumbnails haben (on-demand generiert)
+                        # All videos and images can have thumbnails (generated on demand)
                         has_thumbnail = True
                         
                         # Extrahiere Video-Metadaten
@@ -122,7 +122,7 @@ def register_files_api(app, video_dir, config=None):
                             "size": file_size,
                             "size_human": _format_size(file_size),
                             "has_thumbnail": has_thumbnail,
-                            **metadata  # Füge fps, duration, frame_count hinzu
+                            **metadata  # Add fps, duration, frame_count
                         }
                         files.append(file_info)
                 
@@ -188,7 +188,7 @@ def register_files_api(app, video_dir, config=None):
     
     @app.route('/api/files/videos', methods=['GET'])
     def get_all_videos():
-        """Gibt flache Liste aller Videos und Bilder zurück (für Drag & Drop)."""
+        """Returns flat list of all videos and images (for drag & drop)."""
         try:
             files_list = []
             unconverted_only = request.args.get('unconverted_only', 'false').lower() == 'true'
@@ -246,7 +246,7 @@ def register_files_api(app, video_dir, config=None):
                             elif file_lower.endswith(IMAGE_EXTENSIONS):
                                 file_type = "image"
                             else:
-                                continue  # Überspringe andere Dateitypen
+                                continue  # Skip other file types
 
                             # converted_only: hide raw video files (keep images, clip_folders shown above)
                             if converted_only and file_type == "video":
@@ -264,7 +264,7 @@ def register_files_api(app, video_dir, config=None):
                             # Extrahiere Ordnername
                             folder_name = os.path.dirname(rel_path) if os.path.dirname(rel_path) else "root"
                             
-                            # Alle Videos und Bilder können Thumbnails haben (on-demand generiert)
+                            # All videos and images can have thumbnails (generated on demand)
                             has_thumbnail = True
                             
                             # Extrahiere Video-Metadaten
@@ -285,7 +285,7 @@ def register_files_api(app, video_dir, config=None):
                                 "size_human": _format_size(file_size),
                                 "type": file_type,
                                 "has_thumbnail": has_thumbnail,
-                                **metadata  # Füge fps, duration, frame_count hinzu
+                                **metadata  # Add fps, duration, frame_count
                             })
 
             # Inject tags/alias from sidecar files
@@ -312,7 +312,7 @@ def register_files_api(app, video_dir, config=None):
     @app.route('/api/files/thumbnail/<path:file_path>', methods=['GET'])
     def get_thumbnail(file_path):
         """
-        Gibt Thumbnail für Datei zurück
+        Returns thumbnail for file
         
         Query Parameters:
             - generate: 'true' um Thumbnail zu generieren falls nicht existiert
@@ -350,7 +350,7 @@ def register_files_api(app, video_dir, config=None):
                     'error': 'Could not generate thumbnail for generator'
                 }), 404
             
-            # Finde vollständigen Pfad in Video-Quellen
+            # Find full path in video sources
             full_path = None
             for source_path in get_video_sources():
                 potential_path = os.path.join(source_path, file_path)
@@ -372,7 +372,7 @@ def register_files_api(app, video_dir, config=None):
                 else:
                     return jsonify({'success': False, 'error': 'No original.mov in clip folder'}), 404
                 
-            # Prüfe ob generieren gewünscht
+            # Check whether generation is requested
             should_generate = request.args.get('generate', 'false').lower() == 'true'
             
             # Versuche Thumbnail zu laden
@@ -404,7 +404,7 @@ def register_files_api(app, video_dir, config=None):
     @app.route('/api/files/video-preview/<path:file_path>', methods=['GET'])
     def get_video_preview(file_path):
         """
-        Gibt animiertes Video-Preview zurück (GIF oder WebM)
+        Returns animated video preview (GIF or WebM)
         
         Query Parameters:
             - generate: 'true' um Preview zu generieren falls nicht existiert
@@ -413,7 +413,7 @@ def register_files_api(app, video_dir, config=None):
             # Decode file path
             file_path = urllib.parse.unquote(file_path)
             
-            # Finde vollständigen Pfad
+            # Find full path
             full_path = None
             for source_path in get_video_sources():
                 potential_path = os.path.join(source_path, file_path)
@@ -427,7 +427,7 @@ def register_files_api(app, video_dir, config=None):
                     'error': 'File not found'
                 }), 404
                 
-            # Prüfe ob generieren gewünscht
+            # Check whether generation is requested
             should_generate = request.args.get('generate', 'false').lower() == 'true'
             
             # Versuche Preview zu laden
@@ -467,7 +467,7 @@ def register_files_api(app, video_dir, config=None):
     @app.route('/api/files/thumbnails/batch', methods=['POST'])
     def generate_thumbnails_batch():
         """
-        Generiert Thumbnails für mehrere Dateien asynchron
+        Generates thumbnails for multiple files asynchronously
         
         Request Body:
             {
@@ -484,7 +484,7 @@ def register_files_api(app, video_dir, config=None):
                     'error': 'No files provided'
                 }), 400
                 
-            # Finde vollständige Pfade
+            # Find full paths
             full_paths = []
             for file_path in file_paths:
                 for source_path in get_video_sources():
@@ -493,7 +493,7 @@ def register_files_api(app, video_dir, config=None):
                         full_paths.append(potential_path)
                         break
                         
-            # Queue für asynchrone Generierung
+            # Queue for asynchronous generation
             for full_path in full_paths:
                 thumbnail_gen.generate_thumbnail(full_path, async_mode=True)
                 
@@ -512,7 +512,7 @@ def register_files_api(app, video_dir, config=None):
             
     @app.route('/api/files/thumbnails/stats', methods=['GET'])
     def get_thumbnail_stats():
-        """Gibt Cache-Statistiken zurück"""
+        """Returns cache statistics"""
         try:
             stats = thumbnail_gen.get_cache_stats()
             return jsonify({
@@ -527,7 +527,7 @@ def register_files_api(app, video_dir, config=None):
             
     @app.route('/api/files/thumbnails/cleanup', methods=['POST'])
     def cleanup_thumbnails():
-        """Löscht alte Thumbnails"""
+        """Deletes old thumbnails"""
         try:
             data = request.get_json() or {}
             days = data.get('days', None)  # None = use config default
@@ -729,7 +729,7 @@ def register_files_api(app, video_dir, config=None):
 
 
 def _format_size(size_bytes):
-    """Formatiert Dateigröße human-readable."""
+    """Formats file size in human-readable form."""
     for unit in ['B', 'KB', 'MB', 'GB']:
         if size_bytes < 1024.0:
             return f"{size_bytes:.1f} {unit}"

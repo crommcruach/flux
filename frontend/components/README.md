@@ -1,20 +1,20 @@
 # Reusable UI Components
 
-Dieses Verzeichnis enthält wiederverwendbare UI-Komponenten, die in mehreren Seiten verwendet werden können.
+This directory contains reusable UI components that can be used across multiple pages.
 
 ## Toast Notifications
 
-### Verwendung
+### Usage
 
-**Automatisches Laden (empfohlen):**
+**Automatic loading (recommended):**
 ```html
-<!-- Im HTML Head oder vor dem schließenden </body> Tag -->
+<!-- In the HTML head or before the closing </body> tag -->
 <script src="js/toast-loader.js"></script>
 ```
 
-**Manuelles Einbinden:**
+**Manual include:**
 ```html
-<!-- Alternative: Direktes Include (wenn unterstützt) -->
+<!-- Alternative: Direct include (if supported) -->
 <div id="toast-container-wrapper"></div>
 <script>
     fetch('/static/components/toast.html')
@@ -27,44 +27,44 @@ Dieses Verzeichnis enthält wiederverwendbare UI-Komponenten, die in mehreren Se
 
 ### JavaScript API
 
-Die Toast-Funktionalität wird über `common.js` bereitgestellt:
+The toast functionality is provided via `common.js`:
 
 ```javascript
 import { showToast } from './common.js';
 
-// Erfolg (grün)
-showToast('Operation erfolgreich!', 'success', 3000);
+// Success (green)
+showToast('Operation successful!', 'success', 3000);
 
-// Fehler (rot)
-showToast('Ein Fehler ist aufgetreten', 'error', 5000);
+// Error (red)
+showToast('An error occurred', 'error', 5000);
 
-// Info (blau)
-showToast('Informative Nachricht', 'info', 3000);
+// Info (blue)
+showToast('Informative message', 'info', 3000);
 
-// Warnung (gelb)
-showToast('Achtung!', 'warning', 4000);
+// Warning (yellow)
+showToast('Caution!', 'warning', 4000);
 ```
 
-### Styling anpassen
+### Customizing styles
 
-Alle Toast-Styles befinden sich in `components/toast.html`. Änderungen dort werden automatisch auf alle Seiten angewendet.
+All toast styles are located in `components/toast.html`. Changes there are automatically applied to all pages.
 
-**CSS-Variablen für Theme-Anpassung:**
-- `--bg-secondary`: Hintergrundfarbe
-- `--border-color`: Rahmenfarbe
-- `--text-primary`: Textfarbe
-- `--text-secondary`: Sekundäre Textfarbe
+**CSS variables for theme customization:**
+- `--bg-secondary`: Background color
+- `--border-color`: Border color
+- `--text-primary`: Text color
+- `--text-secondary`: Secondary text color
 
-### Vorteile der zentralisierten Komponente
+### Benefits of the centralized component
 
-✅ **Single Source of Truth**: Alle Änderungen an einem Ort  
-✅ **Konsistentes Design**: Gleiche Toast-Darstellung auf allen Seiten  
-✅ **Wartbarkeit**: Keine Code-Duplikation mehr  
-✅ **Einfache Updates**: Nur eine Datei ändern statt 5+  
+✅ **Single Source of Truth**: All changes in one place  
+✅ **Consistent design**: Same toast appearance across all pages  
+✅ **Maintainability**: No code duplication  
+✅ **Easy updates**: Only one file to change instead of 5+  
 
-## Weitere Komponenten
+## Additional Components
 
-Weitere wiederverwendbare Komponenten können hier nach dem gleichen Muster hinzugefügt werden:
+More reusable components can be added here following the same pattern:
 
 - Modals
 - Loading Spinner

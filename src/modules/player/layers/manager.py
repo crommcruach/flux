@@ -591,10 +591,10 @@ class LayerManager:
     # ──────────────────────────────────────────────────────────────────────────
 
     def composite_layers(self, preprocess_transport_callback, player_name="Player",
-                         needs_download: bool = True):
+                         needs_download: bool = True, global_effects=None):
         """GPU ping-pong blend pipeline.  See layers/compositor.py."""
         from .compositor import composite_layers as _cl
-        return _cl(self, preprocess_transport_callback, player_name, needs_download)
+        return _cl(self, preprocess_transport_callback, player_name, needs_download, global_effects)
 
     def _init_comp_ring(self, w: int, h: int) -> None:
         """(Re-)allocate staging buffers.  See layers/compositor.py."""

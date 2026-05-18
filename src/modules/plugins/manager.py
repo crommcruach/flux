@@ -1,5 +1,5 @@
 """
-Plugin Manager - Lädt, verwaltet und validiert Plugins
+Plugin Manager - Loads, manages and validates plugins
 """
 import os
 import importlib
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 class PluginManager:
     """
-    Verwaltet alle Plugins und stellt Registry zur Verfügung.
+    Manages all plugins and provides a registry.
     
     Features:
     - Plugin Discovery (automatisches Scannen von plugins/ Ordner)
@@ -43,21 +43,21 @@ class PluginManager:
         self.registry: Dict[str, Type[PluginBase]] = {}  # ID -> Plugin Class
         self.instances: Dict[str, PluginBase] = {}       # ID -> Plugin Instance
         
-        # Discover Plugins beim Initialisieren
+        # Discover plugins on initialization
         self.discover_plugins()
     
     def discover_plugins(self):
         """
-        Scannt plugins/ Ordner nach Plugin-Klassen.
-        Lädt alle Python-Module und registriert PluginBase-Subklassen.
+        Scans the plugins/ folder for plugin classes.
+        Loads all Python modules and registers PluginBase subclasses.
         """
-        logger.debug(f"Plugin Discovery gestartet: {self.plugins_dir.absolute()}")
+        logger.debug(f"Plugin discovery started: {self.plugins_dir.absolute()}")
         
         if not self.plugins_dir.exists():
-            logger.warning(f"Plugins-Ordner nicht gefunden: {self.plugins_dir.absolute()}")
+            logger.warning(f"Plugins folder not found: {self.plugins_dir.absolute()}")
             return
         
-        # Durchsuche alle Subordner (effects/, generators/, sources/, transitions/)
+            # Search all subdirectories (effects/, generators/, sources/, transitions/)
         for category_dir in self.plugins_dir.iterdir():
             if not category_dir.is_dir():
                 continue
@@ -65,7 +65,7 @@ class PluginManager:
             if category_dir.name.startswith('_'):
                 continue  # Skip __pycache__, __init__.py
             
-            # Durchsuche alle .py Dateien im Kategorie-Ordner
+                # Search all .py files in the category folder
             for plugin_file in category_dir.glob('*.py'):
                 if plugin_file.name.startswith('_'):
                     continue  # Skip __init__.py
@@ -80,7 +80,7 @@ class PluginManager:
                     else:
                         module = importlib.import_module(module_path)
                     
-                    # Finde alle PluginBase-Subklassen im Modul
+                    # Find all PluginBase subclasses in module
                     for name, obj in inspect.getmembers(module, inspect.isclass):
                         if issubclass(obj, PluginBase) and obj is not PluginBase:
                             if getattr(obj, 'DISABLED', False):
@@ -88,15 +88,15 @@ class PluginManager:
                                 continue
                             try:
                                 self.register_plugin(obj)
-                                logger.debug(f"Plugin geladen: {obj.METADATA.get('id', 'unknown')} ({module_path})")
+                                logger.debug(f"Plugin loaded: {obj.METADATA.get('id', 'unknown')} ({module_path})")
                             except Exception as reg_err:
                                 import traceback
-                                logger.error(f"Fehler beim Registrieren von {obj.__name__}: {reg_err}")
+                                logger.error(f"Error registering {obj.__name__}: {reg_err}")
                                 traceback.print_exc()
                 
                 except Exception as e:
                     import traceback
-                    logger.error(f"Fehler beim Laden von {module_path}: {e}")
+                    logger.error(f"Error loading {module_path}: {e}")
                     traceback.print_exc()
     
     def register_plugin(self, plugin_class: Type[PluginBase]):
@@ -108,23 +108,23 @@ class PluginManager:
         """
         # Validiere METADATA
         if not hasattr(plugin_class, 'METADATA') or 'id' not in plugin_class.METADATA:
-            raise ValueError(f"Plugin {plugin_class.__name__} hat keine METADATA['id']")
+            raise ValueError(f"Plugin {plugin_class.__name__} has no METADATA['id']")
         
         plugin_id = plugin_class.METADATA['id']
         
-        # Prüfe auf Duplikate
+        # Check for duplicates
         if plugin_id in self.registry:
-            logger.warning(f"Plugin mit ID '{plugin_id}' existiert bereits - überschreibe mit {plugin_class.__name__}")
+            logger.warning(f"Plugin with ID '{plugin_id}' already exists - overwriting with {plugin_class.__name__}")
         
         self.registry[plugin_id] = plugin_class
         logger.debug(f"Registered '{plugin_id}' in registry (total: {len(self.registry)})")
     
     def load_plugin(self, plugin_id: str, config: Optional[Dict] = None) -> Optional[PluginBase]:
         """
-        Lädt Plugin und erstellt NEUE Instanz.
+        Loads plugin and creates a NEW instance.
         
-        WICHTIG: Erstellt jedes Mal eine neue Instanz, da Effekte 
-        mehrfach mit unterschiedlichen Configs in Chains verwendet werden können.
+        IMPORTANT: Creates a new instance each time, as effects
+        can be used multiple times with different configs in chains.
         
         Args:
             plugin_id: Plugin-ID aus METADATA
@@ -141,19 +141,19 @@ class PluginManager:
             plugin_class = self.registry[plugin_id]
             # Extract actual values from config if range metadata is present
             cleaned_config = self._extract_parameter_values(config) if config else None
-            # Erstelle NEUE Instanz (nicht cachen, da Effekte mehrfach verwendbar)
+            # Create NEW instance (not cached, as effects can be used multiple times)
             instance = plugin_class(config=cleaned_config)
-            logger.debug(f"Plugin '{plugin_id}' erfolgreich geladen")
+            logger.debug(f"Plugin '{plugin_id}' successfully loaded")
             return instance
         except Exception as e:
             import traceback
-            logger.error(f"Fehler beim Laden von Plugin '{plugin_id}': {e}")
+            logger.error(f"Error loading plugin '{plugin_id}': {e}")
             traceback.print_exc()
             return None
     
     def _extract_parameter_values(self, config: Dict) -> Dict:
         """
-        Extrahiert tatsächliche Werte aus Config mit range metadata.
+        Extracts actual values from config with range metadata.
         
         Triple-Slider speichert Parameter als:
         {'param': {'_value': 5.0, '_rangeMin': 0, '_rangeMax': 10}}
@@ -162,7 +162,7 @@ class PluginManager:
         {'param': 5.0}
         
         Args:
-            config: Config dict mit möglicherweise verschachtelten Parametern
+            config: Config dict with possibly nested parameters
             
         Returns:
             Config dict mit extrahierten Werten
@@ -191,7 +191,7 @@ class PluginManager:
     
     def list_plugins(self, plugin_type: Optional[PluginType] = None) -> List[Dict]:
         """
-        Listet alle verfügbaren Plugins auf.
+        Lists all available plugins.
         
         Args:
             plugin_type: Optional - Filtert nach Plugin-Typ
@@ -210,7 +210,7 @@ class PluginManager:
                 if plugin_type and metadata.get('type') != plugin_type:
                     continue
                 
-                # Konvertiere PluginType Enum zu String für JSON-Serialisierung
+                # Convert PluginType Enum to string for JSON serialization
                 if 'type' in metadata and isinstance(metadata['type'], PluginType):
                     metadata['type'] = metadata['type'].value
                 
@@ -225,7 +225,7 @@ class PluginManager:
     
     def get_plugin_metadata(self, plugin_id: str) -> Optional[Dict]:
         """
-        Gibt METADATA eines Plugins zurück.
+        Returns METADATA of a plugin.
         B6 Performance: Nutzt gecachte JSON-Version (keine redundanten Enum-Conversions).
         
         Args:
@@ -237,22 +237,21 @@ class PluginManager:
         if plugin_id not in self.registry:
             return None
         
-        # B6: Nutze gecachte JSON-Version (Enum→String bereits konvertiert)
-        # Erstelle temporäre Instanz nur für Metadata-Zugriff (lightweight)
+        # B6: Use cached JSON version (Enum→String already converted)
+        # Create temporary instance only for metadata access (lightweight)
         try:
             temp_instance = self.registry[plugin_id]()
             return temp_instance.get_metadata_json()
         except:
-            # Fallback: Manuelle Konvertierung (falls __init__ fehlschlägt)
-            metadata = self.registry[plugin_id].METADATA.copy()
+            # Fallback: manual conversion (if __init__ fails)
             if 'type' in metadata and isinstance(metadata['type'], PluginType):
                 metadata['type'] = metadata['type'].value
             return metadata
     
     def get_plugin_parameters(self, plugin_id: str) -> Optional[List[Dict]]:
         """
-        Gibt PARAMETERS eines Plugins zurück (für UI-Generierung).
-        B6 Performance: Nutzt gecachte JSON-Version (keine redundanten Enum-Conversions).
+        Returns PARAMETERS of a plugin (for UI generation).
+        B6 Performance: Uses cached JSON version (no redundant Enum conversions).
         
         Args:
             plugin_id: Plugin-ID
@@ -263,12 +262,12 @@ class PluginManager:
         if plugin_id not in self.registry:
             return None
         
-        # B6: Nutze gecachte JSON-Version (Enum→String bereits konvertiert & deep-copied)
+        # B6: Use cached JSON version (Enum→String already converted & deep-copied)
         try:
             temp_instance = self.registry[plugin_id]()
             return temp_instance.get_parameters_json()
         except:
-            # Fallback: Manuelle Konvertierung (falls __init__ fehlschlägt)
+            # Fallback: manual conversion (if __init__ fails)
             import copy
             parameters = copy.deepcopy(self.registry[plugin_id].PARAMETERS)
             for param in parameters:
@@ -291,7 +290,7 @@ class PluginManager:
         if plugin_id not in self.registry:
             return False
         
-        # Finde Parameter-Definition
+        # Find parameter definition
         param_def = None
         for param in self.registry[plugin_id].PARAMETERS:
             if param['name'] == param_name:
@@ -299,7 +298,7 @@ class PluginManager:
                 break
         
         if not param_def:
-            return False  # Parameter existiert nicht
+            return False  # Parameter does not exist
         
         # Type-spezifische Validierung
         param_type = param_def['type']
@@ -325,7 +324,7 @@ class PluginManager:
             return value in param_def['options']
         
         elif param_type == ParameterType.COLOR:
-            # Einfache Hex-Color Validierung
+            # Simple hex-color validation
             return isinstance(value, str) and (value.startswith('#') and len(value) in [7, 9])
         
         elif param_type == ParameterType.STRING:
@@ -346,7 +345,7 @@ class PluginManager:
     
     def unload_plugin(self, plugin_id: str):
         """
-        Entlädt Plugin-Instanz und ruft cleanup() auf.
+        Unloads plugin instance and calls cleanup().
         
         Args:
             plugin_id: Plugin-ID
@@ -355,26 +354,26 @@ class PluginManager:
             instance = self.instances[plugin_id]
             instance.cleanup()
             del self.instances[plugin_id]
-            logger.debug(f"Plugin '{plugin_id}' entladen")
+            logger.debug(f"Plugin '{plugin_id}' unloaded")
     
     def reload_plugins(self):
         """
-        Lädt alle Plugins neu (für Development).
+        Reloads all plugins (for development).
         """
-        # Entlade alle Instanzen
+        # Unload all instances
         for plugin_id in list(self.instances.keys()):
             self.unload_plugin(plugin_id)
         
-        # Leere Registry
+        # Clear registry
         self.registry.clear()
         
         # Discover neu
         self.discover_plugins()
-        logger.debug("Alle Plugins neu geladen")
+        logger.debug("All plugins reloaded")
     
     def get_stats(self) -> Dict:
         """
-        Gibt Statistiken über geladene Plugins zurück.
+        Returns statistics about loaded plugins.
         
         Returns:
             Dictionary mit Plugin-Statistiken
@@ -393,15 +392,15 @@ class PluginManager:
         return f"<PluginManager plugins={len(self.registry)} instances={len(self.instances)}>"
 
 
-# Globale PluginManager-Instanz
+# Global PluginManager instance
 _plugin_manager = None
 
 def get_plugin_manager() -> PluginManager:
     """
-    Singleton-Getter für PluginManager.
+    Singleton getter for PluginManager.
     
     Returns:
-        Globale PluginManager-Instanz
+        Global PluginManager instance
     """
     global _plugin_manager
     if _plugin_manager is None:

@@ -1,5 +1,5 @@
 """
-Zentrale Konstanten für Flux Anwendung
+Central constants for the Flux application
 """
 
 # Art-Net / DMX Konstanten
@@ -19,8 +19,8 @@ IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp', '
 IMAGE_EXTENSIONS_LIST = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp', '.gif']
 
 # Cache Konstanten
-CACHE_CHUNK_SIZE = 5 * 1024 * 1024  # 5MB für Hash-Berechnung
-CACHE_HASH_LENGTH = 16  # Anzahl Zeichen für Video-Hash
+CACHE_CHUNK_SIZE = 5 * 1024 * 1024  # 5MB for hash calculation
+CACHE_HASH_LENGTH = 16  # Number of characters for video hash
 CACHE_FILE_EXTENSION = '.msgpack'
 
 # API / Console Konstanten
@@ -45,8 +45,8 @@ DEFAULT_FPS = 30.0
 UNLIMITED_LOOPS = 0
 
 # System Konstanten
-DEFAULT_RESTART_DELAY = 1.0  # Sekunden
-OUTPUT_TRUNCATE_SIZE = 60 * 1024  # 60KB für Terminal-Output
+DEFAULT_RESTART_DELAY = 1.0  # Seconds
+OUTPUT_TRUNCATE_SIZE = 60 * 1024  # 60KB for terminal output
 
-# Affirmative Antworten für Bestätigungen
+# Affirmative responses for confirmations
 AFFIRMATIVE_RESPONSES = ['j', 'ja', 'y', 'yes']

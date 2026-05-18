@@ -1,4 +1,4 @@
-"""
+﻿"""
 Sequence Manager
 
 Central coordinator for all parameter sequences.
@@ -59,7 +59,28 @@ class SequenceManager:
     def get_all(self) -> List[BaseSequence]:
         """Get all sequences"""
         return list(self.sequences.values())
-    
+
+    def set_color_palette_mode(self, param_uid: str, palette_colors: list):
+        """
+        Store palette colors for a COLOR-type parameter so the sequence engine
+        cycles through the discrete palette entries instead of hue-cycling.
+
+        Call this whenever the user switches the associated ColorPicker to
+        palette mode or selects a different named palette.
+
+        Args:
+            param_uid:      The parameter UID (same key used by sequences)
+            palette_colors: List of hex color strings (e.g. ["#ff0000", "#00ff00"]).
+                            Pass an empty list to disable palette mode for this param.
+        """
+        if not hasattr(self, '_color_palette_modes'):
+            self._color_palette_modes = {}
+        if palette_colors:
+            self._color_palette_modes[param_uid] = list(palette_colors)
+        else:
+            self._color_palette_modes.pop(param_uid, None)
+        logger.debug(f"Color palette mode updated for {param_uid}: {len(palette_colors)} colors")
+
     def delete(self, sequence_id: str) -> bool:
         """
         Delete a sequence
@@ -724,11 +745,58 @@ class SequenceManager:
                 
                 # Audio sequences now use the correct range from triple slider (e.g., 0-500 for scale)
                 # For BOOL params, coerce float to bool using >= 0.5 threshold for clean on/off toggling
+                # For COLOR params, convert float 0.0–1.0 → hue → hex string (or palette index → hex)
                 scaled_value = value
                 param_def = next((p for p in getattr(effect_instance, 'PARAMETERS', []) if p.get('name') == param_name), None)
                 if param_def is not None and getattr(param_def.get('type'), 'value', None) == 'bool':
                     scaled_value = scaled_value >= 0.5
-                
+                elif param_def is not None and getattr(param_def.get('type'), 'value', None) == 'color':
+                    import colorsys, time as _time
+
+                    COLOR_HOLD_SECONDS = 1.0
+                    if not hasattr(self, '_color_hold_times'):
+                        self._color_hold_times = {}   # uid -> (timestamp, last_applied_hex)
+
+                    now = _time.monotonic()
+                    last_time, last_seq_hex = self._color_hold_times.get(target_path, (0.0, None))
+
+                    # Detect manual color change: effect color != what sequence last set -> hold 1s
+                    if last_seq_hex is not None and hasattr(effect_instance, 'get_parameters'):
+                        try:
+                            current_hex = effect_instance.get_parameters().get(param_name, '').lstrip('#')
+                            if len(current_hex) == 6 and current_hex.lower() != last_seq_hex.lstrip('#').lower():
+                                self._color_hold_times[target_path] = (now, '#' + current_hex)
+                                return True  # preserve manually set color this tick
+                        except (ValueError, IndexError):
+                            pass
+
+                    # Hold: don't apply a new sequence color until the hold period has elapsed
+                    if (now - last_time) < COLOR_HOLD_SECONDS:
+                        return True  # hold active - skip this tick
+
+                    # Lookup sequence min/max for palette index normalisation
+                    seq_obj = next((s for s in self.sequences.values()
+                                    if s.target_parameter == target_path), None)
+                    s_min = getattr(seq_obj, 'min_value', 0.0) if seq_obj else 0.0
+                    s_max = getattr(seq_obj, 'max_value', 1.0) if seq_obj else 1.0
+                    span = (s_max - s_min) if s_max != s_min else 1.0
+
+                    # Check if palette mode is active for this parameter
+                    palette_colors = (getattr(self, '_color_palette_modes', {})).get(target_path)
+                    if palette_colors:
+                        # Palette mode: map scalar in [s_min, s_max] -> palette index
+                        norm = ((float(scaled_value) - s_min) / span) % 1.0
+                        idx = int(norm * len(palette_colors)) % len(palette_colors)
+                        # Strip alpha suffix if present (#rrggbbaa -> #rrggbb)
+                        scaled_value = palette_colors[idx][:7]
+                    else:
+                        # HSB mode: scaled_value is already in [min_value, max_value] which maps
+                        # directly to the hue range set by the range handles on the color bar.
+                        # No offset applied - hue stays within the user-defined range.
+                        hue = float(scaled_value) % 1.0
+                        r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+                        scaled_value = '#{:02x}{:02x}{:02x}'.format(int(r * 255), int(g * 255), int(b * 255))
+                    self._color_hold_times[target_path] = (now, scaled_value)
                 # Apply value to effect instance
                 if hasattr(effect_instance, 'update_parameter'):
                     success = effect_instance.update_parameter(param_name, scaled_value)
@@ -746,14 +814,19 @@ class SequenceManager:
                         if self._apply_log_counter[target_path] % 60 == 1:
                             should_log = True
                         elif target_path in self._last_logged_values:
-                            change = abs(scaled_value - self._last_logged_values[target_path])
-                            if change > 10.0:  # Log if change > 10
-                                should_log = True
+                            try:
+                                change = abs(scaled_value - self._last_logged_values[target_path])
+                                if change > 10.0:
+                                    should_log = True
+                            except TypeError:
+                                if scaled_value != self._last_logged_values[target_path]:
+                                    should_log = True
                         else:
                             should_log = True  # First time
-                        
+
                         if should_log:
-                            logger.debug(f"🎚️ [{id(effect_instance)}] {param_name} = {scaled_value:.1f}")
+                            sv_disp = scaled_value if isinstance(scaled_value, str) else f'{scaled_value:.1f}'
+                            logger.debug(f"🎚️ [{id(effect_instance)}] {param_name} = {sv_disp}")
                             self._last_logged_values[target_path] = scaled_value
                         return True
                     else:
@@ -761,8 +834,9 @@ class SequenceManager:
                         return False
                 elif hasattr(effect_instance, param_name):
                     setattr(effect_instance, param_name, scaled_value)
-                    logger.debug(f"✅ Applied: {param_name} = {scaled_value:.2f} via setattr [{player.__class__.__name__}]")
-                    logger.debug(f"✅ Applied via setattr: {param_name} = {scaled_value:.4f}")
+                    sv_disp = scaled_value if isinstance(scaled_value, str) else f'{scaled_value:.2f}'
+                    logger.debug(f"✅ Applied: {param_name} = {sv_disp} via setattr [{player.__class__.__name__}]")
+                    logger.debug(f"✅ Applied via setattr: {param_name} = {sv_disp}")
                     return True
                 else:
                     logger.warning(f"Parameter not found on effect instance: {param_name}")

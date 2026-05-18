@@ -4,9 +4,9 @@
    ======================================== */
 
 /* Body Override for Player Page */
-body {
-    overflow-y: auto;
-    overflow-x: hidden;
+html, body {
+    height: 100%;
+    overflow: hidden;
     margin: 0;
     padding: 0;
 }
@@ -18,7 +18,8 @@ body {
 .app-layout {
     display: flex;
     flex-direction: column;
-    min-height: 95vh;
+    height: 100vh;
+    overflow: hidden;
 }
 
 /* ========================================
@@ -141,6 +142,75 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 0.5rem 1rem;
+}
+
+/* Autoplay Toggle Switch */
+.playlist-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.autoplay-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.autoplay-label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: rgba(255,255,255,0.5);
+    transition: color 0.3s;
+}
+
+.autoplay-toggle:has(input:checked) .autoplay-label {
+    color: #667eea;
+}
+
+.autoplay-switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 20px;
+}
+
+.autoplay-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.autoplay-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #495057;
+    transition: 0.3s;
+    border-radius: 20px;
+}
+
+.autoplay-slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+.autoplay-switch input:checked + .autoplay-slider {
+    background-color: #667eea;
+}
+
+.autoplay-switch input:checked + .autoplay-slider:before {
+    transform: translateX(20px);
 }
 
 /* Master Toggle Switch */
@@ -402,17 +472,17 @@ body {
     position: fixed;
     display: none;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     background: var(--bg-primary);
-    padding: 8px;
+    padding: 0;
     border-radius: 6px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
     z-index: 9999;
-    width: 120px;
+    width: 124px;
     border: 2px solid var(--border-color);
     pointer-events: none;
     max-height: 300px;
-    overflow-y: auto;
+    overflow: hidden;
 }
 
 .playlist-item-wrapper.show-layers .layer-previews {
@@ -433,35 +503,44 @@ body {
 
 .layer-preview {
     width: 100%;
-    height: 40px;
-    border-radius: 4px;
+    height: 70px;
+    box-sizing: border-box;
+    border-radius: 0;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: flex-end;
+    justify-content: stretch;
     font-size: 0.65rem;
     font-weight: 600;
-    border: 2px solid var(--border-color);
-    transition: all 0.2s ease;
+    border: none;
+    border-bottom: 1px solid var(--border-color);
     background: var(--bg-secondary);
     color: var(--text-muted);
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 4px;
+    flex-shrink: 0;
+    padding: 0;
+    position: relative;
 }
 
 .layer-preview.has-thumbnail {
     background-size: cover;
     background-position: center;
-    color: white;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
 .layer-preview-label {
-    background: rgba(0, 0, 0, 0.7);
-    padding: 2px 6px;
-    border-radius: 3px;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 70%, transparent 100%);
+    padding: 3px 5px;
     font-size: 0.6rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
 }
 
 /* Drop zones between playlist items */
@@ -557,7 +636,7 @@ body {
     padding: 1rem;
     flex: 1;
     min-height: 0;
-    overflow: hidden;
+    overflow: hidden; /* outer container never scrolls */
 }
 
 /* ========================================
@@ -628,6 +707,7 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
 }
 
 .fx-panel-header {
@@ -692,6 +772,36 @@ body {
     align-items: center;
     cursor: pointer;
     user-select: none;
+    gap: 0.4rem;
+}
+
+/* Drag handle for reorderable effects */
+.effect-drag-handle {
+    flex-shrink: 0;
+    padding: 0 4px;
+    color: var(--text-secondary);
+    cursor: grab;
+    font-size: 0.85rem;
+    line-height: 1;
+    opacity: 0.45;
+    transition: opacity 0.15s;
+    user-select: none;
+}
+
+.effect-drag-handle:hover {
+    opacity: 1;
+    color: var(--text-primary);
+}
+
+/* Visual feedback while dragging */
+.effect-item.fx-dragging {
+    opacity: 0.45;
+    border-style: dashed;
+}
+
+.effect-item.fx-drag-over {
+    border-color: var(--accent-color, #4a9eff);
+    box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.35);
 }
 
 .effect-header:hover {
@@ -1194,6 +1304,19 @@ body {
 
 .layer-id {
     color: var(--text-primary);
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.layer-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .layer-badge {
@@ -1211,7 +1334,9 @@ body {
 }
 
 .layer-remove {
-    width: 20px;
+    flex: 0 0 25px;
+    width: 25px;
+    min-width: 0;
     height: 20px;
     padding: 0;
     font-size: 0.7rem;
@@ -1219,7 +1344,38 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: unset;
+    align-self: center;
+}
+
+.layer-visibility-toggle {
+    flex: 0 0 25px;
+    width: 25px;
+    min-width: 0;
+    height: 20px;
+    padding: 0;
+    font-size: 0.75rem;
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    transition: opacity 0.15s;
+}
+
+.layer-visibility-toggle.enabled {
+    opacity: 1;
+}
+
+.layer-visibility-toggle.layer-off {
+    opacity: 0.45;
+}
+
+.layer-visibility-toggle:hover {
+    opacity: 0.8;
+    border-color: var(--text-secondary);
 }
 
 /* Layer Config Controls */
@@ -1576,8 +1732,17 @@ body {
 }
 
 .layer-remove {
-    padding: 0.1rem 0.4rem;
-    font-size: 0.8rem;
+    flex: 0 0 25px;
+    width: 25px;
+    min-width: 0;
+    height: 20px;
+    padding: 0;
+    font-size: 0.7rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
 }
 
 .layer-lock-icon {
@@ -2070,4 +2235,36 @@ body {
     z-index: 10000;
     overflow: hidden;
     padding: 0.25rem 0;
+}
+
+/* ========================================
+   THIN SCROLLBARS — all panel content areas
+   ======================================== */
+
+.tab-content::-webkit-scrollbar,
+.fx-panel-body::-webkit-scrollbar {
+    width: 4px;
+}
+
+.tab-content::-webkit-scrollbar-track,
+.fx-panel-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tab-content::-webkit-scrollbar-thumb,
+.fx-panel-body::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 2px;
+}
+
+.tab-content::-webkit-scrollbar-thumb:hover,
+.fx-panel-body::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-color);
+}
+
+/* Firefox */
+.tab-content,
+.fx-panel-body {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
 }

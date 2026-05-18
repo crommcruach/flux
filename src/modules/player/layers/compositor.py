@@ -32,6 +32,30 @@ from .slave import render_slave_layer
 
 logger = get_logger(__name__)
 
+# ─── Module-level lazy shader strings ────────────────────────────────────────
+# Populated on first composite_layers() call (GPU context must exist first).
+# Avoids repeated load_shader() dict lookups in the per-frame hot path.
+_BLEND_SRC: str | None = None
+_PASSTHROUGH_SRC: str | None = None
+_SCALE_SRC: str | None = None
+
+
+def _get_compositor_shaders() -> tuple[str, str, str]:
+    """Return (blend_src, passthrough_src, scale_src), loading once on first call."""
+    global _BLEND_SRC, _PASSTHROUGH_SRC, _SCALE_SRC
+    if _BLEND_SRC is None:
+        _BLEND_SRC = load_shader('blend.wgsl')
+        _PASSTHROUGH_SRC = load_shader('passthrough.wgsl')
+        _SCALE_SRC = load_shader('scale_mode.wgsl')
+    return _BLEND_SRC, _PASSTHROUGH_SRC, _SCALE_SRC
+
+
+# ─── Scale-rect result cache ──────────────────────────────────────────────────
+# _compute_scale_rects() does floating-point division whose inputs (mode, frame
+# size, canvas size) virtually never change between frames.  Cache the result
+# so the common case is a single dict lookup.
+_scale_rect_cache: dict[tuple, tuple] = {}
+
 # Sentinel: returned by composite_layers when needs_download=False.
 # Distinguishes a GPU-only frame from an actual source EOF (None).
 _GPU_PROCESSED = object()
@@ -167,8 +191,14 @@ def _compute_scale_rects(mode: str, sw: int, sh: int, tw: int, th: int):
       'fill'    — crop to fill canvas, preserve aspect ratio
       'off'     — 1:1 pixel mapping centred, excess cropped / pad with black
     """
+    _key = (mode, sw, sh, tw, th)
+    _cached = _scale_rect_cache.get(_key)
+    if _cached is not None:
+        return _cached
+
     full = (0.0, 0.0, 1.0, 1.0)
     if mode == 'stretch':
+        _scale_rect_cache[_key] = (full, full)
         return full, full
 
     ar_s = sw / sh
@@ -179,24 +209,32 @@ def _compute_scale_rects(mode: str, sw: int, sh: int, tw: int, th: int):
             # Source wider than canvas → fit by width, black bars top/bottom
             dh = sh / sw * (tw / th)          # = sh*tw/(sw*th), always <= 1
             dy = (1.0 - dh) / 2.0
-            return full, (0.0, dy, 1.0, 1.0 - dy)
+            _r = (full, (0.0, dy, 1.0, 1.0 - dy))
+            _scale_rect_cache[_key] = _r
+            return _r
         else:
             # Source taller/squarer → fit by height, black bars left/right
             dw = sw / sh * (th / tw)          # = sw*th/(sh*tw), always <= 1
             dx = (1.0 - dw) / 2.0
-            return full, (dx, 0.0, 1.0 - dx, 1.0)
+            _r = (full, (dx, 0.0, 1.0 - dx, 1.0))
+            _scale_rect_cache[_key] = _r
+            return _r
 
     if mode == 'fill':
         if ar_s > ar_d:
             # Source wider → scale to fill height, crop left/right of source
             cw = sw * th / sh                 # content width at canvas height
             cx0 = (cw - tw) / (2.0 * cw)     # source UV left crop
-            return (cx0, 0.0, 1.0 - cx0, 1.0), full
+            _r = ((cx0, 0.0, 1.0 - cx0, 1.0), full)
+            _scale_rect_cache[_key] = _r
+            return _r
         else:
             # Source taller → scale to fill width, crop top/bottom of source
             ch = sh * tw / sw                 # content height at canvas width
             cy0 = (ch - th) / (2.0 * ch)     # source UV top crop
-            return (0.0, cy0, 1.0, 1.0 - cy0), full
+            _r = ((0.0, cy0, 1.0, 1.0 - cy0), full)
+            _scale_rect_cache[_key] = _r
+            return _r
 
     # mode == 'off' — 1:1 pixel, centred, excess cropped / padded with black
     dw = sw / tw    # > 1 if source wider than canvas
@@ -211,13 +249,37 @@ def _compute_scale_rects(mode: str, sw: int, sh: int, tw: int, th: int):
     src_y0 = (dst_y0 - dy) / dh
     src_x1 = (dst_x1 - dx) / dw
     src_y1 = (dst_y1 - dy) / dh
-    return (src_x0, src_y0, src_x1, src_y1), (dst_x0, dst_y0, dst_x1, dst_y1)
+    _r = ((src_x0, src_y0, src_x1, src_y1), (dst_x0, dst_y0, dst_x1, dst_y1))
+    _scale_rect_cache[_key] = _r
+    return _r
+
+
+# ─── Global effect chain helper ─────────────────────────────────────────────
+
+class _EffectsLayer:
+    """Minimal duck-type for apply_layer_effects — avoids SimpleNamespace overhead."""
+    __slots__ = ('effects', 'layer_id')
+
+
+def _apply_chain_gpu(mgr, frame, effects, player_name):
+    """Apply a player-global effect list to a GPUFrame on GPU.
+
+    When GPU effects are actually applied the *input* frame is consumed
+    (released to the pool) and a new GPUFrame is returned.  When there are no
+    enabled GPU effects the input frame is returned unchanged (not consumed).
+    Returns None on GPU error (input frame has been consumed in that case).
+    """
+    from .effects import apply_layer_effects as _afx
+    pseudo = _EffectsLayer()
+    pseudo.effects = effects
+    pseudo.layer_id = 'global'
+    return _afx(mgr, pseudo, frame, player_name, stay_on_gpu=True)
 
 
 # ─── Main compositor ─────────────────────────────────────────────────────────
 
 def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Player",
-                     needs_download: bool = True):
+                     needs_download: bool = True, global_effects=None):
     """
     Composite all layers into a single frame using the GPU blend pipeline.
 
@@ -246,8 +308,10 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
         return None, 0
 
     # Clear tap registry from previous frame.
-    if mgr._tap_configs:
-        mgr.tap_registry.clear()
+    # Always clear regardless of _tap_configs so that tap frames from a
+    # previous frame where taps were active are released even when taps
+    # are subsequently disabled (e.g. after a clip switch stops Art-Net).
+    mgr.tap_registry.clear()
 
     profiler = getattr(mgr, 'profiler', None)
 
@@ -294,7 +358,7 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
             _autosize or 'stretch', _fw, _fh, _cw, _ch
         )
         _scale_out = get_texture_pool().acquire(_cw, _ch)
-        _scale_src = load_shader('scale_mode.wgsl')
+        _, _, _scale_src = _get_compositor_shaders()
         _do_scale = lambda: get_renderer().render(
             wgsl_source=_scale_src,
             target=_scale_out,
@@ -324,6 +388,11 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
     if len(layers_snap) == 1:
         if master_frame is None:
             return None, source_delay
+        if global_effects:
+            _gef = _apply_chain_gpu(mgr, master_frame, global_effects, player_name)
+            if _gef is None:
+                return None, source_delay
+            master_frame = _gef
         _fire_single_layer_hooks(mgr, master_frame, profiler)
         if needs_download:
             result = (
@@ -345,6 +414,11 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
     if not active_slaves:
         if master_frame is None:
             return None, source_delay
+        if global_effects:
+            _gef = _apply_chain_gpu(mgr, master_frame, global_effects, player_name)
+            if _gef is None:
+                return None, source_delay
+            master_frame = _gef
         _fire_single_layer_hooks(mgr, master_frame, profiler)
         if needs_download:
             if profiler:
@@ -398,23 +472,25 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
         stage_cm = profiler.profile_stage('layer_composition')
         stage_cm.__enter__()
 
+    cur = master_frame
+    alt = None
+    _deferred_releases = []  # textures to release AFTER blend_enc.finish()
+    composite = None
+    result = None
+
     try:
         # ── GPU compositing ───────────────────────────────────────────────────
         pool = get_texture_pool()
         renderer = get_renderer()
-        blend_src = load_shader('blend.wgsl')
-        passthrough_src = load_shader('passthrough.wgsl')
+        blend_src, passthrough_src, _ = _get_compositor_shaders()
         canvas_w, canvas_h = mgr.canvas_width, mgr.canvas_height
 
-        cur = master_frame
+        blend_enc = get_device().create_command_encoder()
+
         if mgr._tap_configs:
-            _fire_layer_processed_tap(mgr, layers_snap[0], cur)
+            _fire_layer_processed_tap(mgr, layers_snap[0], cur, encoder=blend_enc)
 
         slave_blend_n = 0
-        alt = None          # spare buffer; allocated lazily on first blend
-
-        _src_resize_textures = []
-        blend_enc = get_device().create_command_encoder()
 
         for layer in layers_snap[1:]:
             if not layer.enabled or layer.opacity <= 0:
@@ -446,9 +522,13 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
                         textures={'inputTexture': (0, overlay)},
                         encoder=blend_enc,
                     )
+                    # Do NOT release overlay here — slave owns _slave_cached_frame's
+                    # lifetime and will release it when fetching the next frame.
+                    # Releasing it here would let the pool reuse it as 'alt' next
+                    # frame while the slave still holds a reference to it.
                 else:
                     src_tex = pool.acquire(ov_w2, ov_h2)
-                    _src_resize_textures.append(src_tex)
+                    _deferred_releases.append(src_tex)
                     src_tex.upload(ov3)
                     renderer.render(
                         wgsl_source=passthrough_src,
@@ -459,16 +539,39 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
                     )
             else:
                 if slave_owns_tex:
-                    # Same size: use GPUFrame directly — no acquire/upload needed.
-                    layer_tex = overlay
-                    release_layer_tex = False
+                    # Same size: copy slave's GPU texture to a pool-owned frame via
+                    # passthrough (identical to the resize path above).
+                    #
+                    # Using overlay directly has two irreconcilable failure modes:
+                    #   release_layer_tex=False → 1 pool slot leaked per throttle
+                    #     frame; after ~16 frames the pool hits MAX_PER_BUCKET,
+                    #     force-releases pool[0] (which may be cur), then the next
+                    #     pool.acquire() returns the same slot as alt → blend pass
+                    #     uses it as COLOR_TARGET while it is still cur's RESOURCE
+                    #     → wgpu ValidationError (conflicting usages).
+                    #   release_layer_tex=True → overlay is returned to the pool
+                    #     after blend_enc.finish(); on the next throttled frame the
+                    #     pool may reissue that same slot as alt while the slave
+                    #     returns it unchanged as overlay → same conflict.
+                    #
+                    # The passthrough copy is pool-owned and safely deferred-released;
+                    # the slave's texture is never touched by the compositor.
+                    layer_tex = pool.acquire(canvas_w, canvas_h)
+                    release_layer_tex = True
+                    renderer.render(
+                        wgsl_source=passthrough_src,
+                        target=layer_tex,
+                        uniforms={},
+                        textures={'inputTexture': (0, overlay)},
+                        encoder=blend_enc,
+                    )
                 else:
                     layer_tex = pool.acquire(canvas_w, canvas_h)
                     release_layer_tex = True
                     layer_tex.upload(ov3)
             try:
                 if mgr._tap_configs:
-                    _fire_layer_processed_tap(mgr, layer, layer_tex)
+                    _fire_layer_processed_tap(mgr, layer, layer_tex, encoder=blend_enc)
                 blend_mode = BLEND_MODES.get(getattr(layer, 'blend_mode', 'normal'), 0)
                 if alt is None:
                     alt = pool.acquire(canvas_w, canvas_h)
@@ -480,20 +583,36 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
                     encoder=blend_enc,
                 )
                 if mgr._tap_configs:
-                    _fire_composite_after_n_tap(mgr, slave_blend_n, alt)
+                    _fire_composite_after_n_tap(mgr, slave_blend_n, alt, encoder=blend_enc)
                 slave_blend_n += 1
                 cur, alt = alt, cur   # ping-pong: freshly-written becomes new source
             finally:
                 if release_layer_tex:
-                    pool.release(layer_tex)
+                    # Defer release until after blend_enc.finish().
+                    # Releasing now lets the pool re-issue this texture as a
+                    # passthrough COLOR_TARGET in the next iteration while it is
+                    # still recorded as RESOURCE in the current encoder → wgpu
+                    # ValidationError (conflicting usages within usage scope).
+                    _deferred_releases.append(layer_tex)
 
         get_device().queue.submit([blend_enc.finish()])
-        for _t in _src_resize_textures:
+        for _t in _deferred_releases:
             pool.release(_t)
+        _deferred_releases.clear()
 
         if alt is not None:
             pool.release(alt)
+            alt = None
         composite = cur
+        cur = None  # composite owns the reference now
+
+        # ── Player-global effects (Video FX / Art-Net FX panels) ─────────────
+        if global_effects:
+            _gef = _apply_chain_gpu(mgr, composite, global_effects, player_name)
+            if _gef is None:
+                composite = None
+                return None, source_delay
+            composite = _gef
 
         # ── Output hooks ──────────────────────────────────────────────────────
         if mgr._artnet_gpu_hook is not None:
@@ -536,6 +655,27 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
         else:
             result = _GPU_PROCESSED
         pool.release(composite)
+        composite = None
+
+    except Exception:
+        # Ensure all in-flight GPU frames are returned to the pool so VRAM
+        # doesn't accumulate when an exception aborts a frame mid-composite.
+        _cleanup_pool = get_texture_pool()
+        if cur is not None:
+            _cleanup_pool.release(cur)
+        if alt is not None:
+            _cleanup_pool.release(alt)
+        if composite is not None:
+            _cleanup_pool.release(composite)
+        for _t in _deferred_releases:
+            _cleanup_pool.release(_t)
+        # Also release any tap frames acquired inside blend_enc before the
+        # exception.  These are tracked by tap_registry but NOT in
+        # _deferred_releases, so they would otherwise stay in pool._in_use
+        # until the NEXT frame's clear() — which may never fire if
+        # _tap_configs is empty after a clip switch.
+        mgr.tap_registry.clear()
+        raise
 
     finally:
         if profiler:
@@ -546,7 +686,8 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
 
 # ─── Tap helpers (used inside this compositor) ────────────────────────────────
 
-def _fire_layer_processed_tap(mgr, layer, gpu_frame) -> None:
+def _fire_layer_processed_tap(mgr, layer, gpu_frame, encoder=None) -> None:
+    """Copy gpu_frame into a tap output.  encoder=blend_enc batches into main submit."""
     from ..taps import TapStage
     configs = [
         tc for tc in mgr._tap_configs
@@ -554,15 +695,16 @@ def _fire_layer_processed_tap(mgr, layer, gpu_frame) -> None:
     ]
     if not configs:
         return
+    _, passthrough_src, _ = _get_compositor_shaders()
     pool = get_texture_pool()
     renderer = get_renderer()
-    passthrough_src = load_shader('passthrough.wgsl')
     copy = pool.acquire(gpu_frame.width, gpu_frame.height)
     renderer.render(
         wgsl_source=passthrough_src,
         target=copy,
         uniforms={},
         textures={'inputTexture': (0, gpu_frame)},
+        encoder=encoder,
     )
     for tc in configs:
         if tc.mode == 'separate':
@@ -571,7 +713,8 @@ def _fire_layer_processed_tap(mgr, layer, gpu_frame) -> None:
             mgr.tap_registry.register(tc.tap_id, copy)
 
 
-def _fire_composite_after_n_tap(mgr, n: int, composite_gpu) -> None:
+def _fire_composite_after_n_tap(mgr, n: int, composite_gpu, encoder=None) -> None:
+    """Copy composite into a tap output.  encoder=blend_enc batches into main submit."""
     from ..taps import TapStage
     configs = [
         tc for tc in mgr._tap_configs
@@ -580,15 +723,16 @@ def _fire_composite_after_n_tap(mgr, n: int, composite_gpu) -> None:
     ]
     if not configs:
         return
+    _, passthrough_src, _ = _get_compositor_shaders()
     pool = get_texture_pool()
     renderer = get_renderer()
-    passthrough_src = load_shader('passthrough.wgsl')
     copy = pool.acquire(composite_gpu.width, composite_gpu.height)
     renderer.render(
         wgsl_source=passthrough_src,
         target=copy,
         uniforms={},
         textures={'inputTexture': (0, composite_gpu)},
+        encoder=encoder,
     )
     for tc in configs:
         mgr.tap_registry.register(tc.tap_id, copy)

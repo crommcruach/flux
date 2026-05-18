@@ -1,9 +1,9 @@
 """
 API Config Routes - Configuration Management Endpoints
 
-WICHTIG: Verwende NIEMALS print() Statements in API-Funktionen!
-Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
-Nutze stattdessen immer den Logger für Debug-Ausgaben:
+IMPORTANT: NEVER use print() statements in API functions!
+This causes "write() before start_response" errors in Flask/Werkzeug.
+Always use the logger for debug output:
     from ...core.logger import get_logger
     logger = get_logger(__name__)
     logger.info("Message")
@@ -24,7 +24,7 @@ def register_config_routes(app, config_path='config.json'):
     
     @app.route('/api/config', methods=['GET'])
     def get_config():
-        """Gibt aktuelle Konfiguration zurück."""
+        """Returns the current configuration."""
         try:
             # Finde config.json im Root-Verzeichnis (5 levels up from this file:
             # src/modules/api/system/config.py -> system -> api -> modules -> src -> root)
@@ -34,7 +34,7 @@ def register_config_routes(app, config_path='config.json'):
             if not os.path.exists(config_file):
                 return jsonify({
                     "status": "error",
-                    "message": f"Config-Datei nicht gefunden: {config_file}"
+                    "message": f"Config file not found: {config_file}"
                 }), 404
             
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -57,16 +57,15 @@ def register_config_routes(app, config_path='config.json'):
             if not new_config:
                 return jsonify({
                     "status": "error",
-                    "message": "Keine Konfiguration gesendet"
+                    "message": "No configuration sent"
                 }), 400
-            
-            # Validiere Config gegen Schema
+            # Validate config against schema
             is_valid, errors = validator.validate(new_config)
             
             if not is_valid:
                 return jsonify({
                     "status": "error",
-                    "message": "Validierung fehlgeschlagen",
+                    "message": "Validation failed",
                     "errors": errors,
                     "valid": False
                 }), 400
@@ -76,19 +75,19 @@ def register_config_routes(app, config_path='config.json'):
             base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
             config_file = os.path.join(base_path, 'config.json')
             
-            # Backup erstellen
+            # Create backup
             backup_file = config_file + '.backup'
             if os.path.exists(config_file):
                 import shutil
                 shutil.copy2(config_file, backup_file)
             
-            # Neue Config speichern mit Formatierung
+            # Save new config with formatting
             with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(new_config, f, indent=2, ensure_ascii=False)
             
             return jsonify({
                 "status": "success",
-                "message": "Konfiguration gespeichert und validiert",
+                "message": "Configuration saved and validated",
                 "backup": backup_file,
                 "valid": True
             })
@@ -101,31 +100,31 @@ def register_config_routes(app, config_path='config.json'):
     
     @app.route('/api/config/validate', methods=['POST'])
     def validate_config():
-        """Validiert Konfiguration ohne zu speichern (mit Schema)."""
+        """Validates configuration without saving (with schema)."""
         try:
             config_data = request.get_json()
             
             if not config_data:
                 return jsonify({
                     "status": "error",
-                    "message": "Keine Konfiguration gesendet",
+                    "message": "No configuration sent",
                     "valid": False
                 }), 400
             
-            # Validiere gegen Schema
+            # Validate against schema
             is_valid, errors = validator.validate(config_data)
             
             if not is_valid:
                 return jsonify({
                     "status": "error",
-                    "message": "Validierung fehlgeschlagen",
+                    "message": "Validation failed",
                     "valid": False,
                     "errors": errors
                 }), 400
             
             return jsonify({
                 "status": "success",
-                "message": "Konfiguration ist valide",
+                "message": "Configuration is valid",
                 "valid": True,
                 "errors": []
             })
@@ -139,7 +138,7 @@ def register_config_routes(app, config_path='config.json'):
     
     @app.route('/api/config/restore', methods=['POST'])
     def restore_config():
-        """Stellt Backup wieder her."""
+        """Restores backup."""
         try:
             base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
             config_file = os.path.join(base_path, 'config.json')
@@ -148,7 +147,7 @@ def register_config_routes(app, config_path='config.json'):
             if not os.path.exists(backup_file):
                 return jsonify({
                     "status": "error",
-                    "message": "Kein Backup gefunden"
+                    "message": "No backup found"
                 }), 404
             
             import shutil
@@ -156,7 +155,7 @@ def register_config_routes(app, config_path='config.json'):
             
             return jsonify({
                 "status": "success",
-                "message": "Backup wiederhergestellt"
+                "message": "Backup restored"
             })
         except Exception as e:
             return jsonify({
@@ -166,7 +165,7 @@ def register_config_routes(app, config_path='config.json'):
     
     @app.route('/api/config/schema', methods=['GET'])
     def get_config_schema():
-        """Gibt das JSON-Schema für config.json zurück."""
+        """Returns the JSON schema for config.json."""
         try:
             schema = validator.get_schema()
             return jsonify({
@@ -181,7 +180,7 @@ def register_config_routes(app, config_path='config.json'):
     
     @app.route('/api/config/default', methods=['GET'])
     def get_default_config():
-        """Gibt die Standard-Konfiguration zurück."""
+        """Returns the default configuration."""
         try:
             default_config = validator.get_default_config()
             return jsonify({

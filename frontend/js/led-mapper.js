@@ -52,7 +52,7 @@ class LEDMapper {
             return true;
         } catch (error) {
             console.error('Camera access failed:', error);
-            showToast('Webcam nicht verfügbar', 'error');
+            showToast('Webcam not available', 'error');
             return false;
         }
     }

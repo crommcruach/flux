@@ -654,6 +654,102 @@ def _cmd_perf_disable(args: Namespace):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# output
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _output_players(args: Namespace) -> list[str]:
+    """Expand player arg to list; default to 'video' for output commands."""
+    p = getattr(args, 'player', 'video') or 'video'
+    return ['video', 'artnet'] if p == 'all' else [p]
+
+
+def _cmd_output_list(args: Namespace):
+    for pid in _output_players(args):
+        r = api_call('GET', f'/api/outputs/{pid}')
+        if not _ok(r):
+            print_status('error', f"[{pid}] {r.get('error', 'failed')}")
+            continue
+        outputs = r.get('outputs', {})
+        if not outputs:
+            print(f"[{pid}] No outputs configured")
+            continue
+        if getattr(args, 'json', False):
+            print(json.dumps(outputs, indent=2))
+            continue
+        rows = []
+        for oid, info in outputs.items():
+            state = 'enabled' if info.get('enabled') else 'disabled'
+            otype = info.get('type', '?')
+            rows.append((oid, otype, state))
+        print_table(
+            headers=[f'Output [{pid}]', 'Type', 'State'],
+            rows=rows,
+        )
+
+
+def _cmd_output_start(args: Namespace):
+    target = getattr(args, 'output_id', 'all') or 'all'
+    for pid in _output_players(args):
+        r_list = api_call('GET', f'/api/outputs/{pid}')
+        if not _ok(r_list):
+            print_status('error', f"[{pid}] cannot list outputs: {r_list.get('error')}")
+            continue
+        all_ids = list(r_list.get('outputs', {}).keys())
+        ids = all_ids if target == 'all' else [o for o in all_ids if target in o]
+        if not ids:
+            print_status('error', f"[{pid}] no output matching '{target}'")
+            continue
+        for oid in ids:
+            r = api_call('POST', f'/api/outputs/{pid}/{oid}/enable')
+            if _ok(r):
+                print_status('success', f"[{pid}] {oid}: started")
+            else:
+                print_status('error', f"[{pid}] {oid}: {r.get('error', 'failed')}")
+
+
+def _cmd_output_stop(args: Namespace):
+    target = getattr(args, 'output_id', 'all') or 'all'
+    for pid in _output_players(args):
+        r_list = api_call('GET', f'/api/outputs/{pid}')
+        if not _ok(r_list):
+            print_status('error', f"[{pid}] cannot list outputs: {r_list.get('error')}")
+            continue
+        all_ids = list(r_list.get('outputs', {}).keys())
+        ids = all_ids if target == 'all' else [o for o in all_ids if target in o]
+        if not ids:
+            print_status('error', f"[{pid}] no output matching '{target}'")
+            continue
+        for oid in ids:
+            r = api_call('POST', f'/api/outputs/{pid}/{oid}/disable')
+            if _ok(r):
+                print_status('success', f"[{pid}] {oid}: stopped")
+            else:
+                print_status('error', f"[{pid}] {oid}: {r.get('error', 'failed')}")
+
+
+def _cmd_output_restart(args: Namespace):
+    target = getattr(args, 'output_id', 'all') or 'all'
+    for pid in _output_players(args):
+        r_list = api_call('GET', f'/api/outputs/{pid}')
+        if not _ok(r_list):
+            print_status('error', f"[{pid}] cannot list outputs: {r_list.get('error')}")
+            continue
+        all_ids = list(r_list.get('outputs', {}).keys())
+        ids = all_ids if target == 'all' else [o for o in all_ids if target in o]
+        if not ids:
+            print_status('error', f"[{pid}] no output matching '{target}'")
+            continue
+        for oid in ids:
+            api_call('POST', f'/api/outputs/{pid}/{oid}/disable')
+            time.sleep(0.3)
+            r = api_call('POST', f'/api/outputs/{pid}/{oid}/enable')
+            if _ok(r):
+                print_status('success', f"[{pid}] {oid}: restarted")
+            else:
+                print_status('error', f"[{pid}] {oid}: {r.get('error', 'failed')}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Dispatch table
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -701,6 +797,12 @@ _DISPATCH: dict[tuple, Callable] = {
     ('perf', 'summary'):   _cmd_perf_summary,
     ('perf', 'enable'):    _cmd_perf_enable,
     ('perf', 'disable'):   _cmd_perf_disable,
+
+    ('output', 'list'):    _cmd_output_list,
+    ('output', 'status'):  _cmd_output_list,
+    ('output', 'start'):   _cmd_output_start,
+    ('output', 'stop'):    _cmd_output_stop,
+    ('output', 'restart'): _cmd_output_restart,
 }
 
 

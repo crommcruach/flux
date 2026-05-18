@@ -12,6 +12,8 @@ export class EffectsTab {
         this.effects = [];
         this.filteredEffects = [];
         this.searchTerm = '';
+        this.contextMenu = null;
+        this.contextMenuTarget = null; // {effectId, effectName}
     }
     
     /**
@@ -19,6 +21,7 @@ export class EffectsTab {
      */
     async init() {
         this.setupSearch();
+        this.setupContextMenu();
         await this.loadEffects();
     }
     
@@ -145,6 +148,7 @@ export class EffectsTab {
         return `
             <div class="effect-card" 
                  data-effect-id="${effect.id}"
+                 data-effect-name="${effect.name}"
                  draggable="true"
                  title="${effect.description || effect.name}">
                 <div class="effect-card-header">
@@ -160,17 +164,90 @@ export class EffectsTab {
     /**
      * Attach drag event listeners
      */
+    setupContextMenu() {
+        this.contextMenu = document.createElement('div');
+        this.contextMenu.className = 'file-context-menu';
+        this.contextMenu.innerHTML = `
+            <div class="context-menu-item" data-action="fx-video">
+                <i class="bi bi-camera-video"></i> Add to Video FX
+            </div>
+            <div class="context-menu-item" data-action="fx-artnet">
+                <i class="bi bi-broadcast"></i> Add to Art-Net FX
+            </div>
+            <div class="context-menu-item" data-action="fx-clip">
+                <i class="bi bi-layers"></i> Add to Current Clip Layer FX
+            </div>
+        `;
+        document.body.appendChild(this.contextMenu);
+
+        document.addEventListener('click', (e) => {
+            if (!this.contextMenu.contains(e.target)) {
+                this.hideContextMenu();
+            }
+        });
+
+        window.addEventListener('resize', () => { this.hideContextMenu(); });
+
+        this.contextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.handleContextMenuAction(item.getAttribute('data-action'));
+                this.hideContextMenu();
+            });
+        });
+    }
+
+    showContextMenu(x, y, effectId, effectName) {
+        this.contextMenuTarget = { effectId, effectName };
+        this.contextMenu.style.display = 'block';
+
+        const menuWidth = this.contextMenu.offsetWidth;
+        const menuHeight = this.contextMenu.offsetHeight;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        let posX = Math.max(5, x + menuWidth > vw ? vw - menuWidth - 5 : x);
+        let posY = Math.max(5, y + menuHeight > vh ? vh - menuHeight - 5 : y);
+
+        this.contextMenu.style.left = `${posX}px`;
+        this.contextMenu.style.top  = `${posY}px`;
+    }
+
+    hideContextMenu() {
+        this.contextMenu.style.display = 'none';
+        this.contextMenuTarget = null;
+    }
+
+    handleContextMenuAction(action) {
+        if (!this.contextMenuTarget) return;
+        const { effectId } = this.contextMenuTarget;
+
+        if (action === 'fx-video' && window.addEffectToVideo) {
+            window.addEffectToVideo(effectId);
+        } else if (action === 'fx-artnet' && window.addEffectToArtnet) {
+            window.addEffectToArtnet(effectId);
+        } else if (action === 'fx-clip' && window.addEffectToClip) {
+            window.addEffectToClip(effectId);
+        }
+    }
+
     attachEventListeners() {
         const effectCards = document.querySelectorAll(`#${this.containerId} .effect-card`);
         
         effectCards.forEach(card => {
-        card.addEventListener('dragstart', (e) => {
-            const effectId = card.getAttribute('data-effect-id');
-            e.dataTransfer.setData('effectId', effectId);
-            e.dataTransfer.effectAllowed = 'copy';
-            card.classList.add('dragging');
-        });            card.addEventListener('dragend', (e) => {
+            card.addEventListener('dragstart', (e) => {
+                const effectId = card.getAttribute('data-effect-id');
+                e.dataTransfer.setData('effectId', effectId);
+                e.dataTransfer.effectAllowed = 'copy';
+                card.classList.add('dragging');
+            });
+            card.addEventListener('dragend', (e) => {
                 card.classList.remove('dragging');
+            });
+            card.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const effectId = card.getAttribute('data-effect-id');
+                const effectName = card.getAttribute('data-effect-name');
+                this.showContextMenu(e.clientX, e.clientY, effectId, effectName);
             });
         });
     }

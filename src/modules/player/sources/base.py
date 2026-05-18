@@ -6,7 +6,7 @@ from ...core.constants import DEFAULT_FPS
 
 
 class FrameSource(ABC):
-    """Abstrakte Basisklasse für Frame-Quellen."""
+    """Abstract base class for frame sources."""
 
     def __init__(self, canvas_width, canvas_height, config=None):
         self.canvas_width = canvas_width
@@ -15,26 +15,26 @@ class FrameSource(ABC):
         self.current_frame = 0
         self.total_frames = 0
         self.fps = DEFAULT_FPS
-        self.is_infinite = False  # True für Scripts (unendlich)
+        self.is_infinite = False  # True for scripts (infinite)
 
     @abstractmethod
     def initialize(self):
-        """Initialisiert die Frame-Quelle. Gibt True bei Erfolg zurück."""
+        """Initializes the frame source. Returns True on success."""
         pass
 
     @abstractmethod
     def get_next_frame(self):
         """
-        Gibt das nächste Frame zurück als numpy array (RGB).
+        Returns the next frame as a numpy array (RGB).
         Returns: (frame, delay) tuple
-        - frame: numpy array (height, width, 3) in RGB format oder None
-        - delay: empfohlene Verzögerung bis zum nächsten Frame in Sekunden
+        - frame: numpy array (height, width, 3) in RGB format or None
+        - delay: recommended delay until next frame in seconds
         """
         pass
 
     @abstractmethod
     def reset(self):
-        """Setzt die Quelle auf Frame 0 zurück."""
+        """Resets the source to frame 0."""
         pass
 
     @abstractmethod
@@ -44,11 +44,11 @@ class FrameSource(ABC):
 
     @abstractmethod
     def get_source_name(self):
-        """Gibt Namen der Quelle zurück (z.B. Dateiname)."""
+        """Returns the source name (e.g. filename)."""
         pass
 
     def get_info(self):
-        """Gibt Informationen über die Quelle zurück."""
+        """Returns information about the source."""
         return {
             'source_type': self.__class__.__name__
         }

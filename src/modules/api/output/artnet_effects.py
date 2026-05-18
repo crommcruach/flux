@@ -1,5 +1,5 @@
-"""
-API Art-Net Effects - Separate Effect Chain für Art-Net Ausgabe
+﻿"""
+API Art-Net Effects - Separate effect chain for Art-Net output
 """
 from flask import jsonify, request
 from ...core.logger import get_logger
@@ -14,7 +14,7 @@ def register_artnet_effects_api(app, player_manager):
     
     @app.route('/api/artnet/effects', methods=['GET'])
     def get_artnet_effects():
-        """Gibt die aktuelle Art-Net Effect Chain zurück."""
+        """Returns the current Art-Net effect chain."""
         try:
             # Use artnet_player if available, fallback to main player with artnet chain
             player = player_manager.get_artnet_player() or player_manager.player
@@ -35,7 +35,7 @@ def register_artnet_effects_api(app, player_manager):
     
     @app.route('/api/artnet/effects/add', methods=['POST'])
     def add_artnet_effect():
-        """Fügt einen Effect zur Art-Net Chain hinzu."""
+        """Adds an effect to the Art-Net chain."""
         try:
             data = request.get_json()
             plugin_id = data.get('plugin_id')

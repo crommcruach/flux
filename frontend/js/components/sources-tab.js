@@ -12,6 +12,8 @@ export class SourcesTab {
         this.sources = [];
         this.filteredSources = [];
         this.searchTerm = '';
+        this.contextMenu = null;
+        this.contextMenuTarget = null; // {sourceId, sourceName}
     }
     
     /**
@@ -19,6 +21,7 @@ export class SourcesTab {
      */
     async init() {
         this.setupSearch();
+        this.setupContextMenu();
         await this.loadSources();
     }
     
@@ -161,10 +164,82 @@ export class SourcesTab {
     }
     
     /**
+     * Setup context menu
+     */
+    setupContextMenu() {
+        this.contextMenu = document.createElement('div');
+        this.contextMenu.className = 'file-context-menu';
+        this.contextMenu.innerHTML = `
+            <div class="context-menu-item" data-action="playlist1">
+                <i class="bi bi-play-circle"></i> Add to Video Player
+            </div>
+            <div class="context-menu-item" data-action="playlist2">
+                <i class="bi bi-play-circle"></i> Add to Art-Net Player
+            </div>
+        `;
+        document.body.appendChild(this.contextMenu);
+
+        document.addEventListener('click', (e) => {
+            if (!this.contextMenu.contains(e.target)) {
+                this.hideContextMenu();
+            }
+        });
+
+        window.addEventListener('resize', () => { this.hideContextMenu(); });
+
+        this.contextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.handleContextMenuAction(item.getAttribute('data-action'));
+                this.hideContextMenu();
+            });
+        });
+    }
+
+    /**
+     * Show context menu at position
+     */
+    showContextMenu(x, y, sourceId, sourceName) {
+        this.contextMenuTarget = { sourceId, sourceName };
+        this.contextMenu.style.display = 'block';
+
+        const menuWidth = this.contextMenu.offsetWidth;
+        const menuHeight = this.contextMenu.offsetHeight;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        let posX = Math.max(5, x + menuWidth > vw ? vw - menuWidth - 5 : x);
+        let posY = Math.max(5, y + menuHeight > vh ? vh - menuHeight - 5 : y);
+
+        this.contextMenu.style.left = `${posX}px`;
+        this.contextMenu.style.top  = `${posY}px`;
+    }
+
+    /**
+     * Hide context menu
+     */
+    hideContextMenu() {
+        this.contextMenu.style.display = 'none';
+        this.contextMenuTarget = null;
+    }
+
+    /**
+     * Handle context menu action
+     */
+    handleContextMenuAction(action) {
+        if (!this.contextMenuTarget) return;
+        const { sourceId, sourceName } = this.contextMenuTarget;
+
+        const playerId = action === 'playlist1' ? 'video' : 'artnet';
+        window.dispatchEvent(new CustomEvent('addSourceToPlaylistRequested', {
+            detail: { generatorId: sourceId, generatorName: sourceName, playerId }
+        }));
+    }
+
+    /**
      * Attach drag event listeners
      */
     attachEventListeners() {
-        const sourceCards = document.querySelectorAll(`#${this.containerId} .source-card`);
+        const sourceCards = document.querySelectorAll(`#${this.containerId} .source-card, #${this.containerId} .generator-card`);
         
         sourceCards.forEach(card => {
             card.addEventListener('dragstart', (e) => {
@@ -179,6 +254,13 @@ export class SourcesTab {
             
             card.addEventListener('dragend', (e) => {
                 card.classList.remove('dragging');
+            });
+
+            card.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const sourceId = card.getAttribute('data-source-id');
+                const sourceName = card.getAttribute('data-source-name');
+                this.showContextMenu(e.clientX, e.clientY, sourceId, sourceName);
             });
         });
     }

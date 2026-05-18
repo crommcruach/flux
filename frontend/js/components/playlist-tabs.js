@@ -119,7 +119,12 @@ class PlaylistTabsManager {
         
         // Left-click: View/edit playlist (GUI only, no playback change)
         // Right-click: Context menu with "Activate" option (changes playback)
+        // Add button — delegated so it survives re-renders via render()
         container.addEventListener('click', (e) => {
+            if (e.target.closest('#addPlaylistBtn')) {
+                this.createPlaylist();
+                return;
+            }
             const tab = e.target.closest('.playlist-tab');
             if (tab) {
                 const playlistId = tab.dataset.playlistId;
@@ -135,14 +140,6 @@ class PlaylistTabsManager {
                 this.showContextMenu(e, playlistId);
             }
         });
-        
-        // Add button
-        const addBtn = document.getElementById('addPlaylistBtn');
-        if (addBtn) {
-            addBtn.addEventListener('click', () => {
-                this.createPlaylist();
-            });
-        }
         
         // Hide context menu on outside click
         document.addEventListener('click', () => {

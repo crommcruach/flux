@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
@@ -7,6 +7,7 @@
     <title>Flux - Web CLI</title>
     <link href="libs/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/midi-display.css">
 </head>
 
 <body>
@@ -28,7 +29,7 @@
             
             <pre id="logOutput" class="console-output log-output-custom"></pre>
             <div class="log-info-container">
-                <span id="logInfo">Warte auf Log-Daten...</span>
+                <span id="logInfo">Waiting for log data...</span>
             </div>
         </div>
 
@@ -46,7 +47,7 @@
                 <input type="text" 
                        id="consoleCommand" 
                        class="console-input"
-                       placeholder="Befehl eingeben (z.B. help, status, videos, start, stop...)" 
+                       placeholder="Enter command (e.g. help, status, videos, start, stop...)" 
                        onkeypress="if(event.key==='Enter') executeCommand()" 
                        autofocus>
                 <button class="btn btn-primary" onclick="executeCommand()">▶️ Run</button>
@@ -55,11 +56,11 @@
             <div class="help-section" id="helpSection">
                 <h3 onclick="toggleHelp()">
                     <span class="help-toggle-icon collapsed" id="helpToggleIcon">▼</span>
-                    📖 Verfügbare Befehle 
-                    <span class="help-loading-text">(lädt...)</span>
+                    📖 Available Commands 
+                    <span class="help-loading-text">(loading...)</span>
                 </h3>
                 <div id="helpContent" class="collapsed">
-                    <p class="help-content-message">Lade Befehle...</p>
+                    <p class="help-content-message">Loading commands...</p>
                 </div>
             </div>
         </div>

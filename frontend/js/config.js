@@ -54,7 +54,7 @@ function createInput(key, value, path) {
                 ${items}
                 <button class="btn btn-sm btn-outline-primary add-array-item" 
                         data-path="${fullPath}">
-                    <i class="bi bi-plus"></i> Hinzufügen
+                    <i class="bi bi-plus"></i> Add
                 </button>
             </div>
         `;

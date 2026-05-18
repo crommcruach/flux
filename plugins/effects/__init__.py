@@ -7,6 +7,7 @@ Active effects (all use WGSL shaders via get_shader()/get_uniforms()):
   - ColorizeEffect       — hue/saturation colorize (colorize.wgsl)
   - HueRotateEffect      — hue rotation (hue_rotate.wgsl)
   - BlendModeEffect      — 14-mode color blend (blend_mode.wgsl)
+  - AutoMaskEffect       — key out dark/black backgrounds by luminance (auto_mask.wgsl)
 
 Special exception (CPU, required by core playback engine):
   - TransportEffect      — frame position, speed, trim, loop control
@@ -16,6 +17,7 @@ from .brightness_contrast import BrightnessContrastEffect
 from .colorize import ColorizeEffect
 from .hue_rotate import HueRotateEffect
 from .blend_mode import BlendModeEffect
+from .auto_mask import AutoMaskEffect
 from .transport import TransportEffect
 
 __all__ = [
@@ -24,5 +26,6 @@ __all__ = [
     'ColorizeEffect',
     'HueRotateEffect',
     'BlendModeEffect',
+    'AutoMaskEffect',
     'TransportEffect',
 ]

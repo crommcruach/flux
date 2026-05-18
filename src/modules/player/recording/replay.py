@@ -1,6 +1,6 @@
-"""
+﻿"""
 Replay Manager - Spielt aufgezeichnete DMX-Daten ab
-Unabhängig vom Player, direkt über Art-Net
+Independent of player, directly via Art-Net
 """
 import os
 import json
@@ -19,7 +19,7 @@ class ReplayManager:
         Initialisiert Replay Manager.
         
         Args:
-            artnet_manager: ArtNetManager-Instanz für Ausgabe
+            artnet_manager: ArtNetManager instance for output
             config: Konfigurations-Dict
             player: Player-Instanz (optional, wird beim Start gestoppt)
         """
@@ -43,7 +43,7 @@ class ReplayManager:
         os.makedirs(self.records_dir, exist_ok=True)
     
     def list_recordings(self):
-        """Gibt Liste aller Aufzeichnungen zurück."""
+        """Returns list of all recordings."""
         if not os.path.exists(self.records_dir):
             return []
         
@@ -71,7 +71,7 @@ class ReplayManager:
         return recordings
     
     def load_recording(self, filename):
-        """Lädt eine Aufzeichnung."""
+        """Loads a recording."""
         filepath = os.path.join(self.records_dir, filename)
         
         if not os.path.exists(filepath):
@@ -96,13 +96,13 @@ class ReplayManager:
             return False
         
         if self.is_playing:
-            logger.warning("Replay läuft bereits!")
+            logger.warning("Replay already running!")
             return False
         
         # Stoppe Video-Wiedergabe falls aktiv
         if self.player and self.player.is_playing:
             self.player.stop()
-            logger.debug("Video gestoppt für Replay")
+            logger.debug("Video stopped for replay")
         
         # Aktiviere Replay-Modus (blockiert Video-Ausgabe)
         # Note: artnet_manager removed - replay needs reimplementation with routing_bridge
@@ -160,10 +160,10 @@ class ReplayManager:
                 dmx_data = frame_data['dmx_data'].copy()
                 
                 if self.brightness < 1.0:
-                    # Wende Helligkeit auf alle Kanäle an
+                    # Apply brightness to all channels
                     dmx_data = [int(val * self.brightness) for val in dmx_data]
                 
-                # Sende über Art-Net mit Replay-Priorität
+                # Send via Art-Net with replay priority
                 # Note: artnet_manager removed - replay needs reimplementation with routing_bridge
                 if self.artnet_manager:
                     logger.warning("Replay: Cannot send frame - artnet_manager deprecated")
@@ -203,5 +203,5 @@ class ReplayManager:
         logger.debug(f"Replay Loop: {'an' if enabled else 'aus'}")
     
     def set_player(self, player):
-        """Setzt Player-Referenz (für spätere Initialisierung)."""
+        """Sets player reference (for later initialization)."""
         self.player = player

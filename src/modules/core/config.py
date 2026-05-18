@@ -1,5 +1,5 @@
 """
-Configuration Schema - JSON Schema für config.json Validierung
+Configuration Schema - JSON Schema for config.json validation
 """
 from typing import Dict, Any, List, Tuple
 import json
@@ -7,7 +7,7 @@ from .logger import get_logger
 
 logger = get_logger(__name__)
 
-# JSON Schema für config.json
+# JSON Schema for config.json
 CONFIG_SCHEMA = {
     "type": "object",
     "required": ["artnet", "video", "paths"],
@@ -19,13 +19,13 @@ CONFIG_SCHEMA = {
                 "target_ip": {
                     "type": "string",
                     "pattern": "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$",
-                    "description": "Art-Net Ziel-IP-Adresse"
+                    "description": "Art-Net target IP address"
                 },
                 "start_universe": {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 32767,
-                    "description": "Start-Universum für Art-Net Ausgabe"
+                    "description": "Start universe for Art-Net output"
                 },
                 "fps": {
                     "type": "integer",
@@ -45,7 +45,7 @@ CONFIG_SCHEMA = {
                 "extensions": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Unterstützte Video-Dateiformate"
+                    "description": "Supported video file formats"
                 },
                 "default_fps": {
                     "type": ["integer", "null"],
@@ -76,7 +76,7 @@ CONFIG_SCHEMA = {
                     "items": {"type": "integer", "minimum": 0, "maximum": 255},
                     "minItems": 3,
                     "maxItems": 3,
-                    "description": "RGB-Hintergrundfarbe für GIF-Transparenz"
+                    "description": "RGB background color for GIF transparency"
                 },
                 "gif_respect_frame_timing": {
                     "type": "boolean",
@@ -90,11 +90,11 @@ CONFIG_SCHEMA = {
             "properties": {
                 "video_dir": {
                     "type": "string",
-                    "description": "Verzeichnis für Videos"
+                    "description": "Directory for videos"
                 },
                 "data_dir": {
                     "type": "string",
-                    "description": "Verzeichnis für Points-JSON Dateien"
+                    "description": "Directory for points JSON files"
                 },
                 "points_json": {
                     "type": "string",
@@ -106,22 +106,22 @@ CONFIG_SCHEMA = {
                 },
                 "scripts_dir": {
                     "type": "string",
-                    "description": "Verzeichnis für Script-Dateien"
+                    "description": "Directory for script files"
                 },
                 "cache_dir": {
                     "type": "string",
-                    "description": "Verzeichnis für Video-Cache-Dateien"
+                    "description": "Directory for video cache files"
                 },
                 "projects_dir": {
                     "type": "string",
-                    "description": "Verzeichnis für gespeicherte Projekte"
+                    "description": "Directory for saved projects"
                 },
                 "video_sources": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     },
-                    "description": "Zusätzliche Video-Quellen (Ordner/Laufwerke) für File Browser",
+                    "description": "Additional video sources (folders/drives) for file browser",
                     "default": []
                 }
             }
@@ -139,7 +139,7 @@ CONFIG_SCHEMA = {
                             "params": {"type": "object"}
                         }
                     },
-                    "description": "Default effect chain für Video-Player",
+                    "description": "Default effect chain for video player",
                     "default": []
                 },
                 "artnet": {
@@ -152,7 +152,7 @@ CONFIG_SCHEMA = {
                             "params": {"type": "object"}
                         }
                     },
-                    "description": "Default effect chain für Art-Net-Player",
+                    "description": "Default effect chain for Art-Net player",
                     "default": []
                 },
                 "clips": {
@@ -235,7 +235,7 @@ CONFIG_SCHEMA = {
                     "type": "integer",
                     "minimum": 10,
                     "maximum": 10000,
-                    "description": "Maximale Console-Log Einträge"
+                    "description": "Maximum console log entries"
                 },
                 "status_broadcast_interval": {
                     "type": "number",
@@ -272,7 +272,7 @@ CONFIG_SCHEMA = {
             }
         }
     },
-    "additionalProperties": True  # Erlaube zusätzliche Properties für Erweiterbarkeit
+    "additionalProperties": True  # Allow additional properties for extensibility
 }
 
 
@@ -301,7 +301,7 @@ class ConfigValidator:
             Tuple[bool, List[str]]: (is_valid, error_messages)
         """
         if not self.available:
-            logger.warning("Schema-Validierung übersprungen (jsonschema nicht verfügbar)")
+            logger.warning("Schema validation skipped (jsonschema not available)")
             return True, []
         
         errors = []
@@ -314,7 +314,7 @@ class ConfigValidator:
                 path = ".".join(str(p) for p in error.path) if error.path else "root"
                 errors.append(f"{path}: {error.message}")
             
-            # Zusätzliche Custom-Validierungen
+            # Additional custom validations
             custom_errors = self._custom_validations(config)
             errors.extend(custom_errors)
             
@@ -335,7 +335,7 @@ class ConfigValidator:
     
     def _custom_validations(self, config: Dict[str, Any]) -> List[str]:
         """
-        Führt zusätzliche Custom-Validierungen durch.
+        Performs additional custom validations.
         
         Args:
             config: Configuration Dictionary
@@ -349,7 +349,7 @@ class ConfigValidator:
         if "artnet" in config and "target_ip" in config["artnet"]:
             ip = config["artnet"]["target_ip"]
             if not self._is_valid_ip(ip):
-                errors.append(f"artnet.target_ip: Ungültige IP-Adresse '{ip}'")
+                errors.append(f"artnet.target_ip: Invalid IP address '{ip}'")
         
         # Validiere Pfade
         if "paths" in config:
@@ -365,13 +365,13 @@ class ConfigValidator:
     
     def _is_valid_ip(self, ip: str) -> bool:
         """
-        Prüft ob IP-Adresse gültig ist.
+        Checks whether IP address is valid.
         
         Args:
             ip: IP-Adresse String
             
         Returns:
-            bool: True wenn gültig
+            bool: True if valid
         """
         parts = ip.split(".")
         if len(parts) != 4:
@@ -388,7 +388,7 @@ class ConfigValidator:
     
     def get_schema(self) -> Dict[str, Any]:
         """
-        Gibt das vollständige Schema zurück.
+        Returns the complete schema.
         
         Returns:
             Dict[str, Any]: JSON Schema
@@ -451,7 +451,7 @@ class ConfigValidator:
 
 def validate_config_file(config_path: str) -> Tuple[bool, List[str], Dict[str, Any]]:
     """
-    Lädt und validiert Config-Datei.
+    Loads and validates config file.
     
     Args:
         config_path: Pfad zur config.json

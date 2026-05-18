@@ -1,5 +1,5 @@
-"""
-REST API für Video Converter
+﻿"""
+REST API for video converter
 """
 
 from flask import Blueprint, request, jsonify
@@ -77,7 +77,7 @@ def converter_status():
 
 @converter_bp.route('/api/converter/formats', methods=['GET'])
 def list_formats():
-    """Liste unterstützter Output-Formate"""
+    """List of supported output formats"""
     return jsonify({"formats": [
         {"id": "npy", "name": "NumPy", "description": "Pre-decoded frames (.npy) — instant load, zero runtime decode"}
     ]})
@@ -85,7 +85,7 @@ def list_formats():
 
 @converter_bp.route('/api/converter/info', methods=['POST'])
 def get_video_info():
-    """Hole Informationen über ein Video"""
+    """Get information about a video"""
     data = request.json
     video_path = data.get('path')
     
@@ -446,7 +446,7 @@ def start_multi_res_conversion():
 
 @converter_bp.route('/api/converter/canvas-size', methods=['GET'])
 def get_canvas_size():
-    """Hole Canvas-Größe aus Config"""
+    """Get canvas size from config"""
     try:
         # Load config from config.json
         import json
@@ -478,7 +478,7 @@ def get_canvas_size():
 
 
 def _get_format_description(fmt: OutputFormat) -> str:
-    """Beschreibung für Output-Format"""
+    """Description for output format"""
     descriptions = {
         OutputFormat.HAP: "HAP (DXT1) - Fast decoding, lower quality",
         OutputFormat.HAP_ALPHA: "HAP Alpha (DXT5) - Fast decoding with alpha channel",

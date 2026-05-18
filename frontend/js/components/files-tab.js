@@ -37,6 +37,7 @@ export class FilesTab {
         this.contextMenu = null; // Context menu element
         this.contextMenuTarget = null; // Currently right-clicked file
         this.thumbnailObserver = null; // Intersection Observer for lazy loading
+        this.focusedIndex = -1; // MIDI-controlled focused file index
     }
     
     /**
@@ -474,6 +475,47 @@ export class FilesTab {
      */
     async refresh() {
         return this.loadFiles();
+    }
+
+    /**
+     * MIDI: Set focused file by index (highlights + scrolls item into view)
+     */
+    setFocusedIndex(idx) {
+        const container = document.getElementById(this.containerId);
+        if (!container) return;
+
+        // Clear previous focus
+        container.querySelector('.midi-focused')?.classList.remove('midi-focused');
+
+        const items = container.querySelectorAll('.file-item, .tree-node.file');
+        if (items.length === 0) { this.focusedIndex = -1; return; }
+
+        // Clamp index
+        const clamped = Math.max(0, Math.min(idx, items.length - 1));
+        this.focusedIndex = clamped;
+        items[clamped].classList.add('midi-focused');
+        items[clamped].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    /**
+     * MIDI: Return focused file metadata object, or null
+     */
+    getFocusedFile() {
+        if (this.focusedIndex < 0) return null;
+        // List mode: use filteredFiles
+        if (this.filteredFiles && this.filteredFiles[this.focusedIndex]) {
+            return this.filteredFiles[this.focusedIndex];
+        }
+        // Tree mode: read from DOM
+        const container = document.getElementById(this.containerId);
+        const items = container?.querySelectorAll('.tree-node.file');
+        const item = items?.[this.focusedIndex];
+        if (!item) return null;
+        return {
+            path: item.dataset.path,
+            type: item.dataset.type,
+            filename: item.dataset.filename
+        };
     }
 
     /**

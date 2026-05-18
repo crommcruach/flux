@@ -266,6 +266,80 @@
     color: #ff9090;
 }
 
+/* ----------------------------------------
+   Inline wheel picker for palette add
+   ---------------------------------------- */
+.palette-wheel-picker {
+    margin-bottom: 6px;
+}
+
+.palette-wheel-body {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    margin-bottom: 6px;
+}
+
+.palette-wheel-canvas {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    cursor: crosshair;
+    flex-shrink: 0;
+    border: 1px solid #444;
+}
+
+.palette-wheel-right {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 28px;
+}
+
+.palette-wheel-swatch {
+    width: 100%;
+    height: 36px;
+    border: 1px solid #555;
+    border-radius: 3px;
+    background: #ff0000;
+    flex-shrink: 0;
+}
+
+.palette-wheel-bright-label {
+    font-size: 10px;
+    color: #888;
+}
+
+.palette-wheel-bright-track {
+    flex: 1;
+    width: 18px;
+    background: linear-gradient(to bottom, #ffffff, #000000);
+    border: 1px solid #555;
+    border-radius: 3px;
+    position: relative;
+    cursor: ns-resize;
+}
+
+.palette-wheel-bright-thumb {
+    position: absolute;
+    left: -4px;
+    width: 26px;
+    height: 4px;
+    background: white;
+    border: 1px solid #000;
+    border-radius: 2px;
+    transform: translateY(-50%);
+    pointer-events: none;
+    top: 0%;
+}
+
+.palette-wheel-actions {
+    display: flex;
+    gap: 6px;
+}
+
 .palette-btn-confirm {
     background: #3a3a00;
     border-color: #7a7a00;
@@ -276,4 +350,45 @@
     background: #5a5a00;
     border-color: #aaaa00;
     color: #ffff99;
+}
+
+.hue-range-track {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 20px;   /* matches .color-slider height */
+    pointer-events: none;  /* let hue slider events through */
+    z-index: 1;
+}
+
+.hue-range-track.hidden {
+    display: none;
+}
+
+.hue-range-fill {
+    position: absolute;
+    height: 100%;
+    top: 0;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 3px;
+    pointer-events: none;
+}
+
+.hue-range-handle {
+    position: absolute;
+    width: 3px;
+    height: 20px;
+    top: 0;
+    margin-left: -1px;
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    cursor: ew-resize;
+    z-index: 2;
+    user-select: none;
+    pointer-events: auto;  /* re-enable for handles only */
+}
+
+.hue-range-handle:hover {
+    background: #ffffaa;
 }

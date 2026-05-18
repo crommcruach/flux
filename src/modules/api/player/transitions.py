@@ -43,7 +43,7 @@ def register_transition_routes(app, player_manager, playlist_system=None):
     
     @app.route('/api/player/<player_id>/transition/config', methods=['POST'])
     def set_transition_config(player_id):
-        """Setzt Transition-Konfiguration für einen Player."""
+        """Sets transition configuration for a player."""
         try:
             player = player_manager.get_player(player_id)
             if not player:
@@ -152,7 +152,7 @@ def register_transition_routes(app, player_manager, playlist_system=None):
     
     @app.route('/api/player/<player_id>/transition/status', methods=['GET'])
     def get_transition_status(player_id):
-        """Gibt die aktuelle Transition-Konfiguration eines Players zurück."""
+        """Returns the current transition configuration of a player."""
         try:
             player = player_manager.get_player(player_id)
             if not player:

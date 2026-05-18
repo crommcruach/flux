@@ -13,6 +13,11 @@ logger = get_logger(__name__)
 
 
 class TexturePool:
+    # Maximum GPUFrames per resolution bucket.  When all slots are in-use
+    # at this limit, the oldest slot is force-released (pool leak recovery)
+    # rather than allocating a new texture and exhausting VRAM.
+    MAX_PER_BUCKET = 16
+
     def __init__(self):
         # (width, height, components) → list[GPUFrame]
         self._pool: dict[tuple, list[GPUFrame]] = {}
@@ -47,6 +52,42 @@ class TexturePool:
                 if id(frame) not in self._in_use:
                     self._in_use.add(id(frame))
                     return frame
+
+            # All frames in this bucket are in-use.
+            if len(pool) >= self.MAX_PER_BUCKET:
+                # Hard cap hit — a previous frame was never released (leak).
+                # Evict the oldest slot from the pool and return a fresh
+                # GPUFrame in its place.
+                #
+                # WHY NOT reuse pool[0] directly:
+                #   Returning pool[0] while it is still referenced as `cur`
+                #   (or any other active frame) by the compositor would make
+                #   two different acquire() callers share the SAME Python
+                #   object.  When one uses it as COLOR_TARGET and the other
+                #   already has it as RESOURCE in the same render pass,
+                #   wgpu raises:
+                #     GPUValidationError: conflicting usages —
+                #     TextureUses(RESOURCE) vs TextureUses(COLOR_TARGET).
+                #
+                # By popping pool[0] out of the pool and returning a brand-
+                # new GPUFrame, aliasing is impossible.  The evicted frame
+                # stays alive (its holder still references it) and will be
+                # GC'd once that holder releases it.  VRAM overhead is at
+                # most one extra frame per cap-hit event.
+                evicted = pool.pop(0)
+                self._in_use.discard(id(evicted))
+                logger.warning(
+                    f"TexturePool: bucket {width}x{height} hit cap "
+                    f"({self.MAX_PER_BUCKET}). Force-evicting oldest slot "
+                    f"(id={id(evicted):#x}). Check for missing pool.release() calls."
+                )
+                # Do NOT call evicted.release() — the original holder may
+                # still be using the underlying GPU texture.
+                frame = GPUFrame(None, width, height, components)
+                pool.append(frame)
+                self._in_use.add(id(frame))
+                return frame
+
             frame = GPUFrame(None, width, height, components)
             pool.append(frame)
             self._in_use.add(id(frame))

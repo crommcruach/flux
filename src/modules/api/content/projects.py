@@ -1,4 +1,4 @@
-"""
+﻿"""
 API endpoints for project management (save/load projects)
 """
 import os
@@ -130,7 +130,7 @@ def register_project_routes(app, logger):
             
             return jsonify({
                 'success': True,
-                'message': f'Projekt "{filename}" gelöscht'
+                'message': f'Project "{filename}" deleted'
             })
         except Exception as e:
             logger.error(f"Error deleting project: {e}")

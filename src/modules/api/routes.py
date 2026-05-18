@@ -1,6 +1,6 @@
 """
-Web-Interface Routen für Flux
-Enthält alle HTML-Seiten und statische Datei-Routen
+Web interface routes for Flux
+Contains all HTML pages and static file routes
 """
 from flask import send_from_directory, jsonify
 import logging
@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 def register_web_routes(app, config=None, player_manager=None):
-    """Registriert alle Web-Interface Routen.
+    """Registers all web interface routes.
     
     Args:
-        app: Flask-App-Instanz
-        config: Konfigurationsdictionary
-        player_manager: PlayerManager-Instanz für Preview-Stream
+        app: Flask app instance
+        config: Configuration dictionary
+        player_manager: PlayerManager instance for preview stream
     """
     config = config or {}
     
@@ -23,7 +23,7 @@ def register_web_routes(app, config=None, player_manager=None):
         app.player_manager = player_manager
     
     # ========================================
-    # HTML-SEITEN
+    # HTML PAGES
     # ========================================
     
     @app.route('/')
@@ -90,7 +90,7 @@ def register_web_routes(app, config=None, player_manager=None):
         return send_from_directory(app.static_folder, 'performance.html')
     
     # ========================================
-    # STATISCHE DATEIEN
+    # STATIC FILES
     # ========================================
     
     @app.route('/static/<path:filename>')
@@ -99,12 +99,12 @@ def register_web_routes(app, config=None, player_manager=None):
         return send_from_directory(app.static_folder, filename)
     
     # ========================================
-    # FRONTEND-KONFIGURATION
+    # FRONTEND CONFIGURATION
     # ========================================
     
     @app.route('/api/config/frontend')
     def frontend_config():
-        """Liefert Frontend-Konfiguration für JavaScript."""
+        """Returns frontend configuration for JavaScript."""
         port = config.get('api', {}).get('port', 5000)
         
         # Get WebSocket command settings

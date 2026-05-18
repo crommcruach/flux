@@ -1,10 +1,10 @@
 """
-Unified Player API - Einheitliche REST-API für alle Player.
+Unified Player API - Unified REST API for all players.
 
-Ersetzt separate Video- und Art-Net-APIs durch ein einheitliches Interface:
+Replaces separate video and Art-Net APIs with a unified interface:
 - /api/player/<player_id>/...
-- Clip-basiertes Management mit UUIDs
-- Konsistente Fehlerbehandlung
+- Clip-based management with UUIDs
+- Consistent error handling
 """
 
 import os
@@ -38,7 +38,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/clip/load', methods=['POST'])
     def load_clip(player_id):
-        """Lädt einen Clip (Video oder Generator) in einen Player und registriert ihn."""
+        """Loads a clip (video or generator) into a player and registers it."""
         try:
             data = request.get_json()
             clip_type = data.get('type', 'video')  # 'video' or 'generator'
@@ -132,7 +132,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     player.play()
                     logger.debug(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
                 
-                # Auto-save session state (force=True für kritische Clip-Änderung)
+                # Auto-save session state (force=True for critical clip change)
                 session_state = get_session_state()
                 if session_state:
                     session_state.save_async(player_manager, clip_registry, force=True)
@@ -265,7 +265,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     player.play()
                     logger.debug(f"▶️ [{player_id}] Started playback (was_playing={was_playing}, autoplay={player.autoplay})")
                 
-                # Auto-save session state (force=True für kritische Clip-Änderung)
+                # Auto-save session state (force=True for critical clip change)
                 session_state = get_session_state()
                 if session_state:
                     session_state.save_async(player_manager, clip_registry, force=True)
@@ -304,7 +304,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/clip/current', methods=['GET'])
     def get_current_clip(player_id):
-        """Gibt die aktuell geladene Clip-ID zurück."""
+        """Returns the currently loaded clip ID."""
         try:
             player = player_manager.get_player(player_id)
             if not player:
@@ -342,7 +342,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/clip/<clip_id>/effects', methods=['GET'])
     def get_clip_effects(player_id, clip_id):
-        """Gibt alle Effekte eines Clips zurück mit Live-Parametern von aktiven Instanzen."""
+        """Returns all effects of a clip with live parameters from active instances."""
         try:
             effects = clip_registry.get_clip_effects(clip_id)
             
@@ -452,7 +452,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/clip/<clip_id>/effects/add', methods=['POST'])
     def add_clip_effect(player_id, clip_id):
-        """Fügt einen Effekt zu einem Clip hinzu."""
+        """Adds an effect to a clip."""
         try:
             data = request.get_json()
             plugin_id = data.get('plugin_id')
@@ -651,7 +651,51 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
         except Exception as e:
             logger.error(f"Error removing clip effect: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
-    
+
+    @app.route('/api/player/<player_id>/clip/<clip_id>/effects/reorder', methods=['POST'])
+    def reorder_clip_effects(player_id, clip_id):
+        """Reorders effects of a clip. Body: {new_order: [int, ...]}"""
+        try:
+            data = request.get_json()
+            new_order = data.get('new_order')
+
+            if not isinstance(new_order, list):
+                return jsonify({"success": False, "error": "Missing or invalid new_order"}), 400
+
+            success = clip_registry.reorder_clip_effects(clip_id, new_order)
+            if not success:
+                return jsonify({"success": False, "error": "Invalid reorder indices"}), 400
+
+            # Reload effects on all players that have this clip loaded
+            for check_player in player_manager.players.values():
+                if check_player and hasattr(check_player, 'layers') and check_player.layers:
+                    if any(getattr(layer, 'clip_id', None) == clip_id for layer in check_player.layers):
+                        if hasattr(check_player, 'reload_all_layer_effects'):
+                            check_player.reload_all_layer_effects()
+
+            # Auto-save
+            session_state = get_session_state()
+            if session_state:
+                session_state.save_async(player_manager, clip_registry)
+
+            # WebSocket
+            if socketio:
+                try:
+                    socketio.emit('effects.changed', {
+                        'player_id': player_id,
+                        'clip_id': clip_id,
+                        'action': 'reorder',
+                        'new_order': new_order
+                    }, namespace='/effects')
+                except Exception as e:
+                    logger.error(f"❌ Error emitting effects.changed: {e}")
+
+            return jsonify({"success": True})
+
+        except Exception as e:
+            logger.error(f"Error reordering clip effects: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
     @app.route('/api/player/<player_id>/clip/<clip_id>/effects/<int:index>/parameter', methods=['PUT'])
     def update_clip_effect_parameter(player_id, clip_id, index):
         """Aktualisiert einen Parameter eines Clip-Effekts."""
@@ -875,7 +919,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/effects', methods=['GET'])
     def get_player_effects(player_id):
-        """Gibt die Effect Chain eines Players zurück."""
+        """Returns the effect chain of a player."""
         try:
             player = player_manager.get_player(player_id)
             if not player:
@@ -898,7 +942,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/effects/add', methods=['POST'])
     def add_player_effect(player_id):
-        """Fügt einen Effect zur Player Chain hinzu."""
+        """Adds an effect to the player chain."""
         try:
             data = request.get_json()
             plugin_id = data.get('plugin_id')
@@ -1272,7 +1316,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             if not player:
                 return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
             
-            # Prüfe ob echtes Video geladen ist (nicht DummySource)
+            # Check if real video is loaded (not DummySource)
             from ...player.sources import DummySource
             if not player.source or isinstance(player.source, DummySource):
                 logger.debug(f"⚠️ [{player_id}] Kein Video geladen - Play abgebrochen")
@@ -1323,7 +1367,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/clear', methods=['POST'])
     def unified_clear(player_id):
-        """Löscht den aktuellen Frame (zeigt schwarzen Bildschirm bei leerer Playlist)."""
+        """Clears the current frame (shows black screen on empty playlist)."""
         try:
             player = player_manager.get_player(player_id)
             if not player:
@@ -1344,7 +1388,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/status', methods=['GET'])
     def get_player_status(player_id):
-        """Gibt den Status eines Players zurück."""
+        """Returns the status of a player."""
         try:
             player = player_manager.get_player(player_id)
             if not player:
@@ -1435,7 +1479,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/player/<player_id>/next', methods=['POST'])
     def next_video(player_id):
-        """Lädt das nächste Video aus der Playlist."""
+        """Loads the next video from the playlist."""
         try:
             player = player_manager.get_player(player_id)
             if not player:
@@ -1551,7 +1595,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
 
     @app.route('/api/player/<player_id>/previous', methods=['POST'])
     def previous_video(player_id):
-        """Lädt das vorherige Video aus der Playlist."""
+        """Loads the previous video from the playlist."""
         try:
             player = player_manager.get_player(player_id)
             if not player:
@@ -1768,7 +1812,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     generator_id = None
                     parameters = {}
                 else:
-                    # New: vollständiges Objekt mit UUID
+                # New: complete object with UUID
                     path = item.get('path', '')
                     item_id = item.get('id')  # Extract UUID
                     item_type = item.get('type', 'video')
@@ -1845,7 +1889,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         if generator_id and parameters:
                             player.playlist_params[generator_id] = parameters.copy()
             
-            # Setze Index auf aktuelles Video wenn vorhanden
+            # Set index to current video if present
             current_video_in_playlist = False
             if hasattr(player.source, 'video_path') and player.source.video_path:
                 try:
@@ -1856,37 +1900,37 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     player.playlist_index = -1
                     logger.debug(f"📋 [{player_id}] Current video not in playlist")
             
-            # Wenn aktuelles Video in Playlist ist
+            # If current video is in playlist
             if current_video_in_playlist:
-                # Wenn autoplay aktiv: max_loops=1 damit Clip 1x spielt und dann zum nächsten wechselt
-                # Sonst: max_loops=0 (Endlosschleife, manuelle Navigation mit Next/Previous)
+                # If autoplay active: max_loops=1 so clip plays once then advances to next
+                # Otherwise: max_loops=0 (infinite loop, manual navigation with Next/Previous)
                 player.max_loops = 1 if autoplay else 0
                 logger.debug(f"🔁 [{player_id}] Video in Playlist: max_loops={player.max_loops} (autoplay={autoplay})")
                 
-                # Starte automatisch wenn nicht schon läuft
+                # Start automatically if not already running
                 if not player.is_playing:
                     player.play()
-                    logger.debug(f"▶️ [{player_id}] Video automatisch gestartet (in Playlist)")
+                    logger.debug(f"▶️ [{player_id}] Video automatically started (in playlist)")
             else:
-                # Aktuelles Video wurde aus Playlist entfernt ODER kein Video geladen
+                # Current video was removed from playlist OR no video loaded
                 if hasattr(player.source, 'video_path') and player.source.video_path:
-                    logger.debug(f"🗑️ [{player_id}] Video aus Playlist entfernt - lade leere Source: {os.path.basename(player.source.video_path)}")
+                    logger.debug(f"🗑️ [{player_id}] Video removed from playlist - loading empty source: {os.path.basename(player.source.video_path)}")
                     player.stop()
-                    # Entlade das Video vollständig
+                    # Unload the video completely
                     if hasattr(player, 'source') and player.source:
                         player.source.cleanup()
                     
-                    # Lade DummySource (schwarzes Frame)
+                    # Load DummySource (black frame)
                     from ...player.sources import DummySource
                     player.source = DummySource(player.canvas_width, player.canvas_height)
                     player.source.initialize()
                     player.playlist_index = -1
-                    # Lösche Preview-Frames (leert die Anzeige)
+                    # Clear preview frames (empties the display)
                     player.last_frame = None
                     player.last_video_frame = None
                 
-                # Wenn Playlist nicht leer ist und autoplay aktiviert: lade und starte erstes Video
-                # WICHTIG: Auch wenn Player läuft, ersetze durch erstes Playlist-Video wenn DummySource aktiv
+                # If playlist is not empty and autoplay is enabled: load and start first video
+                # IMPORTANT: Even if player is running, replace with first playlist video when DummySource is active
                 has_dummy_source = hasattr(player.source, '__class__') and player.source.__class__.__name__ == 'DummySource'
                 should_autostart = absolute_playlist and autoplay and (
                     not player.is_playing or has_dummy_source
@@ -1915,10 +1959,10 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         if hasattr(player, 'source') and player.source:
                             player.source.cleanup()
                         
-                        # Hole oder registriere Clip-ID für erstes Item (index 0)
+                        # Get or register clip ID for first item (index 0)
                         first_clip_id = playlist_ids[0] if len(playlist_ids) > 0 else None
                         if not first_clip_id:
-                            # Registriere Clip wenn noch keine ID vorhanden
+                            # Register clip if no ID present yet
                             if first_item.startswith('generator:'):
                                 generator_id = first_item.replace('generator:', '')
                                 parameters = player.playlist_params.get(generator_id, {})
@@ -1946,7 +1990,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                         player.current_clip_id = first_clip_id
                         logger.debug(f"🆔 [{player_id}] Set current_clip_id = {first_clip_id}, updated playlist_ids[0]")
                         
-                        # Lade Layer für den Clip
+                        # Load layers for the clip
                         if not player.load_clip_layers(first_clip_id, clip_registry, video_dir):
                             # Fallback: Ersetze nur Source
                             if player.layers:
@@ -1956,15 +2000,15 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                             logger.warning(f"⚠️ [{player_id}] Could not load layers for first clip, using single-source fallback")
                         
                         player.play()
-                        logger.debug(f"▶️ [{player_id}] Erstes Video automatisch gestartet (clip_id={first_clip_id})")
+                        logger.debug(f"▶️ [{player_id}] First video automatically started (clip_id={first_clip_id})")
                     else:
-                        logger.error(f"❌ [{player_id}] Fehler beim Laden des ersten Videos")
+                        logger.error(f"❌ [{player_id}] Error loading first video")
                 
                 player.max_loops = 1  # Nur 1x abspielen wenn nicht in Playlist
             
             logger.debug(f"✅ [{player_id}] Playlist set: {len(absolute_playlist)} videos, autoplay={autoplay}, loop={loop}")
             
-            # Auto-save session state (force=True für kritische Playlist-Änderung)
+            # Auto-save session state (force=True for critical playlist change)
             session_state = get_session_state()
             if session_state:
                 session_state.save_async(player_manager, clip_registry, force=True)
@@ -2048,7 +2092,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/playlist/load/<name>', methods=['GET'])
     def load_playlist(name):
-        """Lädt eine gespeicherte Playlist."""
+        """Loads a saved playlist."""
         try:
             import json
             
@@ -2114,7 +2158,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/playlists', methods=['GET'])
     def get_playlists():
-        """Gibt Liste aller gespeicherten Playlists zurück."""
+        """Returns list of all saved playlists."""
         try:
             import json
             
@@ -2154,7 +2198,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     
     @app.route('/api/playlist/delete/<name>', methods=['DELETE'])
     def delete_playlist(name):
-        """Löscht eine gespeicherte Playlist."""
+        """Deletes a saved playlist."""
         try:
             playlists_dir = os.path.join(os.path.dirname(video_dir), 'playlists')
             playlist_path = os.path.join(playlists_dir, f'{name}.json')
@@ -2598,3 +2642,133 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                 'success': False,
                 'error': str(e)
             }), 500
+
+    # ========================================
+    # CLIP RECORDING
+    # ========================================
+
+    @app.route('/api/player/<player_id>/record', methods=['POST'])
+    def start_clip_recording(player_id):
+        """Start recording the currently playing clip to a .npy export.
+
+        Body (optional): { "output_name": "my_export" }
+        The export is saved to video_dir/exports/<output_name>_<timestamp>/.
+        Poll GET /api/player/<player_id>/record/status for completion.
+        """
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({'success': False, 'error': f"Player '{player_id}' not found"}), 404
+
+            if player._recording:
+                return jsonify({'success': False, 'error': 'Recording already active'}), 409
+
+            data = request.get_json() or {}
+            output_name = (data.get('output_name') or 'export').strip()
+
+            import uuid as _uuid
+            job_id = str(_uuid.uuid4())
+
+            # ── Seek to frame 0 so we always capture the full clip ──────────────
+            try:
+                src = player.layers[0].source if player.layers else player.source
+
+                # Reset transport effect first (it owns the frame pointer)
+                if player.layers:
+                    for layer in player.layers:
+                        for effect in getattr(layer, 'effects', []):
+                            inst = effect.get('instance') if isinstance(effect, dict) else None
+                            if inst and hasattr(inst, 'current_position'):
+                                inst._current_loop_iteration = 0
+                                inst.current_position = 0
+                                inst._virtual_frame = 0.0
+                                inst.loop_completed = False
+                                inst._has_played_once = False
+                                inst._frame_source = None
+
+                # Reset source frame pointer
+                if src and hasattr(src, 'reset'):
+                    src.reset()          # sets current_frame = 0
+
+                # Reset loop counter so the end-of-clip condition fires correctly
+                player.current_loop = 0
+
+                # Determine how many frames constitute one full playthrough
+                total_frames = getattr(src, 'total_frames', 0) if src else 0
+            except Exception as seek_err:
+                logger.warning(f"[Recording] Could not seek to start: {seek_err}")
+                total_frames = 0
+            # ───────────────────────────────────────────────────────────────────
+
+            player._record_job_id = job_id
+            player._record_frames = []
+            player._record_max_frames = total_frames   # 0 = unknown/infinite
+            player._record_output_name = output_name
+            player._record_video_dir = video_dir
+            player._record_done = False
+            player._record_error = None
+            player._record_output_path = None
+            player._recording = True   # Enable last — starts capturing from the next frame
+
+            logger.info(
+                f"[Recording] Started for player={player_id} output_name={output_name!r} "
+                f"job={job_id} max_frames={total_frames}"
+            )
+            return jsonify({
+                'success': True,
+                'job_id': job_id,
+                'total_frames': total_frames,
+                'message': f"Recording started — clip will be exported when it finishes playing.",
+            })
+
+        except Exception as e:
+            logger.error(f"Error starting recording: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/player/<player_id>/record/status', methods=['GET'])
+    def get_clip_recording_status(player_id):
+        """Poll recording progress.
+
+        Returns:
+            active: True while capturing frames
+            done: True once the .npy file has been written
+            frames_captured: number of frames collected so far
+            output_path: absolute path to the export folder (once done)
+            error: error message (on failure)
+        """
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({'success': False, 'error': f"Player '{player_id}' not found"}), 404
+
+            return jsonify({
+                'success': True,
+                'active': player._recording,
+                'done': player._record_done,
+                'frames_captured': len(player._record_frames),
+                'output_path': player._record_output_path,
+                'error': player._record_error,
+                'job_id': player._record_job_id,
+            })
+
+        except Exception as e:
+            logger.error(f"Error getting recording status: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/player/<player_id>/record', methods=['DELETE'])
+    def cancel_clip_recording(player_id):
+        """Cancel an active recording and discard captured frames."""
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({'success': False, 'error': f"Player '{player_id}' not found"}), 404
+
+            player._recording = False
+            player._record_frames = []
+            logger.info(f"[Recording] Cancelled for player={player_id}")
+            return jsonify({'success': True, 'message': 'Recording cancelled'})
+
+        except Exception as e:
+            logger.error(f"Error cancelling recording: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+

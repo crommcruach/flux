@@ -241,70 +241,6 @@ _SHADER_PATH = os.path.join(
 
 class [Name]Generator(PluginBase):
 
-    _shader_src: str | None = None  # class-level cache
-    """
-    [Name] Generator - [Ausführliche Beschreibung]
-    """
-    
-    # ========================================
-    # METADATA - PFLICHT
-    # ========================================
-    METADATA = {
-        'id': '[lowercase_id]',              # PFLICHT: Eindeutige ID (lowercase, underscore)
-        'name': '[Display Name]',             # PFLICHT: Anzeigename
-        'description': '[Beschreibung]',      # PFLICHT: Kurze Beschreibung
-        'author': 'Flux Team',                # Optional
-        'version': '1.0.0',                   # Optional
-        'type': PluginType.GENERATOR,         # PFLICHT: PluginType.GENERATOR
-        'category': '[Category]'              # Optional: z.B. 'Procedural', 'Patterns', 'Live Sources'
-    }
-    
-    # ========================================
-    # PARAMETERS - PFLICHT (kann leer sein)
-    # ========================================
-    PARAMETERS = [
-        {
-            'name': 'param_name',              # PFLICHT: Parameter-Name (lowercase_underscore)
-            'label': 'Display Label',          # PFLICHT: Anzeigename für UI
-            'type': ParameterType.FLOAT,       # PFLICHT: FLOAT, INT, BOOL, SELECT, COLOR, STRING, RANGE
-            'default': 1.0,                    # PFLICHT: Default-Wert
-            'min': 0.0,                        # Für FLOAT/INT/RANGE
-            'max': 10.0,                       # Für FLOAT/INT/RANGE
-            'step': 0.1,                       # Optional: Für FLOAT/INT
-            'description': 'Beschreibung'      # Optional: Tooltip/Hilfetext
-        },
-        {
-            'name': 'duration',                # Standard-Parameter für Playlist-Autoadvance
-            'label': 'Duration (seconds)',
-            'type': ParameterType.INT,
-            'default': 30,
-            'min': 5,
-            'max': 600,
-            'step': 5,
-            'description': 'Playback duration in seconds (for playlist auto-advance)'
-        }
-    ]
-    
-    # ========================================
-    # PFLICHT-METHODEN
-    # ========================================
-    
-    def initialize(self, config):
-        """
-        Initialisiert Generator mit Parametern.
-        Wird beim Laden aufgerufen.
-        
-        Args:
-            config: Dict mit Parameter-Werten {param_name: value}
-        """
-        # Lade Parameter aus config mit Defaults
-        # ⚠️ WICHTIG: Bei INT-Parametern explizit zu int() casten!
-        self.param_name = float(config.get('param_name', 1.0))
-        self.duration = int(config.get('duration', 30))
-        
-        # Initialisiere interne State-Variablen
-        self.time = 0.0
-    
     _shader_src: str | None = None  # class-level cache — loaded once
 
     METADATA = {
@@ -622,11 +558,28 @@ fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
 ParameterType.FLOAT      # Float slider (requires min, max, step)
 ParameterType.INT        # Integer slider (requires min, max, step)
 ParameterType.BOOL       # Checkbox (True/False)
-ParameterType.SELECT     # Dropdown — add 'options': ['opt1', 'opt2']
+ParameterType.SELECT     # Dropdown — requires 'options': ['opt1', 'opt2']
 ParameterType.COLOR      # Color picker — value is '#RRGGBB' hex string
 ParameterType.STRING     # Free text input
 ParameterType.RANGE      # Dual-handle slider (min, max)
 ```
+
+### Full parameter dict keys
+
+| Key | Required | Type | Notes |
+|---|---|---|---|
+| `name` | ✅ | `str` | Unique within plugin, `lowercase_underscore` |
+| `label` | ✅ | `str` | Display name shown in UI |
+| `type` | ✅ | `ParameterType` | See enum above |
+| `default` | ✅ | any | Used when no saved value exists |
+| `min` | FLOAT/INT | `float/int` | Lower bound for slider |
+| `max` | FLOAT/INT | `float/int` | Upper bound for slider |
+| `step` | optional | `float/int` | Slider granularity (default 1 for INT, 0.01 for FLOAT) |
+| `options` | SELECT | `list[str]` | Dropdown choices |
+| `description` | optional | `str` | Tooltip / help text |
+| `group` | optional | `str` | Collapsible section name |
+| `dynamic` | optional | `bool` | `False` → hides the sequence/automation cogwheel button |
+| `control_type` | optional | `str` | `'input'` → renders a number input field instead of a slider |
 
 ### Parameter grouping
 
@@ -641,6 +594,27 @@ Add `'group': 'Section Name'` to any parameter to create collapsible UI sections
 
 Common group names: `Position`, `Scale`, `Rotation`, `Anchor`, `Color`, `Timing`, `Advanced`
 
+### Disabling dynamic sequences per parameter (`dynamic: False`)
+
+By default every parameter shows a ⚙️ cogwheel button that lets the user assign audio/BPM/LFO sequences to it. For parameters where automation makes no sense (configuration choices, mode selects, file paths …) add `'dynamic': False` to suppress the button:
+
+```python
+{
+    'name': 'source_ar',
+    'label': 'Source AR',
+    'type': ParameterType.SELECT,
+    'default': 'off',
+    'options': ['off', '4:3', '16:9', '9:16'],
+    'group': 'Auto Fit',
+    'dynamic': False,          # ← no cogwheel — automating "which AR is this clip" makes no sense
+    'description': 'Content aspect ratio baked into the encoded frame'
+},
+```
+
+Rule of thumb:
+- **Always** set `dynamic: False` on `SELECT` parameters that represent a static configuration choice.
+- Leave it unset (default `True`) on `FLOAT`/`INT` parameters that describe intensity, speed, position, etc.
+
 ---
 
 ## 6. Checklist
@@ -650,6 +624,7 @@ Common group names: `Position`, `Scale`, `Rotation`, `Anchor`, `Color`, `Timing`
 - [ ] Create `src/modules/gpu/shaders/[name].wgsl` (or `gen_[name].wgsl`)
 - [ ] METADATA: `id`, `name`, `type`, optional `category`
 - [ ] PARAMETERS list (can be empty `[]`)
+- [ ] Add `'dynamic': False` to every `SELECT` / config-only parameter
 - [ ] `initialize(self, config)` — load params with defaults
 - [ ] `process_frame(self, frame, **kwargs)` — **STUB, return frame unchanged**
 - [ ] `get_shader(self)` — read file once, cache at class level
@@ -702,6 +677,14 @@ The renderer packs all values sequentially into `array<vec4<f32>, 16>`. A `tuple
 
 ### ❌ Transition WGSL with only one texture binding
 Transitions require **two** texture+sampler pairs: bindings 1+2 for A, bindings 3+4 for B. See the template above.
+
+### ❌ SELECT parameter with a cogwheel sequence button
+`SELECT` parameters that represent a static mode or configuration choice (e.g. `source_ar`, `blend_mode_name`, `easing_type`) should never be animated via a sequence. Add `'dynamic': False` to hide the cogwheel button:
+```python
+{'name': 'mode', 'type': ParameterType.SELECT, 'options': ['fill','stretch'],
+ 'dynamic': False, ...}
+```
+Leave `dynamic` unset (defaults to `True`) for any `FLOAT`/`INT` parameter the user might want to automate.
 
 ---
 

@@ -13,11 +13,10 @@ _SHADER_PATH = os.path.join(
 class RainbowWaveGenerator(PluginBase):
     """
     Rainbow Wave Generator - Horizontale Regenbogen-Welle.
-
-    _shader_src: str | None = None
-    
     Erzeugt eine sich bewegende Regenbogen-Welle.
     """
+
+    _shader_src: str | None = None
     
     METADATA = {
         'id': 'rainbow_wave',

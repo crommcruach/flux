@@ -1,4 +1,4 @@
-"""
+﻿"""
 API Points - Points Management Endpoints
 
 DEPRECATED: Points files are only used for legacy DMX recording.
@@ -21,7 +21,7 @@ def register_points_routes(app, player_manager, data_dir):
     
     @app.route('/api/points/list', methods=['GET'])
     def list_points():
-        """Listet alle verfügbaren Points-Dateien auf."""
+        """Lists all available points files."""
         try:
             if not os.path.exists(data_dir):
                 return jsonify({"status": "error", "message": "Data-Verzeichnis nicht gefunden"}), 404
@@ -53,7 +53,7 @@ def register_points_routes(app, player_manager, data_dir):
     
     @app.route('/api/points/switch', methods=['POST'])
     def switch_points():
-        """DEPRECATED: Wechselt zu anderer Points-Datei (nur für legacy DMX recording)."""
+        """DEPRECATED: Switches to another points file (for legacy DMX recording only)."""
         try:
             logger.warning("DEPRECATED API called: /api/points/switch - Points files only used for legacy DMX recording")
             data = request.get_json()
@@ -74,7 +74,7 @@ def register_points_routes(app, player_manager, data_dir):
             if not is_valid:
                 return jsonify({
                     "status": "error",
-                    "message": "Ungültige Points-Datei",
+                    "message": "Invalid points file",
                     "validation_errors": errors
                 }), 400
             
@@ -101,7 +101,7 @@ def register_points_routes(app, player_manager, data_dir):
     
     @app.route('/api/points/reload', methods=['POST'])
     def reload_points():
-        """DEPRECATED: Lädt aktuelle Points-Datei neu (nur für legacy DMX recording)."""
+        """DEPRECATED: Reloads current points file (for legacy DMX recording only)."""
         try:
             logger.warning("DEPRECATED API called: /api/points/reload - Points files only used for legacy DMX recording")
             player = player_manager.player
@@ -114,7 +114,7 @@ def register_points_routes(app, player_manager, data_dir):
             if not is_valid:
                 return jsonify({
                     "status": "error",
-                    "message": "Ungültige Points-Datei",
+                    "message": "Invalid points file",
                     "validation_errors": errors
                 }), 400
             
@@ -178,7 +178,7 @@ def register_points_routes(app, player_manager, data_dir):
     
     @app.route('/api/points/current', methods=['GET'])
     def current_points():
-        """Gibt aktuell geladene Points-Datei zurück."""
+        """Returns currently loaded points file."""
         player = player_manager.player
         return jsonify({
             "status": "success",
@@ -211,7 +211,7 @@ def register_points_routes(app, player_manager, data_dir):
             canvas_height = points_data['canvas_height']
             point_coords = points_data['point_coords']
             
-            # Berechne Thumbnail-Größe (max 400px)
+            # Calculate thumbnail size (max 400px)
             max_size = 400
             if canvas_width > canvas_height:
                 thumb_width = max_size
@@ -227,7 +227,7 @@ def register_points_routes(app, player_manager, data_dir):
             scale_x = thumb_width / canvas_width
             scale_y = thumb_height / canvas_height
             
-            # Punkte-Radius (größer für bessere Sichtbarkeit in Thumbnail)
+            # Point radius (larger for better visibility in thumbnail)
             radius = max(3, int(min(thumb_width, thumb_height) * 0.015))
             
             # Zeichne Punkte in Magenta
@@ -235,7 +235,7 @@ def register_points_routes(app, player_manager, data_dir):
             for point in point_coords:
                 x = int(point[0] * scale_x)
                 y = int(point[1] * scale_y)
-                cv2.circle(preview, (x, y), radius, magenta, -1)  # Gefüllter Kreis
+                cv2.circle(preview, (x, y), radius, magenta, -1)  # Filled circle
             
             # Konvertiere zu PNG
             _, buffer = cv2.imencode('.png', preview)

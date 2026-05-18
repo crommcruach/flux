@@ -1,5 +1,5 @@
-"""
-REST API Endpoints für Effect Chain Management
+﻿"""
+REST API endpoints for effect chain management
 """
 from flask import request, jsonify
 from ...core.logger import get_logger
@@ -15,7 +15,7 @@ def register_effect_routes(app, player_manager):
     @app.route('/api/player/effects', methods=['GET'])
     def get_effects():
         """
-        Gibt die aktuelle Video Effect Chain zurück.
+        Returns the current video effect chain.
         
         Returns:
             200: {effects: [...], count: int}
@@ -36,7 +36,7 @@ def register_effect_routes(app, player_manager):
     @app.route('/api/player/effects/add', methods=['POST'])
     def add_effect():
         """
-        Fügt einen Effect zur Chain hinzu.
+        Adds an effect to the chain.
         
         Body:
             {
@@ -271,5 +271,47 @@ def register_effect_routes(app, player_manager):
                 'success': False,
                 'message': message
             }), 400
-    
+
+    @app.route('/api/player/video/effects/reorder', methods=['POST'])
+    def reorder_video_effects():
+        """Reorder video effect chain. Body: {new_order: [int, ...]}"""
+        player = player_manager.get_video_player()
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+
+        data = request.get_json()
+        new_order = data.get('new_order') if data else None
+        if not isinstance(new_order, list):
+            return jsonify({'success': False, 'message': 'Missing or invalid new_order'}), 400
+
+        success, message = player.reorder_effect_chain(new_order, chain_type='video')
+        if success:
+            session_state = get_session_state()
+            if session_state:
+                clip_registry = get_clip_registry()
+                session_state.save_async(player_manager, clip_registry)
+            return jsonify({'success': True, 'message': message})
+        return jsonify({'success': False, 'message': message}), 400
+
+    @app.route('/api/player/artnet/effects/reorder', methods=['POST'])
+    def reorder_artnet_effects():
+        """Reorder Art-Net effect chain. Body: {new_order: [int, ...]}"""
+        player = player_manager.get_artnet_player()
+        if not player:
+            return jsonify({'error': 'No active player'}), 404
+
+        data = request.get_json()
+        new_order = data.get('new_order') if data else None
+        if not isinstance(new_order, list):
+            return jsonify({'success': False, 'message': 'Missing or invalid new_order'}), 400
+
+        success, message = player.reorder_effect_chain(new_order, chain_type='artnet')
+        if success:
+            session_state = get_session_state()
+            if session_state:
+                clip_registry = get_clip_registry()
+                session_state.save_async(player_manager, clip_registry)
+            return jsonify({'success': True, 'message': message})
+        return jsonify({'success': False, 'message': message}), 400
+
     logger.debug("Effect Chain API endpoints registered")

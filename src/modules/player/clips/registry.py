@@ -1,10 +1,10 @@
 """
-Clip Registry - Zentrales Management von Video-Clips mit eindeutigen IDs.
+Clip Registry - Central management of video clips with unique IDs.
 
-Ermöglicht:
-- Eindeutige Identifikation von Clips unabhängig vom Dateinamen
-- Mehrfache Verwendung desselben Videos in verschiedenen Playern
-- Clip-spezifische Metadaten und Effekte
+Enables:
+- Unique identification of clips independent of filename
+- Multiple use of the same video in different players
+- Clip-specific metadata and effects
 """
 
 import uuid
@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 class ClipRegistry:
-    """Zentrale Registry für Video-Clips mit UUID-basierter Identifikation."""
+    """Central registry for video clips with UUID-based identification."""
     
     def __init__(self):
-        """Initialisiert die Clip-Registry."""
+        """Initializes the clip registry."""
         # Mapping: clip_id (UUID) -> clip_data
         self.clips: Dict[str, Dict] = {}
         
@@ -40,18 +40,18 @@ class ClipRegistry:
     ) -> str:
         """
         Registriert einen neuen Clip mit eindeutiger UUID.
-        IDEMPOTENT: Wenn Clip bereits existiert (player_id + absolute_path), 
-        wird die existierende clip_id zurückgegeben (OHNE Daten zu überschreiben).
+        IDEMPOTENT: If clip already exists (player_id + absolute_path),
+        the existing clip_id is returned (WITHOUT overwriting data).
         
         Args:
-            player_id: ID des Players ('video' oder 'artnet')
-            absolute_path: Absoluter Pfad zur Video-Datei
-            relative_path: Relativer Pfad (für UI)
-            metadata: Optionale Metadaten (fps, duration, etc.)
-            clip_id: Optional clip_id (wenn Frontend UUID bereitstellt)
+            player_id: ID of the player ('video' or 'artnet')
+            absolute_path: Absolute path to the video file
+            relative_path: Relative path (for UI)
+            metadata: Optional metadata (fps, duration, etc.)
+            clip_id: Optional clip_id (if frontend provides UUID)
         
         Returns:
-            clip_id: Eindeutige UUID für diesen Clip
+            clip_id: Unique UUID for this clip
         """
         # If clip_id is provided and already exists in registry, reuse it (idempotent).
         if clip_id and clip_id in self.clips:
@@ -66,7 +66,7 @@ class ClipRegistry:
         if not clip_id:
             clip_id = str(uuid.uuid4())
         
-        # Speichere Clip-Daten
+        # Save clip data
         self.clips[clip_id] = {
             'clip_id': clip_id,
             'player_id': player_id,
@@ -75,16 +75,16 @@ class ClipRegistry:
             'filename': os.path.basename(absolute_path),
             'metadata': metadata or {},
             'created_at': datetime.now().isoformat(),
-            'effects': [],  # Clip-spezifische Effekte
-            'layers': [],   # Clip-spezifische Layer-Definitionen
-            'sequences': {},  # Clip-spezifische Sequences: {uid: [sequence_ids]}
+            'effects': [],  # Clip-specific effects
+            'layers': [],   # Clip-specific layer definitions
+            'sequences': {},  # Clip-specific sequences: {uid: [sequence_ids]}
             # Trimming & Playback Control
-            'in_point': None,   # Start-Frame (None = Video-Start)
-            'out_point': None,  # End-Frame (None = Video-Ende)
-            'reverse': False    # Rückwärts abspielen
+            'in_point': None,   # Start frame (None = video start)
+            'out_point': None,  # End frame (None = video end)
+            'reverse': False    # Play in reverse
         }
         
-        logger.debug(f"✅ Clip registriert: {clip_id} → {player_id}/{os.path.basename(absolute_path)}")
+        logger.debug(f"✅ Clip registered: {clip_id} → {player_id}/{os.path.basename(absolute_path)}")
         
         # Auto-apply default effects if manager is configured
         if self._default_effects_manager:
@@ -106,21 +106,21 @@ class ClipRegistry:
     
     def get_clip(self, clip_id: str) -> Optional[Dict]:
         """
-        Holt Clip-Daten anhand der ID.
+        Gets clip data by ID.
         
         Args:
-            clip_id: Eindeutige Clip-ID
+            clip_id: Unique clip ID
         
         Returns:
-            Clip-Daten oder None wenn nicht gefunden
+            Clip data or None if not found
         """
         return self.clips.get(clip_id)
     
     def find_clip_by_path(self, player_id: str, absolute_path: str) -> Optional[str]:
         """
-        Findet ERSTE Clip-ID anhand von Player-ID und Pfad.
-        HINWEIS: Mehrere Clips können denselben Pfad haben!
-        Gibt nur den ersten gefundenen Clip zurück.
+        Finds FIRST clip ID by player ID and path.
+        NOTE: Multiple clips can have the same path!
+        Returns only the first matching clip.
         
         Args:
             player_id: ID des Players
@@ -135,7 +135,7 @@ class ClipRegistry:
         # Also try matching by filename if exact match fails (for path prefix mismatches)
         search_filename = os.path.basename(normalized_search_path)
         
-        # Suche in allen Clips (kann mehrere mit gleichem Pfad geben)
+        # Search across all clips (may have multiple with same path)
         for clip_id, clip_data in self.clips.items():
             if clip_data['player_id'] == player_id:
                 normalized_clip_path = os.path.normpath(clip_data['absolute_path']).lower()
@@ -160,13 +160,13 @@ class ClipRegistry:
     
     def get_clips_for_player(self, player_id: str) -> List[Dict]:
         """
-        Holt alle Clips eines bestimmten Players.
+        Gets all clips for a specific player.
         
         Args:
-            player_id: ID des Players
+            player_id: ID of the player
         
         Returns:
-            Liste von Clip-Daten
+            List of clip data
         """
         return [
             clip for clip in self.clips.values()
@@ -175,11 +175,11 @@ class ClipRegistry:
     
     def _invalidate_cache(self, clip_id: str) -> None:
         """
-        Invalidiert Effect-Cache für einen Clip durch Erhöhung des Version-Counters.
-        Wird bei allen Änderungen an Effekten aufgerufen (add, remove, update, clear).
+        Invalidates effect cache for a clip by incrementing the version counter.
+        Called on all changes to effects (add, remove, update, clear).
         
         Args:
-            clip_id: Eindeutige Clip-ID
+            clip_id: Unique clip ID
         """
         current_version = self._clip_effects_version.get(clip_id, 0)
         self._clip_effects_version[clip_id] = current_version + 1
@@ -187,20 +187,20 @@ class ClipRegistry:
     
     def get_effects_version(self, clip_id: str) -> int:
         """
-        Gibt die aktuelle Version des Effect-Cache für einen Clip zurück.
-        Player nutzen dies für Version-basierte Cache-Invalidierung.
+        Returns the current version of the effect cache for a clip.
+        Players use this for version-based cache invalidation.
         
         Args:
-            clip_id: Eindeutige Clip-ID
+            clip_id: Unique clip ID
         
         Returns:
-            Version-Counter (0 wenn Clip nicht existiert oder keine Version)
+            Version counter (0 if clip does not exist or has no version)
         """
         return self._clip_effects_version.get(clip_id, 0)
     
     def set_default_effects_manager(self, manager):
         """
-        Setzt den Default Effects Manager für Auto-Apply bei Clip-Registrierung.
+        Sets the default effects manager for auto-apply at clip registration.
         
         Args:
             manager: DefaultEffectsManager instance
@@ -210,13 +210,13 @@ class ClipRegistry:
     
     def unregister_clip(self, clip_id: str) -> bool:
         """
-        Entfernt einen Clip aus der Registry.
+        Removes a clip from the registry.
         
         Args:
-            clip_id: Eindeutige Clip-ID
+            clip_id: Unique clip ID
         
         Returns:
-            True wenn erfolgreich entfernt
+            True if successfully removed
         """
         if clip_id not in self.clips:
             return False
@@ -224,43 +224,43 @@ class ClipRegistry:
         clip_data = self.clips[clip_id]
         index_key = (clip_data['player_id'], clip_data['absolute_path'])
         
-        # Entferne aus beiden Datenstrukturen
+        # Remove from both data structures
         del self.clips[clip_id]
         if index_key in self._path_index:
             del self._path_index[index_key]
         
-        logger.debug(f"🗑️ Clip unregistriert: {clip_id}")
+        logger.debug(f"🗑️ Clip unregistered: {clip_id}")
         return True
     
     def add_effect_to_clip(self, clip_id: str, effect_data: Dict) -> bool:
         """
-        Fügt einen Effekt zu einem Clip hinzu.
+        Adds an effect to a clip.
         
         Args:
-            clip_id: Eindeutige Clip-ID
-            effect_data: Effekt-Daten (plugin_id, parameters, etc.)
+            clip_id: Unique clip ID
+            effect_data: Effect data (plugin_id, parameters, etc.)
         
         Returns:
-            True wenn erfolgreich hinzugefügt
+            True if successfully added
         """
         if clip_id not in self.clips:
-            logger.error(f"Clip nicht gefunden: {clip_id}")
+            logger.error(f"Clip not found: {clip_id}")
             return False
         
         self.clips[clip_id]['effects'].append(effect_data)
-        self._invalidate_cache(clip_id)  # B3: Cache invalidieren
-        logger.debug(f"Effekt zu Clip hinzugefügt: {clip_id} → {effect_data.get('plugin_id')}")
+        self._invalidate_cache(clip_id)  # B3: Invalidate cache
+        logger.debug(f"Effect added to clip: {clip_id} → {effect_data.get('plugin_id')}")
         return True
     
     def get_clip_effects(self, clip_id: str) -> List[Dict]:
         """
-        Holt alle Effekte eines Clips.
+        Gets all effects for a clip.
         
         Args:
-            clip_id: Eindeutige Clip-ID
+            clip_id: Unique clip ID
         
         Returns:
-            Liste von Effekt-Daten
+            List of effect data
         """
         if clip_id not in self.clips:
             return []
@@ -269,14 +269,14 @@ class ClipRegistry:
     
     def remove_effect_from_clip(self, clip_id: str, effect_index: int) -> bool:
         """
-        Entfernt einen Effekt von einem Clip.
+        Removes an effect from a clip.
         
         Args:
-            clip_id: Eindeutige Clip-ID
-            effect_index: Index des zu entfernenden Effekts
+            clip_id: Unique clip ID
+            effect_index: Index of the effect to remove
         
         Returns:
-            True wenn erfolgreich entfernt
+            True if successfully removed
         """
         if clip_id not in self.clips:
             return False
@@ -284,20 +284,21 @@ class ClipRegistry:
         effects = self.clips[clip_id]['effects']
         if 0 <= effect_index < len(effects):
             removed = effects.pop(effect_index)
-            self._invalidate_cache(clip_id)  # B3: Cache invalidieren
-            logger.debug(f"Effekt von Clip entfernt: {clip_id} → {removed.get('plugin_id')}")
+            self._invalidate_cache(clip_id)  # B3: Invalidate cache
+            logger.debug(f"Effect removed from clip: {clip_id} → {removed.get('plugin_id')}")
             return True
         
         return False
     
     def clear_clip_effects(self, clip_id: str) -> bool:
         """
-        Entfernt alle Effekte von einem Clip, außer system_plugins (z.B. transport).
+        Removes all effects from a clip, except system_plugins (e.g. transport).
         
         Args:
-            clip_id: Eindeutige Clip-ID
+            clip_id: Unique clip ID
         
         Returns:
+            True if successful
             True wenn erfolgreich
         """
         if clip_id not in self.clips:
@@ -310,7 +311,7 @@ class ClipRegistry:
         ]
         
         self.clips[clip_id]['effects'] = system_effects
-        self._invalidate_cache(clip_id)  # B3: Cache invalidieren
+        self._invalidate_cache(clip_id)  # B3: Invalidate cache
         
         removed_count = len(self.clips[clip_id]['effects']) - len(system_effects)
         if removed_count > 0:
@@ -322,14 +323,14 @@ class ClipRegistry:
     
     def update_clip_metadata(self, clip_id: str, metadata: Dict) -> bool:
         """
-        Aktualisiert Metadaten eines Clips.
+        Updates metadata of a clip.
         
         Args:
-            clip_id: Eindeutige Clip-ID
-            metadata: Neue/aktualisierte Metadaten
+            clip_id: Unique clip ID
+            metadata: New/updated metadata
         
         Returns:
-            True wenn erfolgreich
+            True if successful
         """
         if clip_id not in self.clips:
             return False
@@ -380,11 +381,11 @@ class ClipRegistry:
     
     def add_layer_to_clip(self, clip_id: str, layer_config: Dict) -> Optional[int]:
         """
-        Fügt einen Layer zu einem Clip hinzu.
+        Adds a layer to a clip.
         
         Args:
-            clip_id: Eindeutige Clip-ID
-            layer_config: Layer-Konfiguration {
+            clip_id: Unique clip ID
+            layer_config: Layer configuration {
                 'source_type': 'video' | 'generator' | 'script',
                 'source_path': path or generator_id,
                 'blend_mode': 'normal' | 'multiply' | ...,
@@ -393,10 +394,10 @@ class ClipRegistry:
             }
         
         Returns:
-            layer_id (index) oder None bei Fehler
+            layer_id (index) or None on error
         """
         if clip_id not in self.clips:
-            logger.error(f"Clip nicht gefunden: {clip_id}")
+            logger.error(f"Clip not found: {clip_id}")
             return None
         
         layers = self.clips[clip_id]['layers']
@@ -411,18 +412,18 @@ class ClipRegistry:
         
         layers.append(layer_config)
         
-        logger.debug(f"✅ Layer {layer_id} zu Clip {clip_id} hinzugefügt: {layer_config['source_type']}")
+        logger.debug(f"✅ Layer {layer_id} added to clip {clip_id}: {layer_config['source_type']}")
         return layer_id
     
     def get_clip_layers(self, clip_id: str) -> List[Dict]:
         """
-        Holt alle Layer eines Clips.
+        Gets all layers for a clip.
         
         Args:
-            clip_id: Eindeutige Clip-ID
+            clip_id: Unique clip ID
         
         Returns:
-            Liste von Layer-Konfigurationen
+            List of layer configurations
         """
         if clip_id not in self.clips:
             return []
@@ -431,15 +432,15 @@ class ClipRegistry:
     
     def update_clip_layer(self, clip_id: str, layer_id: int, updates: Dict) -> bool:
         """
-        Aktualisiert Layer-Konfiguration.
+        Updates layer configuration.
         
         Args:
-            clip_id: Eindeutige Clip-ID
-            layer_id: Layer-ID (NOT index)
-            updates: Dict mit zu aktualisierenden Feldern
+            clip_id: Unique clip ID
+            layer_id: Layer ID (NOT index)
+            updates: Dict with fields to update
         
         Returns:
-            True wenn erfolgreich
+            True if successful
         """
         if clip_id not in self.clips:
             return False
@@ -464,19 +465,19 @@ class ClipRegistry:
         if 'opacity' in updates:
             logger.debug(f"💾 Layer {layer_id} opacity updated in registry: {old_opacity} → {new_opacity}")
         
-        logger.debug(f"Layer {layer_id} von Clip {clip_id} aktualisiert: {updates}")
+        logger.debug(f"Layer {layer_id} of clip {clip_id} updated: {updates}")
         return True
     
     def remove_layer_from_clip(self, clip_id: str, layer_id: int) -> bool:
         """
-        Entfernt einen Layer von einem Clip.
+        Removes a layer from a clip.
         
         Args:
-            clip_id: Eindeutige Clip-ID
-            layer_id: Layer-ID (NOT index)
+            clip_id: Unique clip ID
+            layer_id: Layer ID (NOT index)
         
         Returns:
-            True wenn erfolgreich
+            True if successful
         """
         if clip_id not in self.clips:
             return False
@@ -495,19 +496,19 @@ class ClipRegistry:
             return False
         
         removed = layers.pop(layer_index)
-        logger.debug(f"✅ Layer {layer_id} von Clip {clip_id} entfernt: {removed.get('source_path')}")
+        logger.debug(f"✅ Layer {layer_id} removed from clip {clip_id}: {removed.get('source_path')}")
         return True
     
     def reorder_clip_layers(self, clip_id: str, new_order: List[int]) -> bool:
         """
-        Sortiert Layer eines Clips um.
+        Reorders layers of a clip.
         
         Args:
-            clip_id: Eindeutige Clip-ID
-            new_order: Liste von Layer-IDs in neuer Reihenfolge (excluding Layer 0 which is always base)
+            clip_id: Unique clip ID
+            new_order: List of layer IDs in new order (excluding layer 0 which is always base)
         
         Returns:
-            True wenn erfolgreich
+            True if successful
         """
         if clip_id not in self.clips:
             return False
@@ -534,6 +535,32 @@ class ClipRegistry:
         self.clips[clip_id]['layers'] = new_layers
         logger.debug(f"Layers von Clip {clip_id} neu sortiert: {registry_order}")
         return True
+    def reorder_clip_effects(self, clip_id: str, new_order: List[int]) -> bool:
+        """
+        Reorders effects of a clip.
+
+        Args:
+            clip_id: Unique clip ID
+            new_order: List of current effect indices in desired order
+                       e.g. [2, 0, 1] moves effect 2 to front
+
+        Returns:
+            True if successful
+        """
+        if clip_id not in self.clips:
+            return False
+
+        effects = self.clips[clip_id]['effects']
+
+        if sorted(new_order) != list(range(len(effects))):
+            logger.warning(f"Invalid effect reorder for clip {clip_id}: expected indices 0-{len(effects)-1}, got {new_order}")
+            return False
+
+        self.clips[clip_id]['effects'] = [effects[i] for i in new_order]
+        self._invalidate_cache(clip_id)
+        logger.debug(f"Effects of clip {clip_id} reordered: {new_order}")
+        return True
+
     def add_sequence_to_effect(self, clip_id: str, effect_index: int, param_name: str, sequence_config: Dict, layer_index: Optional[int] = None) -> bool:
         """
         Add a sequence to an effect parameter (NEW ARCHITECTURE)
@@ -838,10 +865,10 @@ _clip_registry: Optional[ClipRegistry] = None
 
 def get_clip_registry() -> ClipRegistry:
     """
-    Singleton-Getter für ClipRegistry.
+    Singleton getter for ClipRegistry.
     
     Returns:
-        Globale ClipRegistry-Instanz
+        Global ClipRegistry instance
     """
     global _clip_registry
     if _clip_registry is None:

@@ -5,25 +5,25 @@ import { showToast, initErrorLogging, initWebSocket } from './common.js';
 import { debug, loadDebugConfig } from './logger.js';
 
 // ========================================
-// TASTATUR-SHORTCUTS
+// KEYBOARD SHORTCUTS
 // ========================================
-// Entf/Backspace: Ausgewählte Form(en) löschen
-// Strg+D: Ausgewählte Form(en) duplizieren
-// Strg+S: Projekt speichern (lokal)
+// Del/Backspace: Delete selected shape(s)
+// Ctrl+D: Duplicate selected shape(s)
+// Ctrl+S: Save project (local)
 
 // Initialize error logging
 initErrorLogging();
 
 document.addEventListener('keydown', function(e) {
-    // Fokus auf Input-Felder ignorieren
+    // Ignore focus on input fields
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
 
-    // Löschen
+    // Delete
     if ((e.key === 'Delete' || e.key === 'Backspace') && (selectedShape || selectedShapes.length > 0)) {
         e.preventDefault();
         deleteSelectedShape();
     }
-    // Duplizieren (Strg+D)
+    // Duplicate (Ctrl+D)
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && (selectedShape || selectedShapes.length > 0)) {
         e.preventDefault();
         duplicateSelectedShape();
@@ -247,7 +247,7 @@ function applyCustomCanvasSize() {
     const height = parseInt(document.getElementById('customHeight').value);
     
     if (!width || !height || width < 100 || width > 10000 || height < 100 || height > 10000) {
-        showToast('Bitte geben Sie gültige Abmessungen ein (100-10000 Pixel)', 'warning');
+        showToast('Please enter valid dimensions (100-10000 pixels)', 'warning');
         return;
     }
     
@@ -255,7 +255,7 @@ function applyCustomCanvasSize() {
     markForRedraw();
     updateObjectList();
     
-    showToast(`Canvas-Größe: ${width} × ${height}`, 'success');
+    showToast(`Canvas size: ${width} × ${height}`, 'success');
 }
 
 function setCanvasSize(width, height) {
@@ -283,7 +283,7 @@ function updateCanvasOverflow() {
 // EVENT LISTENERS - UI Controls [Lines 311-415]
 // ========================================
 
-// Theme Toggle wird jetzt über menu-loader.js gehandhabt
+// Theme toggle is now handled via menu-loader.js
 
 // Connection lines toggle
 document.getElementById('showConnectionLines').addEventListener('change', e => {
@@ -349,7 +349,7 @@ pointCountInput.addEventListener('change', e => {
     pointCountNumber.value = finalValue;
     if (selectedShape && selectedShape.type !== 'matrix') {
         selectedShape.pointCount = finalValue;
-        // Für Freihand-Formen: Punkte neu samplen
+        // For freehand shapes: resample points
         if (selectedShape.type === 'freehand' && selectedShape.freehandPoints) {
             selectedShape.freehandPoints = resampleFreehandPoints(selectedShape.freehandPoints, finalValue);
         }
@@ -370,7 +370,7 @@ pointCountNumber.addEventListener('input', e => {
     pointCountInput.value = value;
     if (selectedShape && selectedShape.type !== 'matrix') {
         selectedShape.pointCount = value;
-        // Für Freihand-Formen: Punkte neu samplen
+        // For freehand shapes: resample points
         if (selectedShape.type === 'freehand' && selectedShape.freehandPoints) {
             selectedShape.freehandPoints = resampleFreehandPoints(selectedShape.freehandPoints, value);
         }
@@ -433,14 +433,14 @@ function addShape(type) {
     // Update window reference
     window.shapeCounter = shapeCounter;
     const typeNames = {
-        rect: 'Rechteck',
-        circle: 'Kreis',
-        triangle: 'Dreieck',
+        rect: 'Rectangle',
+        circle: 'Circle',
+        triangle: 'Triangle',
         polygon: 'Polygon',
-        line: 'Linie',
-        arc: 'Bogen',
+        line: 'Line',
+        arc: 'Arc',
         matrix: 'Matrix',
-        star: 'Stern'
+        star: 'Star'
     };
     const base = {
         id: shapeId,
@@ -469,12 +469,12 @@ function addShape(type) {
         base.pattern = document.getElementById('matrixPattern').value || 'zigzag-left';
         base.scaleX = base.scaleY = 1;
     }
-    // neu: Stern-spezifische Defaults
+    // New: star-specific defaults
     if (type === 'star') {
         base.spikes = Math.max(2, parseInt(document.getElementById('starSpikes').value) || 5);
         base.innerRatio = 0.5; // inner radius as ratio of outer radius
     }
-    // Polygon-spezifische Defaults
+    // Polygon-specific defaults
     if (type === 'polygon') {
         base.sides = Math.max(3, parseInt(document.getElementById('polygonSides').value) || 6);
     }
@@ -492,7 +492,7 @@ function resetSelectedShape() {
     const shapesToReset = selectedShapes.length > 0 ? selectedShapes : (selectedShape ? [selectedShape] : []);
 
     if (shapesToReset.length === 0) {
-        showToast('Keine Form ausgewählt!', 'warning');
+        showToast('No shape selected!', 'warning');
         return;
     }
 
@@ -516,7 +516,7 @@ function resetSelectedShape() {
         }
     }
 
-    showToast('Form(en) zurückgesetzt', 'success');
+    showToast('Shape(s) reset', 'success');
     markForRedraw(); updateObjectList();
     saveEditorStateToSession();  // Auto-save
 }
@@ -541,7 +541,7 @@ function deleteSelectedShape() {
         shapes = shapes.filter(s => s !== selectedShape);
         selectedShape = null;
     } else {
-        showToast('Keine Form ausgewählt!', 'warning');
+        showToast('No shape selected!', 'warning');
         return;
     }
     updateToolbarSections();
@@ -553,7 +553,7 @@ function fitToCanvas() {
     const shapesToFit = selectedShapes.length > 0 ? selectedShapes : (selectedShape ? [selectedShape] : []);
 
     if (shapesToFit.length === 0) {
-        showToast('Keine Form ausgewählt!', 'warning');
+        showToast('No shape selected!', 'warning');
         return;
     }
 
@@ -582,7 +582,7 @@ function duplicateSelectedShape() {
     const shapesToDuplicate = selectedShapes.length > 0 ? selectedShapes : (selectedShape ? [selectedShape] : []);
 
     if (shapesToDuplicate.length === 0) {
-        showToast('Keine Form ausgewählt!', 'warning');
+        showToast('No shape selected!', 'warning');
         return;
     }
 
@@ -889,12 +889,12 @@ function initializeProjectModal() {
     
     projectManagerModal = ModalManager.create({
         id: 'projectManagerModal',
-        title: '📂 Projektverwaltung',
-        content: '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Lädt...</span></div></div>',
+        title: '📂 Project Manager',
+        content: '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>',
         size: 'lg',
         buttons: [
             {
-                label: 'Schließen',
+                label: 'Close',
                 class: 'btn btn-secondary',
                 callback: (modal) => modal.hide()
             }
@@ -929,7 +929,7 @@ async function refreshProjectList() {
         return;
     }
     
-    projectManagerModal.showLoading('Lädt Projekte...');
+    projectManagerModal.showLoading('Loading projects...');
 
     try {
         const response = await fetch('/api/projects');
@@ -939,7 +939,7 @@ async function refreshProjectList() {
             let html = '<div class="list-group">';
             
             for (const project of result.projects) {
-                const date = new Date(project.savedAt).toLocaleString('de-DE');
+                const date = new Date(project.savedAt).toLocaleString('en-US');
                 const size = (project.size / 1024).toFixed(1);
                 
                 html += `
@@ -948,17 +948,17 @@ async function refreshProjectList() {
                             <div class="flex-grow-1">
                                 <h6 class="mb-1">${escapeHtml(project.projectName)}</h6>
                                 <small class="text-muted">
-                                    ${date} • ${project.shapeCount} Objekte • ${size} KB
+                                    ${date} • ${project.shapeCount} objects • ${size} KB
                                 </small>
                             </div>
                             <div class="btn-group btn-group-sm" role="group">
-                                <button class="btn btn-primary" onclick="loadProjectFromServer('${project.filename}')" title="Laden">
-                                    📂 Laden
+                                <button class="btn btn-primary" onclick="loadProjectFromServer('${project.filename}')" title="Load">
+                                    📂 Load
                                 </button>
-                                <button class="btn btn-info" onclick="downloadProjectFromServer('${project.filename}')" title="Herunterladen">
+                                <button class="btn btn-info" onclick="downloadProjectFromServer('${project.filename}')" title="Download">
                                     ⬇️
                                 </button>
-                                <button class="btn btn-danger" onclick="deleteProjectFromServer('${project.filename}')" title="Löschen">
+                                <button class="btn btn-danger" onclick="deleteProjectFromServer('${project.filename}')" title="Delete">
                                     🗑️
                                 </button>
                             </div>
@@ -972,19 +972,19 @@ async function refreshProjectList() {
             // Add refresh button at the top
             const contentHtml = `
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h6>Gespeicherte Projekte</h6>
-                    <button class="btn btn-primary btn-sm" onclick="refreshProjectList()" title="Aktualisieren">🔄</button>
+                    <h6>Saved Projects</h6>
+                    <button class="btn btn-primary btn-sm" onclick="refreshProjectList()" title="Refresh">🔄</button>
                 </div>
                 ${html}
             `;
             
             projectManagerModal.setContent(contentHtml);
         } else {
-            projectManagerModal.setContent('<div class="alert alert-info">Keine gespeicherten Projekte gefunden.</div>');
+            projectManagerModal.setContent('<div class="alert alert-info">No saved projects found.</div>');
         }
     } catch (error) {
         console.error('Error loading projects:', error);
-        projectManagerModal.setContent(`<div class="alert alert-danger">Fehler beim Laden: ${error.message}</div>`);
+        projectManagerModal.setContent(`<div class="alert alert-danger">Error loading: ${error.message}</div>`);
     }
 }
 
@@ -997,13 +997,13 @@ async function loadProjectFromServer(filename) {
         if (result.success) {
             loadProject(result.data);
             projectManagerModal?.hide();
-            showToast('Projekt geladen', 'success');
+            showToast('Project loaded', 'success');
         } else {
-            showToast(`Fehler beim Laden: ${result.error}`, 'error');
+            showToast(`Error loading: ${result.error}`, 'error');
         }
     } catch (error) {
         console.error('Error loading project:', error);
-        showToast(`Fehler beim Laden: ${error.message}`, 'error');
+        showToast(`Error loading: ${error.message}`, 'error');
     }
 }
 
@@ -1013,13 +1013,13 @@ async function downloadProjectFromServer(filename) {
         window.location.href = `/api/projects/download/${filename}`;
     } catch (error) {
         console.error('Error downloading project:', error);
-        showToast(`Fehler beim Herunterladen: ${error.message}`, 'error');
+        showToast(`Error downloading: ${error.message}`, 'error');
     }
 }
 
 // Delete project from server
 async function deleteProjectFromServer(filename) {
-    if (!confirm(`Projekt "${filename}" wirklich löschen?`)) {
+    if (!confirm(`Really delete project "${filename}"?`)) {
         return;
     }
 
@@ -1030,14 +1030,14 @@ async function deleteProjectFromServer(filename) {
         const result = await response.json();
 
         if (result.success) {
-            showToast('Projekt gelöscht', 'success');
+            showToast('Project deleted', 'success');
             await refreshProjectList();
         } else {
-            showToast(`Fehler beim Löschen: ${result.error}`, 'error');
+            showToast(`Error deleting: ${result.error}`, 'error');
         }
     } catch (error) {
         console.error('Error deleting project:', error);
-        showToast(`Fehler beim Löschen: ${error.message}`, 'error');
+        showToast(`Error deleting: ${error.message}`, 'error');
     }
 }
 
@@ -1206,7 +1206,7 @@ function exportPoints() {
 
     // Show warning if points were filtered
     if (filteredPoints > 0) {
-        showToast(`⚠️ ${filteredPoints} von ${totalPoints} Punkten außerhalb des Canvas wurden nicht exportiert`, 'warning');
+        showToast(`⚠️ ${filteredPoints} of ${totalPoints} points outside the canvas were not exported`, 'warning');
     }
 
     // Create download
@@ -2330,7 +2330,7 @@ function getShapePoints(s) {
         return distributeAlongEdges(s, edges, count);
     }
 
-    // Polygon - erzeugt gleichmäßiges N-Eck und verteilt Punkte entlang der Kanten
+    // Polygon - generates a regular N-gon and distributes points along the edges
     if (s.type === 'polygon') {
         const count = Math.max(1, s.pointCount || 1);
         const sides = Math.max(3, s.sides || 6);
@@ -2823,7 +2823,7 @@ canvas.addEventListener('mousemove', e => {
         markForRedraw();
     }
 
-    // Cursor je nach Handle-Typ ändern
+    // Change cursor based on handle type
     if (handle && handle.startsWith('rotate-')) {
         canvas.style.cursor = 'grabbing';
     } else if (handle === 'scaleRight' || handle === 'scaleLeft') {
@@ -3223,7 +3223,7 @@ function updateObjectList() {
                         selectedShape = selectedShapes.length > 0 ? selectedShapes[0] : null;
                     }
                 } else {
-                    // Neu hinzufügen
+                    // Add to selection
                     if (!selectedShapes.includes(s)) {
                         selectedShapes.push(s);
                     }
@@ -3670,7 +3670,7 @@ function updateProjectStats() {
             if (!shapeUniverseBreaks.has(i)) {
                 const shapeLabel = s.label || `Shape ${i + 1}`;
                 showToast(
-                    `🔌 Neue Art-Net Verbindung benötigt ab "${shapeLabel}" (Universe ${currentUniverse + 1})`,
+                    `🔌 New Art-Net connection required from "${shapeLabel}" (Universe ${currentUniverse + 1})`,
                     'warning',
                     5000
                 );
@@ -3701,7 +3701,7 @@ function updateProjectStats() {
         noteEl.className = 'stats-note';
     } else {
         const avgChannelsPerUniverse = Math.round(totalChannels / universesNeeded);
-        noteEl.textContent = `⌀ ${avgChannelsPerUniverse} Kanäle/Universum`;
+        noteEl.textContent = `⌀ ${avgChannelsPerUniverse} channels/universe`;
         noteEl.className = 'stats-note success';
     }
 }
@@ -3745,7 +3745,7 @@ function ungroupSelectedShapes() {
     const shapesToUngroup = selectedShapes.length > 0 ? selectedShapes : (selectedShape ? [selectedShape] : []);
     
     if (shapesToUngroup.length === 0) {
-        showToast('Keine Gruppe zum Auflösen ausgewählt', 'warning');
+        showToast('No group selected to ungroup', 'warning');
         return;
     }
     
@@ -3765,11 +3765,11 @@ function ungroupSelectedShapes() {
     groups = groups.filter(g => !groupIdsToRemove.has(g.id));
     
     if (ungroupedCount > 0) {
-        showToast(`${ungroupedCount} Objekte aus Gruppe(n) entfernt`, 'success');
+        showToast(`${ungroupedCount} objects removed from group(s)`, 'success');
         markForRedraw();
         updateObjectList();
     } else {
-        showToast('Keine gruppierten Objekte ausgewählt', 'warning');
+        showToast('No grouped objects selected', 'warning');
     }
 }
 
@@ -3907,9 +3907,9 @@ function addTextToCanvas() {
     // Add group to groups list if shapes were created
     if (textGroup.shapes.length > 0) {
         groups.push(textGroup);
-        showToast(`Text "${text}" mit ${textGroup.shapes.length} Objekten hinzugefügt`, 'success');
+        showToast(`Text "${text}" added with ${textGroup.shapes.length} objects`, 'success');
     } else {
-        showToast('Keine gültigen Zeichen im Text gefunden', 'warning');
+        showToast('No valid characters found in text', 'warning');
     }
 
     // Clear input and hide panel

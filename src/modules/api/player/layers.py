@@ -1,9 +1,9 @@
-"""
-Layer Stack API - REST-API für Multi-Layer Management.
+﻿"""
+Layer Stack API - REST API for multi-layer management.
 
-Ermöglicht Layer-basiertes Compositing mit:
-- Layer hinzufügen/entfernen
-- Layer-Reihenfolge ändern
+Enables layer-based compositing with:
+- Add/remove layers
+- Change layer order
 - Blend-Mode und Opacity pro Layer
 - Clip in Layer laden
 """
@@ -35,7 +35,7 @@ def register_layer_routes(app, player_manager, config):
     
     @app.route('/api/player/<player_id>/layers', methods=['GET'])
     def get_layers(player_id):
-        """Gibt alle Layer eines Players zurück."""
+        """Returns all layers of a player."""
         try:
             player = player_manager.get_player(player_id)
             if not player:
@@ -59,14 +59,14 @@ def register_layer_routes(app, player_manager, config):
     @app.route('/api/player/<player_id>/layers/add', methods=['POST'])
     def add_layer(player_id):
         """
-        Fügt einen neuen Layer zum Stack hinzu.
+        Adds a new layer to the stack.
         
         Body:
         {
             "type": "video" | "generator",
-            "path": "video/file.mp4" (für video),
-            "generator_id": "plasma" (für generator),
-            "parameters": {} (für generator),
+            "path": "video/file.mp4" (for video),
+            "generator_id": "plasma" (for generator),
+            "parameters": {} (for generator),
             "blend_mode": "multiply",
             "opacity": 50,
             "clip_id": "optional-uuid"
@@ -239,7 +239,7 @@ def register_layer_routes(app, player_manager, config):
     @app.route('/api/player/<player_id>/layers/reorder', methods=['PUT'])
     def reorder_layers(player_id):
         """
-        Ändert die Reihenfolge der Layer.
+        Changes the order of layers.
         
         Body:
         {
@@ -281,14 +281,14 @@ def register_layer_routes(app, player_manager, config):
     @app.route('/api/player/<player_id>/layers/<int:layer_id>/clip/load', methods=['POST'])
     def load_clip_to_layer(player_id, layer_id):
         """
-        Lädt einen neuen Clip in einen bestehenden Layer.
+        Loads a new clip into an existing layer.
         
         Body:
         {
             "type": "video" | "generator",
-            "path": "video/file.mp4" (für video),
-            "generator_id": "plasma" (für generator),
-            "parameters": {} (für generator),
+            "path": "video/file.mp4" (for video),
+            "generator_id": "plasma" (for generator),
+            "parameters": {} (for generator),
             "clip_id": "optional-uuid"
         }
         """

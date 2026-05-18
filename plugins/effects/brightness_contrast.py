@@ -73,9 +73,12 @@ class BrightnessContrastEffect(PluginBase):
         """Update parameter zur Laufzeit."""
         if name == 'brightness':
             self.brightness = float(value)
+            return True
         elif name == 'contrast':
             self.contrast = float(value)
-    
+            return True
+        return False
+
     def get_parameters(self):
         """Gibt aktuelle Parameter zurück."""
         return {

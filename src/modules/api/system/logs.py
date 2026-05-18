@@ -1,5 +1,5 @@
 """
-API Endpoints für Log-Zugriff
+API Endpoints for log access
 """
 import os
 import logging
@@ -8,23 +8,23 @@ from flask import jsonify, request
 
 
 def register_log_routes(app):
-    """Registriert alle Log-API-Routen"""
+    """Registers all log API routes"""
     
     @app.route('/api/logs', methods=['GET'])
     def get_logs():
         """
-        Gibt die aktuellen Log-Zeilen zurück.
+        Returns the current log lines.
         
         Returns:
-            JSON mit Log-Zeilen
+            JSON with log lines
         """
         try:
             log_dir = Path('logs')
             
-            # Finde die neueste Log-Datei
+            # Find the newest log file
             if not log_dir.exists():
                 return jsonify({
-                    'lines': ['Log-Verzeichnis nicht gefunden'],
+                    'lines': ['Log directory not found'],
                     'file': None,
                     'size': 0
                 })
@@ -33,20 +33,20 @@ def register_log_routes(app):
             
             if not log_files:
                 return jsonify({
-                    'lines': ['Keine Log-Dateien gefunden'],
+                    'lines': ['No log files found'],
                     'file': None,
                     'size': 0
                 })
             
-            # Lese die neueste Log-Datei
+            # Read the newest log file
             latest_log = log_files[0]
             
-            # Lese die letzten 500 Zeilen (oder alle, falls weniger)
+            # Read the last 500 lines (or all if fewer)
             with open(latest_log, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-                # Entferne Newlines am Ende
+                # Remove trailing newlines
                 lines = [line.rstrip('\n') for line in lines]
-                # Nehme die letzten 500 Zeilen
+                # Take the last 500 lines
                 lines = lines[-500:]
             
             file_size_mb = latest_log.stat().st_size / (1024 * 1024)
@@ -61,7 +61,7 @@ def register_log_routes(app):
         except Exception as e:
             return jsonify({
                 'error': str(e),
-                'lines': [f'Fehler beim Laden der Logs: {str(e)}'],
+                'lines': [f'Error loading logs: {str(e)}'],
                 'file': None,
                 'size': 0
             }), 500
@@ -69,10 +69,10 @@ def register_log_routes(app):
     @app.route('/api/logs/files', methods=['GET'])
     def get_log_files():
         """
-        Gibt eine Liste aller verfügbaren Log-Dateien zurück.
+        Returns a list of all available log files.
         
         Returns:
-            JSON mit Liste der Log-Dateien
+            JSON with list of log files
         """
         try:
             log_dir = Path('logs')
@@ -103,10 +103,10 @@ def register_log_routes(app):
     @app.route('/api/logs/clear', methods=['POST'])
     def clear_old_logs():
         """
-        Löscht alte Log-Dateien (behält die neuesten 5).
+        Deletes old log files (keeps the newest 5).
         
         Returns:
-            JSON mit Bestätigung
+            JSON with confirmation
         """
         try:
             log_dir = Path('logs')
@@ -114,13 +114,13 @@ def register_log_routes(app):
             if not log_dir.exists():
                 return jsonify({
                     'success': True,
-                    'message': 'Log-Verzeichnis nicht gefunden',
+                    'message': 'Log directory not found',
                     'deleted': 0
                 })
             
             log_files = sorted(log_dir.glob('flux_*.log'), key=lambda f: f.stat().st_mtime, reverse=True)
             
-            # Behalte die neuesten 5, lösche den Rest
+            # Keep the newest 5, delete the rest
             files_to_delete = log_files[5:]
             deleted_count = 0
             
@@ -129,11 +129,11 @@ def register_log_routes(app):
                     log_file.unlink()
                     deleted_count += 1
                 except Exception as e:
-                    print(f"Fehler beim Löschen von {log_file}: {e}")
+                    print(f"Error deleting {log_file}: {e}")
             
             return jsonify({
                 'success': True,
-                'message': f'{deleted_count} alte Log-Dateien gelöscht',
+                'message': f'{deleted_count} old log files deleted',
                 'deleted': deleted_count,
                 'remaining': len(log_files) - deleted_count
             })
@@ -162,7 +162,7 @@ def register_log_routes(app):
             }
         
         Returns:
-            JSON mit Bestätigung
+            JSON with confirmation
         """
         try:
             data = request.get_json()
@@ -175,10 +175,7 @@ def register_log_routes(app):
             url = data.get('url', '')
             user_agent = data.get('userAgent', '')
             
-            # Logging über den Python Logger
-            logger = logging.getLogger('flux')
-            
-            error_msg = f"[JS ERROR] {message}"
+            # Log via Python logger
             if source and line:
                 error_msg += f" at {source}:{line}:{column}"
             if url:
@@ -186,13 +183,13 @@ def register_log_routes(app):
             
             logger.error(error_msg)
             
-            # Stack trace in separaten Zeilen loggen
+            # Log stack trace on separate lines
             if stack:
                 for stack_line in stack.split('\n'):
                     if stack_line.strip():
                         logger.error(f"[JS STACK] {stack_line.strip()}")
             
-            # User Agent für Debugging
+            # User agent for debugging
             if user_agent:
                 logger.debug(f"[JS ERROR] User-Agent: {user_agent}")
             
@@ -203,7 +200,7 @@ def register_log_routes(app):
             
         except Exception as e:
             logger = logging.getLogger('flux')
-            logger.error(f"Fehler beim Loggen von JS-Error: {str(e)}")
+            logger.error(f"Error logging JS error: {str(e)}")
             return jsonify({
                 'success': False,
                 'error': str(e)
@@ -225,7 +222,7 @@ def register_log_routes(app):
             }
         
         Returns:
-            JSON mit Bestätigung
+            JSON with confirmation
         """
         try:
             data = request.get_json()
@@ -237,26 +234,26 @@ def register_log_routes(app):
             timestamp = data.get('timestamp', '')
             stack = data.get('stack', '')
             
-            # Logging über den Python Logger
+            # Log via Python logger
             logger = logging.getLogger('flux')
             
-            # Kombiniere Message und Args
+            # Combine message and args
             if args:
                 full_message = f"{message} {' '.join(str(arg) for arg in args)}"
             else:
                 full_message = message
             
-            # Baue Log-Message
+            # Build log message
             log_msg = f"[JS {level.upper()}]"
             if url:
-                # Extrahiere nur den Pfad ohne Domain
+                # Extract only the path without domain
                 from urllib.parse import urlparse
                 parsed = urlparse(url)
                 path = parsed.path if parsed.path else 'unknown'
                 log_msg += f" [{path}]"
             log_msg += f" {full_message}"
             
-            # Logge mit entsprechendem Level
+            # Log with corresponding level
             if level == 'error':
                 logger.error(log_msg)
                 if stack:

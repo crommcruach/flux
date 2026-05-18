@@ -1,5 +1,5 @@
 """
-Session State Manager - Persistiert Player-Status für Page-Reloads
+Session State Manager - Persists player status for page reloads
 
 Speichert automatisch:
 - Playlists (Video + Art-Net) mit allen Clip-Details
@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 
 
 class SessionStateManager:
-    """Verwaltet persistenten Session-State für Player-Konfiguration."""
+    """Manages persistent session state for player configuration."""
     
     def __init__(self, state_file_path: str, sequence_manager=None):
         """
@@ -263,8 +263,12 @@ class SessionStateManager:
         if 'artnet_routing' in self._state:
             state['artnet_routing'] = self._state['artnet_routing'].copy()
         
-        # Sequences (if stored at root level - legacy)
-        if 'sequences' in self._state:
+        # Sequences: always capture live state from sequence_manager
+        live_sequences = self._save_sequences()
+        if live_sequences:
+            state['sequences'] = live_sequences
+        elif 'sequences' in self._state:
+            # Fall back to last loaded data only if no sequence_manager is wired
             state['sequences'] = self._state['sequences'].copy()
         
         # Save playlists system
@@ -291,12 +295,12 @@ class SessionStateManager:
                 sequences_by_uid[uid] = []
             sequences_by_uid[uid].append(seq.serialize())
         
-        (f"💾 Saved {len(sequences_by_uid)} parameter sequences (flat by UID)")
+        logger.debug(f"💾 Saved {len(sequences_by_uid)} parameter sequences (flat by UID)")
         return sequences_by_uid
     
     def load(self) -> Dict[str, Any]:
         """
-        Lädt gespeicherten Session-State.
+        Loads saved session state.
         
         Returns:
             State-Dict mit Player-Konfigurationen
@@ -305,7 +309,7 @@ class SessionStateManager:
     
     def get_player_state(self, player_id: str) -> Optional[Dict[str, Any]]:
         """
-        Holt State für spezifischen Player.
+        Gets state for a specific player.
         
         Args:
             player_id: 'video' oder 'artnet'
@@ -322,7 +326,7 @@ class SessionStateManager:
         Args:
             player_manager: PlayerManager-Instanz
             clip_registry: ClipRegistry-Instanz
-            config: Config-Dict für FrameSource-Initialisierung
+            config: Config dict for FrameSource initialization
             
         Returns:
             True bei Erfolg
@@ -349,16 +353,16 @@ class SessionStateManager:
                             seq_type = seq_data.get('type')
                             
                             if seq_type == 'audio':
-                                from .sequences import AudioSequence
+                                from modules.audio.sequences.audio import AudioSequence
                                 sequence = AudioSequence.deserialize(seq_data, player_manager.audio_analyzer)
                             elif seq_type == 'lfo':
-                                from .sequences import LFOSequence
+                                from modules.audio.sequences.lfo import LFOSequence
                                 sequence = LFOSequence.deserialize(seq_data)
                             elif seq_type == 'timeline':
-                                from .sequences import TimelineSequence
+                                from modules.audio.sequences.timeline import TimelineSequence
                                 sequence = TimelineSequence.deserialize(seq_data)
                             elif seq_type == 'bpm':
-                                from .sequences import BPMSequence
+                                from modules.audio.sequences.bpm import BPMSequence
                                 sequence = BPMSequence.deserialize(seq_data, player_manager.audio_analyzer)
                             else:
                                 logger.warning(f"Unknown sequence type: {seq_type}")

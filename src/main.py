@@ -1,5 +1,5 @@
 """
-Haupteinstiegspunkt für die Flux Anwendung.
+Main entry point for the Flux application.
 """
 import os
 import json
@@ -154,14 +154,15 @@ def graceful_shutdown(signum=None, frame=None):
     print("🛑 Shutting down gracefully...")
     print("="*80)
     
-    # Cleanup in reverse order of initialization (most important first)
+    # Cleanup order: session is FIRST so the snapshot is captured while
+    # players and REST API are still running (full live state available).
     cleanup_order = [
-        'outputs',      # Close display windows first
+        'session',      # Save state + auto-snapshot FIRST (players still running)
+        'outputs',      # Close display windows
         'players',      # Stop playback
         'artnet',       # Send blackout to all ArtNet channels
         'rest_api',     # Stop web server
         'dmx',          # Stop DMX controller
-        'session',      # Save session state
     ]
     
     import concurrent.futures
@@ -200,7 +201,7 @@ def graceful_shutdown(signum=None, frame=None):
                 print(f"  ⚠️  Error cleaning up {resource_name}: {e}")
     
     print("="*80)
-    print("✅ Shutdown complete. Auf Wiedersehen!")
+    print("\n✅ Shutdown complete. Goodbye!")
     print("="*80)
     
     # Force exit after 1 second to ensure we don't hang regardless of
@@ -260,29 +261,105 @@ def _cleanup_rest_api(rest_api):
     except Exception as e:
         logger.error(f"Failed to stop REST API: {e}")
 
-def _cleanup_session(playlist_system):
-    """Save session state"""
+def _startup_restore_prompt(base_path):
+    """
+    Check for recent snapshots/saves and ask the user whether to restore.
+
+    Returns the absolute path to restore from, or None for an empty session.
+    """
+    import shutil as _shutil  # local import to keep top-level imports minimal
+
+    snapshots_dir = os.path.join(base_path, 'snapshots')
+    data_dir = os.path.join(base_path, 'data')
+
+    candidates = []  # list of (label, filename, filepath)
+
+    # Newest auto/manual snapshot
+    if os.path.isdir(snapshots_dir):
+        snaps = sorted(
+            [f for f in os.listdir(snapshots_dir) if f.endswith('.json')],
+            key=lambda f: os.path.getmtime(os.path.join(snapshots_dir, f)),
+            reverse=True
+        )
+        if snaps:
+            candidates.append(('Snapshot', snaps[0], os.path.join(snapshots_dir, snaps[0])))
+
+    # Newest saved session
+    if os.path.isdir(data_dir):
+        sessions = sorted(
+            [f for f in os.listdir(data_dir)
+             if f.endswith('.json') and f != 'punkte_export.json'],
+            key=lambda f: os.path.getmtime(os.path.join(data_dir, f)),
+            reverse=True
+        )
+        if sessions:
+            candidates.append(('Saved session', sessions[0], os.path.join(data_dir, sessions[0])))
+
+    if not candidates:
+        return None
+
+    print("\n" + "=" * 80)
+    print("📁  Previous session data found:")
+    print("=" * 80)
+    for i, (label, filename, filepath) in enumerate(candidates, 1):
+        mtime = datetime.fromtimestamp(os.path.getmtime(filepath))
+        size_kb = os.path.getsize(filepath) // 1024
+        print(f"  [{i}] {label}: {filename}")
+        print(f"       {mtime.strftime('%Y-%m-%d %H:%M:%S')}  |  {size_kb} KB")
+    print("\n  [e] Start empty session")
+    print("=" * 80)
+
+    try:
+        choice = input("Restore? (1/2/e  — default: 1): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+    if choice in ('', '1'):
+        return candidates[0][2]
+    if choice == '2' and len(candidates) >= 2:
+        return candidates[1][2]
+    return None  # empty session
+
+
+def _cleanup_session(session_state, player_manager, clip_registry, playlist_system):
+    """Save full session state and create an auto-snapshot on exit."""
+    import shutil as _shutil
     try:
         if playlist_system and playlist_system.active_playlist_id:
             playlist_system.capture_active_playlist_state()
-            playlist_system._auto_save()
+
+        # Force a complete synchronous save so nothing is lost
+        session_state.save(player_manager, clip_registry, force=True)
         logger.info("  └─ Session state saved")
+
+        # Create auto-snapshot in /snapshots/
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        snapshots_dir = os.path.join(base_path, 'snapshots')
+        os.makedirs(snapshots_dir, exist_ok=True)
+
+        session_state_path = session_state.get_state_file_path()
+        if os.path.exists(session_state_path):
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            snap_filename = f"auto_{timestamp}_snap.json"
+            _shutil.copy2(session_state_path, os.path.join(snapshots_dir, snap_filename))
+            print(f"  └─ Auto-snapshot: {snap_filename}")
+            logger.info(f"  └─ Auto-snapshot created: {snap_filename}")
     except Exception as e:
-        logger.error(f"Failed to save session: {e}")
+        logger.error(f"Failed to save session/snapshot: {e}")
 
 
 class ConsoleCapture:
-    """Fängt print() Ausgaben ab und leitet sie an REST API Console Log weiter."""
+    """Intercepts print() output and forwards it to the REST API console log."""
     def __init__(self, rest_api=None):
         self.rest_api = rest_api
         self.original_stdout = sys.stdout
         self._in_request = False
     
     def write(self, text):
-        """Schreibt Text sowohl in Terminal als auch in Console Log."""
+        """Writes text to both terminal and console log."""
         import threading
         
-        # Schreibe immer ins Terminal
+        # Always write to terminal
         try:
             self.original_stdout.write(text)
             self.original_stdout.flush()
@@ -301,7 +378,7 @@ class ConsoleCapture:
             'thread' in thread_name.lower() and 'wsgi' in thread_name.lower()
         )
         
-        # Prüfe ob wir in einem Flask Request Context sind
+        # Check if we are in a Flask request context
         try:
             from flask import has_request_context
             in_request = has_request_context()
@@ -313,47 +390,47 @@ class ConsoleCapture:
             try:
                 self.rest_api.add_log(text.rstrip())
             except:
-                # Stiller Fehler - verhindert Endlosschleife bei Problemen
+                # Silent error - prevents infinite loop on problems
                 pass
             finally:
                 self._in_request = False
     
     def flush(self):
-        """Flush für stdout Kompatibilität."""
+        """Flush for stdout compatibility."""
         self.original_stdout.flush()
     
     def attach(self, rest_api):
-        """Bindet REST API Console an."""
+        """Attaches REST API console."""
         self.rest_api = rest_api
 
 
 def load_config():
-    """Lädt und validiert Konfiguration aus config.json."""
+    """Loads and validates configuration from config.json."""
     from modules.core.config import validate_config_file, ConfigValidator
     
     config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
     
-    # Versuche Config zu laden und validieren
+    # Try to load and validate config
     is_valid, errors, config = validate_config_file(config_path)
     
     if not is_valid:
-        print(f"⚠️  Config-Validierung fehlgeschlagen:")
+        print(f"⚠️  Config validation failed:")
         for error in errors:
             print(f"    - {error}")
         
-        # Verwende Default-Config bei Fehler
+        # Use default config on error
         validator = ConfigValidator()
         config = validator.get_default_config()
-        print(f"⚠️  Verwende Standard-Konfiguration")
+        print(f"⚠️  Using default configuration")
     else:
-        logger.debug("Konfiguration erfolgreich geladen und validiert")
+        logger.debug("Configuration loaded and validated successfully")
     
     return config
 
 
 def main():
-    """Hauptfunktion der Anwendung mit erweiteter CLI."""
-    # Konfiguration laden (vor Logger, um console_log_level zu erhalten)
+    """Main application function with extended CLI."""
+    # Load configuration (before logger, to get console_log_level)
     config = load_config()
     
     # Log-Levels aus Config lesen
@@ -371,7 +448,7 @@ def main():
     console_level = log_level_map.get(console_level_str.upper(), logging.WARNING)
     file_level = log_level_map.get(file_level_str.upper(), logging.WARNING)
     
-    # Logging initialisieren mit Levels aus Config
+    # Initialize logging with levels from config
     flux_logger = FluxLogger()
     flux_logger.setup_logging(log_level=file_level, console_level=console_level, max_log_files=max_log_files)
     
@@ -386,46 +463,69 @@ def main():
     set_profiling_enabled(profiling_enabled)
     logger.debug(f"Performance profiling: {'enabled' if profiling_enabled else 'disabled (zero overhead)'}")
     
-    logger.debug("Flux startet...")
-    logger.debug("Konfiguration geladen")
+    logger.debug("Flux starting...")
+    logger.debug("Configuration loaded")
     
-    # Pfade
+    # Paths
     base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     video_dir = os.path.join(base_path, config['paths']['video_dir'])
     data_dir = os.path.join(base_path, config['paths']['data_dir'])
     
-    # Erstelle video-Ordner falls nicht vorhanden
+    # Create video folder if it does not exist
     if not os.path.exists(video_dir):
         os.makedirs(video_dir)
-        print(f"Video-Ordner erstellt: {video_dir}")
+        print(f"Video folder created: {video_dir}")
     
     # Video-Ordner Existenz ist sichergestellt, aber kein Video wird automatisch geladen
     # User muss explizit ein Video laden (via Web-UI, API oder CLI)
     # Legacy video_path Variable wird nicht mehr verwendet (Player startet mit DummySource)
     
-    # Konfiguration für Art-Net
+    # Configuration for Art-Net
     target_ip = config['artnet']['target_ip']
     start_universe = config['artnet']['start_universe']
     fps_limit = config['video']['default_fps']
     
-    # Scripts-Ordner
+    # Scripts folder
     scripts_dir = os.path.join(base_path, config['paths']['scripts_dir'])
     
     # Initialize session state early (needed for canvas size and player settings)
     from modules.session.state import init_session_state, get_session_state
     session_state_path = os.path.join(base_path, 'session_state.json')
-    
-    # ALWAYS start with clean session state (no fragments from previous sessions)
-    if os.path.exists(session_state_path):
+
+    # Ask the user whether to restore a previous session or start empty
+    import shutil as _shutil
+    _startup_restore_path = _startup_restore_prompt(base_path)
+
+    if _startup_restore_path:
+        # Copy chosen file to session_state.json (replaces any stale file)
+        _shutil.copy2(_startup_restore_path, session_state_path)
+        logger.info(f"✅ Startup restore: copied {os.path.basename(_startup_restore_path)} → session_state.json")
+    else:
+        # Start fresh: remove any leftover state from a previous run
+        if os.path.exists(session_state_path):
+            try:
+                os.remove(session_state_path)
+                logger.info("✅ Cleared old session state on startup (clean start)")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to clear session state: {e}")
+
+    # Load startup restore data into memory now (before players are built)
+    _startup_restore_data = None
+    if _startup_restore_path and os.path.exists(session_state_path):
         try:
-            os.remove(session_state_path)
-            logger.info("✅ Cleared old session state on startup (clean start)")
+            import json as _json
+            with open(session_state_path, 'r', encoding='utf-8') as _f:
+                _startup_restore_data = _json.load(_f)
         except Exception as e:
-            logger.warning(f"⚠️ Failed to clear session state: {e}")
-    
-    # Initialize session state (starts fresh each time)
+            logger.warning(f"⚠️ Failed to read startup restore data: {e}")
+            _startup_restore_data = None
+
+    # Initialize session state manager
     session_state = init_session_state(session_state_path)
-    logger.debug("SessionStateManager initialized with clean state")
+    if _startup_restore_data:
+        logger.debug("SessionStateManager initialized with restored state")
+    else:
+        logger.debug("SessionStateManager initialized with clean state")
     
     # Use default canvas size (no session restoration)
     # Editor canvas will be set from config or defaults
@@ -458,36 +558,36 @@ def main():
     
     logger.info(f"Video player resolution: {video_canvas_width}x{video_canvas_height} (preset: {video_settings.get('preset', '1080p')}, autosize: {video_settings.get('autosize', 'off')})")
     
-    # ClipRegistry initialisieren (ERST, bevor Player erstellt werden)
+    # Initialize ClipRegistry (FIRST, before players are created)
     from modules.player.clips.registry import get_clip_registry
     clip_registry = get_clip_registry()
-    logger.debug("ClipRegistry initialisiert")
+    logger.debug("ClipRegistry initialized")
     
-    # Video Player initialisieren (nur für Preview, KEIN Art-Net Output!)
-    # Starte mit leerer DummySource - User muss Video explizit laden
+    # Initialize video player (for preview only, NO Art-Net output!)
+    # Start with empty DummySource - user must explicitly load a video
     from modules.player.sources import DummySource
     video_source = DummySource(video_canvas_width, video_canvas_height)
     player = Player(video_source, target_ip=target_ip, start_universe=start_universe, fps_limit=fps_limit, config=config, 
                    enable_artnet=False, player_name="Video Player (Preview)", clip_registry=clip_registry,
                    canvas_width=video_canvas_width, canvas_height=video_canvas_height)
-    logger.debug(f"Video Player initialisiert (Preview only, kein Video geladen)")
+    logger.debug(f"Video Player initialized (preview only, no video loaded)")
     
-    # Setze Standard-Werte aus Config
+    # Set default values from config
     player.set_brightness(config['video']['default_brightness'])
     player.set_speed(config['video']['default_speed'])
     
-    # Art-Net Player initialisieren (separat vom Video Player)
-    # Starte mit leerer DummySource - User muss Video explizit laden
+    # Initialize Art-Net player (separate from video player)
+    # Start with empty DummySource - user must explicitly load a video
     artnet_video_source = DummySource(artnet_canvas_width, artnet_canvas_height)
     artnet_player = Player(artnet_video_source, target_ip=target_ip, start_universe=start_universe, fps_limit=fps_limit, config=config,
                           enable_artnet=True, player_name="Art-Net Player", clip_registry=clip_registry,
                           canvas_width=artnet_canvas_width, canvas_height=artnet_canvas_height)
-    logger.debug(f"Art-Net Player initialisiert (kein Video geladen)")
+    logger.debug(f"Art-Net Player initialized (no video loaded)")
 
     
-    # PlayerManager initialisieren (Single Source of Truth)
+    # Initialize PlayerManager (Single Source of Truth)
     player_manager = PlayerManager(player, artnet_player)
-    logger.debug("PlayerManager initialisiert mit Video Player und Art-Net Player")
+    logger.debug("PlayerManager initialized with video player and Art-Net player")
     
     # Set PlayerManager reference in players (for Master/Slave sync)
     player.player_manager = player_manager
@@ -495,7 +595,7 @@ def main():
     
     # Initialize Audio Sequencer
     player_manager.init_sequencer()
-    logger.debug("Audio Sequencer initialisiert")
+    logger.debug("Audio Sequencer initialized")
     
     # Initialize Dynamic Parameter Sequences
     from modules.audio.sequences import SequenceManager, AudioAnalyzer
@@ -503,7 +603,7 @@ def main():
     audio_analyzer = AudioAnalyzer(config=config)
     player_manager.sequence_manager = sequence_manager
     player_manager.audio_analyzer = audio_analyzer
-    logger.debug("Parameter Sequence System initialisiert")
+    logger.debug("Parameter Sequence System initialized")
     
     # Connect sequence_manager to session_state for persistence
     session_state.set_sequence_manager(sequence_manager)
@@ -534,13 +634,42 @@ def main():
     playlist_system = MultiPlaylistSystem(player_manager, session_state, None, config)
     set_playlist_system(playlist_system)
     player_manager.playlist_system = playlist_system
+
+    if _startup_restore_data:
+        # ── Restore from chosen snapshot / saved session ──────────────────────
+        # session_state._state was loaded from the restored file by init_session_state above.
+        # Use the canonical restore path: it handles sequences + BPM + clip_registry + playlists
+        # in the correct dependency order (sequences first so auto-save captures them live).
+        try:
+            session_state.restore(player_manager, clip_registry, config)
+            logger.info(f"✅ Startup restore: {len(playlist_system.playlists)} playlist(s), sequences loaded")
+            print(f"  ✅ Restored session from {os.path.basename(_startup_restore_path)}")
+        except Exception as e:
+            logger.warning(f"⚠️ Startup restore failed: {e}")
+
+        # Fallback: ensure at least one playlist exists if restore left none
+        if not playlist_system.playlists:
+            _pl = playlist_system.create_playlist("Default", "standard")
+            playlist_system.activate_playlist(_pl.id)
+            logger.warning("⚠️ Startup restore: no playlists found after restore, created Default")
+
+        # Restore output routing to running OutputManagers (not handled by restore())
+        _out_data = _startup_restore_data.get('outputs', {})
+        for _pname, _out_state in _out_data.items():
+            _p = player_manager.get_player(_pname)
+            if _p and hasattr(_p, 'output_manager') and _p.output_manager:
+                try:
+                    _p.output_manager.set_state(_out_state)
+                    logger.info(f"🔌 Startup restore: output state for '{_pname}'")
+                except Exception as e:
+                    logger.warning(f"⚠️ Startup restore: output state for '{_pname}' failed: {e}")
+    else:
+        # Create default playlist (empty / clean start)
+        default_playlist = playlist_system.create_playlist("Default", "standard")
+        playlist_system.activate_playlist(default_playlist.id)
+        logger.debug("Created and activated Default playlist (first start or empty session)")
     
-    # Create default playlist (session state cleared on startup)
-    default_playlist = playlist_system.create_playlist("Default", "standard")
-    playlist_system.activate_playlist(default_playlist.id)
-    logger.debug("Created and activated Default playlist (first start or empty session)")
-    
-    logger.debug("Multi-Playlist System initialisiert")
+    logger.debug("Multi-Playlist System initialized")
     
     # Auto-start audio analyzer if it was running in previous session
     try:
@@ -574,7 +703,7 @@ def main():
     # Default Effects Manager - Used by ClipRegistry for clip-level effects
     # IMPORTANT: Default PLAYER effects are now applied per-playlist (see playlist_manager.py)
     try:
-        # Hole PluginManager vom Player (bereits initialisiert)
+        # Get PluginManager from player (already initialized)
         plugin_manager = player.plugin_manager
         default_effects_manager = get_default_effects_manager(config, plugin_manager)
         
@@ -590,9 +719,9 @@ def main():
     except Exception as e:
         logger.warning(f"⚠️ Failed to configure default effects manager: {e}")
     
-    # Session State wird NICHT geladen beim Start (frischer Start)
-    # User kann über Snapshots wiederherstellen wenn gewünscht
-    logger.debug("Start mit leeren Playlists (Session State gelöscht)")
+    # Session state is NOT loaded on startup (fresh start)
+    # User can restore via snapshots if desired
+    logger.debug("Start with empty playlists (session state cleared)")
 
     # REST API initialisieren und automatisch starten
     # Note: replay_manager=None - Recording system removed, will be reimplemented later
@@ -647,14 +776,27 @@ def main():
     except Exception as e:
         logger.warning('GPU renderer early init failed (will retry on first use): %s', e)
 
+    # Pre-allocate GPU texture pool at canvas resolution so VRAM is committed
+    # before the player loop starts.  Content doesn't matter — write_texture()
+    # is non-blocking DMA and will be overwritten on the first real frame.
+    # 8 slots covers: output + artnet + 2 ping-pong effect chains × 2 players.
+    try:
+        from modules.gpu.texture_pool import get_texture_pool
+        _pool = get_texture_pool()
+        for _w, _h in {(video_canvas_width, video_canvas_height), (artnet_canvas_width, artnet_canvas_height)}:
+            _pool.warmup(_w, _h, count=8, components=3)
+            print(f'✅ GPU: texture pool warmed ({_w}×{_h}, 8 slots)', flush=True)
+    except Exception as e:
+        logger.warning('GPU texture pool warmup failed (will allocate on demand): %s', e)
+
     # Register cleanup for REST API
     register_cleanup_resource('rest_api', lambda: _cleanup_rest_api(rest_api))
     
-    # Register cleanup for session state
-    register_cleanup_resource('session', lambda: _cleanup_session(playlist_system))
+    # Register cleanup for session state (saves + creates auto-snapshot)
+    register_cleanup_resource('session', lambda: _cleanup_session(session_state, player_manager, clip_registry, playlist_system))
     
-    # Console Capture NICHT aktivieren - verursacht "write() before start_response" Fehler
-    # Die REST API Console Log funktioniert über direkte add_log() Aufrufe
+    # Console Capture NOT activated - causes "write() before start_response" errors
+    # The REST API console log works via direct add_log() calls
     # console_capture = ConsoleCapture(rest_api)
     # sys.stdout = console_capture
     

@@ -1,0 +1,501 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   MIDI DISPLAY — Visual MIDI mapping layer
+   Magenta = mappable, Cyan = mapped, Dashed white = selected
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── MIDI Sidebar ─────────────────────────────────────────────────────────── */
+
+.midi-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 200px;
+    z-index: 2000;
+    background: var(--panel-bg);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 4px 0 16px rgba(0,0,0,0.4);
+    overflow: hidden;
+}
+
+/* Right-side variant */
+.midi-sidebar.right {
+    left: unset;
+    right: 0;
+    border-right: none;
+    border-left: 1px solid var(--border-color);
+    transform: translateX(100%);
+    box-shadow: -4px 0 16px rgba(0,0,0,0.4);
+}
+
+.midi-sidebar.open {
+    transform: translateX(0);
+}
+
+/* Flip-side button */
+.midi-sidebar-flip {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0 4px;
+    line-height: 1;
+    opacity: 0.6;
+}
+.midi-sidebar-flip:hover { color: var(--text-primary); opacity: 1; }
+
+.midi-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.midi-sidebar-header .midi-sidebar-title {
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 1px;
+    color: var(--accent-color);
+    text-transform: uppercase;
+}
+
+.midi-sidebar-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0 4px;
+    line-height: 1;
+}
+.midi-sidebar-close:hover { color: var(--text-primary); }
+
+.midi-sidebar-selection {
+    padding: 6px 10px;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.midi-sidebar-selection.has-param {
+    color: var(--text-primary);
+    background: rgba(52, 152, 219, 0.08);
+}
+
+.midi-sidebar-selection .midi-sel-path {
+    color: var(--accent-color);
+    font-family: monospace;
+    font-size: 0.65rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.midi-sidebar-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+}
+
+.midi-sidebar-body::-webkit-scrollbar { width: 4px; }
+.midi-sidebar-body::-webkit-scrollbar-track { background: transparent; }
+.midi-sidebar-body::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+.midi-sidebar-body::-webkit-scrollbar-thumb:hover { background: var(--accent-color); }
+
+.midi-sidebar-body .midi-field-label {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 3px;
+}
+
+.midi-sidebar-body select,
+.midi-sidebar-body input[type="number"] {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 0.75rem;
+}
+
+.midi-sidebar-body select:focus,
+.midi-sidebar-body input[type="number"]:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+.midi-cc-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.midi-cc-row input[type="number"] {
+    flex: 1;
+}
+
+.midi-cc-row .midi-14bit-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.midi-mode-options {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.midi-mode-options label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 3px 6px;
+    border-radius: 3px;
+    transition: background 0.15s;
+}
+
+.midi-mode-options label:hover { background: var(--bg-secondary); }
+.midi-mode-options label:has(input:checked) { color: var(--text-primary); background: rgba(52, 152, 219, 0.12); }
+
+.midi-invert-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    margin-top: -4px;
+}
+
+.midi-range-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.midi-range-row input[type="number"] {
+    width: 54px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.midi-range-row input[type="range"] {
+    flex: 1;
+    accent-color: #ff00ff;
+}
+
+.midi-learn-cc-btn {
+    width: 100%;
+    padding: 4px;
+    background: rgba(52, 152, 219, 0.1);
+    border: 1px solid rgba(52, 152, 219, 0.4);
+    color: var(--accent-color);
+    border-radius: 4px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: background 0.15s;
+    text-align: center;
+}
+
+.midi-learn-cc-btn:hover { background: rgba(52, 152, 219, 0.22); }
+
+.midi-learn-cc-btn.listening {
+    background: rgba(255,0,255,0.35);
+    color: #fff;
+    animation: midi-cc-pulse 1s infinite;
+}
+
+@keyframes midi-cc-pulse {
+    0%,100% { box-shadow: 0 0 6px rgba(255,0,255,0.4); }
+    50%      { box-shadow: 0 0 14px rgba(255,0,255,0.8); }
+}
+
+.midi-action-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.midi-action-row .btn-map {
+    flex: 1;
+    padding: 5px;
+    background: rgba(52, 152, 219, 0.12);
+    border: 1px solid rgba(52, 152, 219, 0.4);
+    color: var(--accent-color);
+    border-radius: 4px;
+    font-size: 0.74rem;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+}
+.midi-action-row .btn-map:hover { background: rgba(52, 152, 219, 0.28); }
+
+.midi-action-row .btn-unmap {
+    flex: 1;
+    padding: 5px;
+    background: rgba(220, 53, 69, 0.1);
+    border: 1px solid rgba(220, 53, 69, 0.35);
+    color: rgba(220, 100, 100, 0.9);
+    border-radius: 4px;
+    font-size: 0.74rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.midi-action-row .btn-unmap:hover { background: rgba(220, 53, 69, 0.22); }
+
+.midi-sidebar-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 2px 0;
+}
+
+/* ── MIDI Parameter Frames ─────────────────────────────────────────────────── */
+
+.midi-param-frame {
+    position: relative;  /* needed for overlay badge */
+}
+
+/* ── Playlist tabs MIDI controls ─────────────────────────────────────────── */
+.playlist-tabs-midi-wrapper {
+    display: none;
+    gap: 4px;
+    padding: 2px 4px;
+    align-items: center;
+}
+body.midi-learn-mode .playlist-tabs-midi-wrapper {
+    display: flex;
+}
+/* Keep visible when any frame in it is mapped */
+.playlist-tabs-midi-wrapper:has(.midi-param-frame.has-mapping) {
+    display: flex;
+}
+.playlist-tabs-midi-wrapper .midi-param-frame {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+}
+
+/* ── File navigation control bar ─────────────────────────────────────────── */
+.midi-file-controls {
+    display: none;
+    gap: 4px;
+    padding: 2px 4px 4px;
+}
+body.midi-learn-mode .midi-file-controls {
+    display: flex;
+}
+/* show controls with mapped frames even outside learn mode */
+.midi-file-controls .midi-param-frame.has-mapping {
+    display: inline-flex;
+}
+.midi-file-controls .midi-param-frame {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+}
+.midi-file-ctrl-label {
+    white-space: nowrap;
+    color: #bbb;
+}
+
+/* ── Clip navigation control bar ─────────────────────────────────────────── */
+.midi-clip-controls {
+    display: none;
+    gap: 4px;
+    padding: 2px 4px;
+    flex-wrap: wrap;
+}
+body.midi-learn-mode .midi-clip-controls {
+    display: flex;
+}
+/* show when any frame is mapped */
+.midi-clip-controls:has(.midi-param-frame.has-mapping) {
+    display: flex;
+}
+.midi-clip-controls .midi-param-frame {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+}
+
+/* ── MIDI-focused playlist clip highlight ────────────────────────────────── */
+.playlist-item-wrapper.midi-clip-focused .playlist-item {
+    outline: 2px solid rgba(255, 165, 0, 0.9) !important;
+    box-shadow: 0 0 8px rgba(255, 165, 0, 0.5);
+}
+.playlist-item-wrapper.midi-clip-focused .playlist-item-fx-tab {
+    outline: 2px solid rgba(255, 165, 0, 0.6);
+}
+
+/* ── MIDI-focused file item highlight ────────────────────────────────────── */
+.midi-focused {
+    background: rgba(255, 165, 0, 0.25) !important;
+    outline: 2px solid rgba(255, 165, 0, 0.8);
+    border-radius: 3px;
+}
+
+/* In MIDI learn mode: magenta frame + 70% opacity fill on EVERY frame */
+body.midi-learn-mode .midi-param-frame {
+    outline: 2px solid rgba(255, 0, 255, 0.85);
+    background-color: rgba(255, 0, 255, 0.12) !important;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+body.midi-learn-mode .midi-param-frame:hover {
+    outline-color: #ff00ff;
+    background-color: rgba(255, 0, 255, 0.22) !important;
+}
+
+/* Mapped frame: cyan */
+body.midi-learn-mode .midi-param-frame.has-mapping {
+    outline: 2px solid rgba(0, 255, 255, 0.85);
+    background-color: rgba(0, 255, 255, 0.12) !important;
+}
+
+body.midi-learn-mode .midi-param-frame.has-mapping:hover {
+    outline-color: #00ffff;
+    background-color: rgba(0, 255, 255, 0.22) !important;
+}
+
+/* Selected frame: dashed white */
+body.midi-learn-mode .midi-param-frame.midi-selected {
+    outline: 2px dashed rgba(255, 255, 255, 0.9) !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ── MIDI address overlay badge ───────────────────────────────────────────── */
+
+.midi-addr-badge {
+    display: none;
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    background: rgba(0, 200, 220, 0.85);
+    color: #000;
+    font-family: "Courier New", monospace;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 10;
+    line-height: 1.4;
+}
+
+body.midi-learn-mode .midi-param-frame.has-mapping .midi-addr-badge {
+    display: block;
+}
+
+/* ── Learn toggle button ──────────────────────────────────────────────────── */
+
+#midiLearnToggle {
+    transition: background 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+#midiLearnToggle:not(.active) {
+    background: transparent;
+    border-color: rgba(255, 0, 255, 0.7);
+    color: rgba(255, 0, 255, 0.9);
+}
+
+#midiLearnToggle.active {
+    background: rgba(255, 0, 255, 0.85);
+    border-color: #ff00ff;
+    color: #fff;
+    box-shadow: 0 0 16px rgba(255, 0, 255, 0.6);
+    animation: midi-btn-pulse 2s infinite;
+}
+
+@keyframes midi-btn-pulse {
+    0%, 100% { box-shadow: 0 0 12px rgba(255, 0, 255, 0.5); }
+    50%       { box-shadow: 0 0 24px rgba(255, 0, 255, 0.9); }
+}
+
+/* ── MIDI Clock — beat indicator dots ─────────────────────────────────────── */
+
+.beat-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: background 0.1s ease, transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.beat-dot.beat-active {
+    background: #2196f3;
+    box-shadow: 0 0 12px rgba(33, 150, 243, 0.8);
+    transform: scale(1.2);
+}
+
+/* ── MIDI Clock container ─────────────────────────────────────────────────── */
+
+.midi-clock-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+}
+
+.midi-section + .midi-section {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 0.75rem;
+}
+
+/* ── Grid target inputs (Col / Row) ──────────────────────────────────────── */
+
+.midi-grid-target-row {
+    display: flex;
+    gap: 8px;
+}
+.midi-grid-target-row > div {
+    flex: 1;
+}
+.midi-grid-target-row input[type="number"] {
+    width: 100%;
+    text-align: center;
+}
+.midi-grid-hint {
+    font-size: 0.65rem;
+    color: rgba(0, 255, 255, 0.6);
+    text-align: center;
+    margin-top: -6px;
+    font-style: italic;
+}

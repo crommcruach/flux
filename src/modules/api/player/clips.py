@@ -1,11 +1,11 @@
-"""
-Clip Layer API - REST Endpoints für Layer-Management pro Clip
+﻿"""
+Clip Layer API - REST endpoints for per-clip layer management
 
-Ermöglicht:
-- Layer zu einzelnen Clips hinzufügen/entfernen
-- Layer-Konfiguration ändern (blend_mode, opacity, enabled)
-- Layer-Reihenfolge ändern
-- Clips in Layers ersetzen
+Enables:
+- Add/remove layers to individual clips
+- Change layer configuration (blend_mode, opacity, enabled)
+- Change layer order
+- Replace clips in layers
 """
 
 from flask import request, jsonify
@@ -29,7 +29,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
     
     @app.route('/api/blend-modes', methods=['GET'])
     def get_blend_modes():
-        """Gibt verfügbare Blend-Modes zurück."""
+        """Returns available blend modes."""
         return jsonify({
             "success": True,
             "blend_modes": list(BLEND_MODES.keys())
@@ -95,7 +95,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
     @app.route('/api/clips/<clip_id>/layers/add', methods=['POST'])
     def add_clip_layer(clip_id):
         """
-        Fügt einen Layer zu einem Clip hinzu.
+        Adds a layer to a clip.
         
         Body:
             source_type: 'video' | 'generator' | 'script'
@@ -244,7 +244,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
     @app.route('/api/clips/<clip_id>/layers/reorder', methods=['PUT'])
     def reorder_clip_layers(clip_id):
         """
-        Ändert die Reihenfolge der Layers.
+        Changes the order of layers.
         
         Body:
             layer_order: Liste von Layer-IDs in neuer Reihenfolge

@@ -1,6 +1,6 @@
 """
 Thumbnail Generator
-Erstellt und cached Thumbnails für Videos und Bilder
+Creates and caches thumbnails for videos and images
 """
 import os
 import hashlib
@@ -22,7 +22,7 @@ class ThumbnailGenerator:
     def __init__(self, config=None):
         """
         Args:
-            config: Dictionary mit Thumbnail-Konfiguration oder None für Defaults
+            config: Dictionary with thumbnail configuration or None for defaults
         """
         # Load config with defaults
         if config is None:
@@ -54,7 +54,7 @@ class ThumbnailGenerator:
         self.video_preview_fps = preview_config.get('fps', 10)
         self.video_preview_format = preview_config.get('format', 'gif')
         
-        # Queue für asynchrone Generierung
+        # Queue for asynchronous generation
         self.generation_queue = Queue()
         self.worker_thread = None
         self.running = False
@@ -62,7 +62,7 @@ class ThumbnailGenerator:
         logger.debug(f"🖼️ ThumbnailGenerator initialized: size={self.size}, quality={self.quality}, cache={self.cache_dir}")
         
     def start_worker(self):
-        """Startet Worker-Thread für asynchrone Generierung"""
+        """Starts worker thread for asynchronous generation"""
         if self.worker_thread and self.worker_thread.is_alive():
             return
             
@@ -78,7 +78,7 @@ class ThumbnailGenerator:
             self.worker_thread.join(timeout=5)
             
     def _worker_loop(self):
-        """Worker-Thread für Thumbnail-Generierung"""
+        """Worker thread for thumbnail generation"""
         while self.running:
             try:
                 task = self.generation_queue.get(timeout=1)
@@ -92,7 +92,7 @@ class ThumbnailGenerator:
                 
     def get_thumbnail_path(self, file_path):
         """
-        Gibt Pfad zum Thumbnail zurück (ohne Generierung)
+        Returns the path to the thumbnail (without generation)
         
         Returns:
             str: Pfad zum Thumbnail oder None wenn nicht existiert
@@ -106,13 +106,13 @@ class ThumbnailGenerator:
     
     def delete_thumbnail(self, file_path):
         """
-        Löscht Thumbnail und Preview-Dateien für eine Datei
+        Deletes thumbnail and preview files for a file
         
         Args:
             file_path: Pfad zur Original-Datei
             
         Returns:
-            bool: True wenn Dateien gelöscht wurden, False wenn keine gefunden
+            bool: True if files were deleted, False if none found
         """
         try:
             deleted_any = False
@@ -142,17 +142,17 @@ class ThumbnailGenerator:
         
     def generate_thumbnail(self, file_path, async_mode=False, callback=None):
         """
-        Generiert Thumbnail für Datei
+        Generates thumbnail for file
         
         Args:
             file_path: Pfad zur Originaldatei
             async_mode: Wenn True, wird asynchron generiert
-            callback: Optional callback für async_mode (wird mit Pfad aufgerufen)
+            callback: Optional callback for async_mode (called with path)
             
         Returns:
             str: Pfad zum Thumbnail oder None bei Fehler
         """
-        # Prüfe ob bereits cached
+        # Check if already cached
         existing = self.get_thumbnail_path(file_path)
         if existing:
             if callback:
@@ -182,7 +182,7 @@ class ThumbnailGenerator:
             cache_filename = self._get_cache_filename(file_path)
             thumbnail_path = self.cache_dir / cache_filename
             
-            # Prüfe ob bereits existiert (Double-Check für Race Conditions)
+            # Check if already exists (double-check for race conditions)
             if thumbnail_path.exists():
                 return str(thumbnail_path)
                 
@@ -255,7 +255,7 @@ class ThumbnailGenerator:
         try:
             img = Image.open(image_path)
             
-            # Konvertiere zu RGB falls nötig
+            # Convert to RGB if necessary
             if img.mode not in ('RGB', 'RGBA'):
                 img = img.convert('RGB')
                 
@@ -276,7 +276,7 @@ class ThumbnailGenerator:
         """
         file_path = Path(file_path)
         
-        # Hash aus Pfad + Modification Time (für Cache Invalidation)
+        # Hash from path + modification time (for cache invalidation)
         try:
             mtime = file_path.stat().st_mtime
         except:
@@ -291,7 +291,7 @@ class ThumbnailGenerator:
         
     def generate_video_preview(self, video_path):
         """
-        Generiert animiertes Preview (GIF oder WebM) für Video
+        Generates animated preview (GIF or WebM) for video
         
         Args:
             video_path: Pfad zur Video-Datei
@@ -313,11 +313,11 @@ class ThumbnailGenerator:
             cache_filename = self._get_cache_filename(video_path).replace('.jpg', f'_preview{file_ext}')
             preview_path = self.cache_dir / cache_filename
             
-            # Prüfe ob bereits existiert
+            # Check if already exists
             if preview_path.exists():
                 return str(preview_path)
                 
-            # Generiere Preview
+            # Generate preview
             if self.video_preview_format == 'gif':
                 success = self._generate_gif_preview(video_path, preview_path)
             else:
@@ -391,7 +391,7 @@ class ThumbnailGenerator:
         try:
             import subprocess
             
-            # FFmpeg command für kurzen Preview-Clip
+            # FFmpeg command for short preview clip
             cmd = [
                 'ffmpeg',
                 '-i', str(video_path),
@@ -419,13 +419,13 @@ class ThumbnailGenerator:
     
     def cleanup_old_thumbnails(self, days=None):
         """
-        Löscht Thumbnails älter als X Tage
+        Deletes thumbnails older than X days
         
         Args:
             days: Anzahl Tage (None = nutzt self.cache_days)
             
         Returns:
-            int: Anzahl gelöschter Dateien
+            int: Number of deleted files
         """
         import time
         
@@ -450,7 +450,7 @@ class ThumbnailGenerator:
             
     def get_cache_stats(self):
         """
-        Gibt Cache-Statistiken zurück
+        Returns cache statistics
         
         Returns:
             dict: Stats (count, total_size_mb)

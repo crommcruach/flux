@@ -1,6 +1,6 @@
 /**
  * Constants and Configuration
- * Zentrale Konstanten für den Editor
+ * Central constants for the editor
  */
 
 // Scale limits

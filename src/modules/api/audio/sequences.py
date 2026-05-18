@@ -535,7 +535,33 @@ def register_sequence_routes(app, sequence_manager, audio_analyzer, player_manag
         except Exception as e:
             logger.error(f"Error getting sequences for target: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
-    
+
+    @app.route('/api/sequences/color-mode', methods=['POST'])
+    def set_sequence_color_mode():
+        """
+        Store the active palette colors for a COLOR-type parameter so the sequence
+        engine cycles through the discrete palette entries instead of hue-cycling.
+
+        Body JSON:
+          {
+            "param_uid": "param_clip_1_...",
+            "palette_colors": ["#ff0000", "#00ff00", ...]   // or [] to disable
+          }
+        """
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+            param_uid = data.get('param_uid')
+            palette_colors = data.get('palette_colors', [])
+            if not param_uid:
+                return jsonify({'error': 'param_uid is required'}), 400
+            sequence_manager.set_color_palette_mode(param_uid, palette_colors)
+            return jsonify({'ok': True, 'param_uid': param_uid, 'colors': len(palette_colors)})
+        except Exception as e:
+            logger.error(f"Error setting color sequence mode: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
     # Audio Analyzer Routes
     
     @app.route('/api/audio/devices', methods=['GET'])

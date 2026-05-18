@@ -1,6 +1,6 @@
-"""
+﻿"""
 Unified Player - Universeller Media-Player mit austauschbaren Frame-Quellen
-Unterstützt Videos, Scripts und zukünftige Quellen über FrameSource-Interface
+Supports videos, scripts and future sources via FrameSource interface
 """
 import time
 import threading
@@ -24,14 +24,14 @@ from ..core.constants import (
 
 logger = get_logger(__name__)
 
-# GLOBALE LOCK: Shared Lock für Player-Synchronisation
+# GLOBAL LOCK: Shared lock for player synchronization
 from .lock import player_lock
 
 
 class Player:
     """
     Universeller Media-Player mit austauschbaren Frame-Quellen.
-    Unterstützt Videos, Scripts und zukünftige Medien-Typen.
+    Supports videos, scripts and future media types.
     """
     
     def __init__(self, frame_source, points_json_path=None, target_ip='127.0.0.1', start_universe=0, fps_limit=None, config=None, enable_artnet=True, player_name="Player", clip_registry=None, canvas_width=None, canvas_height=None):
@@ -40,16 +40,16 @@ class Player:
         
         Args:
             frame_source: FrameSource-Instanz (VideoSource, GeneratorSource, etc.)
-            points_json_path: DEPRECATED - Wird ignoriert (für Kompatibilität)
+            points_json_path: DEPRECATED - Ignored (for compatibility)
             target_ip: Art-Net Ziel-IP
-            start_universe: Start-Universum für Art-Net
+            start_universe: Start universe for Art-Net
             fps_limit: FPS-Limit (None = Source-FPS)
             config: Konfigurations-Dict
-            enable_artnet: Aktiviert Art-Net Ausgabe (False für Preview-Only Player)
-            player_name: Name des Players für Logging
-            clip_registry: ClipRegistry Instanz für UUID-basierte Clip-Verwaltung
+            enable_artnet: Enables Art-Net output (False for preview-only player)
+            player_name: Player name for logging
+            clip_registry: ClipRegistry instance for UUID-based clip management
             canvas_width: Canvas Breite (optional, auto-detect from source if not provided)
-            canvas_height: Canvas Höhe (optional, auto-detect from source if not provided)
+            canvas_height: Canvas height (optional, auto-detect from source if not provided)
         """
         self.player_name = player_name
         self.enable_artnet = enable_artnet
@@ -59,7 +59,7 @@ class Player:
         if points_json_path is not None:
             logger.debug(f"points_json_path parameter is deprecated and will be ignored")
         
-        # Player ID für Clip Registry (normalisiert)
+        # Player ID for Clip Registry (normalized)
         if 'art-net' in player_name.lower() or 'artnet' in player_name.lower():
             self.player_id = 'artnet'
         else:
@@ -146,7 +146,7 @@ class Player:
         self.current_clip_id = None  # UUID of currently loaded clip (for clip effects from registry)
         
         # Preview Frames
-        self.last_video_frame = None  # Letztes komplettes Frame für Preview
+        self.last_video_frame = None  # Last complete frame for preview
         
         # Transition Manager
         self.transition_manager = TransitionManager()
@@ -167,7 +167,7 @@ class Player:
         }
         
         # NICHT initialisieren im Konstruktor - wird lazy beim ersten play() gemacht
-        # Grund: Verhindert dass mehrere Player dieselbe Video-Datei parallel öffnen (FFmpeg-Konflikt)
+        # Reason: Prevents multiple players from opening the same video file in parallel (FFmpeg conflict)
         self.source_initialized = False
         
         debug_playback(logger, f"{self.player_name} initialisiert:")
@@ -206,6 +206,17 @@ class Player:
 
         # ArtNet Routing Bridge (NEW - for routing system output)
         self.routing_bridge = None
+
+        # Clip Recording — captures rendered frames to a .npy export
+        self._recording: bool = False
+        self._record_frames: list = []
+        self._record_max_frames: int = 0   # 0 = unknown/infinite, >0 = stop after N frames
+        self._record_job_id: str | None = None
+        self._record_output_name: str = ''
+        self._record_video_dir: str = ''
+        self._record_done: bool = False
+        self._record_error: str | None = None
+        self._record_output_path: str | None = None
 
         
         # Output Manager (NEW - video player only, optional feature)
@@ -375,9 +386,12 @@ class Player:
           Outputs served by GPU hooks (display GPU sharing, GPU slices, preview
           downscaler) set needs_cpu_frame=False on their OutputBase instance so
           they are excluded here automatically.
+        - Active clip recording — forces download so frames can be written to disk.
 
         When False, composite_layers() skips the SSBO download.
         """
+        if self._recording:
+            return True
         if self._fullscreen_subscriber_count > 0 and self._fullscreen_downscaler is None:
             self._log_needs_cpu_once('fullscreen_subscriber')
             return True
@@ -540,12 +554,15 @@ class Player:
                         out.needs_cpu_frame = False
 
         # ── Fullscreen downscaler (canvas-res sync readback) ─────────────────
-        if self._fullscreen_downscaler is not None and self._fullscreen_subscriber_count > 0:
+        # Always encode (keeps triple-buffer ring warm) — same pattern as the
+        # preview downscaler.  Without this the ring starts cold every time a
+        # new subscriber connects, causing a 3-frame stale-frame freeze.
+        if self._fullscreen_downscaler is not None:
             if is_numpy:
                 fs_result = self._fullscreen_downscaler.encode_numpy(composite)
             else:
                 fs_result = self._fullscreen_downscaler.encode(composite)
-            if fs_result is not None:
+            if self._fullscreen_subscriber_count > 0 and fs_result is not None:
                 self.last_fullscreen_jpeg = fs_result
 
     def _on_transition_gpu_frame(self, gpu_frame) -> None:
@@ -593,9 +610,9 @@ class Player:
                         result = self._preview_downscaler.encode(blended)
                         if self._mjpeg_subscriber_count > 0 and result is not None:
                             self.last_preview_jpeg = result
-                    if self._fullscreen_downscaler is not None and self._fullscreen_subscriber_count > 0:
+                    if self._fullscreen_downscaler is not None:
                         fs_result = self._fullscreen_downscaler.encode(blended)
-                        if fs_result is not None:
+                        if self._fullscreen_subscriber_count > 0 and fs_result is not None:
                             self.last_fullscreen_jpeg = fs_result
                 if _profiler:
                     with _profiler.profile_stage('transition_gpu'):
@@ -912,7 +929,7 @@ class Player:
     
     def switch_source(self, new_source):
         """
-        Wechselt zu einer neuen Frame-Quelle ohne Player zu zerstören.
+        Switches to a new frame source without destroying the player.
         
         Args:
             new_source: Neue FrameSource-Instanz
@@ -1140,12 +1157,22 @@ class Player:
                 # Registriere als aktiver Player NUR wenn Art-Net enabled ist
                 if self.enable_artnet:
                     with player_lock:
-                        from .lock import _active_player
-                        globals()['_active_player'] = self
+                        from . import lock as lock_module
+                        lock_module._active_player = self
                         from ..core.logger import debug_log, DebugCategories
                         debug_log(logger, DebugCategories.ARTNET, f"[{self.player_name}] Registered as active Art-Net player")
                 
-                # Reaktiviere ArtNet (handled by routing_bridge)
+                # Reaktiviere ArtNet routing bridge (stopped by stop() above)
+                if self.routing_bridge and self.enable_artnet:
+                    try:
+                        self.routing_bridge.start()
+                        if hasattr(self, 'layer_manager') and self.layer_manager is not None:
+                            self.layer_manager.set_artnet_gpu_hook(
+                                self.routing_bridge.on_gpu_composite
+                            )
+                        logger.debug(f"[{self.player_name}] ArtNet routing bridge restarted for clip switch")
+                    except Exception as e:
+                        logger.error(f"[{self.player_name}] Failed to restart routing bridge: {e}")
                 
                 self.is_playing = True
                 self.is_running = True
@@ -1170,7 +1197,7 @@ class Player:
     def play(self):
         """Intelligente Play-Funktion: startet oder setzt fort je nach Status."""
         if self.is_playing and not self.is_paused:
-            debug_playback(logger, f"{self.player_name}: Wiedergabe läuft bereits!")
+            debug_playback(logger, f"{self.player_name}: Playback already running!")
             return
         
         if self.is_paused:
@@ -1183,7 +1210,7 @@ class Player:
     def start(self):
         """Startet die Wiedergabe (interner Start mit Thread-Erstellung)."""
         if self.is_playing:
-            debug_playback(logger, f"{self.player_name}: Wiedergabe läuft bereits!")
+            debug_playback(logger, f"{self.player_name}: Playback already running!")
             return
         
         # Registriere als aktiver Player NUR wenn Art-Net enabled ist
@@ -1202,12 +1229,12 @@ class Player:
         else:
             logger.debug(f"{self.player_name}: Starte Preview-Only (kein Art-Net)")
         
-        # Prüfe ob Source vorhanden ist
+        # Check if source is available
         if not self.source:
             logger.warning(f"{self.player_name}: Keine Source geladen - kann nicht starten")
             return
         
-        # Re-initialisiere Source falls nötig (nach stop)
+        # Re-initialize source if needed (after stop)
         if not self.source.initialize():
             logger.error(f"Fehler beim Re-Initialisieren der Source: {self.source.get_source_name()}")
             return
@@ -1237,7 +1264,7 @@ class Player:
     def stop(self):
         """Stoppt die Wiedergabe."""
         if not self.is_playing:
-            debug_playback(logger, "Wiedergabe läuft nicht!")
+            debug_playback(logger, "Playback not running!")
             return
         
         debug_playback(logger, "Stoppe Wiedergabe...")
@@ -1271,9 +1298,9 @@ class Player:
         
         self.thread = None
         
-        # HINWEIS: Source und ArtNet Manager NICHT cleanup/zerstören
-        # Sie werden beim nächsten start() wiederverwendet
-        # Nur bei switch_source() oder Shutdown cleanup nötig
+        # NOTE: Source and ArtNet manager must NOT be cleaned up/destroyed
+        # They will be reused on the next start()
+        # Cleanup only needed on switch_source() or shutdown
         
         # Deregistriere Player (nur wenn Art-Net enabled)
         if self.enable_artnet:
@@ -1285,7 +1312,7 @@ class Player:
         logger.debug(f"{self.player_name}: Wiedergabe gestoppt")
     
     def clear_frame(self):
-        """Löscht den aktuellen Frame und zeigt schwarzen Bildschirm (für leere Playlist)."""
+        """Clears the current frame and shows a black screen (for empty playlist)."""
         # Determine canvas dimensions for the black frame
         canvas_width = getattr(self, 'canvas_width', 320)
         canvas_height = getattr(self, 'canvas_height', 180)
@@ -1314,7 +1341,7 @@ class Player:
     def pause(self):
         """Pausiert die Wiedergabe."""
         if not self.is_playing or self.is_paused:
-            debug_playback(logger, "Wiedergabe läuft nicht oder ist bereits pausiert!")
+            debug_playback(logger, "Playback not running or already paused!")
             return
         
         self.is_paused = True
@@ -1324,7 +1351,7 @@ class Player:
     def resume(self):
         """Setzt Wiedergabe fort."""
         if not self.is_playing or not self.is_paused:
-            debug_playback(logger, "Wiedergabe läuft nicht oder ist nicht pausiert!")
+            debug_playback(logger, "Playback not running or not paused!")
             return
         
         self.is_paused = False
@@ -1333,7 +1360,7 @@ class Player:
     
     def restart(self):
         """Startet Wiedergabe neu vom ersten Frame (egal in welchem Status)."""
-        # Stoppe falls läuft oder pausiert
+        # Stop if running or paused
         if self.is_playing or self.is_paused:
             self.stop()
             time.sleep(0.3)
@@ -1368,9 +1395,32 @@ class Player:
                 transport_instance = effect.get('instance')
                 
                 if transport_instance:
-                    # Initialize transport state if needed (only once)
+                    # Initialize transport state if needed.
+                    # Guard: re-init when _frame_source is None (reset after clip switch)
+                    # OR when out_point is still 0 (first-ever initialization).
+                    # The old guard (only out_point == 0) caused the transport to skip
+                    # re-initialization after autoplay loads a shorter clip, leaving a
+                    # stale out_point that made the video spin through hundreds of
+                    # None-frame cycles and then play too fast.
                     if hasattr(transport_instance, '_initialize_state'):
-                        if transport_instance.out_point == 0:
+                        needs_init = (
+                            getattr(transport_instance, '_frame_source', None) is None
+                            or transport_instance.out_point == 0
+                        )
+                        if needs_init:
+                            # Guard: source must be fully initialized before transport
+                            # can read total_frames.  total_frames==0 is the FrameSource
+                            # default and means initialize() hasn't run yet (or failed).
+                            # Skip this frame and let the next tick retry — the source
+                            # will have valid total_frames once initialize() completes.
+                            source_total = getattr(layer.source, 'total_frames', 0)
+                            if not source_total:
+                                debug_transport(
+                                    logger,
+                                    f"⏳ Layer {layer.layer_id} Transport init deferred "
+                                    f"(source not ready: total_frames={source_total})"
+                                )
+                                return False
                             transport_instance._initialize_state(layer.source)
                             debug_transport(logger, f"🎬 Layer {layer.layer_id} Transport initialized: out_point={transport_instance.out_point}")
                     
@@ -1388,7 +1438,7 @@ class Player:
     
     def _check_transport_loop_completion(self):
         """
-        Prüft ob der Transport-Effekt einen Loop abgeschlossen hat.
+        Checks whether the transport effect has completed a loop.
         Returns True wenn Loop completed, False sonst.
         """
         if not self.clip_registry or not hasattr(self, 'current_clip_id') or not self.current_clip_id:
@@ -1417,7 +1467,7 @@ class Player:
             return False
     
     def _play_loop(self):
-        """Haupt-Wiedergabeschleife (läuft in separatem Thread)."""
+        """Main playback loop (runs in a separate thread)."""
         self.is_running = True
         self.is_paused = False
         self.start_time = time.time()
@@ -1512,7 +1562,7 @@ class Player:
         except Exception as _e:
             logger.warning(f"GPU pipeline reset check failed: {_e}")
 
-        # FPS für Timing
+        # FPS for timing
         # Multi-Layer: Master-Layer (0) bestimmt FPS
         if self.layers:
             fps = self.fps_limit if self.fps_limit else self.layers[0].source.fps
@@ -1528,6 +1578,11 @@ class Player:
         
         source_name = self.layers[0].source.get_source_name() if self.layers else self.source.get_source_name()
         debug_playback(logger, f"Play-Loop gestartet: FPS={fps}, Source={source_name}")
+
+        # Cache per-player constants that never change during a play loop.
+        # player_id is set once in __init__ and never mutated; avoid re-evaluating
+        # the ternary and attribute lookups on every frame iteration.
+        _is_artnet_player = (self.player_id == 'artnet')
         
         # Check sequence manager setup (log every time play loop starts)
         logger.debug(f"🎵 PLAY LOOP STARTED FOR: {source_name}")
@@ -1538,7 +1593,7 @@ class Player:
                 logger.debug(f"🎵 [SEQUENCE CHECK] sequence count: {len(self.player_manager.sequence_manager.sequences)}")
         
         while self.is_running and self.is_playing:
-            # Pause-Handling (Event-basiert für low-latency)
+            # Pause handling (event-based for low latency)
             if self.is_paused:
                 # Warte auf resume (pause_event.set()) - keine CPU-Last, immediate wake
                 self.pause_event.wait(timeout=frame_wait_delay)
@@ -1574,7 +1629,7 @@ class Player:
             should_autoadvance = False
             
             if not is_slave:
-                # Check if transport effect signaled loop completion (für Playlist-Autoplay)
+                # Check if transport effect signaled loop completion (for playlist autoplay)
                 transport_loop_completed = self._check_transport_loop_completion()
                 
                 if transport_loop_completed:
@@ -1585,7 +1640,7 @@ class Player:
                     if self.max_loops > 0 and self.current_loop >= self.max_loops:
                         logger.debug(f"📋 [{self.player_name}] max_loops reached ({self.current_loop}/{self.max_loops})")
                         
-                        # Prüfe Playlist-Autoplay
+                        # Check playlist autoplay
                         if self.autoplay and len(self.playlist) > 0:
                             # Skip frame reading and trigger autoplay
                             should_autoadvance = True
@@ -1597,10 +1652,16 @@ class Player:
             # ========== MULTI-LAYER COMPOSITING ==========
             if not should_autoadvance and self.layers and len(self.layers) > 0:
                 try:
+                    _global_chain = (
+                        self.effect_processor.artnet_effect_chain
+                        if _is_artnet_player
+                        else self.effect_processor.video_effect_chain
+                    ) or None
                     frame, source_delay = self.layer_manager.composite_layers(
                         preprocess_transport_callback=self._preprocess_layer_transport,
                         player_name=self.player_name,
                         needs_download=self.needs_cpu_frame,
+                        global_effects=_global_chain,
                     )
                 except Exception as _cmp_err:
                     logger.error(f"❌ [{self.player_name}] composite_layers error: {_cmp_err}", exc_info=True)
@@ -1616,7 +1677,7 @@ class Player:
                     get_texture_pool().release(frame)
                     frame = _cpu
             
-            # ========== REST IST UNVERÄNDERT ==========
+            # ========== REST IS UNCHANGED ==========
 
             # GPU-only path: composite_layers processed the frame on GPU but
             # skipped the CPU download (needs_download=False).  This is NOT a
@@ -1646,8 +1707,25 @@ class Player:
 
             if frame is None:
                 # Ende der Source (Video-Loop oder Fehler)
-                # ACHTUNG: current_loop wurde bereits im Transport-Loop-Check erhöht!
-                # Nur erhöhen wenn kein Transport-Loop (z.B. bei echtem Frame=None von Source)
+                # NOTE: current_loop was already incremented in the transport loop check!
+                # Only increment if no transport loop (e.g. when real Frame=None from source)
+
+                # Finish clip recording on source EOF (one full playthrough captured)
+                if self._recording and self._record_frames:
+                    import threading as _rt
+                    _frames = self._record_frames
+                    _output = self._record_output_name
+                    _job_id = self._record_job_id
+                    _vdir = self._record_video_dir
+                    _fps = fps
+                    self._recording = False
+                    self._record_frames = []
+                    _rt.Thread(
+                        target=self._finish_recording,
+                        args=(_frames, _output, _job_id, _fps, _vdir),
+                        daemon=True,
+                    ).start()
+
                 if not transport_loop_completed:
                     self.current_loop += 1
                 
@@ -1759,7 +1837,7 @@ class Player:
                         
                         # Initialisiere neue Source
                         if not new_source.initialize():
-                            logger.error(f"❌ [{self.player_name}] Fehler beim Initialisieren des nächsten Items: {next_item_path}")
+                            logger.error(f"❌ [{self.player_name}] Error initializing next item: {next_item_path}")
                             break
                         
                         # Start transition if enabled
@@ -1894,20 +1972,29 @@ class Player:
                             debug_layers(logger, f"🔁 [{self.player_name}] Same clip {next_clip_id}, reusing existing layers")
                         
                         item_name = generator_id if next_item_path.startswith('generator:') else os.path.basename(next_item_path)
-                        logger.debug(f"✅ [{self.player_name}] Nächstes Item geladen: {item_name} (clip_id={next_clip_id})")
+                        logger.debug(f"✅ [{self.player_name}] Next item loaded: {item_name} (clip_id={next_clip_id})")
+                        # Refresh fps/frame_time so the timing loop uses the new
+                        # source's frame rate, not the one captured at play() start.
+                        if not self.fps_limit:
+                            _new_fps = (self.layers[0].source.fps if self.layers else self.source.fps) or fps
+                            if _new_fps != fps:
+                                fps = _new_fps
+                                frame_time = 1.0 / fps if fps > 0 else 0
+                                next_frame_time = time.time()  # reset drift accumulator
+                                debug_playback(logger, f"⏱️ [{self.player_name}] Timing updated for new source: FPS={fps}")
                         continue
                     except Exception as e:
-                        logger.error(f"❌ [{self.player_name}] Fehler beim Laden des nächsten Items: {e}")
+                        logger.error(f"❌ [{self.player_name}] Error loading next item: {e}")
                         break
                 
                 # Kein Autoplay - normales Loop-Verhalten
-                # Loop-Limit prüfen (nur für nicht-infinite Sources)
+                # Check loop limit (only for non-infinite sources)
                 current_source = self.layers[0].source if self.layers else self.source
                 if not current_source.is_infinite and self.max_loops > 0 and self.current_loop >= self.max_loops:
                     debug_playback(logger, f"Loop-Limit ({self.max_loops}) erreicht, stoppe...")
                     break
                 
-                # Reset Source für nächsten Loop
+                # Reset source for next loop
                 if self.layers:
                     # Multi-Layer: Reset nur Master (Layer 0), Slaves loopen selbst
                     self.layers[0].source.reset()
@@ -1921,6 +2008,7 @@ class Player:
             if frame is not None:
                 # (Transitions are GPU-only; handled by _on_transition_gpu_frame hook)
                 # (Clip effects are GPU-only; applied by composite_layers → apply_layer_effects)
+                # (Player-global effects are GPU-only; applied by composite_layers → _apply_chain_gpu)
 
                 # Alpha-Compositing (wenn RGBA vorhanden)
                 if frame is not None and isinstance(frame, np.ndarray) and frame.shape[2] == 4:
@@ -1930,6 +2018,26 @@ class Player:
             # frame may be None when GPU sampler covers ArtNet and no preview is active
             if frame is not None:
                 self.last_video_frame = frame
+                # Capture rendered frame for active clip recording
+                if self._recording and isinstance(frame, np.ndarray):
+                    self._record_frames.append(frame.copy())
+                    # Stop when we've collected all expected frames (handles infinite-loop sources)
+                    _max_f = getattr(self, '_record_max_frames', 0)
+                    if _max_f > 0 and len(self._record_frames) >= _max_f:
+                        import threading as _rt
+                        _frames = self._record_frames
+                        _output = self._record_output_name
+                        _job_id = self._record_job_id
+                        _vdir = self._record_video_dir
+                        _fps = fps
+                        self._recording = False
+                        self._record_frames = []
+                        logger.info(f"[Recording] Frame count reached ({_max_f}), saving...")
+                        _rt.Thread(
+                            target=self._finish_recording,
+                            args=(_frames, _output, _job_id, _fps, _vdir),
+                            daemon=True,
+                        ).start()
 
             # Distribute frame to output routing system.
             if self.output_manager and frame is not None:
@@ -1961,7 +2069,7 @@ class Player:
             if not self.is_running:
                 break
             
-            # Für Preview-Only Player: Kein Lock-Check nötig
+            # For preview-only player: no lock check needed
             from . import lock as lock_module
             if self.enable_artnet and lock_module._active_player is not self:
                 # Art-Net Player wurde deaktiviert
@@ -1970,7 +2078,7 @@ class Player:
             self.frames_processed += 1
             
             # Frame-Timing mit Drift-Kompensation
-            # Verwende source_delay wenn verfügbar, sonst calculated frame_time
+            # Use source_delay if available, otherwise calculated frame_time
             delay = source_delay if source_delay > 0 else frame_time
             delay /= self.speed_factor  # Speed-Faktor anwenden
             
@@ -1980,7 +2088,7 @@ class Player:
             
             if sleep_time > 0:
                 time.sleep(sleep_time)
-            elif sleep_time < -0.1:  # Zu langsam, Reset
+            elif sleep_time < -delay:  # More than one frame behind — reset to avoid catch-up burst
                 next_frame_time = current_time + delay
         
         # Release GPU ownership so the next play-loop thread (on clip change,
@@ -1990,23 +2098,48 @@ class Player:
             release_gpu_ownership()
         except Exception:
             pass
-        # Always reset flags when loop exits (whether via break or normal end).
-        # Without this, is_playing stays True after a natural clip end, making
-        # play() believe the player is still running and silently skip restart.
-        self.is_running = False
-        self.is_playing = False
+        # Finalize recording if play loop exited while recording was active
+        # (e.g. max_loops reached without autoplay, or player stopped)
+        if self._recording and self._record_frames:
+            import threading as _rt
+            _frames = self._record_frames
+            _output = self._record_output_name
+            _job_id = self._record_job_id
+            _vdir = self._record_video_dir
+            _fps = fps
+            self._recording = False
+            self._record_frames = []
+            logger.info(f"[Recording] Loop exited with {len(_frames)} frames — saving...")
+            _rt.Thread(
+                target=self._finish_recording,
+                args=(_frames, _output, _job_id, _fps, _vdir),
+                daemon=True,
+            ).start()
+
+        # Only reset player state if this thread is still the active play thread.
+        # If play() was called while we were still running (e.g. during a
+        # switch_source → stop → play sequence), the new thread has already set
+        # is_playing=True/is_running=True and self.thread to itself.  Clearing
+        # either flag here would kill the new thread after just 1 frame.
+        import threading as _threading
+        if self.thread is _threading.current_thread():
+            self.is_running = False
+            self.is_playing = False
+        else:
+            logger.debug(f"[{self.player_name}] Play-loop cleanup: not clearing state "
+                         f"(new thread already started)")
         debug_playback(logger, "Play-Loop beendet")
     
     def status(self):
-        """Gibt Status-String zurück."""
+        """Returns status string."""
         if self.is_playing:
             if self.is_paused:
                 return "pausiert"
-            return "läuft"
+            return "running"
         return "gestoppt"
     
     def get_info(self):
-        """Gibt Informationen zurück."""
+        """Returns information."""
         import os
         
         info = {
@@ -2024,7 +2157,7 @@ class Player:
         return info
     
     def get_stats(self):
-        """Gibt Live-Statistiken zurück."""
+        """Returns live statistics."""
         runtime = time.time() - self.start_time if self.start_time > 0 else 0
         fps = self.frames_processed / runtime if runtime > 0 else 0
         
@@ -2058,19 +2191,19 @@ class Player:
             self.brightness = val / 100.0
             debug_playback(logger, f"Helligkeit auf {val}% gesetzt")
         except ValueError:
-            logger.debug("Ungültiger Helligkeits-Wert!")
+            logger.debug("Invalid brightness value!")
     
     def set_speed(self, value):
         """Setzt Geschwindigkeit."""
         try:
             val = float(value)
             if val <= 0:
-                logger.debug("Geschwindigkeit muss größer als 0 sein!")
+                logger.debug("Speed must be greater than 0!")
                 return
             self.speed_factor = val
             logger.debug(f"Geschwindigkeit auf {val}x gesetzt")
         except ValueError:
-            logger.debug("Ungültiger Geschwindigkeits-Wert!")
+            logger.debug("Invalid speed value!")
     
     def set_hue_shift(self, value):
         """Setzt Hue Rotation (0-360 Grad)."""
@@ -2082,23 +2215,27 @@ class Player:
             self.hue_shift = val
             logger.debug(f"Hue Shift auf {val}° gesetzt")
         except ValueError:
-            logger.debug("Ungültiger Hue Shift-Wert!")
+            logger.debug("Invalid hue shift value!")
     
     # ========== Player-Level Effect Chain Management (Delegated to EffectProcessor) ==========
     def add_effect_to_chain(self, plugin_id, config=None, chain_type='video'):
-        """Fügt einen Effect zur gewählten Chain hinzu - Delegiert an EffectProcessor."""
+        """Adds an effect to the selected chain - delegates to EffectProcessor."""
         return self.effect_processor.add_effect(plugin_id, config, chain_type)
     
     def remove_effect_from_chain(self, index, chain_type='video'):
-        """Entfernt einen Effect aus der gewählten Chain - Delegiert an EffectProcessor."""
+        """Removes an effect from the selected chain - delegates to EffectProcessor."""
         return self.effect_processor.remove_effect(index, chain_type)
     
     def clear_effects_chain(self, chain_type='video'):
-        """Entfernt alle Effects aus der gewählten Chain - Delegiert an EffectProcessor."""
+        """Removes all effects from the selected chain - delegates to EffectProcessor."""
         return self.effect_processor.clear_chain(chain_type)
-    
+
+    def reorder_effect_chain(self, new_order, chain_type='video'):
+        """Reorders effects in a player-level chain - Delegiert an EffectProcessor."""
+        return self.effect_processor.reorder_chain(new_order, chain_type)
+
     def get_effect_chain(self, chain_type='video'):
-        """Gibt die aktuelle Effect Chain zurück - Delegiert an EffectProcessor."""
+        """Returns the current effect chain - delegates to EffectProcessor."""
         return self.effect_processor.get_chain(chain_type, layers=self.layers)
     
     def update_effect_parameter(self, index, param_name, value, chain_type='video'):
@@ -2126,6 +2263,33 @@ class Player:
         return self.effect_processor.toggle_enabled(index, chain_type)
     
     
+    def _apply_global_effects(self, frame):
+        """
+        Apply player-global effects (Video FX / Art-Net FX panels) to the
+        fully-composited frame.  Runs after all per-clip and per-layer effects
+        have already been applied inside composite_layers().
+
+        Order: Clip effects → Layer effects → Player effects  (this method)
+        """
+        if frame is None:
+            return frame
+
+        chain_type = 'artnet' if self.player_id == 'artnet' else 'video'
+        chain = (
+            self.effect_processor.artnet_effect_chain
+            if chain_type == 'artnet'
+            else self.effect_processor.video_effect_chain
+        )
+
+        if not chain:
+            return frame
+
+        import types as _types
+        pseudo_layer = _types.SimpleNamespace(effects=chain, layer_id='global')
+        return self.layer_manager.apply_layer_effects(
+            pseudo_layer, frame, self.player_name, stay_on_gpu=False
+        )
+
     def _alpha_composite_to_black(self, rgba_frame):
         """
         Composites RGBA frame onto black background using alpha channel.
@@ -2144,6 +2308,58 @@ class Player:
         composited = (rgb.astype(np.uint16) * alpha.astype(np.uint16) / 255).astype(np.uint8)
         
         return composited
+
+    def _finish_recording(self, frames, output_name, job_id, fps, video_dir):
+        """Save captured frames as a .npy clip folder under video_dir/exports/.
+
+        Runs in a daemon thread so the render loop is not blocked.
+        """
+        import json as _json
+        import time as _time
+        import os as _os
+
+        try:
+            if not frames:
+                self._record_error = 'No frames captured'
+                self._record_done = True
+                return
+
+            exports_dir = _os.path.join(video_dir, 'exports')
+            _os.makedirs(exports_dir, exist_ok=True)
+
+            timestamp = _time.strftime('%Y%m%d_%H%M%S')
+            safe_name = (output_name or 'export').replace(' ', '_')
+            clip_folder = _os.path.join(exports_dir, f"{safe_name}_{timestamp}")
+            _os.makedirs(clip_folder, exist_ok=True)
+
+            frame0 = frames[0]
+            h, w = frame0.shape[:2]
+            preset = f"{w}x{h}"
+
+            arr = np.stack(frames)          # (N, H, W, 3) BGR uint8
+            output_npy = _os.path.join(clip_folder, f"{preset}.npy")
+            np.save(output_npy, arr)
+
+            meta = {
+                'fps': fps,
+                'total_frames': len(frames),
+                'width': w,
+                'height': h,
+                'preset': preset,
+                'source': 'recording',
+            }
+            with open(_os.path.join(clip_folder, f"{preset}.json"), 'w') as f:
+                _json.dump(meta, f, indent=2)
+
+            self._record_output_path = clip_folder
+            self._record_done = True
+            logger.info(f"[Recording] Saved {len(frames)} frames → {clip_folder}")
+
+        except Exception as e:
+            self._record_error = str(e)
+            self._record_done = True
+            logger.error(f"[Recording] Failed to save: {e}", exc_info=True)
+
     
     # ========== Multi-Layer Management ==========
     
@@ -2199,9 +2415,9 @@ class Player:
     @property
     def source(self):
         """
-        Gibt erste Layer-Source zurück für Backward Compatibility.
-        Wenn Layers existieren, gibt Layer 0 Source zurück.
-        Sonst gibt Legacy-Source zurück.
+        Returns first layer source for backward compatibility.
+        If layers exist, returns layer 0 source.
+        Otherwise returns legacy source.
         """
         if self.layers:
             return self.layers[0].source
@@ -2210,7 +2426,7 @@ class Player:
     @source.setter
     def source(self, value):
         """
-        Setzt Source - für Backward Compatibility.
+        Sets source - for backward compatibility.
         Wenn Layers existieren, aktualisiert Layer 0.
         Sonst speichert in Legacy-Source.
         """
@@ -2222,7 +2438,7 @@ class Player:
     # Backward Compatibility: current_clip_id Property
     @property
     def current_clip_id(self):
-        """Gibt Clip-ID von Layer 0 zurück (Backward Compatibility)."""
+        """Returns clip ID from layer 0 (backward compatibility)."""
         if self.layers:
             return self.layers[0].clip_id
         return None

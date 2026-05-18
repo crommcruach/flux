@@ -1,4 +1,4 @@
-"""
+﻿"""
 API Routes - Playback, Settings, Art-Net Endpoints
 
 ⚠️⚠️⚠️ DEPRECATED FILE - SCHEDULED FOR REMOVAL ⚠️⚠️⚠️
@@ -37,7 +37,7 @@ def register_reload_route(app):
         
         def restart_app():
             import time
-            time.sleep(1.0)  # Warte länger, damit Response gesendet wird
+            time.sleep(1.0)  # Wait longer so response is sent
             
             try:
                 python = sys.executable
@@ -45,7 +45,7 @@ def register_reload_route(app):
                 
                 logger.info(f"Starte Anwendung neu: {python} {script}")
                 
-                # Windows: Nutze subprocess.Popen für sauberen Neustart
+                # Windows: Use subprocess.Popen for clean restart
                 if sys.platform == 'win32':
                     # Starte neuen Prozess ohne neue Console
                     # DETACHED_PROCESS = 0x00000008 (als Konstante, da nicht in subprocess)
@@ -69,7 +69,7 @@ def register_reload_route(app):
         
         # Starte Neustart in separatem Thread, damit Response noch gesendet wird
         thread = threading.Thread(target=restart_app)
-        thread.daemon = False  # Nicht-daemon, damit Thread zu Ende läuft
+        thread.daemon = False  # Non-daemon so thread runs to completion
         thread.start()
         
         return jsonify({"status": "success", "message": "Anwendung wird neu gestartet..."})
@@ -126,12 +126,12 @@ def register_artnet_routes(app, player_manager):
         ip = data.get('ip')
         if ip:
             player.target_ip = ip
-            return jsonify({"status": "success", "ip": player.target_ip, "message": "HINWEIS: Starte Video neu für Änderung"})
+            return jsonify({"status": "success", "ip": player.target_ip, "message": "NOTE: Restart video for change to take effect"})
         return jsonify({"status": "error", "message": "Keine IP angegeben"}), 400
     
     @app.route('/api/ip', methods=['GET'])
     def get_ip():
-        """Gibt aktuelle Art-Net Ziel-IP zurück."""
+        """Returns current Art-Net target IP."""
         try:
             player = player_manager.player
             return jsonify({"status": "success", "ip": player.target_ip})
@@ -148,16 +148,16 @@ def register_artnet_routes(app, player_manager):
             if universe is not None:
                 try:
                     player.start_universe = int(universe)
-                    return jsonify({"status": "success", "universe": player.start_universe, "message": "HINWEIS: Starte Video neu für Änderung"})
+                    return jsonify({"status": "success", "universe": player.start_universe, "message": "NOTE: Restart video for change to take effect"})
                 except ValueError:
-                    return jsonify({"status": "error", "message": "Ungültiger Wert"}), 400
+                    return jsonify({"status": "error", "message": "Invalid value"}), 400
             return jsonify({"status": "error", "message": "Kein Universum angegeben"}), 400
         except Exception as e:
             return jsonify({"status": "error", "message": f"Fehler: {str(e)}"}), 500
     
     @app.route('/api/universe', methods=['GET'])
     def get_universe():
-        """Gibt aktuelles Art-Net Start-Universum zurück."""
+        """Returns current Art-Net start universe."""
         try:
             player = player_manager.player
             return jsonify({"status": "success", "universe": player.start_universe})
@@ -170,7 +170,7 @@ def register_info_routes(app, player_manager, api=None, config=None):
     
     @app.route('/api/status', methods=['GET'])
     def status():
-        """Gibt aktuellen Status zurück."""
+        """Returns current status."""
         player = player_manager.player
         
         # Collect routing outputs (NEW - for routing system DMX monitor)
@@ -196,19 +196,19 @@ def register_info_routes(app, player_manager, api=None, config=None):
     
     @app.route('/api/info', methods=['GET'])
     def info():
-        """Gibt Player-Informationen zurück."""
+        """Returns player information."""
         player = player_manager.player
         return jsonify(player.get_info())
     
     @app.route('/api/stats', methods=['GET'])
     def stats():
-        """Gibt Live-Statistiken zurück."""
+        """Returns live statistics."""
         player = player_manager.player
         return jsonify(player.get_stats())
     
     @app.route('/api/stream/traffic', methods=['GET'])
     def stream_traffic():
-        """Gibt Traffic-Statistiken für Stream-APIs zurück."""
+        """Returns traffic statistics for stream APIs."""
         import time
         
         def format_bytes(bytes_val):
@@ -357,7 +357,7 @@ def register_info_routes(app, player_manager, api=None, config=None):
             return bytes(buf) if ok else None
 
         def generate_frames():
-            """Generator für MJPEG-Stream."""
+            """Generator for MJPEG stream."""
             _player = player_manager.player
             if _player and hasattr(_player, '_mjpeg_subscriber_count'):
                 _player._mjpeg_subscriber_count += 1
@@ -399,7 +399,7 @@ def register_info_routes(app, player_manager, api=None, config=None):
         frame_delay = 1.0 / stream_fps
         
         def generate_frames():
-            """Generator für Art-Net Player MJPEG-Stream."""
+            """Generator for Art-Net player MJPEG stream."""
             _player = player_manager.artnet_player
             if _player and hasattr(_player, '_mjpeg_subscriber_count'):
                 _player._mjpeg_subscriber_count += 1
@@ -420,7 +420,7 @@ def register_info_routes(app, player_manager, api=None, config=None):
     
     @app.route('/api/fullscreen/stream')
     def fullscreen_stream():
-        """MJPEG Video-Stream in voller Player-Auflösung (ohne Skalierung)."""
+        """MJPEG video stream at full player resolution (without scaling)."""
         from flask import Response, request
         import time
 
@@ -433,7 +433,7 @@ def register_info_routes(app, player_manager, api=None, config=None):
         frame_delay = 1.0 / stream_fps
         
         def generate_frames():
-            """Generator für MJPEG-Stream ohne Preview-Skalierung."""
+            """Generator for MJPEG stream without preview scaling."""
             _player = player_manager.artnet_player if player_type == 'artnet' else player_manager.player
             # Signal the player that a fullscreen subscriber is active so the
             # GPU fullscreen downscaler starts encoding (triple-buffer ring).
@@ -469,7 +469,7 @@ def register_info_routes(app, player_manager, api=None, config=None):
 
     @app.route('/api/preview/debug')
     def preview_debug():
-        """Debug-Info über Player-Zustand."""
+        """Debug info about player state."""
         info = {
             "has_last_video_frame": hasattr(player, 'last_video_frame'),
             "last_video_frame_is_none": hasattr(player, 'last_video_frame') and player.last_video_frame is None,
@@ -498,7 +498,7 @@ def register_info_routes(app, player_manager, api=None, config=None):
             """Generiert bunte Testbilder."""
             colors = [
                 (255, 0, 0),    # Blau
-                (0, 255, 0),    # Grün
+                (0, 255, 0),    # Green
                 (0, 0, 255),    # Rot
                 (255, 255, 0),  # Cyan
                 (255, 0, 255),  # Magenta
@@ -530,7 +530,7 @@ def register_cache_routes(app):
     
     @app.route('/api/cache/info', methods=['GET'])
     def cache_info():
-        """Gibt Cache-Informationen zurück."""
+        """Returns cache information."""
         import os
         cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
         
@@ -555,7 +555,7 @@ def register_cache_routes(app):
     
     @app.route('/api/cache/clear', methods=['POST'])
     def cache_clear():
-        """Löscht Cache."""
+        """Clears cache."""
         import os
         import shutil
         cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
@@ -572,7 +572,7 @@ def register_cache_routes(app):
         
         return jsonify({
             "status": "success",
-            "message": f"Cache geleert ({file_count} Dateien gelöscht)",
+            "message": f"Cache cleared ({file_count} files deleted)",
             "deleted_files": file_count
         })
 
@@ -582,7 +582,7 @@ def register_console_command_routes(app, player, rest_api, video_dir, data_dir, 
     
     @app.route('/api/console', methods=['POST'])
     def execute_console_command():
-        """Führt CLI-Befehl über Console aus."""
+        """Executes CLI command via console."""
         import io
         import sys
         
@@ -608,7 +608,7 @@ def register_console_command_routes(app, player, rest_api, video_dir, data_dir, 
             command = parts[0].lower()
             args = parts[1] if len(parts) > 1 else None
             
-            # Spezielle Behandlung für help
+            # Special handling for help
             if command == "help":
                 from ...core.utils import print_help
                 
@@ -627,8 +627,8 @@ def register_console_command_routes(app, player, rest_api, video_dir, data_dir, 
                     "output": output
                 })
             
-            # Führe Befehl über CLI Handler aus - in separatem Thread!
-            # Dies verhindert dass print() Statements die Flask Response stören
+            # Execute command via CLI handler - in separate thread!
+            # This prevents print() statements from disturbing the Flask response
             import threading
             from .cli_handler import CLIHandler
             
@@ -666,7 +666,7 @@ def register_console_command_routes(app, player, rest_api, video_dir, data_dir, 
             
             return jsonify({
                 "status": "success",
-                "output": f"Befehl '{command}' ausgeführt",
+                "output": f"Command '{command}' executed",
                 "exit": not result_container['continue_loop']
             })
                 

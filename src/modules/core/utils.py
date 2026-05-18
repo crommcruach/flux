@@ -1,12 +1,12 @@
 """
-Hilfsfunktionen für die CLI-Anwendung
+Helper functions for the CLI application
 """
 import os
 from .constants import VIDEO_EXTENSIONS_LIST
 
 
 def print_help():
-    """Zeigt alle verfügbaren Befehle."""
+    """Shows all available commands."""
     print("\n" + "=" * 80)
     print("BEFEHLE")
     print("=" * 80)
@@ -16,25 +16,25 @@ def print_help():
     print("  stop               - Stoppt Script/Video-Wiedergabe")
     print("  pause              - Pausiert Script/Video-Wiedergabe")
     print("  resume             - Setzt Script/Video-Wiedergabe fort")
-    print("  next               - Lädt nächstes Video/Script")
-    print("  back               - Lädt vorheriges Video/Script")
+    print("  next               - Loads next video/script")
+    print("  back               - Loads previous video/script")
     print("\n🎬 Video-Verwaltung:")
-    print("  videos             - Listet alle verfügbaren Videos auf")
-    print("  video:<name>       - Lädt und startet Video (z.B. video:testbild)")
+    print("  videos             - Lists all available videos")
+    print("  video:<name>       - Loads and starts video (e.g. video:testimage)")
     print("\n📍 Punkte-Verwaltung:")
     print("  points list        - Zeigt alle Punkte-Listen")
     print("  points validate [name] - Validiert Punkte-Liste (JSON Schema)")
     print("  points switch <name> - Wechselt Punkte-Liste (mit Validierung)")
-    print("  points reload      - Lädt aktuelle Punkte-Liste neu")
+    print("  points reload      - Reloads current points list")
     print("\n⚙️ Einstellungen:")
-    print("  fps <wert>         - Ändert FPS-Limit (z.B. fps 30)")
+    print("  fps <value>        - Changes FPS limit (e.g. fps 30)")
     print("  speed <faktor>     - Wiedergabe-Geschwindigkeit (z.B. speed 0.5)")
     print("  brightness <0-100> - Globale Helligkeit (z.B. brightness 50)")
     print("  loop <anzahl>      - Loop-Limit (0 = unendlich)")
     print("\n🌐 Art-Net:")
-    print("  ip <adresse>       - Ändert Ziel-IP")
-    print("  universe <start>   - Ändert Start-Universum")
-    print("  blackout           - Alle DMX-Kanäle auf 0")
+    print("  ip <address>       - Changes target IP")
+    print("  universe <start>   - Changes start universe")
+    print("  blackout           - All DMX channels to 0")
     print("  test <farbe>       - Testmuster: red/green/blue/white/yellow/cyan/magenta/gradient")
     print("  artnet map <format> <universes> - RGB-Kanal-Reihenfolge (z.B. artnet map grb 0-5)")
     print("  artnet show        - Zeigt aktuelle Kanal-Mappings")
@@ -51,25 +51,25 @@ def print_help():
     print("  record start       - Startet RGB-Aufzeichnung")
     print("  record stop [file] - Stoppt Aufzeichnung (optional: Dateiname)")
     print("\n💾 Cache:")
-    print("  cache clear        - Löscht alle Cache-Dateien")
-    print("  cache info         - Zeigt Cache-Informationen (Größe, Dateien)")
-    print("  cache delete <name> - Löscht Cache für spezifisches Video")
+    print("  cache clear        - Deletes all cache files")
+    print("  cache info         - Shows cache information (size, files)")
+    print("  cache delete <name> - Deletes cache for specific video")
     print("  cache enable       - Aktiviert RGB-Caching")
     print("  cache disable      - Deaktiviert RGB-Caching")
-    print("  cache size         - Zeigt Größe aller Cache-Dateien")
+    print("  cache size         - Shows size of all cache files")
     print("  cache fill         - Cached alle Videos neu (dauert lange!)")
     print("\n🔌 Plugins:")
     print("  plugin list        - Zeigt alle registrierten Plugins")
-    print("  plugin reload      - Lädt alle Plugins neu (Hot-Reload)")
+    print("  plugin reload      - Reloads all plugins (hot-reload)")
     print("\n🎨 Prozedural:")
-    print("  scripts [list]     - Zeigt alle verfügbaren Python-Scripts")
-    print("  script:<name>      - Lädt und startet Script (z.B. script:rainbow_wave)")
+    print("  scripts [list]     - Shows all available Python scripts")
+    print("  script:<name>      - Loads and starts script (e.g. script:rainbow_wave)")
     print("                       Scripts laufen endlos und generieren Grafiken in Echtzeit")
     print("\n🔧 Allgemein:")
     print("  help               - Zeigt diese Hilfe")
     print("  exit/quit          - Beendet die Anwendung")
     print("\n💡 Hinweis: REST API startet automatisch beim Programmstart")
-    print("   Alle Befehle sind auch via Web-Interface verfügbar!")
+    print("   All commands are also available via web interface!")
     print("=" * 80)
 
 

@@ -1,11 +1,11 @@
 /**
- * Stroke Font Definition - Vektorbasierte Buchstaben
- * Koordinaten normalisiert auf 0-100 Einheiten (Breite) x 0-140 (Höhe mit Unterlängen)
- * Baseline bei y=100, Caps bei y=0, Descender bis y=140
+ * Stroke Font Definition - Vector-based letters
+ * Coordinates normalized to 0-100 units (width) x 0-140 (height with descenders)
+ * Baseline at y=100, caps at y=0, descender to y=140
  */
 
 const STROKE_FONT = {
-  // Großbuchstaben
+  // Uppercase letters
   'A': [
     { type: 'line', points: [[20, 100], [50, 0], [80, 100]] },
     { type: 'line', points: [[35, 60], [65, 60]] }
@@ -197,14 +197,14 @@ const STROKE_FONT = {
   ]
 };
 
-// Buchstaben-Breiten (für Spacing)
+// Letter widths (for spacing)
 const LETTER_WIDTHS = {
   'I': 60, '1': 60, '.': 40, ',': 40, '!': 40, ':': 40,
   'W': 120, 'M': 120,
   ' ': 50
 };
 
-// Standard-Breite falls nicht definiert
+// Default width if not defined
 const DEFAULT_LETTER_WIDTH = 100;
 
 // Letter Spacing

@@ -1,0 +1,158 @@
+<!-- MIDI Clock Component
+     Requires: socket (SocketIO), Bootstrap 5, midi-display.css
+     Include anywhere in a page: <div data-include="components/midi-clock.html"></div>
+     or paste inline.
+-->
+<div class="midi-clock-container p-3">
+
+    <!-- Clock Input -->
+    <div class="midi-section mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong>Clock In</strong>
+            <span id="clockInStatus" class="badge bg-secondary">Disconnected</span>
+        </div>
+        <div class="d-flex gap-2 mb-2">
+            <select id="clockInputDevice" class="form-select form-select-sm flex-grow-1">
+                <option value="">Select device…</option>
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="midiClock.connectInput()">Connect</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="midiClock.disconnectInput()">✕</button>
+        </div>
+        <div class="d-flex gap-3 mb-2 small">
+            <span>BPM: <strong id="clockInBPM">--</strong></span>
+            <span>Beat: <strong id="clockInBeat">--</strong></span>
+        </div>
+        <div class="d-flex gap-2">
+            <div class="beat-dot" id="beat-0"></div>
+            <div class="beat-dot" id="beat-1"></div>
+            <div class="beat-dot" id="beat-2"></div>
+            <div class="beat-dot" id="beat-3"></div>
+        </div>
+    </div>
+
+    <!-- Clock Output -->
+    <div class="midi-section">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong>Clock Out</strong>
+            <span id="clockOutStatus" class="badge bg-secondary">Disconnected</span>
+        </div>
+        <div class="d-flex gap-2 mb-2">
+            <select id="clockOutputDevice" class="form-select form-select-sm flex-grow-1">
+                <option value="">Select device…</option>
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="midiClock.connectOutput()">Connect</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="midiClock.disconnectOutput()">✕</button>
+        </div>
+        <div class="mb-2">
+            <label class="small">BPM: <strong id="clockOutBPMValue">120</strong></label>
+            <input type="range" class="form-range" id="clockOutBPM"
+                   min="20" max="300" value="120"
+                   oninput="midiClock.setBPM(this.value)">
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-success"  onclick="midiClock.start()">▶ Start</button>
+            <button class="btn btn-sm btn-warning"  onclick="midiClock.continue()">⏩ Continue</button>
+            <button class="btn btn-sm btn-danger"   onclick="midiClock.stop()">■ Stop</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const midiClock = {
+    async init() {
+        try {
+            const data = await (await fetch('/api/midi/devices')).json();
+            if (data.success) {
+                this._fillSelect('clockInputDevice',  data.input_devices);
+                this._fillSelect('clockOutputDevice', data.output_devices);
+            }
+        } catch (e) {
+            console.error('MIDI devices load error:', e);
+        }
+        if (typeof socket !== 'undefined') {
+            socket.on('midi_clock_update', (s) => this._update(s));
+        }
+    },
+
+    _fillSelect(id, devices) {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        sel.innerHTML = '<option value="">Select device…</option>';
+        devices.forEach(d => {
+            const o = document.createElement('option');
+            o.value = o.textContent = d;
+            sel.appendChild(o);
+        });
+    },
+
+    async connectInput() {
+        const device = document.getElementById('clockInputDevice')?.value;
+        if (!device) return;
+        await fetch('/api/midi/clock/connect-input', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ device })
+        });
+    },
+
+    async disconnectInput() {
+        await fetch('/api/midi/clock/disconnect-input', { method: 'POST' });
+    },
+
+    async connectOutput() {
+        const device = document.getElementById('clockOutputDevice')?.value;
+        const bpm    = parseFloat(document.getElementById('clockOutBPM')?.value ?? 120);
+        if (!device) return;
+        await fetch('/api/midi/clock/connect-output', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ device, bpm })
+        });
+    },
+
+    async disconnectOutput() {
+        await fetch('/api/midi/clock/disconnect-output', { method: 'POST' });
+    },
+
+    async setBPM(bpm) {
+        const label = document.getElementById('clockOutBPMValue');
+        if (label) label.textContent = bpm;
+        await fetch('/api/midi/clock/set-bpm', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ bpm: parseFloat(bpm) })
+        });
+    },
+
+    async start()    { await fetch('/api/midi/clock/start',    { method: 'POST' }); },
+    async continue() { await fetch('/api/midi/clock/continue', { method: 'POST' }); },
+    async stop()     { await fetch('/api/midi/clock/stop',     { method: 'POST' }); },
+
+    _update(s) {
+        const inEl  = document.getElementById('clockInStatus');
+        const outEl = document.getElementById('clockOutStatus');
+
+        if (inEl) {
+            inEl.textContent = s.input.connected ? 'Connected: ' + s.input.device : 'Disconnected';
+            inEl.className   = 'badge ' + (s.input.connected ? 'bg-success' : 'bg-secondary');
+        }
+
+        const bpmEl  = document.getElementById('clockInBPM');
+        const beatEl = document.getElementById('clockInBeat');
+        if (bpmEl)  bpmEl.textContent  = s.input.bpm  || '--';
+        if (beatEl) beatEl.textContent = s.input.beat_position != null ? s.input.beat_position.toFixed(2) : '--';
+
+        const beat = Math.floor(s.input.beat_position) % 4;
+        for (let i = 0; i < 4; i++) {
+            document.getElementById('beat-' + i)?.classList.toggle('beat-active', i === beat && s.input.playing);
+        }
+
+        if (outEl) {
+            const running = s.output.running;
+            outEl.textContent = s.output.connected
+                ? s.output.device + (running ? ' (Running)' : '')
+                : 'Disconnected';
+            outEl.className = 'badge ' + (running ? 'bg-primary' : s.output.connected ? 'bg-success' : 'bg-secondary');
+        }
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => midiClock.init());
+</script>
