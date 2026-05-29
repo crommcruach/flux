@@ -165,7 +165,7 @@ html, body {
 }
 
 .autoplay-toggle:has(input:checked) .autoplay-label {
-    color: #667eea;
+    color: var(--accent-color);
 }
 
 .autoplay-switch {
@@ -188,7 +188,7 @@ html, body {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #495057;
+    background-color: var(--btn-secondary);
     transition: 0.3s;
     border-radius: 20px;
 }
@@ -206,7 +206,7 @@ html, body {
 }
 
 .autoplay-switch input:checked + .autoplay-slider {
-    background-color: #667eea;
+    background-color: var(--accent-color);
 }
 
 .autoplay-switch input:checked + .autoplay-slider:before {
@@ -227,11 +227,11 @@ html, body {
 }
 
 .master-label.is-master {
-    color: #ffc107;
+    color: var(--btn-warning);
 }
 
 .master-label.is-slave {
-    color: #28a745;
+    color: var(--accent-color);
 }
 
 .master-switch {
@@ -254,7 +254,7 @@ html, body {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #495057;
+    background-color: var(--btn-secondary);
     transition: 0.3s;
     border-radius: 20px;
 }
@@ -272,11 +272,11 @@ html, body {
 }
 
 .master-switch input:checked + .master-slider {
-    background-color: #ffc107;
+    background-color: var(--btn-warning);
 }
 
 .master-switch input:disabled + .master-slider {
-    background-color: #28a745;
+    background-color: var(--accent-color);
     cursor: not-allowed;
 }
 
@@ -747,8 +747,8 @@ html, body {
 }
 
 .effect-item.system-plugin {
-    border-left: 3px solid #ffc107;
-    background: linear-gradient(90deg, rgba(255, 193, 7, 0.05) 0%, var(--bg-secondary) 20%);
+    border-left: 3px solid var(--btn-warning);
+    background: linear-gradient(90deg, rgba(217, 119, 6, 0.06) 0%, var(--bg-secondary) 20%);
 }
 
 .effect-item.effect-disabled {
@@ -869,7 +869,7 @@ html, body {
 }
 
 .effect-enable-switch input:checked + .effect-enable-slider {
-    background-color: #28a745;
+    background-color: var(--accent-color);
 }
 
 .effect-enable-switch input:checked + .effect-enable-slider:before {
@@ -877,7 +877,7 @@ html, body {
 }
 
 .effect-enable-switch:hover .effect-enable-slider {
-    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.25);
 }
 
 .effect-toggle {
@@ -1114,7 +1114,7 @@ html, body {
 
 .transition-toggle:hover {
     background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary-color) 100%);
-    box-shadow: 0 0 15px rgba(0, 123, 255, 0.5);
+    box-shadow: var(--glow-cyan, 0 0 12px rgba(6, 182, 212, 0.4));
 }
 
 .transition-icon {
@@ -1270,6 +1270,78 @@ html, body {
 .layer-card.base-layer {
     border-left: 3px solid #ffd700;
     background: linear-gradient(90deg, rgba(255, 215, 0, 0.1) 0%, var(--bg-secondary) 10%);
+}
+
+.layer-card.empty-slot {
+    border-left: 3px solid var(--border-color);
+    border-style: dashed;
+    opacity: 0.7;
+    cursor: default;
+}
+
+.layer-card.empty-slot:hover {
+    opacity: 1;
+    border-color: var(--accent-color);
+    border-style: dashed;
+}
+
+.layer-card.empty-slot.drag-over-slot {
+    border-color: var(--primary-color);
+    border-style: solid;
+    opacity: 1;
+    background: rgba(0, 123, 255, 0.08);
+}
+
+.layer-empty-drop {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.4rem;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    border-radius: 3px;
+}
+
+.layer-empty-icon {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    line-height: 1;
+}
+
+.layer-name {
+    cursor: default;
+    user-select: none;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.layer-name:hover {
+    color: var(--accent-color);
+}
+
+.layer-name-input {
+    font-size: inherit;
+    font-weight: inherit;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--accent-color);
+    border-radius: 3px;
+    padding: 1px 4px;
+    width: 100%;
+    box-sizing: border-box;
+    outline: none;
+}
+
+.layer-base-badge {
+    font-size: 0.65rem;
+    color: #ffd700;
+    font-weight: normal;
+    margin-left: 2px;
+    opacity: 0.8;
 }
 
 .layer-card.selected {
@@ -1455,8 +1527,8 @@ html, body {
 }
 
 .layer-toggle.enabled {
-    background: var(--success-color, #28a745);
-    border-color: var(--success-color, #28a745);
+    background: var(--accent-color, #06b6d4);
+    border-color: var(--accent-color, #06b6d4);
 }
 
 .layer-toggle.disabled {
@@ -1842,11 +1914,11 @@ html, body {
 .trim-controls-section .irs--round .irs-from,
 .trim-controls-section .irs--round .irs-to,
 .trim-controls-section .irs--round .irs-single {
-    background: var(--accent-color, #0d6efd);
+    background: var(--accent-color, #06b6d4);
 }
 
 .trim-controls-section .irs--round .irs-handle {
-    border-color: var(--accent-color, #0d6efd);
+    border-color: var(--accent-color, #06b6d4);
     cursor: grab;
 }
 
@@ -1910,7 +1982,7 @@ html, body {
 }
 
 .preview-area-waveform:hover {
-    border-color: var(--primary-color, #667eea);
+    border-color: var(--primary-color, #06b6d4);
     color: #999;
 }
 
@@ -2024,7 +2096,7 @@ html, body {
 }
 
 .slot-item.active {
-    border-color: var(--primary-color, #667eea);
+    border-color: var(--primary-color, #06b6d4);
     background: var(--bg-dark, #3c3c3c);
 }
 
@@ -2048,7 +2120,7 @@ html, body {
 }
 
 .slot-item.active .slot-title {
-    color: var(--primary-color, #667eea);
+    color: var(--primary-color, #06b6d4);
 }
 
 .slot-time {
@@ -2113,7 +2185,7 @@ html, body {
 }
 
 .split-time-input:focus {
-    border-color: var(--primary-color, #667eea);
+    border-color: var(--primary-color, #06b6d4);
     outline: none;
 }
 
@@ -2135,7 +2207,7 @@ html, body {
 }
 
 .info-badge {
-    background: var(--primary-color, #667eea);
+    background: var(--primary-color, #06b6d4);
     color: white;
     padding: 2px 8px;
     border-radius: 3px;
@@ -2180,20 +2252,20 @@ html, body {
 }
 
 .context-menu-item-danger {
-    color: #dc3545;
+    color: var(--btn-danger);
 }
 
 .context-menu-item-danger:hover {
-    background: rgba(220, 53, 69, 0.1);
+    background: rgba(192, 38, 211, 0.1);
 }
 
 .context-menu-item-warning {
-    color: #ffc107;
+    color: var(--btn-warning);
     font-weight: 500;
 }
 
 .context-menu-item-warning:hover {
-    background: rgba(255, 193, 7, 0.1);
+    background: rgba(217, 119, 6, 0.1);
 }
 
 .context-menu-divider {

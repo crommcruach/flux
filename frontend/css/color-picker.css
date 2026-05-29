@@ -3,8 +3,8 @@
    ======================================== */
 
 .color-picker-container {
-    background: #1e1e1e;
-    border: 1px solid #3c3c3c;
+    background: var(--bg-secondary, #14141e);
+    border: 1px solid var(--border-color, #262636);
     border-radius: 4px;
     padding: 12px;
     max-width: 650px;
@@ -20,7 +20,7 @@
 .color-swatch {
     width: 45px;
     height: 24px;
-    border: 1px solid #555;
+    border: 1px solid var(--border-color-light, #323248);
     border-radius: 3px;
     cursor: pointer;
     background: #ff0000;
@@ -35,9 +35,9 @@
 .mode-tab {
     padding: 4px 12px;
     font-size: 11px;
-    background: #2b2b2b;
-    border: 1px solid #3c3c3c;
-    color: #a0a0a0;
+    background: var(--bg-tertiary, #1c1c28);
+    border: 1px solid var(--border-color, #262636);
+    color: var(--text-secondary, #8888a8);
     cursor: pointer;
     transition: all 0.2s;
 }
@@ -51,12 +51,15 @@
 }
 
 .mode-tab.active {
-    background: #3c3c3c;
-    color: #e0e0e0;
+    background: var(--bg-secondary, #14141e);
+    border-color: var(--accent-color, #06b6d4);
+    color: var(--text-primary, #e8e8f4);
 }
 
 .mode-tab:hover:not(.active) {
-    background: #333;
+    background: var(--hover-bg, rgba(6, 182, 212, 0.07));
+    border-color: var(--border-hover, #06b6d4);
+    color: var(--text-primary, #e8e8f4);
 }
 
 .mode-content {
@@ -80,7 +83,7 @@
 
 .slider-label {
     font-size: 12px;
-    color: #e0e0e0;
+    color: var(--text-primary, #e8e8f4);
     min-width: 70px;
 }
 
@@ -93,7 +96,7 @@
     width: 100%;
     height: 20px;
     border-radius: 3px;
-    border: 1px solid #555;
+    border: 1px solid var(--border-color-light, #323248);
     position: relative;
     cursor: pointer;
     overflow: hidden;
@@ -108,7 +111,7 @@
 .alpha-slider-group {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid #333;
+    border-top: 1px solid var(--border-color, #262636);
 }
 
 /* Checkerboard underlay so transparency is visible */
@@ -136,7 +139,7 @@
 
 .slider-value {
     font-size: 11px;
-    color: #a0a0a0;
+    color: var(--text-secondary, #8888a8);
     min-width: 45px;
     text-align: right;
 }
@@ -144,7 +147,7 @@
 .add-to-palette-btn {
     margin-top: 8px;
     padding: 6px 12px;
-    background: var(--accent-color, #007bff);
+    background: var(--accent-color, #06b6d4);
     color: white;
     border: none;
     border-radius: 3px;
@@ -154,7 +157,7 @@
 }
 
 .add-to-palette-btn:hover {
-    background: var(--accent-hover, #0056b3);
+    background: var(--btn-primary-hover, #0891b2);
 }
 
 .add-to-palette-btn.hidden {
@@ -171,7 +174,7 @@
 
 .palette-color {
     aspect-ratio: 1;
-    border: 1px solid #555;
+    border: 1px solid var(--border-color-light, #323248);
     border-radius: 3px;
     cursor: pointer;
     transition: transform 0.2s, box-shadow 0.2s;
@@ -205,7 +208,7 @@
 .palette-empty {
     padding: 20px;
     text-align: center;
-    color: #888;
+    color: var(--text-tertiary, #5a5a78);
     font-size: 12px;
     grid-column: 1 / -1;
 }
@@ -220,9 +223,9 @@
 .palette-named-select {
     flex: 1;
     padding: 4px 6px;
-    background: #2b2b2b;
-    border: 1px solid #3c3c3c;
-    color: #e0e0e0;
+    background: var(--bg-tertiary, #1c1c28);
+    border: 1px solid var(--border-color, #262636);
+    color: var(--text-primary, #e8e8f4);
     border-radius: 3px;
     font-size: 11px;
     cursor: pointer;
@@ -230,7 +233,7 @@
 
 .palette-named-select:focus {
     outline: none;
-    border-color: #555;
+    border-color: var(--accent-color, #06b6d4);
 }
 
 .palette-actions {
@@ -240,9 +243,9 @@
 
 .palette-btn {
     padding: 6px 12px;
-    background: #2b2b2b;
-    border: 1px solid #3c3c3c;
-    color: #e0e0e0;
+    background: var(--bg-tertiary, #1c1c28);
+    border: 1px solid var(--border-color, #262636);
+    color: var(--text-primary, #e8e8f4);
     border-radius: 3px;
     cursor: pointer;
     font-size: 11px;
@@ -250,20 +253,21 @@
 }
 
 .palette-btn:hover {
-    background: #3c3c3c;
+    background: var(--hover-bg, rgba(6, 182, 212, 0.07));
+    border-color: var(--border-hover, #06b6d4);
 }
 
 .palette-btn-delete {
-    background: #3a1a1a;
-    border-color: #6b2a2a;
-    color: #e07070;
+    background: rgba(192, 38, 211, 0.08);
+    border-color: rgba(192, 38, 211, 0.3);
+    color: var(--color-magenta-bright, #e040fb);
     padding: 6px 8px;
 }
 
 .palette-btn-delete:hover {
-    background: #5a1a1a;
-    border-color: #a03030;
-    color: #ff9090;
+    background: rgba(192, 38, 211, 0.18);
+    border-color: rgba(192, 38, 211, 0.6);
+    color: #fff;
 }
 
 /* ----------------------------------------
@@ -286,7 +290,7 @@
     border-radius: 50%;
     cursor: crosshair;
     flex-shrink: 0;
-    border: 1px solid #444;
+    border: 1px solid var(--border-color, #262636);
 }
 
 .palette-wheel-right {
@@ -301,7 +305,7 @@
 .palette-wheel-swatch {
     width: 100%;
     height: 36px;
-    border: 1px solid #555;
+    border: 1px solid var(--border-color-light, #323248);
     border-radius: 3px;
     background: #ff0000;
     flex-shrink: 0;
@@ -309,14 +313,14 @@
 
 .palette-wheel-bright-label {
     font-size: 10px;
-    color: #888;
+    color: var(--text-tertiary, #5a5a78);
 }
 
 .palette-wheel-bright-track {
     flex: 1;
     width: 18px;
     background: linear-gradient(to bottom, #ffffff, #000000);
-    border: 1px solid #555;
+    border: 1px solid var(--border-color-light, #323248);
     border-radius: 3px;
     position: relative;
     cursor: ns-resize;
@@ -341,15 +345,15 @@
 }
 
 .palette-btn-confirm {
-    background: #3a3a00;
-    border-color: #7a7a00;
-    color: #ffff80;
+    background: rgba(251, 191, 36, 0.1);
+    border-color: rgba(251, 191, 36, 0.35);
+    color: var(--color-yellow-bright, #fbbf24);
 }
 
 .palette-btn-confirm:hover {
-    background: #5a5a00;
-    border-color: #aaaa00;
-    color: #ffff99;
+    background: rgba(251, 191, 36, 0.2);
+    border-color: rgba(251, 191, 36, 0.6);
+    color: #fff;
 }
 
 .hue-range-track {

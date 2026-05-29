@@ -166,7 +166,7 @@ class VideoSource(FrameSource):
         )
 
     def reset(self):
-        self.current_frame = 0
+        self.current_frame = self._trim_start
 
     def cleanup(self):
         self.frames = None

@@ -1055,17 +1055,19 @@ class SequenceManager {
             max_value: maxValue
         };
         
+        const targetParameter = this.contextParameter.uid || parameterId;
+        
         const data = {
             type: 'timeline',
-            target_parameter: this.contextParameter.uid || parameterId,
+            target_parameter: targetParameter,
             config: config
         };
         
-        console.log('📦 Creating timeline sequence with UID:', this.contextParameter.uid, 'config:', data);
+        console.log('📦 Creating timeline sequence with UID:', targetParameter, 'config:', data);
         
         try {
             // Check if sequence already exists and update it
-            const existingSequence = this.sequences.find(s => s.target_parameter === parameterId);
+            const existingSequence = this.sequences.find(s => s.target_parameter === targetParameter);
             
             let response;
             if (existingSequence) {
@@ -1977,22 +1979,25 @@ class SequenceManager {
      * @param {string} clipId - The UUID of the clip
      * @param {string} pluginId - The plugin ID of the effect (e.g., 'transform', 'blur')
      */
-    async cleanupSequencesForEffect(clipId, pluginId) {
-        if (!clipId || !pluginId) return;
+    async cleanupSequencesForEffect(clipId, effectIndex, player = 'clip') {
+        if (player === 'clip' && (!clipId || effectIndex === undefined || effectIndex === null)) return;
+        if (player !== 'clip' && effectIndex === undefined) return;
         
-        console.log(`🧹 Cleaning up sequences for effect ${pluginId} on clip: ${clipId}`);
+        console.log(`🧹 Cleaning up sequences for ${player} effect[${effectIndex}] on clip: ${clipId}`);
         
-        // Find all sequences whose target_parameter matches this clip and plugin
-        // Format (NEW): param_clip_{clip_id}_effect_{idx}_{param}
-        // Format (OLD): param_clip_{clip_id}_{param}_... (matches by path)
+        // Find all sequences whose target_parameter matches this effect.
+        // Clip-level NEW format:   param_clip_{clipId}_effect_{effectIndex}_{param}
+        // Layer-level NEW format:  param_clip_{clipId}_layer_{N}_effect_{effectIndex}_{param}
+        // Player-level legacy:     param_{player}_{effectIndex}_{param}_{shortUuid}
         const effectSequences = this.sequences.filter(seq => {
-            if (!seq.target_parameter || !seq.target_parameter.includes(`_${clipId}_`)) {
-                return false;
+            if (!seq.target_parameter) return false;
+            if (player !== 'clip') {
+                // Legacy format for video/artnet player-level effects
+                return seq.target_parameter.startsWith(`param_${player}_${effectIndex}_`);
             }
-            // Also check if the parameter path includes the plugin_id
-            // Path format: {player}.{clipId}.{pluginId}.{paramName}
-            const pathParts = seq.target_parameter.split('.');
-            return pathParts.length >= 3 && pathParts[2] === pluginId;
+            // Clip-level: must contain clip id and effect index, must NOT be a layer effect
+            return seq.target_parameter.includes(`_${clipId}_effect_${effectIndex}_`) &&
+                   !seq.target_parameter.includes('_layer_');
         });
         
         if (effectSequences.length === 0) {
@@ -2029,9 +2034,8 @@ class SequenceManager {
             if (!seq.target_parameter || !seq.target_parameter.includes(`_${clipId}_`)) {
                 return false;
             }
-            // Additional check: layer sequences have layerId in their context or metadata
-            // For now, we'll remove all sequences for the clip+layer combination
-            return true;
+            // Layer-level NEW format: param_clip_{clipId}_layer_{layerId}_effect_{idx}_{param}
+            return seq.target_parameter.includes(`_layer_${layerId}_`);
         });
         
         if (layerSequences.length === 0) {

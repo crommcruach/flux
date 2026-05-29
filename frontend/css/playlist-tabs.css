@@ -36,7 +36,7 @@
     cursor: pointer;
     transition: all 0.2s;
     font-size: 11px;
-    color: #bbb;
+    color: var(--text-secondary, #bbb);
     position: relative;
     user-select: none;
     max-height: 30px;
@@ -53,10 +53,10 @@
     color: #fff;
 }
 
-/* Active playlist (green border - controls playback) */
+/* Active playlist (cyan border - controls playback) */
 .playlist-tab.active {
-    border-color: #00ff00;
-    box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+    border-color: var(--color-cyan-bright, #22d3ee);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.35);
 }
 
 .playlist-tab i {
@@ -77,13 +77,13 @@
 }
 
 .active-indicator {
-    color: #00ff00;
+    color: var(--color-cyan-bright, #22d3ee);
     font-size: 9px;
     margin-left: 2px;
 }
 
 .add-playlist-btn {
-    background: rgba(0, 150, 255, 0.8);
+    background: var(--btn-primary, #06b6d4);
     border: none;
     color: white;
     padding: 4px 10px;
@@ -95,7 +95,7 @@
 }
 
 .add-playlist-btn:hover {
-    background: rgba(0, 180, 255, 1);
+    background: var(--btn-primary-hover, #0891b2);
     transform: scale(1.05);
 }
 
@@ -105,7 +105,7 @@
     background: rgba(30, 30, 40, 0.8);
     border-radius: 2px;
     font-size: 9px;
-    color: #888;
+    color: var(--text-tertiary, #888);
     text-align: center;
     white-space: nowrap;
     overflow: hidden;
@@ -133,7 +133,7 @@
     padding: 8px 15px;
     background: transparent;
     border: none;
-    color: #ccc;
+    color: var(--text-secondary, #ccc);
     cursor: pointer;
     text-align: left;
     font-size: 13px;

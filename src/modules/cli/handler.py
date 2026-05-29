@@ -527,7 +527,7 @@ class CLIHandler:
                 universe_list = [int(universes_str)]
         except ValueError:
             logger.warning(f"❌ Invalid universe range: {universes_str}")
-            logger.debug("Use format: '0-5' or '3'"))
+            logger.debug("Use format: '0-5' or '3'")
             return
         
         # Lade config.json

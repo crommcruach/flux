@@ -266,6 +266,10 @@
       }
     ]
   },
+  "layers": {
+    "_comment": "Layer system settings. default_names: names for pre-allocated layer slots 0-4 (slot 0 = base clip).",
+    "default_names": ["Background", "Overlay 1", "Overlay 2", "Overlay 3", "Mask"]
+  },
   "paths": {
     "cache_dir": "caches",
     "data_dir": "data",
@@ -274,7 +278,7 @@
     "projects_dir": "projects",
     "scripts_dir": "scripts",
     "sequencer_audio_dir": "audio",
-    "video_dir": "video",
+    "video_dir": "C:\\Py_artnet_data\\video",
     "video_sources": []
   },
   "performance": {

@@ -884,6 +884,15 @@ class Player:
         if clip_id in playlist_params:
             saved_effects = playlist_params[clip_id].get('effects', [])
 
+        # Build pre-allocated empty overlay slots from registry defaults
+        _names = self.clip_registry._default_layer_names
+        empty_slots = [
+            {'layer_id': i, 'name': _names[i] if i < len(_names) else f'Layer {i}',
+             'source_type': 'empty', 'source_path': None,
+             'blend_mode': 'normal', 'opacity': 1.0, 'enabled': True}
+            for i in range(1, len(_names))
+        ]
+
         self.clip_registry.clips[clip_id] = {
             'clip_id': clip_id,
             'player_id': self.player_id,
@@ -893,7 +902,8 @@ class Player:
             'metadata': {},
             'created_at': __import__('datetime').datetime.now().isoformat(),
             'effects': saved_effects,
-            'layers': [],
+            'layers': empty_slots,
+            'base_layer_name': _names[0] if _names else 'Background',
             'sequences': {},
             'in_point': None,
             'out_point': None,

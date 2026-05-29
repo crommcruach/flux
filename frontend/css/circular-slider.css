@@ -195,20 +195,20 @@
 /* Variants */
 .circular-slider.variant-primary .circular-slider-progress circle,
 .circular-slider.variant-primary .circular-slider-progress path {
-    stroke: #64c8ff;
+    stroke: var(--color-cyan-bright, #22d3ee);
 }
 
 .circular-slider.variant-success .circular-slider-progress circle,
 .circular-slider.variant-success .circular-slider-progress path {
-    stroke: #28a745;
+    stroke: var(--success-dot, #10b981);
 }
 
 .circular-slider.variant-warning .circular-slider-progress circle,
 .circular-slider.variant-warning .circular-slider-progress path {
-    stroke: #ffc107;
+    stroke: var(--color-yellow-bright, #fbbf24);
 }
 
 .circular-slider.variant-danger .circular-slider-progress circle,
 .circular-slider.variant-danger .circular-slider-progress path {
-    stroke: #dc3545;
+    stroke: var(--color-magenta-bright, #e040fb);
 }

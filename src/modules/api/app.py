@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flask REST API with WebSocket for Flux control
 """
 from flask import Flask
@@ -28,67 +28,72 @@ class RestAPI:
         self.video_dir = video_dir
         self.config = config or {}
         self.replay_manager = replay_manager
-        self.logger = logger    Add logger as instance attribute
-        self.clip_registry = get_clip_registry()    Get singleton instance
+        self.logger = logger    # Add logger as instance attribute
+        self.clip_registry = get_clip_registry()    # Get singleton instance
+
+        # Apply layer name defaults from config
+        _layer_defaults = (config or {}).get('layers', {}).get('default_names')
+        if _layer_defaults:
+            self.clip_registry.set_layer_defaults(_layer_defaults)
         
-          Traffic counter for stream APIs
+        # Traffic counter for stream APIs
         import time
         self.stream_traffic = {
             'preview': {'bytes': 0, 'frames': 0, 'start_time': time.time()},
             'fullscreen': {'bytes': 0, 'frames': 0, 'start_time': time.time()}
         }
         
-          Initialize unified command executor
+        # Initialize unified command executor
         self.command_executor = CommandExecutor(
             player_provider=lambda: self.player_manager.player,
-            dmx_controller=None,    DMX input removed
+            dmx_controller=None,    # DMX input removed
             video_dir=video_dir,
             data_dir=data_dir,
             config=config or {}
         )
         
-          Console Log Buffer aus config oder default
+        # Console Log Buffer aus config oder default
         console_maxlen = self.config.get('api', {}).get('console_log_maxlen', CONSOLE_LOG_MAX_LENGTH)
         self.console_log = deque(maxlen=console_maxlen)
         
-          BPM streaming
+        # BPM streaming
         self._bpm_streaming_thread = None
         self._bpm_streaming_active = False
         
-          Flask App erstellen - static_folder muss absoluter Pfad sein
-          Pfad: src/modules/api -> src/modules -> src -> root, then add frontend
+        # Flask App erstellen - static_folder muss absoluter Pfad sein
+        # Pfad: src/modules/api -> src/modules -> src -> root, then add frontend
         static_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'frontend')
-          Empty static_url_path serves files at root level (e.g., /styles.css)
+        # Empty static_url_path serves files at root level (e.g., /styles.css)
         self.app = Flask(__name__, static_folder=static_path, static_url_path='')
         secret_key = self.config.get('api', {}).get('secret_key', 'flux_secret_key_2025')
         self.app.config['SECRET_KEY'] = secret_key
-        CORS(self.app)    Enable CORS for all routes
+        CORS(self.app)    # Enable CORS for all routes
         
-          Socket.IO initialisieren mit erweiterten Stabilit\u00e4ts-Einstellungen
-          Force polling first to establish connection, then upgrade to WebSocket
+        # Socket.IO initialisieren mit erweiterten Stabilit\u00e4ts-Einstellungen
+        # Force polling first to establish connection, then upgrade to WebSocket
         self.socketio = SocketIO(
             self.app, 
             cors_allowed_origins="*", 
             async_mode='threading',
             logger=False,
             engineio_logger=False,
-            ping_timeout=30,             30s timeout
-            ping_interval=10,            10s ping interval  
-            max_http_buffer_size=5e6,    5MB buffer
+            ping_timeout=30,    # 30s timeout
+            ping_interval=10,    # 10s ping interval  
+            max_http_buffer_size=5e6,    # 5MB buffer
             manage_session=False,
-            always_connect=True,         Keep-Alive
-            allow_upgrades=True,         Allow polling -> websocket upgrade
-              Compression settings for binary frames (JPEG)
-            http_compression=False,      No HTTP compression
-            websocket_compression=False   No WebSocket compression
+            always_connect=True,    # Keep-Alive
+            allow_upgrades=True,    # Allow polling -> websocket upgrade
+            # Compression settings for binary frames (JPEG)
+            http_compression=False,    # No HTTP compression
+            websocket_compression=False    # No WebSocket compression
         )
         
-          Routen registrieren
+        # Routen registrieren
         self._register_routes()
         self._register_socketio_events()
-        self._setup_websocket_command_handlers()    NEW: WebSocket command channels
+        self._setup_websocket_command_handlers()    # NEW: WebSocket command channels
         
-          Error handler for 500 errors (prevents write() before start_response)
+        # Error handler for 500 errors (prevents write() before start_response)
         @self.app.errorhandler(500)
         def handle_internal_error(e):
             """Catches server errors and prevents stdout issues."""
@@ -96,12 +101,12 @@ class RestAPI:
             logger.error(f"Server-Fehler: {e}")
             return jsonify({"error": "Internal Server Error"}), 500
         
-          404 Handler (ohne lautes Logging)
+        # 404 Handler (ohne lautes Logging)
         @self.app.errorhandler(404)
         def handle_not_found(e):
             """Behandelt 404-Fehler still."""
             from flask import jsonify, request
-              Nur loggen wenn es kein favicon oder bekannte statische Datei ist
+            # Nur loggen wenn es kein favicon oder bekannte statische Datei ist
             if not request.path.endswith(('.ico', '.map', '.svg')):
                 logger.debug(f"404: {request.path}")
             return jsonify({"error": "Not Found"}), 404
@@ -130,27 +135,27 @@ class RestAPI:
             artnet_routing_manager: ArtNetRoutingManager instance  
             audio_analyzer: AudioAnalyzer instance (optional)
         """
-          Unified Player API routes
+        # Unified Player API routes
         from .player.playback import register_unified_routes
         register_unified_routes(self.app, self.player_manager, self.config, self.socketio, playlist_system)
         logger.debug("Unified Player API routes registered")
         
-          Transition API routes
+        # Transition API routes
         from .player.transitions import register_transition_routes
         register_transition_routes(self.app, self.player_manager, playlist_system)
         logger.debug("Transition API routes registered")
         
-          Multi-Playlist API routes
+        # Multi-Playlist API routes
         from .player.playlists import register_playlist_routes
         register_playlist_routes(self.app, self.player_manager, self.config, self.socketio)
         logger.debug("Multi-Playlist API routes registered")
         
-          ArtNet Routing API routes
+        # ArtNet Routing API routes
         from .artnet import register_artnet_routing_routes
         register_artnet_routing_routes(self.app, artnet_routing_manager)
         logger.debug("ArtNet Routing API routes registered")
         
-          Set audio analyzer for BPM blueprint (already registered during init)
+        # Set audio analyzer for BPM blueprint (already registered during init)
         if audio_analyzer:
             from .audio.bpm import set_audio_analyzer, set_sequence_manager
             set_audio_analyzer(audio_analyzer)
@@ -161,11 +166,11 @@ class RestAPI:
     def _register_routes(self):
         """Registriert alle API-Routen."""
         
-          Lade Web-Interface Routen
+        # Lade Web-Interface Routen
         from .routes import register_web_routes
         register_web_routes(self.app, self.config, self.player_manager)
         
-          Lade externe API Route-Module
+        # Lade externe API Route-Module
         from .output.artnet import (
             register_reload_route,
             register_settings_routes,
@@ -180,14 +185,14 @@ class RestAPI:
         from .system.config import register_config_routes
         from .system.logs import register_log_routes
         from .content.plugins import register_plugins_api
-          REMOVED: benchmark module deleted
+        # REMOVED: benchmark module deleted
         from .player.layers import register_layer_routes
         from .player.clips import register_clip_layer_routes
         from .output.routing import register_output_routes
         from .content.converter import converter_bp
         from ..player.clips.registry import get_clip_registry
         
-          Registriere alle Routen
+        # Registriere alle Routen
         register_reload_route(self.app)
         register_settings_routes(self.app, self.player_manager)
         register_artnet_routes(self.app, self.player_manager)
@@ -199,67 +204,67 @@ class RestAPI:
         register_config_routes(self.app)
         register_log_routes(self.app)
         register_plugins_api(self.app)
-          REMOVED: register_benchmark_routes - benchmark module deleted
+        # REMOVED: register_benchmark_routes - benchmark module deleted
         register_layer_routes(self.app, self.player_manager, self.config)
         register_clip_layer_routes(self.app, get_clip_registry(), self.player_manager, self.video_dir)
         register_output_routes(self.app, self.player_manager)
         register_background_routes(self.app)
         
-          Register Converter Blueprint
+        # Register Converter Blueprint
         self.app.register_blueprint(converter_bp)
         
-          Register Files API
+        # Register Files API
         from .content.files import register_files_api
         register_files_api(self.app, self.video_dir, self.config)
         
-          NOTE: Unified Player API routes registered later in main.py after playlist_system is initialized
+        # NOTE: Unified Player API routes registered later in main.py after playlist_system is initialized
         
-          NOTE: Transition API routes will be registered later after playlist_system is available
+        # NOTE: Transition API routes will be registered later after playlist_system is available
         
-          Register Debug API
+        # Register Debug API
         from .system.debug import register_debug_routes
         register_debug_routes(self.app)
         
-          Register Performance Monitoring API
+        # Register Performance Monitoring API
         from .system.performance import register_performance_routes
         register_performance_routes(self.app, self.player_manager)
         logger.debug("Performance Monitoring API routes registered")
         
-          Store config in app for route access
+        # Store config in app for route access
         self.app.flux_config = self.config
         
-          Store player_manager and clip_registry for session save routes
+        # Store player_manager and clip_registry for session save routes
         self.app.flux_player_manager = self.player_manager
         self.app.flux_clip_registry = self.clip_registry
         
-          Register Session Snapshot API
+        # Register Session Snapshot API
         from .system.session import register_session_routes
         from ..session.state import get_session_state
         session_state = get_session_state()
         register_session_routes(self.app, session_state)
         
-          Register Sequencer API routes
+        # Register Sequencer API routes
         from .audio.sequencer import register_sequencer_routes
         register_sequencer_routes(self.app, self.player_manager, self.config, session_state)
         logger.debug("Sequencer API routes registered")
         
-          Register Dynamic Parameter Sequences API
+        # Register Dynamic Parameter Sequences API
         if hasattr(self.player_manager, 'sequence_manager') and hasattr(self.player_manager, 'audio_analyzer'):
             from .audio.sequences import register_sequence_routes
             register_sequence_routes(self.app, self.player_manager.sequence_manager, self.player_manager.audio_analyzer, self.player_manager, self.socketio)
             logger.debug("Parameter Sequence API routes registered with audio streaming")
         
-          Register BPM API Blueprint
+        # Register BPM API Blueprint
         from .audio.bpm import bpm_bp
         self.app.register_blueprint(bpm_bp)
         logger.debug("BPM API routes registered")
         
-          Register LED Mapper API Blueprint
+        # Register LED Mapper API Blueprint
         from .mapper import mapper_bp
         self.app.register_blueprint(mapper_bp)
         logger.debug("LED Mapper API routes registered")
 
-          Register MIDI API Blueprint (mappings, profiles, clock)
+        # Register MIDI API Blueprint (mappings, profiles, clock)
         from .midi import init_midi_api
         init_midi_api(self.app, self.socketio)
         logger.debug("MIDI API routes registered")
@@ -271,7 +276,7 @@ class RestAPI:
         def handle_connect(auth=None):
             """Client verbunden."""
             logger.debug(f"WebSocket Client verbunden")
-              Client sollte 'request_status' Event senden nach erfolgreichem Connect
+            # Client sollte 'request_status' Event senden nach erfolgreichem Connect
         
         @self.socketio.on('disconnect')
         def handle_disconnect():
@@ -279,7 +284,7 @@ class RestAPI:
             try:
                 logger.debug(f"WebSocket Client getrennt")
             except Exception:
-                pass    Ignore disconnect errors (Werkzeug bug)
+                pass    # Ignore disconnect errors (Werkzeug bug)
         
         @self.socketio.on('request_status')
         def handle_status_request():
@@ -298,7 +303,7 @@ class RestAPI:
                     "total": len(self.console_log)
                 })
         
-          BPM WebSocket namespace
+        # BPM WebSocket namespace
         @self.socketio.on('connect', namespace='/bpm')
         def handle_bpm_connect():
             """Client connected to BPM WebSocket"""
@@ -309,9 +314,9 @@ class RestAPI:
         """Setup WebSocket command handlers for low-latency commands."""
         from flask import request
         
-          ========================================
-          PLAYER NAMESPACE - Transport Controls
-          ========================================
+        # ========================================
+        # PLAYER NAMESPACE - Transport Controls
+        # ========================================
         @self.socketio.on('connect', namespace='/player')
         def handle_player_connect():
             logger.debug(f"Client connected to /player namespace: {request.sid}")
@@ -334,7 +339,7 @@ class RestAPI:
                         'command': 'play',
                         'player_id': player_id
                     })
-                      Broadcast status change to all clients
+                    # Broadcast status change to all clients
                     self.socketio.emit('player.status', {
                         'player_id': player_id,
                         'is_playing': True,
@@ -409,7 +414,7 @@ class RestAPI:
                         'command': 'next',
                         'player_id': player_id
                     })
-                      Broadcast playlist change
+                    # Broadcast playlist change
                     self.socketio.emit('playlist.changed', {
                         'player_id': player_id,
                         'current_index': getattr(player, 'playlist_index', 0)
@@ -445,9 +450,9 @@ class RestAPI:
                     'error': str(e)
                 })
         
-          ========================================
-          EFFECTS NAMESPACE - Effect Parameters
-          ========================================
+        # ========================================
+        # EFFECTS NAMESPACE - Effect Parameters
+        # ========================================
         @self.socketio.on('connect', namespace='/effects')
         def handle_effects_connect():
             logger.debug(f"Client connected to /effects namespace: {request.sid}")
@@ -467,38 +472,38 @@ class RestAPI:
             value = data.get('value')
             range_min = data.get('rangeMin')
             range_max = data.get('rangeMax')
-            uid = data.get('uid')    Preserve UID for sequence restoration
+            uid = data.get('uid')    # Preserve UID for sequence restoration
 
             if not clip_id:
                 logger.warning(f"🌐 WebSocket 'command.effect.param': clip_id is None — ignored (effect[{effect_index}].{param_name})")
                 return
 
-              Debug: Log WebSocket effect parameter updates
+            # Debug: Log WebSocket effect parameter updates
             logger.debug(f"🌐 WebSocket 'command.effect.param': clip={clip_id[:8]}..., effect[{effect_index}].{param_name} = {value}")
             
             try:
-                  Get player and update parameter
+                # Get player and update parameter
                 player = self.player_manager.get_player(player_id)
                 if not player:
                     raise ValueError(f"Player {player_id} not found")
                 
-                  Get clip from registry
+                # Get clip from registry
                 from ..player.clips.registry import get_clip_registry
                 registry = get_clip_registry()
                 clip = registry.get_clip(clip_id)
                 
                 if not clip:
-                      Fallback: search for a clip whose effect parameter UIDs reference
-                      this (now-stale) clip_id.  This happens when the clip was
-                      re-registered with a new UUID but the embedded _uid strings
-                      inside its parameters still carry the old ID.
+                    # Fallback: search for a clip whose effect parameter UIDs reference
+                    # this (now-stale) clip_id.  This happens when the clip was
+                    # re-registered with a new UUID but the embedded _uid strings
+                    # inside its parameters still carry the old ID.
                     stale_prefix = f'param_clip_{clip_id}'
                     for cid, cdata in registry.clips.items():
                         for eff in cdata.get('effects', []):
                             for pval in eff.get('parameters', {}).values():
                                 if isinstance(pval, dict) and stale_prefix in pval.get('_uid', ''):
                                     clip = cdata
-                                    clip_id = cid    redirect to real ID for all subsequent ops
+                                    clip_id = cid    # redirect to real ID for all subsequent ops
                                     logger.debug(f"WebSocket effect.param: stale clip_id resolved {data.get('clip_id')[:8]}→{cid[:8]}")
                                     break
                             if clip:
@@ -507,20 +512,20 @@ class RestAPI:
                 if not clip:
                     raise ValueError(f"Clip {clip_id} not found")
                 
-                  Get effects list from clip dict
+                # Get effects list from clip dict
                 effects = clip.get('effects', [])
                 
-                  Update effect parameter
+                # Update effect parameter
                 if effect_index < len(effects):
                     effect = effects[effect_index]
                     
-                      Effects in registry are dicts with 'parameters' key (not 'params')
+                    # Effects in registry are dicts with 'parameters' key (not 'params')
                     if isinstance(effect, dict):
                         if 'parameters' not in effect:
                             effect['parameters'] = {}
                         
-                          Store parameter value in registry (keep original format - DO NOT CHANGE!)
-                          For triple sliders with range data, store as dict with metadata
+                        # Store parameter value in registry (keep original format - DO NOT CHANGE!)
+                        # For triple sliders with range data, store as dict with metadata
                         param_value_to_store = None
                         if range_min is not None and range_max is not None:
                             param_value_to_store = {
@@ -528,13 +533,13 @@ class RestAPI:
                                 '_rangeMin': range_min,
                                 '_rangeMax': range_max
                             }
-                              Preserve UID if provided
+                            # Preserve UID if provided
                             if uid:
                                 param_value_to_store['_uid'] = uid
                             effect['parameters'][param_name] = param_value_to_store
                             logger.debug(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value} (range: {range_min}-{range_max})")
                         else:
-                              For simple values, store as dict if UID is present, otherwise plain value
+                            # For simple values, store as dict if UID is present, otherwise plain value
                             if uid:
                                 param_value_to_store = {
                                     '_value': value,
@@ -545,8 +550,8 @@ class RestAPI:
                             effect['parameters'][param_name] = param_value_to_store
                             logger.debug(f"✅ WebSocket: Updated REGISTRY for clip {clip_id[:8]}... effect[{effect_index}].{param_name} = {value}")
                         
-                          Update LIVE effect instance in player layers (via command queue to player process)
-                          MULTI-PROCESS: Send command to player process to update live layers
+                        # Update LIVE effect instance in player layers (via command queue to player process)
+                        # MULTI-PROCESS: Send command to player process to update live layers
                         if hasattr(player, 'update_layer_effect_parameter'):
                             update_success = player.update_layer_effect_parameter(
                                 clip_id=clip_id,
@@ -557,13 +562,13 @@ class RestAPI:
                             if update_success is True:
                                 logger.debug(f"🔄 Sent layer effect update command to player process")
                             elif update_success is False:
-                                  Layer was found but the update itself failed — real problem
+                                # Layer was found but the update itself failed — real problem
                                 logger.warning(f"⚠️ Failed to send layer effect update command")
-                              else None: clip not currently playing, registry write is sufficient
+                            # else None: clip not currently playing, registry write is sufficient
                         else:
                             logger.debug(f"⚠️ Player has no update_layer_effect_parameter (no clip loaded, skipping live update)")
                         
-                          Invalidate cache so changes are picked up
+                        # Invalidate cache so changes are picked up
                         registry._invalidate_cache(clip_id)
                         
                         emit('command.response', {
@@ -574,7 +579,7 @@ class RestAPI:
                             'value': value
                         })
                         
-                          Broadcast to all clients for multi-user sync
+                        # Broadcast to all clients for multi-user sync
                         self.socketio.emit('effect.param.changed', {
                             'player_id': player_id,
                             'clip_id': clip_id,
@@ -594,9 +599,9 @@ class RestAPI:
                     'error': str(e)
                 })
         
-          ========================================
-          LAYERS NAMESPACE - Layer Controls
-          ========================================
+        # ========================================
+        # LAYERS NAMESPACE - Layer Controls
+        # ========================================
         @self.socketio.on('connect', namespace='/layers')
         def handle_layers_connect():
             logger.debug(f"Client connected to /layers namespace: {request.sid}")
@@ -628,7 +633,7 @@ class RestAPI:
                         'opacity': opacity
                     })
                     
-                      Broadcast to all clients
+                    # Broadcast to all clients
                     self.socketio.emit('layer.changed', {
                         'player_id': player_id,
                         'clip_id': clip_id,
@@ -683,7 +688,7 @@ class RestAPI:
     
     def _get_status_data(self):
         """Creates status data for WebSocket."""
-          Hole Media-Namen und Typ (Video oder Script)
+        # Hole Media-Namen und Typ (Video oder Script)
         is_script = False
         media_name = "Unknown"
         
@@ -698,23 +703,23 @@ class RestAPI:
             media_name = self.player.script_name
             is_script = True
         
-          DMX preview data directly from Art-Net manager (= actual output)
+        # DMX preview data directly from Art-Net manager (= actual output)
         dmx_preview = None
         total_universes = 0
         
-          Check artnet_player first (if available) - it sends the data
+        # Check artnet_player first (if available) - it sends the data
         artnet_source = None
         if hasattr(self.player_manager, 'artnet_player') and self.player_manager.artnet_player:
             artnet_source = self.player_manager.artnet_player
         else:
             artnet_source = self.player
         
-          Art-Net Routing is the source now (routing_bridge)
-          OLD artnet_manager system removed
+        # Art-Net Routing is the source now (routing_bridge)
+        # OLD artnet_manager system removed
         if hasattr(artnet_source, 'required_universes'):
             total_universes = artnet_source.required_universes
         
-          ArtNet Routing Output Data (NEW - for routing system on ARTNET PLAYER)
+        # ArtNet Routing Output Data (NEW - for routing system on ARTNET PLAYER)
         routing_outputs = {}
         if hasattr(artnet_source, 'routing_bridge') and artnet_source.routing_bridge:
             try:
@@ -722,21 +727,21 @@ class RestAPI:
                 logger.debug(f"Routing outputs available: {list(last_frames.keys())}, lengths: {[len(d) for d in last_frames.values()]}")
                 for output_id, dmx_data in last_frames.items():
                     if dmx_data and len(dmx_data) > 0:
-                          Convert bytes to list for JSON serialization
+                        # Convert bytes to list for JSON serialization
                         routing_outputs[output_id] = list(dmx_data)
                 logger.debug(f"Sending routing_outputs: {list(routing_outputs.keys())}")
             except Exception as e:
                 logger.error(f"Error collecting routing outputs: {e}", exc_info=True)
-                pass    Silently fail if routing bridge not available
+                pass    # Silently fail if routing bridge not available
         else:
             logger.debug("No routing_bridge available on Art-Net Player")
         
-          Replay Status
+        # Replay Status
         is_replaying = False
         if self.replay_manager:
             is_replaying = self.replay_manager.is_playing
         
-          Aktiver Modus - always "Video" now (routing_bridge handles output)
+        # Aktiver Modus - always "Video" now (routing_bridge handles output)
         active_mode = "Video"
         
         return {
@@ -755,7 +760,7 @@ class RestAPI:
             "total_universes": total_universes,
             "is_replaying": is_replaying,
             "active_mode": active_mode,
-            "routing_outputs": routing_outputs    NEW: Routing system output data
+            "routing_outputs": routing_outputs    # NEW: Routing system output data
         }
     
     def _status_broadcast_loop(self):
@@ -777,14 +782,14 @@ class RestAPI:
         import time
         from pathlib import Path
         
-        interval = 5    Update every 5 seconds
+        interval = 5    # Update every 5 seconds
         last_log_data = None
         
         while self.is_running:
             try:
                 time.sleep(interval)
                 
-                  Read current log
+                # Read current log
                 log_dir = Path('logs')
                 if log_dir.exists():
                     log_files = sorted(log_dir.glob('flux_*.log'), key=lambda f: f.stat().st_mtime, reverse=True)
@@ -796,7 +801,7 @@ class RestAPI:
                             with open(latest_log, 'r', encoding='utf-8') as f:
                                 lines = f.readlines()
                                 lines = [line.rstrip('\n') for line in lines]
-                                lines = lines[-500:]    Last 500 lines
+                                lines = lines[-500:]    # Last 500 lines
                             
                             log_data = {
                                 'lines': lines,
@@ -804,7 +809,7 @@ class RestAPI:
                                 'total_lines': len(lines)
                             }
                             
-                              Only emit if data has changed
+                            # Only emit if data has changed
                             if log_data != last_log_data:
                                 with self.app.app_context():
                                     self.socketio.emit('log_update', log_data, namespace='/')
@@ -820,7 +825,7 @@ class RestAPI:
     def add_log(self, message):
         """Adds message to console log and sends to clients."""
         self.console_log.append(message)
-          Broadcast an alle WebSocket Clients
+        # Broadcast an alle WebSocket Clients
         if self.is_running:
             try:
                 with self.app.app_context():
@@ -835,7 +840,7 @@ class RestAPI:
     def clear_console(self):
         """Clears the console log display."""
         self.console_log.clear()
-          Broadcast clear event an alle WebSocket Clients
+        # Broadcast clear event an alle WebSocket Clients
         if self.is_running:
             try:
                 with self.app.app_context():
@@ -867,19 +872,19 @@ class RestAPI:
         Dies verursacht "write() before start_response" Fehler in Flask/Werkzeug.
         Nutze stattdessen Logger: self.logger.info("message")
         """
-          Check for video: and script: prefix
+        # Check for video: and script: prefix
         if ':' in command and command.split(':', 1)[0].lower() in ['video', 'script']:
             prefix, target = command.split(':', 1)
             prefix = prefix.lower()
             
             if prefix == 'video':
-                  Load video via relative path
+                # Load video via relative path
                 try:
                     video_path = os.path.join(self.video_dir, target.strip())
                     if os.path.exists(video_path):
                         from ..player.sources import VideoSource
                         
-                          Load clip (multi-process compatible)
+                        # Load clip (multi-process compatible)
                         success = self.player.load_clip(video_path)
                         
                         if success:
@@ -892,7 +897,7 @@ class RestAPI:
                     return f"Fehler beim Laden: {e}"
             
             elif prefix == 'script':
-                  Lade Script
+                # Lade Script
                 try:
                     from ..player.sources import ScriptSource
                     
@@ -900,9 +905,9 @@ class RestAPI:
                     if not script_name.endswith('.py'):
                         script_name += '.py'
                     
-                      TODO: Update to use load_clip() for multi-process compatibility
-                      Scripts are not yet handled by load_clip method
-                      Erstelle ScriptSource
+                    # TODO: Update to use load_clip() for multi-process compatibility
+                    # Scripts are not yet handled by load_clip method
+                    # Erstelle ScriptSource
                     script_source = ScriptSource(
                         script_name,
                         self.player.canvas_width,
@@ -910,7 +915,7 @@ class RestAPI:
                         self.config
                     )
                     
-                      Wechsle Source (unified Player bleibt bestehen)
+                    # Wechsle Source (unified Player bleibt bestehen)
                     success = self.player.switch_source(script_source)
                     
                     if success:
@@ -921,12 +926,12 @@ class RestAPI:
                     import traceback
                     return f"Fehler beim Laden des Scripts: {e}\n{traceback.format_exc()}"
         
-          Standard-Befehle
+        # Standard-Befehle
         parts = command.split(maxsplit=1)
         cmd = parts[0].lower()
         args = parts[1] if len(parts) > 1 else None
         
-          Playback
+        # Playback
         if cmd == "start":
             try:
                 self.player.start()
@@ -950,7 +955,7 @@ class RestAPI:
             self.player.start()
             return "Video neu gestartet"
         
-          Video Management
+        # Video Management
         elif cmd == "load":
             if args:
                 try:
@@ -989,7 +994,7 @@ class RestAPI:
                     return f"Fehler: {e}"
             return "Verwendung: switch <name>"
         
-          Settings
+        # Settings
         elif cmd == "brightness":
             if args:
                 self.player.set_brightness(args)
@@ -1011,7 +1016,7 @@ class RestAPI:
                 return f"Loop-Limit auf {args} gesetzt"
             return "Verwendung: loop <anzahl>"
         
-          Art-Net
+        # Art-Net
         elif cmd == "blackout":
             self.player.blackout()
             return "Blackout aktiviert"
@@ -1033,7 +1038,7 @@ class RestAPI:
                     return "Ung\u00fcltiger Wert!"
             return f"Aktuelles Start-Universum: {self.player.start_universe}"
         
-          Info
+        # Info
         elif cmd == "status":
             return f"Status: {self.player.status()}"
         elif cmd == "info":
@@ -1045,7 +1050,7 @@ class RestAPI:
                 return "\n".join([f"{k}: {v}" for k, v in stats.items()])
             return str(stats)
         
-          Cache
+        # Cache
         elif cmd == "cache":
             from .cache_commands import execute_cache_command
             cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
@@ -1057,10 +1062,10 @@ class RestAPI:
                 return "⚠ 'cache fill' is only available via CLI (takes a long time)"
             return "Verwendung: cache clear | info | delete <name> | enable | disable | size"
         
-          System
-          reload entfernt
+        # System
+        # reload entfernt
         
-          Help
+        # Help
         elif cmd == "help":
             return "Available commands: start, stop, restart, pause, resume, load, list, switch, video:<path>, script:<name>, brightness, speed, fps, loop, ip, universe, blackout, test, status, info, stats, cache, help"
         
@@ -1077,39 +1082,39 @@ class RestAPI:
         
         self.is_running = True
         
-          Flask/SocketIO Logging komplett deaktivieren und von stdout entfernen
+        # Flask/SocketIO Logging komplett deaktivieren und von stdout entfernen
         import logging
         import sys
         
-          Entferne alle Handler von werkzeug/socketio/engineio
+        # Entferne alle Handler von werkzeug/socketio/engineio
         werkzeug_logger = logging.getLogger('werkzeug')
         socketio_logger = logging.getLogger('socketio')
         engineio_logger = logging.getLogger('engineio')
         
         for logger_obj in [werkzeug_logger, socketio_logger, engineio_logger]:
-            logger_obj.setLevel(logging.CRITICAL)    Nur kritische Fehler
-            logger_obj.handlers = []    Entferne alle Handler
-            logger_obj.propagate = False    Verhindere Propagierung zu Root-Logger
+            logger_obj.setLevel(logging.CRITICAL)    # Nur kritische Fehler
+            logger_obj.handlers = []    # Entferne alle Handler
+            logger_obj.propagate = False    # Verhindere Propagierung zu Root-Logger
         
-          Suppress Flask startup messages
+        # Suppress Flask startup messages
         cli = sys.modules.get('flask.cli')
         if cli is not None:
             cli.show_server_banner = lambda *args: None
         
-          Status Broadcast Thread starten
+        # Status Broadcast Thread starten
         self.status_broadcast_thread = threading.Thread(target=self._status_broadcast_loop, daemon=True)
         self.status_broadcast_thread.start()
         
-          Log Broadcast Thread starten
+        # Log Broadcast Thread starten
         self.log_broadcast_thread = threading.Thread(target=self._log_broadcast_loop, daemon=True)
         self.log_broadcast_thread.start()
         
-          BPM Broadcast Thread starten
+        # BPM Broadcast Thread starten
         self._bpm_streaming_active = True
         self.bpm_broadcast_thread = threading.Thread(target=self._bpm_broadcast_loop, daemon=True)
         self.bpm_broadcast_thread.start()
         
-          Server Thread starten
+        # Server Thread starten
         def run_server():
             try:
                 self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
@@ -1143,22 +1148,22 @@ class RestAPI:
         
         while self._bpm_streaming_active and self.is_running:
             try:
-                  Get BPM status from audio analyzer
+                # Get BPM status from audio analyzer
                 if hasattr(self.player_manager, 'audio_analyzer') and self.player_manager.audio_analyzer:
                     status = self.player_manager.audio_analyzer.get_bpm_status()
                     
-                      Broadcast to /bpm namespace
+                    # Broadcast to /bpm namespace
                     self.socketio.emit(
                         'bpm_update',
                         status,
                         namespace='/bpm'
                     )
                 
-                  Update every 100ms for smooth beat indicator
+                # Update every 100ms for smooth beat indicator
                 time.sleep(0.1)
                 
             except Exception as e:
                 logger.error(f"Error in BPM broadcast loop: {e}", exc_info=True)
-                time.sleep(1)    Back off on error
+                time.sleep(1)    # Back off on error
         
         logger.debug("🎵 BPM broadcast thread stopped")

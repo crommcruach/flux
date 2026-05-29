@@ -43,7 +43,7 @@
 .effect-card:hover,
 .source-card:hover {
     border-color: var(--primary-color);
-    box-shadow: 0 2px 8px rgba(0, 123, 255, 0.2);
+    box-shadow: var(--glow-cyan);
     transform: translateY(-2px);
 }
 
@@ -240,25 +240,18 @@
     opacity: 0.9;
 }
 
-/* Dark Mode Support */
+/* Dark Mode Support — variables are defined globally in styles.css */
+/* These are kept only for any remaining fallbacks this file needs */
 :root {
     --card-bg: #ffffff;
-    --hover-bg: #f8f9fa;
-    --border-color: #dee2e6;
-    --text-primary: #212529;
-    --text-secondary: #6c757d;
-    --text-tertiary: #495057;
-    --primary-color: #007bff;
+    --hover-bg: rgba(8, 145, 178, 0.06);
+    --primary-color: #0891b2;
 }
 
 [data-theme="dark"] {
-    --card-bg: #2b2d31;
-    --hover-bg: #35373c;
-    --border-color: #3f4147;
-    --text-primary: #e4e6eb;
-    --text-secondary: #b0b3b8;
-    --text-tertiary: #c8ccd1;
-    --primary-color: #4e9eff;
+    --card-bg: #1a1a26;
+    --hover-bg: rgba(6, 182, 212, 0.07);
+    --primary-color: #06b6d4;
 }
 
 /* ===== FILE TAGS & ALIAS ===== */

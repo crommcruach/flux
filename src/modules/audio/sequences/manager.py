@@ -121,6 +121,10 @@ class SequenceManager:
                 if not other_seq_exists:
                     del self._last_emitted_values[sequence.target_parameter]
             
+            # Clear UID from warning cache so future issues with the same UID are reported
+            if hasattr(self, '_uid_warning_cache'):
+                self._uid_warning_cache.discard(sequence.target_parameter)
+            
             logger.info(f"Deleted sequence: {sequence_id} (target: {sequence.target_parameter})")
             return True
         return False
@@ -518,7 +522,9 @@ class SequenceManager:
             
             parts = uid.split('_')
             if len(parts) < 4 or parts[0] != 'param' or parts[1] != 'clip':
-                logger.warning(f"Invalid UID format: {uid}")
+                if uid not in self._uid_warning_cache:
+                    logger.warning(f"Invalid UID format: {uid}")
+                    self._uid_warning_cache.add(uid)
                 return None
             
             clip_id = None

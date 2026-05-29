@@ -103,6 +103,12 @@ def render_slave_layer(
                         f"returned None after reset, skipping"
                     )
                     warned_layers_set.add(layer.layer_id)
+                # Release any cached GPU texture so the pool slot is not held
+                # permanently by a broken source, and back off for 1 s.
+                if hasattr(layer._slave_cached_frame, 'texture'):
+                    get_texture_pool_fn().release(layer._slave_cached_frame)
+                    layer._slave_cached_frame = None
+                layer._slave_next_time = now + 1.0
                 return layer.layer_id, None
 
             overlay_frame = apply_effects_fn(layer, overlay_frame, player_name)

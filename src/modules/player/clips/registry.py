@@ -29,6 +29,40 @@ class ClipRegistry:
         
         # Optional: Default effects manager for auto-applying effects
         self._default_effects_manager = None
+
+        # Default layer names for pre-allocated slots (index = slot layer_id)
+        self._default_layer_names: List[str] = ["Background", "Overlay 1", "Overlay 2", "Overlay 3", "Mask"]
+
+    def set_layer_defaults(self, names: List[str]) -> None:
+        """Configure default layer names from config (index 0 = base, 1-N = overlay slots)."""
+        if names:
+            self._default_layer_names = list(names)
+
+    def ensure_layer_slots(self, clip_id: str) -> None:
+        """Ensure clip has all pre-allocated overlay slot entries (lazy migration for old clips)."""
+        if clip_id not in self.clips:
+            return
+        layers = self.clips[clip_id]['layers']
+        existing_ids = {l['layer_id'] for l in layers}
+        changed = False
+        for slot_id in range(1, len(self._default_layer_names)):
+            if slot_id not in existing_ids:
+                slot_name = self._default_layer_names[slot_id]
+                layers.append({
+                    'layer_id': slot_id,
+                    'name': slot_name,
+                    'source_type': 'empty',
+                    'source_path': None,
+                    'blend_mode': 'normal',
+                    'opacity': 1.0,
+                    'enabled': True
+                })
+                changed = True
+        if changed:
+            layers.sort(key=lambda l: l['layer_id'])
+        # Ensure base_layer_name exists
+        if 'base_layer_name' not in self.clips[clip_id]:
+            self.clips[clip_id]['base_layer_name'] = self._default_layer_names[0] if self._default_layer_names else 'Background'
     
     def register_clip(
         self, 
@@ -66,6 +100,20 @@ class ClipRegistry:
         if not clip_id:
             clip_id = str(uuid.uuid4())
         
+        # Pre-populate empty overlay slots (layer_id 1..N) with default names
+        empty_slots = []
+        for slot_id in range(1, len(self._default_layer_names)):
+            slot_name = self._default_layer_names[slot_id] if slot_id < len(self._default_layer_names) else f"Layer {slot_id}"
+            empty_slots.append({
+                'layer_id': slot_id,
+                'name': slot_name,
+                'source_type': 'empty',
+                'source_path': None,
+                'blend_mode': 'normal',
+                'opacity': 1.0,
+                'enabled': True
+            })
+
         # Save clip data
         self.clips[clip_id] = {
             'clip_id': clip_id,
@@ -76,7 +124,8 @@ class ClipRegistry:
             'metadata': metadata or {},
             'created_at': datetime.now().isoformat(),
             'effects': [],  # Clip-specific effects
-            'layers': [],   # Clip-specific layer definitions
+            'layers': empty_slots,  # Pre-allocated overlay slot definitions
+            'base_layer_name': self._default_layer_names[0] if self._default_layer_names else 'Background',
             'sequences': {},  # Clip-specific sequences: {uid: [sequence_ids]}
             # Trimming & Playback Control
             'in_point': None,   # Start frame (None = video start)
@@ -445,9 +494,13 @@ class ClipRegistry:
         if clip_id not in self.clips:
             return False
         
-        # Layer 0 is the base clip - cannot be updated in registry
+        # Layer 0 is the base clip - only 'name' updates are allowed
         if layer_id == 0:
-            logger.warning(f"Layer 0 is the base clip - cannot be updated in registry")
+            if set(updates.keys()) <= {'name'}:
+                if 'name' in updates:
+                    self.clips[clip_id]['base_layer_name'] = updates['name']
+                return True
+            logger.warning(f"Layer 0 is the base clip - only 'name' can be updated")
             return False
         
         layers = self.clips[clip_id]['layers']

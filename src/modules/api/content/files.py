@@ -334,6 +334,15 @@ def register_files_api(app, video_dir, config=None):
                     if gen_source.initialize():
                         frame, _ = gen_source.get_next_frame()
                         if frame is not None:
+                            # GPUFrame (wgpu texture) → BGR numpy array
+                            if hasattr(frame, 'download'):
+                                numpy_frame = frame.download()
+                                try:
+                                    from ...gpu.texture_pool import get_texture_pool
+                                    get_texture_pool().release(frame)
+                                except Exception:
+                                    pass
+                                frame = numpy_frame
                             # Encode as JPEG
                             ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                             if ret:

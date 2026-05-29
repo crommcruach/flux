@@ -2,32 +2,26 @@
 <div class="menu-bar d-flex align-items-center justify-content-between flex-nowrap px-2" style="gap: 1.2rem; flex-wrap: nowrap;">
     <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem;">
         <img src="/static/logo.svg" alt="Flux Logo"
-            style="height: 32px; width: auto; display: inline-block; vertical-align: middle;">
-        <span style="font-size: 1.4rem; font-weight: 700; letter-spacing: 1px; margin-left: 0.3rem;">Flux</span>
+            style="height: 28px; width: auto; display: inline-block; vertical-align: middle;">
+        <span style="font-size: 1.25rem; font-weight: 700; letter-spacing: 2px; color: var(--accent-color);">FLUX</span>
     </div>
-    <div class="d-flex align-items-center flex-nowrap" style="gap: 0.7rem; margin-left: auto;">
-        <a href="/" class="btn btn-primary btn-sm menu-btn" title="Editor"
-            style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎨</a>
-        <a href="/player" class="btn btn-primary btn-sm menu-btn" title="Player"
-            style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎬</a>
-        <a href="/output-settings" class="btn btn-primary btn-sm menu-btn" title="Output Settings"
-            style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🖥️</a>
-        <a href="/converter" class="btn btn-primary btn-sm menu-btn" title="Video Converter"
-            style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">🎞️</a>
-        <a href="/config" class="btn btn-primary btn-sm menu-btn" title="Config"
-            style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">⚙️</a>
-        <a href="/cli" class="btn btn-primary btn-sm menu-btn" title="Web CLI"
-            style="width: 28px; min-width: 28px; height: 32px; padding: 2px 4px; text-align: center; line-height: 1; display: flex; align-items: center; justify-content: center;">&gt;_</a>
+    <div class="d-flex align-items-center flex-nowrap" style="gap: 0.5rem; margin-left: auto;">
+        <a href="/" class="btn btn-sm menu-btn" title="Editor">🎨</a>
+        <a href="/player" class="btn btn-sm menu-btn" title="Player">🎬</a>
+        <a href="/output-settings" class="btn btn-sm menu-btn" title="Output Settings">🖥️</a>
+        <a href="/converter" class="btn btn-sm menu-btn" title="Video Converter">🎞️</a>
+        <a href="/config" class="btn btn-sm menu-btn" title="Config">⚙️</a>
+        <a href="/cli" class="btn btn-sm menu-btn" title="Web CLI">&gt;_</a>
         
         <!-- Session Management Buttons -->
-        <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem; padding-left: 1rem; border-left: 2px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 0.4rem; margin-left: 0.75rem; padding-left: 0.75rem; border-left: 1px solid var(--border-color);">
             <button class="btn btn-success btn-sm" onclick="SessionManager.saveSession()" title="Session speichern">💾</button>
-            <button class="btn btn-warning btn-sm" onclick="SessionManager.showLoadModal()" title="Session oder Snapshot laden">📂</button>
+            <button class="btn btn-danger btn-sm" onclick="SessionManager.showLoadModal()" title="Session oder Snapshot laden">📂</button>
             <button class="btn btn-info btn-sm" onclick="SessionManager.createSnapshot()" title="Schneller Snapshot">📸</button>
         </div>
 
         <!-- MIDI Learn Toggle -->
-        <div style="display: flex; align-items: center; gap: 0.4rem; margin-left: 0.8rem; padding-left: 0.8rem; border-left: 2px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 0.4rem; margin-left: 0.5rem; padding-left: 0.5rem; border-left: 1px solid var(--border-color);">
             <button id="midiLearnToggle"
                     class="btn btn-outline-warning btn-sm"
                     onclick="window.midiLearnManager?.toggleLearnMode()"
@@ -36,7 +30,7 @@
             <span class="badge bg-info" id="midiMappingCount" style="display: none; font-size: 0.7rem;">0</span>
         </div>
         
-        <div style="display: flex; align-items: center; gap: 2rem; margin-left: 2.2rem;">
+        <div style="display: flex; align-items: center; gap: 1.5rem; margin-left: 1.5rem;">
             <!-- Session State Auto-Save Status -->
             <div id="globalAutoSaveStatus" style="display: none;">
                 <span id="autoSaveStatusBadge" class="badge bg-success" style="font-size: 0.75rem; padding: 4px 8px;">✓ Gespeichert</span>

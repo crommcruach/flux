@@ -1731,26 +1731,66 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
             
             # Check if it's a generator source
             from ...player.sources import GeneratorSource
-            if not isinstance(player.source, GeneratorSource):
-                return jsonify({"success": False, "error": "Current source is not a generator"}), 400
+            
+            # Determine target source: main clip or a layer clip
+            target_source = None
+            is_layer_clip = False
+            
+            # Check main clip first (current_clip_id matches)
+            if isinstance(player.source, GeneratorSource) and getattr(player, 'current_clip_id', None) == clip_id:
+                target_source = player.source
+            else:
+                # Search layers for the matching clip_id
+                if hasattr(player, 'layers'):
+                    for layer in player.layers:
+                        if getattr(layer, 'clip_id', None) == clip_id:
+                            if hasattr(layer, 'source') and isinstance(layer.source, GeneratorSource):
+                                target_source = layer.source
+                                is_layer_clip = True
+                                break
+                # Fallback to main source if nothing matched by clip_id (legacy behaviour)
+                if target_source is None and isinstance(player.source, GeneratorSource):
+                    target_source = player.source
+            
+            if target_source is None:
+                return jsonify({"success": False, "error": "No generator source found for this clip"}), 400
+            
+            if not isinstance(target_source, GeneratorSource):
+                return jsonify({"success": False, "error": "Target source is not a generator"}), 400
             
             # Log the update attempt
-            logger.debug(f"🔧 [{player_id}] Attempting to update generator parameter: {param_name} = {param_value} (generator: {player.source.generator_id})")
+            logger.debug(f"🔧 [{player_id}] Attempting to update generator parameter: {param_name} = {param_value} (generator: {target_source.generator_id}, layer_clip: {is_layer_clip})")
             
             # Update parameter
-            success = player.source.update_parameter(param_name, param_value)
+            success = target_source.update_parameter(param_name, param_value)
             
             if success:
-                # Store in player's playlist_params for persistence across loops
-                generator_id = player.source.generator_id
-                if generator_id not in player.playlist_params:
-                    player.playlist_params[generator_id] = {}
-                player.playlist_params[generator_id][param_name] = param_value
+                generator_id = target_source.generator_id
+                if not is_layer_clip:
+                    # Store in player's playlist_params for persistence across loops (main clip only)
+                    if generator_id not in player.playlist_params:
+                        player.playlist_params[generator_id] = {}
+                    player.playlist_params[generator_id][param_name] = param_value
                 
                 # Update ClipRegistry metadata so parameters persist on clip reload
-                if hasattr(player, 'current_clip_id') and player.current_clip_id:
-                    clip = clip_registry.get_clip(player.current_clip_id)
-                    if clip and clip.get('metadata', {}).get('type') == 'generator':
+                clip = clip_registry.get_clip(clip_id)
+                if clip:
+                    if is_layer_clip:
+                        # For layer clips, store in the layer def inside the parent clip
+                        parent_clip_id = clip.get('metadata', {}).get('layer_of')
+                        layer_id = clip.get('metadata', {}).get('layer_id')
+                        if parent_clip_id is not None and layer_id is not None:
+                            parent_clip = clip_registry.get_clip(parent_clip_id)
+                            if parent_clip:
+                                layers = parent_clip.get('layers', [])
+                                for ldef in layers:
+                                    if ldef.get('layer_id') == layer_id:
+                                        if 'parameters' not in ldef:
+                                            ldef['parameters'] = {}
+                                        ldef['parameters'][param_name] = param_value
+                                        logger.debug(f"📝 [{player_id}] Updated layer {layer_id} parameter in parent clip {parent_clip_id}: {param_name} = {param_value}")
+                                        break
+                    elif clip.get('metadata', {}).get('type') == 'generator':
                         if 'parameters' not in clip['metadata']:
                             clip['metadata']['parameters'] = {}
                         clip['metadata']['parameters'][param_name] = param_value
@@ -1770,7 +1810,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
                     "value": param_value
                 })
             else:
-                logger.error(f"❌ [{player_id}] Failed to update generator parameter: {param_name} = {param_value} (generator: {player.source.generator_id}, has plugin: {player.source.plugin_instance is not None})")
+                logger.error(f"❌ [{player_id}] Failed to update generator parameter: {param_name} = {param_value} (generator: {target_source.generator_id}, has plugin: {target_source.plugin_instance is not None})")
                 return jsonify({"success": False, "error": f"Failed to update parameter {param_name}"}), 400
             
         except Exception as e:

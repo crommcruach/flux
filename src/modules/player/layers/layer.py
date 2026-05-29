@@ -46,6 +46,7 @@ class Layer:
         self.blend_mode = blend_mode
         self.opacity = opacity
         self.clip_id = clip_id
+        self.name: str = ""
         self.enabled = True
         
         # Layer-spezifische Effekte (Liste von {id, instance, config})
@@ -103,6 +104,7 @@ class Layer:
         
         layer_dict = {
             'layer_id': self.layer_id,
+            'name': self.name,
             'type': source_type,
             'path': source_path,
             'blend_mode': self.blend_mode,

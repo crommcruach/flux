@@ -28,7 +28,7 @@
 
 .scrub-input-field:focus {
     outline: none;
-    border-color: var(--primary-color, #4caf50);
+    border-color: var(--primary-color, #06b6d4);
 }
 
 /* Step buttons */
@@ -58,7 +58,7 @@
 }
 
 .scrub-input-btn.active {
-    background: var(--primary-color, #4caf50);
-    border-color: var(--primary-color, #4caf50);
+    background: var(--primary-color, #06b6d4);
+    border-color: var(--primary-color, #06b6d4);
     color: #fff;
 }

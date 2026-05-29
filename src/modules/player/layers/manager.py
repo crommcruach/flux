@@ -237,6 +237,9 @@ class LayerManager:
             source_type = layer_def.get('source_type')
             source_path = layer_def.get('source_path')
             source = None
+            # Skip empty pre-allocated slots - they have no source to load
+            if source_type == 'empty' or not source_path:
+                continue
             if source_type == 'video':
                 video_path = source_path
                 if video_dir and not os.path.isabs(video_path):

@@ -16,7 +16,10 @@ class TexturePool:
     # Maximum GPUFrames per resolution bucket.  When all slots are in-use
     # at this limit, the oldest slot is force-released (pool leak recovery)
     # rather than allocating a new texture and exhausting VRAM.
-    MAX_PER_BUCKET = 16
+    # Sized for up to 5 overlay layers with effects running in parallel:
+    # 5 cached + 5 layer_tex + 1 alt + 1 master + ~4 effect chain = 16 baseline;
+    # headroom for global effects, taps, and transition buffers.
+    MAX_PER_BUCKET = 24
 
     def __init__(self):
         # (width, height, components) → list[GPUFrame]

@@ -10,6 +10,7 @@ Enables:
 
 from flask import request, jsonify
 import logging
+import os
 from ...gpu import BLEND_MODES
 from ...session.state import get_session_state
 
@@ -72,6 +73,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
             
             base_layer = {
                 'layer_id': 0,
+                'name': clip.get('base_layer_name', 'Background'),
                 'source_type': source_type,
                 'source_path': clip['relative_path'],
                 'blend_mode': 'normal',
@@ -221,6 +223,54 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
                 if data['blend_mode'] not in BLEND_MODES:
                     return jsonify({"success": False, "error": "Invalid blend_mode"}), 400
             
+            # Sanitize source_path (must not contain path traversal)
+            if 'source_path' in data and data['source_path'] is not None:
+                if '..' in str(data['source_path']):
+                    return jsonify({"success": False, "error": "Invalid source_path"}), 400
+            
+            layer_clip_id = None
+
+            # When a source is assigned/cleared on a pre-allocated slot we must
+            # keep the layer's own clip_id in sync so the FX tab can target it.
+            if 'source_path' in data and layer_id != 0:
+                clip_data = clip_registry.get_clip(clip_id)
+                if clip_data:
+                    existing_layer = next(
+                        (l for l in clip_data.get('layers', []) if l.get('layer_id') == layer_id),
+                        None
+                    )
+                    new_source_path = data.get('source_path')
+                    if new_source_path:  # filling the slot
+                        if existing_layer and not existing_layer.get('clip_id'):
+                            # Register source as its own clip so effects/params work
+                            abs_layer_path = new_source_path
+                            if video_dir and not os.path.isabs(new_source_path):
+                                abs_layer_path = os.path.join(video_dir, new_source_path)
+                            layer_clip_id = clip_registry.register_clip(
+                                player_id=clip_data.get('player_id', 'video'),
+                                absolute_path=abs_layer_path,
+                                relative_path=new_source_path,
+                                metadata={
+                                    'type': 'layer',
+                                    'layer_of': clip_id,
+                                    'layer_id': layer_id,
+                                }
+                            )
+                            data = dict(data)
+                            data['clip_id'] = layer_clip_id
+                        elif existing_layer:
+                            layer_clip_id = existing_layer.get('clip_id')
+                    else:  # clearing the slot
+                        if existing_layer:
+                            old_clip_id = existing_layer.get('clip_id')
+                            if old_clip_id and old_clip_id != clip_id:
+                                try:
+                                    clip_registry.unregister_clip(old_clip_id)
+                                except Exception:
+                                    pass
+                            data = dict(data)
+                            data['clip_id'] = None
+
             # Update
             success = clip_registry.update_clip_layer(clip_id, layer_id, data)
             
@@ -234,6 +284,7 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
                 "success": True,
                 "clip_id": clip_id,
                 "layer_id": layer_id,
+                "layer_clip_id": layer_clip_id,
                 "updates": data
             })
             

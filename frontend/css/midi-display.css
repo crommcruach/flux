@@ -210,14 +210,14 @@
 
 .midi-range-row input[type="range"] {
     flex: 1;
-    accent-color: #ff00ff;
+    accent-color: var(--color-magenta-bright, #e040fb);
 }
 
 .midi-learn-cc-btn {
     width: 100%;
     padding: 4px;
-    background: rgba(52, 152, 219, 0.1);
-    border: 1px solid rgba(52, 152, 219, 0.4);
+    background: rgba(6, 182, 212, 0.08);
+    border: 1px solid rgba(6, 182, 212, 0.35);
     color: var(--accent-color);
     border-radius: 4px;
     font-size: 0.72rem;
@@ -226,7 +226,7 @@
     text-align: center;
 }
 
-.midi-learn-cc-btn:hover { background: rgba(52, 152, 219, 0.22); }
+.midi-learn-cc-btn:hover { background: rgba(6, 182, 212, 0.18); }
 
 .midi-learn-cc-btn.listening {
     background: rgba(255,0,255,0.35);
@@ -462,8 +462,8 @@ body.midi-learn-mode .midi-param-frame.has-mapping .midi-addr-badge {
 }
 
 .beat-dot.beat-active {
-    background: #2196f3;
-    box-shadow: 0 0 12px rgba(33, 150, 243, 0.8);
+    background: var(--color-cyan-bright, #22d3ee);
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.8);
     transform: scale(1.2);
 }
 
