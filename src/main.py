@@ -167,6 +167,9 @@ def graceful_shutdown(signum=None, frame=None):
     
     import concurrent.futures
     
+    
+    
+    
     for resource_name in cleanup_order:
         if resource_name in _cleanup_resources:
             try:
@@ -725,7 +728,7 @@ def main():
 
     # REST API initialisieren und automatisch starten
     # Note: replay_manager=None - Recording system removed, will be reimplemented later
-    rest_api = RestAPI(player_manager, None, data_dir, video_dir, config, replay_manager=None)
+    rest_api = RestAPI(player_manager, data_dir, video_dir, config, replay_manager=None)
     
     # Register all routes that depend on objects created after RestAPI init
     # (playlist_system, artnet_routing_manager, audio_analyzer)
@@ -801,7 +804,7 @@ def main():
     # sys.stdout = console_capture
     
     # CLI Handler initialisieren (legacy — kept for direct-object fallback)
-    cli_handler = CLIHandler(player_manager, None, rest_api, video_dir, data_dir, config)
+    cli_handler = CLIHandler(player_manager, rest_api, video_dir, data_dir, config)
 
     # New argparse-based CLI
     from modules.cli.parser import build_parser
@@ -834,7 +837,7 @@ def main():
             # Legacy pass-through for bare commands the new parser doesn't own
             # (browser, api, artnet, points, cache, plugin)
             first_word = user_input.split()[0].lower()
-            _legacy_commands = {'browser', 'api', 'artnet', 'points', 'cache', 'plugin',
+            _legacy_commands = {'browser', 'api', 'artnet', 'points', 'plugin',
                                  'next', 'back', 'clear', 'start', 'stop', 'pause', 'resume',
                                  'brightness', 'speed', 'fps', 'loop', 'hue', 'blackout',
                                  'test', 'ip', 'universe', 'delta', 'status', 'info', 'stats',

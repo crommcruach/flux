@@ -1,22 +1,39 @@
 ﻿"""
-Video Converter Module - Universal Video Converter mit HAP Codec Support
-Supports batch processing, auto-resize, loop optimization, multi-resolution
+Video Converter — HAP_NPY format only.
+
+Converts source videos to DXT-compressed .hap flat binaries for zero-copy
+GPU playback.  Each frame is BC1 (RGB) or BC3 (RGBA) compressed by imagecodecs
+(libsquish/libdxt backend, ~2-5 ms per 1080p frame).
+
+Output layout per clip:
+    clips/<name>/
+        original.mov          <- preserved source
+        720p.hap              <- flat: frame0_dxt | frame1_dxt | ...
+        720p.json             <- metadata: fps, frame_count, width, height, dxt_variant, frame_bytes
+        1080p.hap
+        1080p.json
+        ...
+        conversion_state.json <- per-preset progress (in_progress / done / failed)
+
+Custom resolutions are also supported.  Dimensions are silently rounded up to
+the nearest multiple of 4 (required for BC block-compressed textures).
 """
 
 import os
-import subprocess
 import json
 import shutil
+import time
+import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 from enum import Enum
 import cv2
 import numpy as np
 
 
 # ---------------------------------------------------------------------------
-# Multi-Resolution Constants
+# Resolution presets
 # ---------------------------------------------------------------------------
 
 RESOLUTION_PRESETS: Dict[str, Tuple[int, int]] = {
@@ -28,16 +45,10 @@ RESOLUTION_PRESETS: Dict[str, Tuple[int, int]] = {
 
 ALL_PRESETS = ['720p', '1080p', '1440p', '2160p']
 
-# State file name stored inside each clip folder
+# State file stored inside each clip folder
 JOB_STATE_FILE = 'conversion_state.json'
 
-# Maximum seconds per FFmpeg subprocess per resolution
-CONVERSION_TIMEOUTS = {
-    '720p':  1800,   # 30 min
-    '1080p': 3600,   # 1 hour
-    '1440p': 5400,   # 1.5 hours
-    '2160p': 7200,   # 2 hours
-}
+logger = logging.getLogger(__name__)
 
 
 def get_target_preset(player_width: int, player_height: int) -> str:
@@ -49,8 +60,13 @@ def get_target_preset(player_width: int, player_height: int) -> str:
     return '2160p'
 
 
+def _align4(v: int) -> int:
+    """Round up to the nearest multiple of 4 (required for BC textures)."""
+    return (v + 3) & ~3
+
+
 def _scale_frame_fit(frame: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
-    """Scale frame to fit target_w×target_h with letterbox (black bars, no crop)."""
+    """Scale frame to fit target_w x target_h with letterbox (no crop, no distortion)."""
     fh, fw = frame.shape[:2]
     if fw == target_w and fh == target_h:
         return frame
@@ -67,40 +83,20 @@ def _scale_frame_fit(frame: np.ndarray, target_w: int, target_h: int) -> np.ndar
     return result
 
 
+# ---------------------------------------------------------------------------
+# Output format enum
+# ---------------------------------------------------------------------------
+
 class OutputFormat(Enum):
-    """Supported output formats"""
-    HAP = "hap"
-    HAP_ALPHA = "hap_alpha"
-    HAP_Q = "hap_q"
-    H264 = "h264"
-    H264_NVENC = "h264_nvenc"  # Hardware-Encoding (NVIDIA)
+    HAP_NPY = "hap_npy"   # DXT-compressed .hap (internal format)
 
 
-class ResizeMode(Enum):
-    """Resize-Modi"""
-    NONE = "none"
-    FIT = "fit"  # Fit into canvas, keep aspect ratio
-    FILL = "fill"  # Fill canvas, crop if needed
-    STRETCH = "stretch"  # Stretch to canvas size
-    AUTO = "auto"  # Automatic based on canvas config
+# ---------------------------------------------------------------------------
+# Conversion result
+# ---------------------------------------------------------------------------
 
-
-@dataclass
-class ConversionJob:
-    """Einzelner Conversion-Job"""
-    input_path: str
-    output_path: str
-    format: OutputFormat
-    target_size: Optional[Tuple[int, int]] = None
-    resize_mode: ResizeMode = ResizeMode.NONE
-    optimize_loop: bool = False
-    bitrate: Optional[str] = None  # e.g. "5M" for H.264
-    fps: Optional[int] = None
-    
-    
 @dataclass
 class ConversionResult:
-    """Ergebnis einer Conversion"""
     success: bool
     input_path: str
     output_path: str
@@ -111,440 +107,337 @@ class ConversionResult:
     compression_ratio: float = 0.0
 
 
+# ---------------------------------------------------------------------------
+# VideoConverter
+# ---------------------------------------------------------------------------
+
 class VideoConverter:
-    """
-    Universal Video Converter mit HAP Codec Support
-    """
-    
-    def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe"):
-        """
-        Initialize VideoConverter
-        
-        Args:
-            ffmpeg_path: Pfad zu ffmpeg executable
-            ffprobe_path: Pfad zu ffprobe executable
-        """
-        self.ffmpeg_path = ffmpeg_path
-        self.ffprobe_path = ffprobe_path
-        self._verify_ffmpeg()
-        
-    def _verify_ffmpeg(self):
-        """Check if FFmpeg is available and supports HAP codec"""
+    """Convert source videos to DXT-compressed .hap files for HAP playback."""
+
+    def __init__(self) -> None:
+        self._check_dependencies()
+
+    # ------------------------------------------------------------------
+    # Dependency check
+    # ------------------------------------------------------------------
+
+    def _check_dependencies(self) -> None:
+        """Verify FFmpeg CLI and PyAV are available."""
+        if not hasattr(cv2, 'VideoCapture'):
+            raise RuntimeError("OpenCV VideoCapture not available")
+
+        import subprocess
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "ffmpeg not found in PATH. "
+                "Install with: winget install Gyan.FFmpeg"
+            )
+
         try:
-            # Check FFmpeg
-            result = subprocess.run(
-                [self.ffmpeg_path, "-version"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode != 0:
-                raise RuntimeError("FFmpeg not found or not working")
-            
-            # Check HAP Codec Support
-            result = subprocess.run(
-                [self.ffmpeg_path, "-codecs"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if "hap" not in result.stdout.lower():
-                print("WARNING: HAP codec might not be available in this FFmpeg build")
-                
-        except FileNotFoundError:
-            raise RuntimeError(f"FFmpeg not found at: {self.ffmpeg_path}. Please install FFmpeg: https://ffmpeg.org/download.html")
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"FFmpeg command timed out")
-        except Exception as e:
-            raise RuntimeError(f"Error verifying FFmpeg: {e}")
-    
+            import av  # noqa: F401
+        except ImportError:
+            raise RuntimeError("PyAV not installed. Install with: pip install av")
+
+    # ------------------------------------------------------------------
+    # Video info (used by API)
+    # ------------------------------------------------------------------
+
     def get_video_info(self, video_path: str) -> Dict:
-        """
-        Hole Video-Informationen via ffprobe
-        
-        Args:
-            video_path: Pfad zum Video
-            
-        Returns:
-            Dictionary mit Video-Informationen
-        """
+        """Return basic metadata for a video file via OpenCV."""
+        cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open video: {video_path}")
         try:
-            result = subprocess.run(
-                [
-                    self.ffprobe_path,
-                    "-v", "quiet",
-                    "-print_format", "json",
-                    "-show_format",
-                    "-show_streams",
-                    video_path
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            if result.returncode != 0:
-                raise RuntimeError(f"ffprobe failed: {result.stderr}")
-            
-            data = json.loads(result.stdout)
-            
-            # Extrahiere relevante Infos
-            video_stream = next(
-                (s for s in data.get("streams", []) if s.get("codec_type") == "video"),
-                None
-            )
-            
-            if not video_stream:
-                raise RuntimeError("No video stream found")
-            
+            fps_raw = cap.get(cv2.CAP_PROP_FPS)
+            fps = fps_raw if fps_raw > 0 else 25.0
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            duration = frame_count / fps if fps > 0 else 0.0
+            size_bytes = os.path.getsize(video_path) if os.path.exists(video_path) else 0
             return {
-                "width": video_stream.get("width"),
-                "height": video_stream.get("height"),
-                "codec": video_stream.get("codec_name"),
-                "fps": eval(video_stream.get("r_frame_rate", "0/1")),
-                "duration": float(data.get("format", {}).get("duration", 0)),
-                "bitrate": int(data.get("format", {}).get("bit_rate", 0)),
-                "size_bytes": int(data.get("format", {}).get("size", 0))
+                "width": width,
+                "height": height,
+                "fps": fps,
+                "frame_count": frame_count,
+                "duration": duration,
+                "size_bytes": size_bytes,
             }
-            
-        except Exception as e:
-            raise RuntimeError(f"Error getting video info: {e}")
-    
-    def _build_ffmpeg_command(self, job: ConversionJob) -> List[str]:
-        """
-        Build FFmpeg command for conversion job
-        
-        Args:
-            job: ConversionJob
-            
-        Returns:
-            FFmpeg command als Liste
-        """
-        cmd = [self.ffmpeg_path, "-i", job.input_path]
-        
-        # Video Filter Chain
-        filters = []
-        
-        # Resize Filter
-        if job.target_size and job.resize_mode != ResizeMode.NONE:
-            width, height = job.target_size
-            
-            if job.resize_mode == ResizeMode.FIT:
-                # Scale to fit, pad if needed
-                filters.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
-                filters.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
-                
-            elif job.resize_mode == ResizeMode.FILL:
-                # Scale to fill, crop if needed
-                filters.append(f"scale={width}:{height}:force_original_aspect_ratio=increase")
-                filters.append(f"crop={width}:{height}")
-                
-            elif job.resize_mode == ResizeMode.STRETCH:
-                # Simple stretch
-                filters.append(f"scale={width}:{height}")
-        
-        # Loop optimization (for seamless loops)
-        if job.optimize_loop:
-            # Fade out last frames and fade in first frames for smooth loop
-            filters.append("fade=t=out:st=0:d=0.5,fade=t=in:st=0:d=0.5")
-        
-        # Apply filters
-        if filters:
-            cmd.extend(["-vf", ",".join(filters)])
-        
-        # FPS
-        if job.fps:
-            cmd.extend(["-r", str(job.fps)])
-        
-        # Codec-spezifische Optionen
-        if job.format == OutputFormat.HAP:
-            cmd.extend(["-c:v", "hap"])
-            
-        elif job.format == OutputFormat.HAP_ALPHA:
-            cmd.extend(["-c:v", "hap", "-format", "hap_alpha"])
-            
-        elif job.format == OutputFormat.HAP_Q:
-            cmd.extend(["-c:v", "hap", "-format", "hap_q"])
-        
-        # Audio (copy or remove)
-        cmd.extend(["-an"])  # No audio for LED content
-        
-        # Output
-        cmd.extend(["-y", job.output_path])  # -y overwrite
-        
-        return cmd
-    
-    def convert(self, job: ConversionJob, progress_callback=None) -> ConversionResult:
-        """
-        Konvertiere Video
-        
-        Args:
-            job: ConversionJob
-            progress_callback: Optional callback(percent: float, message: str)
-            
-        Returns:
-            ConversionResult
-        """
-        import time
-        start_time = time.time()
-        
-        try:
-            # Get input info
-            input_info = self.get_video_info(job.input_path)
-            input_size_mb = input_info["size_bytes"] / (1024 * 1024)
-            
-            if progress_callback:
-                progress_callback(0, f"Converting {Path(job.input_path).name}...")
-            
-            # Build command
-            cmd = self._build_ffmpeg_command(job)
-            
-            # Execute
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
-            )
-            
-            # Monitor progress
-            stderr_output = []
-            for line in process.stderr:
-                stderr_output.append(line)
-                
-                # Parse progress from FFmpeg output
-                if "time=" in line and progress_callback:
-                    try:
-                        time_str = line.split("time=")[1].split()[0]
-                        h, m, s = time_str.split(":")
-                        current_sec = int(h) * 3600 + int(m) * 60 + float(s)
-                        percent = min(100, (current_sec / input_info["duration"]) * 100)
-                        progress_callback(percent, f"Converting... {percent:.1f}%")
-                    except:
-                        pass
-            
-            process.wait()
-            
-            if process.returncode != 0:
-                error_msg = "\n".join(stderr_output[-10:])  # Last 10 lines
-                return ConversionResult(
-                    success=False,
-                    input_path=job.input_path,
-                    output_path=job.output_path,
-                    error=f"FFmpeg error: {error_msg}"
-                )
-            
-            # Get output info
-            if os.path.exists(job.output_path):
-                output_size_mb = os.path.getsize(job.output_path) / (1024 * 1024)
-                compression_ratio = output_size_mb / input_size_mb if input_size_mb > 0 else 0
-            else:
-                output_size_mb = 0
-                compression_ratio = 0
-            
-            duration = time.time() - start_time
-            
-            if progress_callback:
-                progress_callback(100, "Conversion complete!")
-            
-            return ConversionResult(
-                success=True,
-                input_path=job.input_path,
-                output_path=job.output_path,
-                duration=duration,
-                input_size_mb=input_size_mb,
-                output_size_mb=output_size_mb,
-                compression_ratio=compression_ratio
-            )
-            
-        except Exception as e:
-            return ConversionResult(
-                success=False,
-                input_path=job.input_path,
-                output_path=job.output_path,
-                error=str(e)
-            )
-    
-    # -----------------------------------------------------------------------
-    # Multi-Resolution Conversion (Phase 1)
-    # -----------------------------------------------------------------------
+        finally:
+            cap.release()
 
-    def convert_multi_resolution(
-        self,
-        input_path: str,
-        presets: List[str] = None,
-        output_format: OutputFormat = OutputFormat.HAP,
-        output_dir: str = None,
-    ) -> Tuple[str, Dict]:
-        """Convert a video to multiple resolution presets inside a clip folder.
+    # ------------------------------------------------------------------
+    # Internal: DXT conversion for one preset
+    # ------------------------------------------------------------------
 
-        Supports resume: calling this again on an existing clip folder skips
-        presets already marked 'done' in conversion_state.json.
-
-        Args:
-            input_path:    Path to the source video file.
-            presets:       List of preset names to convert.  Defaults to ALL_PRESETS.
-            output_format: Output codec / container format.
-            output_dir:    Directory where the clip folder is created.
-                           Defaults to the same directory as input_path.
-
-        Returns:
-            (clip_folder, results) where results is a dict mapping preset → info.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-
-        if presets is None:
-            presets = ALL_PRESETS
-
-        base_name = os.path.splitext(os.path.basename(input_path))[0]
-        target_dir = output_dir if output_dir else os.path.dirname(input_path)
-        clip_folder = os.path.join(target_dir, base_name)
-        os.makedirs(clip_folder, exist_ok=True)
-
-        # Load existing state (resume support)
-        state = self._load_job_state(clip_folder)
-
-        # Copy original once
-        original_dest = os.path.join(clip_folder, 'original.mov')
-        if not os.path.exists(original_dest):
-            shutil.copy2(input_path, original_dest)
-            logger.info(f"[MultiRes] Copied original → {original_dest}")
-
-        results = {}
-        for preset in presets:
-            output_npy = os.path.join(clip_folder, f"{preset}.npy")
-            output_meta = os.path.join(clip_folder, f"{preset}.json")
-
-            # Skip already-completed presets
-            if state.get(preset) == 'done' and os.path.exists(output_npy):
-                logger.info(f"[NpyConvert] {preset}: already done, skipping")
-                results[preset] = {'success': True, 'skipped': True, 'output_path': output_npy}
-                continue
-
-            # Clean up partial files from a previous crashed run
-            if state.get(preset) == 'in_progress':
-                for partial in [output_npy, output_meta]:
-                    if os.path.exists(partial):
-                        os.remove(partial)
-                logger.warning(f"[NpyConvert] {preset}: removed partial files from previous run")
-
-            # Mark in-progress before starting
-            state[preset] = 'in_progress'
-            self._save_job_state(clip_folder, state)
-
-            try:
-                result = self._npy_convert_preset(original_dest, clip_folder, preset)
-                if result.success:
-                    state[preset] = 'done'
-                    results[preset] = {
-                        'success': True,
-                        'output_path': output_npy,
-                        'size_mb': result.output_size_mb,
-                    }
-                    logger.info(f"[NpyConvert] {preset}: done ({result.output_size_mb:.0f} MB in {result.duration:.0f}s)")
-                else:
-                    state[preset] = f"failed: {result.error}"
-                    results[preset] = {'success': False, 'error': result.error}
-                    logger.error(f"[NpyConvert] {preset}: failed — {result.error}")
-            except Exception as e:
-                msg = str(e)
-                state[preset] = f"failed: {msg}"
-                results[preset] = {'success': False, 'error': msg}
-                logger.error(f"[NpyConvert] {preset}: exception — {e}")
-
-            self._save_job_state(clip_folder, state)
-
-        return clip_folder, results
-
-    def _npy_convert_preset(
+    def _hap_convert_preset(
         self,
         input_path: str,
         clip_folder: str,
         preset: str,
+        dxt_variant: str = 'bc1',
+        custom_resolution: Optional[Tuple[int, int]] = None,
     ) -> ConversionResult:
-        """Decode all frames from input_path, scale to preset resolution, and save as .npy + .json."""
-        import time
-        import logging
-        logger = logging.getLogger(__name__)
+        """Encode to HAP via FFmpeg, extract raw DXT blocks via PyAV, write .hap.
 
-        target_w, target_h = RESOLUTION_PRESETS[preset]
-        output_npy = os.path.join(clip_folder, f"{preset}.npy")
-        output_meta = os.path.join(clip_folder, f"{preset}.json")
+        FFmpeg encodes with the HAP codec (DXT1/BC1 for 'bc1', DXT5/BC3 for 'bc3')
+        to a temporary .mov.  PyAV demuxes the HAP packets — each packet is a
+        4-byte HAP section header followed by raw DXT data — which are written
+        directly to the flat .hap binary.
+        """
+        import subprocess
+        import tempfile
+        import av
 
         t0 = time.perf_counter()
 
-        cap = cv2.VideoCapture(input_path, cv2.CAP_FFMPEG)
-        if not cap.isOpened():
-            return ConversionResult(
-                success=False, input_path=input_path, output_path=output_npy,
-                error=f"Could not open video: {input_path}"
-            )
+        if custom_resolution is not None:
+            target_w, target_h = custom_resolution
+        else:
+            target_w, target_h = RESOLUTION_PRESETS[preset]
 
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        target_w = _align4(target_w)
+        target_h = _align4(target_h)
 
-        frames = []
+        output_hap = os.path.join(clip_folder, f"{preset}.hap")
+        output_meta = os.path.join(clip_folder, f"{preset}.json")
+
+        bpb = 8 if dxt_variant == 'bc1' else 16
+        frame_bytes = (target_w // 4) * (target_h // 4) * bpb
+
+        # FFmpeg HAP format name: 'hap' → DXT1/BC1, 'hap_alpha' → DXT5/BC3
+        hap_format = 'hap' if dxt_variant == 'bc1' else 'hap_alpha'
+
+        # Scale + letterbox to exact target dimensions
+        vf = (
+            f"scale={target_w}:{target_h}:flags=lanczos"
+            f":force_original_aspect_ratio=decrease,"
+            f"pad={target_w}:{target_h}:-1:-1:color=black"
+        )
+
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix='.mov')
+        os.close(tmp_fd)
+
+        fps = 25.0
+        frame_count = 0
+
         try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                frames.append(_scale_frame_fit(frame, target_w, target_h))
+            # --- Step 1: FFmpeg HAP encode → temp .mov ---
+            cmd = [
+                'ffmpeg', '-y', '-i', input_path,
+                '-vf', vf,
+                '-vcodec', 'hap',
+                '-format', hap_format,
+                '-chunks', '1',
+                '-compressor', 'none',
+                '-an',
+                tmp_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True)
+            if result.returncode != 0:
+                err = result.stderr.decode(errors='replace')[-600:]
+                return ConversionResult(
+                    success=False, input_path=input_path, output_path=output_hap,
+                    error=f"FFmpeg failed: {err}"
+                )
+
+            # --- Step 2: Demux HAP .mov → extract raw DXT bytes per packet ---
+            # HAP packet layout (single-chunk, no Snappy):
+            #   [size_lo][size_mid][size_hi][descriptor] + [raw DXT data]
+            # descriptor: 0x0B = BC1 (HAP), 0x0E = BC3 (HAP Alpha)
+            with av.open(tmp_path) as container:
+                v_stream = container.streams.video[0]
+                if v_stream.average_rate:
+                    fps = float(v_stream.average_rate)
+
+                with open(output_hap, 'wb') as f_out:
+                    for packet in container.demux(v_stream):
+                        if packet.size <= 4:
+                            continue  # flush / empty packet
+                        raw = bytes(packet)
+                        # HAP packet layout (single-chunk, no Snappy, FFmpeg):
+                        #   raw[0:4]  outer section header (size 3B LE + type 0x0B/0x0E)
+                        #   raw[4:8]  inner DXT-data section header (type 0x01)
+                        #   raw[8:]   raw DXT bytes
+                        dxt = raw[8:]
+                        if len(dxt) != frame_bytes:
+                            logger.warning(
+                                f"[HapConvert] {preset}: frame {frame_count} "
+                                f"size {len(dxt)} != expected {frame_bytes} — skipping"
+                            )
+                            continue
+                        f_out.write(dxt)
+                        frame_count += 1
+
         finally:
-            cap.release()
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
-        if not frames:
+        if frame_count == 0:
             return ConversionResult(
-                success=False, input_path=input_path, output_path=output_npy,
-                error="No frames decoded from video"
+                success=False, input_path=input_path, output_path=output_hap,
+                error="No frames extracted from HAP encode"
             )
-
-        arr = np.stack(frames)  # shape: (N, H, W, 3)
-        np.save(output_npy, arr)
 
         meta = {
             'fps': fps,
-            'total_frames': len(frames),
+            'frame_count': frame_count,
             'width': target_w,
             'height': target_h,
-            'original_width': orig_w,
-            'original_height': orig_h,
+            'format': 'hap',
+            'dxt_variant': dxt_variant,
+            'frame_bytes': frame_bytes,
             'preset': preset,
         }
         with open(output_meta, 'w') as f:
             json.dump(meta, f, indent=2)
 
         elapsed = time.perf_counter() - t0
-        size_mb = arr.nbytes / (1024 * 1024)
+        size_mb = (frame_count * frame_bytes) / (1024 * 1024)
         input_size_mb = os.path.getsize(input_path) / (1024 * 1024) if os.path.exists(input_path) else 0
 
-        logger.info(f"[NpyConvert] {preset}: {len(frames)} frames @ {fps:.1f}fps → {size_mb:.0f} MB in {elapsed:.0f}s")
+        logger.info(
+            f"[HapConvert] {preset} ({dxt_variant.upper()}): "
+            f"{frame_count}fr @ {fps:.1f}fps -> {size_mb:.0f} MB in {elapsed:.0f}s"
+        )
 
         return ConversionResult(
             success=True,
             input_path=input_path,
-            output_path=output_npy,
+            output_path=output_hap,
             duration=elapsed,
             input_size_mb=input_size_mb,
             output_size_mb=size_mb,
             compression_ratio=size_mb / input_size_mb if input_size_mb > 0 else 0,
         )
 
+    # ------------------------------------------------------------------
+    # Multi-resolution conversion (main pipeline)
+    # ------------------------------------------------------------------
+
+    def convert_multi_resolution(
+        self,
+        input_path: str,
+        presets: Optional[List[str]] = None,
+        output_format: Optional[OutputFormat] = None,
+        output_dir: Optional[str] = None,
+        dxt_variant: str = 'bc1',
+        custom_resolutions: Optional[List[Dict]] = None,
+    ) -> Tuple[str, Dict]:
+        """Convert a video to multiple resolution presets inside a clip folder.
+
+        Supports resume: re-calling on an existing clip folder skips presets
+        already marked 'done'.
+
+        Args:
+            input_path:          Source video file.
+            presets:             Standard preset names (e.g. ['720p', '1080p']).
+                                 Defaults to ALL_PRESETS.
+            output_format:       Unused (kept for API compatibility).
+            output_dir:          Parent directory for the clip folder.
+            dxt_variant:         'bc1' (RGB) or 'bc3' (RGBA with alpha).
+            custom_resolutions:  List of {'name': str, 'width': int, 'height': int}.
+
+        Returns:
+            (clip_folder, results) where results maps preset_name -> info dict.
+        """
+        if presets is None:
+            presets = list(ALL_PRESETS)
+        if custom_resolutions is None:
+            custom_resolutions = []
+
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        target_dir = output_dir if output_dir else os.path.dirname(input_path)
+        clip_folder = os.path.join(target_dir, base_name)
+        os.makedirs(clip_folder, exist_ok=True)
+
+        state = self._load_job_state(clip_folder)
+
+        original_dest = os.path.join(clip_folder, 'original.mov')
+        if not os.path.exists(original_dest):
+            shutil.copy2(input_path, original_dest)
+            logger.info(f"[MultiRes] Copied original -> {original_dest}")
+
+        # Build job list: standard presets + custom resolutions
+        jobs: List[Tuple[str, Optional[Tuple[int, int]]]] = [
+            (p, None) for p in presets
+        ]
+        for cr in custom_resolutions:
+            w = _align4(int(cr['width']))
+            h = _align4(int(cr['height']))
+            name = cr.get('name') or f"custom_{w}x{h}"
+            jobs.append((name, (w, h)))
+
+        results = {}
+        for preset_name, custom_res in jobs:
+            output_hap = os.path.join(clip_folder, f"{preset_name}.hap")
+            output_meta = os.path.join(clip_folder, f"{preset_name}.json")
+
+            if state.get(preset_name) == 'done' and os.path.exists(output_hap):
+                logger.info(f"[HapConvert] {preset_name}: already done, skipping")
+                results[preset_name] = {
+                    'success': True, 'skipped': True, 'output_path': output_hap
+                }
+                continue
+
+            if state.get(preset_name) == 'in_progress' or (
+                isinstance(state.get(preset_name), str)
+                and state[preset_name].startswith('failed')
+            ):
+                for partial in [output_hap, output_meta]:
+                    if os.path.exists(partial):
+                        os.remove(partial)
+                logger.warning(f"[HapConvert] {preset_name}: removed partial files before retry")
+
+            state[preset_name] = 'in_progress'
+            self._save_job_state(clip_folder, state)
+
+            try:
+                result = self._hap_convert_preset(
+                    original_dest, clip_folder, preset_name,
+                    dxt_variant=dxt_variant,
+                    custom_resolution=custom_res,
+                )
+                if result.success:
+                    state[preset_name] = 'done'
+                    results[preset_name] = {
+                        'success': True,
+                        'output_path': output_hap,
+                        'size_mb': result.output_size_mb,
+                        'dxt_variant': dxt_variant,
+                    }
+                else:
+                    state[preset_name] = f"failed: {result.error}"
+                    results[preset_name] = {'success': False, 'error': result.error}
+                    logger.error(f"[HapConvert] {preset_name}: failed -- {result.error}")
+            except Exception as e:
+                msg = str(e)
+                state[preset_name] = f"failed: {msg}"
+                results[preset_name] = {'success': False, 'error': msg}
+                logger.error(f"[HapConvert] {preset_name}: exception -- {e}")
+
+            self._save_job_state(clip_folder, state)
+
+        return clip_folder, results
+
+    # ------------------------------------------------------------------
+    # Job state helpers
+    # ------------------------------------------------------------------
+
     def _load_job_state(self, clip_folder: str) -> Dict:
-        """Load per-preset conversion state from clip folder."""
         state_path = os.path.join(clip_folder, JOB_STATE_FILE)
         if os.path.exists(state_path):
             try:
-                with open(state_path, 'r') as f:
+                with open(state_path) as f:
                     return json.load(f)
             except Exception:
                 pass
         return {}
 
     def _save_job_state(self, clip_folder: str, state: Dict) -> None:
-        """Persist per-preset conversion state to clip folder."""
         state_path = os.path.join(clip_folder, JOB_STATE_FILE)
         with open(state_path, 'w') as f:
             json.dump(state, f, indent=2)
@@ -559,81 +452,22 @@ class VideoConverter:
             'done': [p for p, s in state.items() if s == 'done'],
             'pending': [p for p, s in state.items() if s != 'done'],
             'in_progress': [p for p, s in state.items() if s == 'in_progress'],
-            'failed': [p for p, s in state.items() if isinstance(s, str) and s.startswith('failed')],
-            'timeout': [p for p, s in state.items() if s == 'timeout'],
+            'failed': [
+                p for p, s in state.items()
+                if isinstance(s, str) and s.startswith('failed')
+            ],
         }
 
-    # -----------------------------------------------------------------------
 
-    def batch_convert(
-        self,
-        input_pattern: str,
-        output_dir: str,
-        format: OutputFormat,
-        target_size: Optional[Tuple[int, int]] = None,
-        resize_mode: ResizeMode = ResizeMode.NONE,
-        optimize_loop: bool = False,
-        progress_callback=None
-    ) -> List[ConversionResult]:
-        """
-        Batch-Convert mehrere Videos
-        
-        Args:
-            input_pattern: Glob pattern for input files (e.g. "kanal_1/*.mp4")
-            output_dir: Output-Verzeichnis
-            format: Output-Format
-            target_size: Optional target size (width, height)
-            resize_mode: Resize-Modus
-            optimize_loop: Loop-Optimierung aktivieren
-            progress_callback: Optional callback(job_index, total_jobs, percent, message)
-            
-        Returns:
-            Liste von ConversionResults
-        """
-        from glob import glob
-        
-        # Find input files (recursive=True enables ** pattern)
-        input_files = glob(input_pattern, recursive=True)
-        if not input_files:
-            raise ValueError(f"No files found matching pattern: {input_pattern}")
-        
-        # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Convert each file
-        results = []
-        for i, input_file in enumerate(input_files):
-            # Build output filename
-            input_name = Path(input_file).stem
-            ext = ".mov" if format.value.startswith("hap") else ".mp4"
-            output_file = os.path.join(output_dir, f"{input_name}{ext}")
-            
-            # Create job
-            job = ConversionJob(
-                input_path=input_file,
-                output_path=output_file,
-                format=format,
-                target_size=target_size,
-                resize_mode=resize_mode,
-                optimize_loop=optimize_loop
-            )
-            
-            # Convert
-            def job_progress(percent, message):
-                if progress_callback:
-                    progress_callback(i + 1, len(input_files), percent, message)
-            
-            result = self.convert(job, job_progress)
-            results.append(result)
-        
-        return results
+# ---------------------------------------------------------------------------
+# Module-level singleton
+# ---------------------------------------------------------------------------
 
+_converter_instance: Optional[VideoConverter] = None
 
-# Singleton instance
-_converter_instance = None
 
 def get_converter() -> VideoConverter:
-    """Get singleton VideoConverter instance"""
+    """Return the singleton VideoConverter instance."""
     global _converter_instance
     if _converter_instance is None:
         _converter_instance = VideoConverter()

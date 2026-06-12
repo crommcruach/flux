@@ -54,7 +54,19 @@ class Layer:
         
         # Cache for last frame (for HOLD mode or frame blending)
         self.last_frame: Optional[np.ndarray] = None
-        
+
+        # How many times this layer's source has looped (incremented in slave.py
+        # on each EOF→reset cycle).  Used by compositor for 'longest' duration mode.
+        self._play_count: int = 0
+
+        # ─── Output slice routing ─────────────────────────────────────────────
+        # List of slice IDs this layer feeds into (sub-compositor outputs).
+        # Empty = no routing, layer participates only in the main composite.
+        self.output_slices: List[str] = []
+        # When True, the layer is excluded from the main composite and only
+        # blended into its assigned slice sub-compositors.
+        self.bypass_main: bool = False
+
         debug_layers(
             logger,
             f"Layer {layer_id} created: {source.get_source_name()} "
@@ -110,7 +122,9 @@ class Layer:
             'blend_mode': self.blend_mode,
             'opacity': self.opacity,
             'enabled': self.enabled,
-            'clip_id': self.clip_id
+            'clip_id': self.clip_id,
+            'output_slices': list(self.output_slices),
+            'bypass_main': self.bypass_main,
         }
         
         # Generator-spezifische Felder
@@ -119,10 +133,12 @@ class Layer:
             layer_dict['parameters'] = parameters
         
         # Serialize effects (without instance)
+        # Effects loaded from registry use 'parameters' as the config key;
+        # some older paths use 'config'.  Check both so nothing is lost.
         layer_dict['effects'] = [
             {
                 'plugin_id': effect['id'],
-                'parameters': effect.get('config', {})
+                'parameters': effect.get('config') or effect.get('parameters', {})
             }
             for effect in self.effects
         ]

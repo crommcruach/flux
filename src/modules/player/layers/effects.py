@@ -32,6 +32,13 @@ def apply_layer_effects(mgr, layer, frame, player_name: str = "", stay_on_gpu: b
     """
     from ...gpu import get_texture_pool, get_renderer, get_device
 
+    # HAP DXT raw data (memoryview) cannot have GPU effects applied until
+    # it has been decoded.  Return it unchanged — the compositor's slave
+    # branch decodes HAP to a GPUFrame and then calls _apply_effects again
+    # on the decoded frame (see compositor.py HAP branch).
+    if isinstance(frame, memoryview):
+        return frame
+
     _frame_is_gpu = hasattr(frame, 'texture')
     if _frame_is_gpu:
         h, w = frame.height, frame.width
@@ -42,14 +49,31 @@ def apply_layer_effects(mgr, layer, frame, player_name: str = "", stay_on_gpu: b
     # Merges what was previously two list comprehensions into one loop to
     # halve the allocation and iteration overhead in the per-frame hot path.
     enabled_effects = []
+    disabled_ids = []
+    noop_ids = []
     for _e in layer.effects:
         if not _e.get('enabled', True):
+            disabled_ids.append(_e.get('id', 'unknown'))
             continue
         _inst = _e['instance']
         if hasattr(_inst, 'is_noop') and _inst.is_noop():
+            noop_ids.append(_e.get('id', 'unknown'))
             continue
         enabled_effects.append(_e)
     if not enabled_effects:
+        # Log why effects were skipped — helps trace "no visual change" bugs
+        total = len(layer.effects)
+        if total == 0:
+            logger.warning(
+                f"⚠️ [LAYER-FX] [{player_name}] Layer {layer.layer_id} "
+                f"(clip_id={getattr(layer, 'clip_id', 'N/A')[:8] if getattr(layer, 'clip_id', None) else 'N/A'}...): "
+                f"layer.effects is EMPTY — no effects loaded"
+            )
+        else:
+            logger.debug(
+                f"[LAYER-FX] [{player_name}] Layer {layer.layer_id}: "
+                f"{total} effect(s) all skipped — disabled={disabled_ids}, noop={noop_ids}"
+            )
         if _frame_is_gpu:
             return frame
         if stay_on_gpu:
@@ -82,6 +106,20 @@ def apply_layer_effects(mgr, layer, frame, player_name: str = "", stay_on_gpu: b
             f"shader and were skipped in the GPU chain. Migrate to get_shader()."
         )
 
+    # One-shot log per layer: confirm GPU effects are about to be applied
+    _logged_set = getattr(mgr, '_layer_fx_logged', None)
+    if _logged_set is None:
+        mgr._layer_fx_logged = set()
+        _logged_set = mgr._layer_fx_logged
+    _log_key = (layer.layer_id, tuple(e.get('id', '') for e in gpu_effects))
+    if _log_key not in _logged_set:
+        _logged_set.add(_log_key)
+        logger.info(
+            f"🎨 [LAYER-FX] [{player_name}] Layer {layer.layer_id} "
+            f"(clip_id={getattr(layer, 'clip_id', 'N/A')[:8] if getattr(layer, 'clip_id', None) else 'N/A'}...): "
+            f"applying GPU effects {[e.get('id') for e in gpu_effects]}"
+        )
+
     try:
         pool = get_texture_pool()
         renderer = get_renderer()
@@ -109,13 +147,18 @@ def apply_layer_effects(mgr, layer, frame, player_name: str = "", stay_on_gpu: b
                 if shader_src is not None:
                     dst_gpu = pool.acquire(w, h)
                     try:
+                        uniforms = instance.get_uniforms(frame_w=w, frame_h=h)
                         stage_name = f'effects_shader_{effect.get("id", i)}'
+                        logger.debug(
+                            f"[LAYER-FX] [{player_name}] Layer {layer.layer_id} "
+                            f"effect '{effect.get('id', i)}' uniforms: {uniforms}"
+                        )
                         if profiler:
                             with profiler.profile_stage(stage_name):
                                 renderer.render(
                                     wgsl_source=shader_src,
                                     target=dst_gpu,
-                                    uniforms=instance.get_uniforms(frame_w=w, frame_h=h),
+                                    uniforms=uniforms,
                                     textures={'inputTexture': (0, current_gpu)},
                                     encoder=batch_enc,
                                 )
@@ -123,7 +166,7 @@ def apply_layer_effects(mgr, layer, frame, player_name: str = "", stay_on_gpu: b
                             renderer.render(
                                 wgsl_source=shader_src,
                                 target=dst_gpu,
-                                uniforms=instance.get_uniforms(frame_w=w, frame_h=h),
+                                uniforms=uniforms,
                                 textures={'inputTexture': (0, current_gpu)},
                                 encoder=batch_enc,
                             )
@@ -141,7 +184,8 @@ def apply_layer_effects(mgr, layer, frame, player_name: str = "", stay_on_gpu: b
             except Exception as e:
                 plugin_id = effect.get('id', 'unknown')
                 logger.error(
-                    f"❌ [{player_name}] Layer {layer.layer_id} effect {plugin_id} error: {e}"
+                    f"❌ [{player_name}] Layer {layer.layer_id} effect {plugin_id} error: {e}",
+                    exc_info=True
                 )
 
         device.queue.submit([batch_enc.finish()])
@@ -191,10 +235,14 @@ def update_layer_effect_parameter(mgr, clip_id: str, effect_index: int,
 
         if hasattr(instance, 'update_parameter'):
             success = instance.update_parameter(param_name, value)
-            logger.debug(
-                f"🔧 [{player_name}] Layer {layer.layer_id} "
+            if success:
+                # Mark the slave's cached frame stale so the new parameter
+                # value is visible immediately, even on a paused/throttled source.
+                layer._slave_effects_dirty = True
+            logger.info(
+                f"🔧 [LAYER-FX] [{player_name}] Layer {layer.layer_id} "
                 f"effect[{effect_index}].{param_name} = {value} "
-                f"→ {'OK' if success else 'FAILED'}"
+                f"→ {'✅ OK' if success else '❌ FAILED'}"
             )
             return bool(success)
         else:
@@ -207,9 +255,11 @@ def update_layer_effect_parameter(mgr, clip_id: str, effect_index: int,
     # playing in this player.  This is normal: the registry write already persisted
     # the parameter; it will be loaded when the clip starts playing.
     # Return None (not False) so callers can distinguish 'not playing' from 'failed'.
-    logger.debug(
-        f"[{player_name}] update_layer_effect_parameter: "
-        f"clip {clip_id[:8]}... has no live layer (not currently playing — registry write is sufficient)"
+    live_clip_ids = [getattr(l, 'clip_id', 'N/A') for l in layers_snap]
+    logger.warning(
+        f"⚠️ [LAYER-FX] [{player_name}] update_layer_effect_parameter: "
+        f"clip {clip_id[:8]}... NOT found in any live layer. "
+        f"Live layer clip_ids: {[c[:8] if c and len(c) >= 8 else c for c in live_clip_ids]}"
     )
     return None
 
@@ -225,12 +275,18 @@ def load_layer_effects_from_registry(mgr, layer, player_name: str = "") -> None:
 
     effects = clip_data.get('effects', [])
     if not effects:
+        logger.debug(
+            f"[LAYER-FX] [{player_name}] Layer {layer.layer_id} "
+            f"(clip_id={layer.clip_id[:8] if layer.clip_id else 'N/A'}...): "
+            f"no effects in registry — layer.effects cleared"
+        )
+        layer.effects = []
         return
 
     layer.effects = []
-    logger.debug(
-        f"📦 [{player_name}] Loading {len(effects)} effects for "
-        f"Layer {layer.layer_id} from registry"
+    logger.info(
+        f"📦 [LAYER-FX] [{player_name}] Loading {len(effects)} effect(s) for "
+        f"Layer {layer.layer_id} (clip_id={layer.clip_id[:8] if layer.clip_id else 'N/A'}...) from registry"
     )
     for effect_config in effects:
         plugin_id = effect_config.get('plugin_id')
@@ -290,16 +346,24 @@ def load_layer_effects_from_registry(mgr, layer, player_name: str = "") -> None:
                 f"Layer {layer.layer_id}: {e}"
             )
 
-    logger.debug(
-        f"✅ [{player_name}] Loaded {len(layer.effects)} effects for Layer {layer.layer_id}"
+    logger.info(
+        f"✅ [LAYER-FX] [{player_name}] Layer {layer.layer_id}: "
+        f"loaded {len(layer.effects)} effect(s) — "
+        f"{[e['id'] for e in layer.effects]}"
     )
 
 
 def reload_all_layer_effects(mgr, player_name: str = "") -> None:
     """Reload effects for all layers from ClipRegistry."""
-    logger.debug(
-        f"🔄 [{player_name}] Reloading all layer effects, layers={len(mgr.layers)}"
+    logger.info(
+        f"🔄 [LAYER-FX] [{player_name}] Reloading all layer effects, "
+        f"layers={len(mgr.layers)}, "
+        f"clip_ids={[getattr(l, 'clip_id', 'N/A')[:8] if getattr(l, 'clip_id', None) else 'N/A' for l in mgr.layers]}"
     )
+    # Clear the one-time GPU-applied log flags so the 🎨 log fires again
+    # on the next slave advance for each layer — confirms effects are running
+    # after a reload.
+    mgr._layer_fx_logged = set()
     for layer in mgr.layers:
         if layer.clip_id:
             load_layer_effects_from_registry(mgr, layer, player_name)

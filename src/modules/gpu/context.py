@@ -35,14 +35,26 @@ def get_device() -> wgpu.GPUDevice:
         # Falls back gracefully; most desktop Vulkan/D3D12 drivers support this.
         try:
             _device = adapter.request_device_sync(
-                required_features=["timestamp-query"]
+                required_features=["timestamp-query", "texture-compression-bc"]
             )
             _has_timestamp_query = True
-            logger.info("wgpu: timestamp-query enabled (GPU profiling available)")
+            logger.info("wgpu: timestamp-query + texture-compression-bc enabled")
         except Exception:
-            _device = adapter.request_device_sync()
-            _has_timestamp_query = False
-            logger.info("wgpu: timestamp-query not available on this device")
+            # timestamp-query may not be available; BC compression is almost
+            # always present on desktop Vulkan/D3D12 — try BC alone.
+            try:
+                _device = adapter.request_device_sync(
+                    required_features=["texture-compression-bc"]
+                )
+                _has_timestamp_query = False
+                logger.info("wgpu: texture-compression-bc enabled (no timestamp-query)")
+            except Exception:
+                _device = adapter.request_device_sync()
+                _has_timestamp_query = False
+                logger.warning(
+                    "wgpu: texture-compression-bc NOT available — "
+                    "HAP video sources will fail. Check GPU/driver support."
+                )
         info = adapter.info
         logger.info(
             f"wgpu device ready: {info.get('description', '?')} "

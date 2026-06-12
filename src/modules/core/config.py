@@ -70,17 +70,6 @@ CONFIG_SCHEMA = {
                     "minimum": 0,
                     "maximum": 1,
                     "description": "Wartezeit zwischen Frames in Sekunden"
-                },
-                "gif_transparency_bg": {
-                    "type": "array",
-                    "items": {"type": "integer", "minimum": 0, "maximum": 255},
-                    "minItems": 3,
-                    "maxItems": 3,
-                    "description": "RGB background color for GIF transparency"
-                },
-                "gif_respect_frame_timing": {
-                    "type": "boolean",
-                    "description": "GIF Frame-Timing respektieren"
                 }
             }
         },
@@ -410,13 +399,11 @@ class ConfigValidator:
                 "broadcast": True
             },
             "video": {
-                "extensions": [".mp4", ".avi", ".mov", ".mkv", ".wmv", ".gif"],
+                "extensions": [".mp4", ".avi", ".mov", ".mkv", ".wmv"],
                 "default_fps": None,
                 "default_brightness": 100,
                 "default_speed": 1.0,
-                "frame_wait_delay": 0.1,
-                "gif_transparency_bg": [0, 0, 0],
-                "gif_respect_frame_timing": True
+                "frame_wait_delay": 0.1
             },
             "paths": {
                 "video_dir": "video",

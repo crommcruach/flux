@@ -494,14 +494,22 @@ class ClipRegistry:
         if clip_id not in self.clips:
             return False
         
-        # Layer 0 is the base clip - only 'name' updates are allowed
+        # Layer 0 is the base clip — allow visibility/opacity/blend updates in
+        # addition to name; block source or structural changes.
         if layer_id == 0:
-            if set(updates.keys()) <= {'name'}:
-                if 'name' in updates:
-                    self.clips[clip_id]['base_layer_name'] = updates['name']
-                return True
-            logger.warning(f"Layer 0 is the base clip - only 'name' can be updated")
-            return False
+            _allowed = {'name', 'enabled', 'opacity', 'blend_mode'}
+            if not set(updates.keys()) <= _allowed:
+                _blocked = set(updates.keys()) - _allowed
+                logger.warning(f"Layer 0: blocked update keys {_blocked} (only {_allowed} allowed)")
+                return False
+            if 'name' in updates:
+                self.clips[clip_id]['base_layer_name'] = updates['name']
+            # Persist enabled/opacity/blend_mode on the clip itself so they
+            # survive a reload (base layer has no separate layer dict).
+            for _k in ('enabled', 'opacity', 'blend_mode'):
+                if _k in updates:
+                    self.clips[clip_id][_k] = updates[_k]
+            return True
         
         layers = self.clips[clip_id]['layers']
         

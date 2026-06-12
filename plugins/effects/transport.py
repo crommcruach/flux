@@ -521,6 +521,9 @@ class TransportEffect(PluginBase):
             if isinstance(value, dict) and '_value' in value:
                 value = value['_value']
             self.speed = float(value)
+            # Persist to config dict so to_dict() / session-state serialisation picks it up
+            if hasattr(self, 'config') and self.config is not None:
+                self.config['speed'] = self.speed
             debug_transport(logger, f"🚀 Transport: Speed updated to {self.speed}")
             return True
         

@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class CLIHandler:
     """Processes CLI commands and delegates to corresponding components."""
     
-    def __init__(self, player_manager, dmx_controller, rest_api, video_dir, data_dir, config):
+    def __init__(self, player_manager, rest_api, video_dir, data_dir, config):
         # Use player_manager for central player access
         self.player_manager = player_manager
         self.rest_api = rest_api
@@ -27,7 +27,6 @@ class CLIHandler:
         # Initialize unified command executor
         self.command_executor = CommandExecutor(
             player_provider=lambda: self.player_manager.player,
-            dmx_controller=None,  # DMX input removed
             video_dir=video_dir,
             data_dir=data_dir,
             config=config
@@ -70,9 +69,6 @@ class CLIHandler:
             new_player = self._handle_points(args)
             if new_player:
                 return (True, new_player)
-            return (True, None)
-        elif command == "cache":
-            logger.debug("Cache system deprecated. RGB caching is no longer used.")
             return (True, None)
         elif command == "artnet":
             self._handle_artnet(args)
@@ -627,177 +623,6 @@ class CLIHandler:
                 logger.debug(f"{key}: {value}")
         else:
             logger.debug(stats)
-    
-    # === Cache ===
-    
-    # REMOVED: _handle_record - Recording system removed
-    
-    def _handle_cache(self, args):
-        """Manages cache."""
-        cache_dir = os.path.join(self.base_path, self.config['paths'].get('cache_dir', 'cache'))
-        
-        if args == "clear":
-            self._handle_cache_clear(cache_dir)
-        elif args == "info":
-            self._handle_cache_info(cache_dir)
-        elif args and args.startswith("delete"):
-            self._handle_cache_delete(args, cache_dir)
-        elif args == "enable":
-            self._handle_cache_enable()
-        elif args == "disable":
-            self._handle_cache_disable()
-        elif args == "size":
-            self._handle_cache_size(cache_dir)
-        elif args == "fill":
-            self._handle_cache_fill(cache_dir)
-        else:
-            logger.debug("Usage: cache clear | info | delete <name> | enable | disable | size | fill")
-    
-    def _handle_cache_clear(self, cache_dir):
-        """Clears cache."""
-        if os.path.exists(cache_dir):
-            files = [f for f in os.listdir(cache_dir) if os.path.isfile(os.path.join(cache_dir, f))]
-            file_count = 0
-            for f in files:
-                try:
-                    os.remove(os.path.join(cache_dir, f))
-                    file_count += 1
-                except Exception as e:
-                    logger.warning(f"  ⚠ Could not delete: {f} ({e})")
-            logger.debug(f"✓ Cache cleared ({file_count} files deleted)")
-        else:
-            logger.debug("Cache folder does not exist")
-    
-    def _handle_cache_info(self, cache_dir):
-        """Shows cache info."""
-        if os.path.exists(cache_dir):
-            files = [f for f in os.listdir(cache_dir) if os.path.isfile(os.path.join(cache_dir, f))]
-            total_size = sum(os.path.getsize(os.path.join(cache_dir, f)) for f in files)
-            logger.debug(f"Cache information:")
-            logger.debug(f"  Files: {len(files)}")
-            logger.debug(f"  Size: {total_size / (1024*1024):.2f} MB")
-            logger.debug(f"  Path: {cache_dir}")
-            logger.debug(f"  Status: {'Enabled' if self.config.get('cache', {}).get('enabled', True) else 'Disabled'}")
-        else:
-            logger.debug("Cache folder does not exist")
-    
-    def _handle_cache_delete(self, args, cache_dir):
-        """Deletes cache for a specific video."""
-        parts = args.split(maxsplit=1)
-        if len(parts) < 2:
-            logger.debug("Usage: cache delete <videoname>")
-            return
-        
-        video_name = parts[1]
-        found = False
-        if os.path.exists(cache_dir):
-            for cache_file in os.listdir(cache_dir):
-                if cache_file.endswith('.msgpack'):
-                    cache_path = os.path.join(cache_dir, cache_file)
-                    try:
-                        import msgpack
-                        with open(cache_path, 'rb') as f:
-                            cache_data = msgpack.unpackb(f.read(), raw=False)
-                        if video_name.lower() in cache_data.get('video', '').lower():
-                            file_size_mb = os.path.getsize(cache_path) / (1024*1024)
-                            os.remove(cache_path)
-                            logger.debug(f"✓ Cache deleted for: {cache_data.get('video')} ({file_size_mb:.2f} MB)")
-                            found = True
-                            break
-                    except:
-                        pass
-        if not found:
-            logger.warning(f"No cache file found for: {video_name}")
-    
-    def _handle_cache_enable(self):
-        """Enables cache."""
-        self.config['cache']['enabled'] = True
-        config_path = os.path.join(self.base_path, 'config.json')
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(self.config, f, indent=2)
-        logger.debug("✓ RGB caching enabled")
-    
-    def _handle_cache_disable(self):
-        """Disables cache."""
-        self.config['cache']['enabled'] = False
-        config_path = os.path.join(self.base_path, 'config.json')
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(self.config, f, indent=2)
-        logger.debug("✓ RGB caching disabled")
-    
-    def _handle_cache_size(self, cache_dir):
-        """Shows cache size."""
-        if os.path.exists(cache_dir):
-            files = [f for f in os.listdir(cache_dir) if os.path.isfile(os.path.join(cache_dir, f))]
-            total_size = sum(os.path.getsize(os.path.join(cache_dir, f)) for f in files)
-            logger.debug(f"Cache size: {total_size / (1024*1024):.2f} MB ({len(files)} files)")
-            if files:
-                logger.debug("\nTop 5 largest files:")
-                file_sizes = [(f, os.path.getsize(os.path.join(cache_dir, f))) for f in files]
-                for fname, fsize in sorted(file_sizes, key=lambda x: x[1], reverse=True)[:5]:
-                    logger.debug(f"  {fname}: {fsize / (1024*1024):.2f} MB")
-        else:
-            logger.debug("Cache-Ordner existiert nicht")
-    
-    def _handle_cache_fill(self, cache_dir):
-        """Fills cache for all videos."""
-        if not self.config.get('cache', {}).get('enabled', True):
-            logger.warning("⚠ Cache is disabled! Enable with: cache enable")
-            return
-        
-        logger.warning("⚠ WARNING: This re-caches all videos and can take very long!")
-        confirm = input("Continue? (y/n): ").strip().lower()
-        if confirm not in AFFIRMATIVE_RESPONSES:
-            logger.debug("Aborted")
-            return
-        
-        all_videos = []
-        for root, dirs, files in os.walk(self.video_dir):
-            for f in files:
-                if f.lower().endswith(VIDEO_EXTENSIONS):
-                    all_videos.append(os.path.join(root, f))
-        
-        logger.debug(f"\nStarting cache fill for {len(all_videos)} videos...")
-        
-        from ..player.sources import VideoSource
-        from .player import Player
-        
-        for idx, video_path in enumerate(all_videos, 1):
-            logger.debug(f"\n[{idx}/{len(all_videos)}] Processing: {os.path.basename(video_path)}")
-            try:
-                # Create temporary VideoSource for caching
-                temp_source = VideoSource(
-                    video_path,
-                    self.player.canvas_width,
-                    self.player.canvas_height,
-                    self.config
-                )
-                
-                # Create temporary player for caching
-                temp_player = Player(
-                    temp_source,
-                    self.player.points_json_path,
-                    self.player.target_ip,
-                    self.player.start_universe,
-                    self.player.fps_limit,
-                    self.config
-                )
-                
-                cache_path = temp_source._get_cache_path()
-                if cache_path and os.path.exists(cache_path):
-                    logger.debug(f"  ✓ Cache already exists, skipping...")
-                else:
-                    logger.debug(f"  → Creating cache (takes a few seconds)...")
-                    temp_player.start()
-                    while temp_player.current_loop < 1 and temp_player.is_running:
-                        time.sleep(0.5)
-                    temp_player.stop()
-                    time.sleep(0.5)
-                    logger.debug(f"  ✓ Cache created")
-            except Exception as e:
-                logger.error(f"  ✗ Error: {e}")
-        
-        logger.debug(f"\n✓ Cache fill completed for {len(all_videos)} videos")
     
     # === System ===
     

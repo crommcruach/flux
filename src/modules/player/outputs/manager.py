@@ -159,7 +159,41 @@ class OutputManager:
                     '[%s] GPU frame routing error for \'%s\': %s',
                     self.player_name, output_id, exc, exc_info=True,
                 )
-    
+
+    def update_gpu_layer_slices(self, slice_frames: dict) -> None:
+        """Route per-slice sub-compositor GPUFrames to matching outputs.
+
+        slice_frames: {slice_id: GPUFrame} — compositor owns these; do NOT release.
+
+        For each enabled output whose config['slice'] matches a key in
+        slice_frames, apply GPUSliceRenderer (crop/rotate/soft-edge/colour)
+        and queue the result.  Called from the _output_layer_slice_hook before
+        update_gpu_frame() handles the main composite.
+        """
+        if not self.outputs or not slice_frames:
+            return
+        for output_id, output in list(self.outputs.items()):
+            if not output.enabled:
+                continue
+            if not hasattr(output, 'queue_gpu_frame'):
+                continue
+            slice_cfg = output.config.get('slice', 'full')
+            if not isinstance(slice_cfg, str) or slice_cfg not in slice_frames:
+                continue
+            try:
+                sub_frame = slice_frames[slice_cfg]
+                processed = self.slice_manager.get_slice_gpu(
+                    slice_cfg, sub_frame,
+                    self.canvas_width, self.canvas_height,
+                )
+                output.needs_cpu_frame = False
+                output.queue_gpu_frame(processed if processed is not None else sub_frame)
+            except Exception as exc:
+                logger.error(
+                    '[%s] Layer-slice routing error for output \'%s\': %s',
+                    self.player_name, output_id, exc, exc_info=True,
+                )
+
     def load_outputs_from_config(self, output_definitions: list) -> int:
         """
         Load and register outputs from config definitions
@@ -321,17 +355,25 @@ class OutputManager:
         self._save_state()
         return True
 
-    def update_frame(self, composite_frame: np.ndarray, 
+    def update_frame(self, composite_frame: np.ndarray,
                     layer_manager: Optional[Any] = None,
                     current_clip_id: Optional[str] = None):
         """
         Update frame and distribute to all active outputs
-        
+
         Args:
-            composite_frame: Full composited canvas frame
+            composite_frame: Full composited canvas frame (must be np.ndarray)
             layer_manager: Layer manager reference (for layer routing)
             current_clip_id: Current clip UUID (for clip routing)
         """
+        # Guard: skip GPU/HAP frames that were not yet downloaded to CPU.
+        # composite_layers() returns None for GPU-only paths; the caller in
+        # core.py skips update_frame when frame is _GPU_PROCESSED.  However
+        # the slave-loop fast-path may hand a raw memoryview (HAP) here before
+        # it re-enters the compositor.  Silently drop those.
+        if composite_frame is not None and not isinstance(composite_frame, np.ndarray):
+            return
+
         with self.frame_lock:
             self.composite_frame = composite_frame
             self.layer_manager = layer_manager

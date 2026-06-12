@@ -73,12 +73,13 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
             
             base_layer = {
                 'layer_id': 0,
+                'clip_id': clip_id,
                 'name': clip.get('base_layer_name', 'Background'),
                 'source_type': source_type,
                 'source_path': clip['relative_path'],
-                'blend_mode': 'normal',
-                'opacity': 1.0,
-                'enabled': True
+                'blend_mode': clip.get('blend_mode', 'normal'),
+                'opacity': clip.get('opacity', 1.0),
+                'enabled': clip.get('enabled', True),
             }
             
             # Combine base layer + additional layers
@@ -273,12 +274,31 @@ def register_clip_layer_routes(app, clip_registry, player_manager, video_dir):
 
             # Update
             success = clip_registry.update_clip_layer(clip_id, layer_id, data)
-            
+
             if not success:
                 return jsonify({"success": False, "error": "Failed to update layer"}), 400
-            
-            # Reload layers in player if this clip is currently active
-            reload_player_layers_if_active(clip_id)
+
+            # For layer 0 simple property changes (enabled/opacity/blend_mode), update
+            # the live layer directly — avoids a full source reload which would reset
+            # playback state.  For layer 0 we must find it by index (layer_id==0).
+            _live_props = {k: data[k] for k in ('enabled', 'opacity', 'blend_mode') if k in data}
+            if layer_id == 0 and _live_props:
+                for _pid in ['video', 'artnet']:
+                    _p = player_manager.get_player(_pid)
+                    if _p and hasattr(_p, 'current_clip_id') and _p.current_clip_id == clip_id:
+                        _blend = _live_props.get('blend_mode')
+                        _opacity = _live_props['opacity'] * 100.0 if 'opacity' in _live_props else None
+                        _enabled = _live_props.get('enabled')
+                        _p.layer_manager.update_layer_config(
+                            layer_id=0,
+                            blend_mode=_blend,
+                            opacity=_opacity,
+                            enabled=_enabled,
+                            player_name=getattr(_p, 'player_name', _pid),
+                        )
+            else:
+                # Reload layers in player if this clip is currently active
+                reload_player_layers_if_active(clip_id)
             
             return jsonify({
                 "success": True,

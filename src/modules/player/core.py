@@ -188,11 +188,25 @@ class Player:
         # subscribers no longer trigger a full-resolution SSBO download.
         self.last_preview_jpeg: bytes | None = None
         self._preview_downscaler = None  # type: ignore[assignment]
+        # Frame-sync Conditions: MJPEG generators wait on these instead of
+        # time.sleep() so they wake up exactly when a new JPEG is ready.
+        # notify_all() is called from the GPU thread after each JPEG write.
+        self._preview_frame_cond = threading.Condition(threading.Lock())
+        # Selection stream — separate MJPEG endpoint for output-settings canvas.
+        # Shows only the layers assigned to the selected slice when
+        # _selection_slice_id is set; falls back to the full composite otherwise.
+        # Completely independent from last_preview_jpeg (player.html unaffected).
+        self.last_selection_jpeg: bytes | None = None
+        self._selection_downscaler = None  # type: ignore[assignment]
+        self._selection_slice_id: str | None = None
+        self._selection_subscriber_count: int = 0
+        self._selection_frame_cond = threading.Condition(threading.Lock())
         # GPU fullscreen downscaler — sync readback at canvas resolution.
         # Produces last_fullscreen_jpeg; eliminates the full-res SSBO download for
         # the /api/fullscreen/stream endpoint.
         self.last_fullscreen_jpeg: bytes | None = None
         self._fullscreen_downscaler = None  # type: ignore[assignment]
+        self._fullscreen_frame_cond = threading.Condition(threading.Lock())
         self._init_preview_downscaler()
 
         # Display GPU hook — zero-copy GLFW display via WGL context sharing.
@@ -365,6 +379,28 @@ class Player:
                         _om.update_gpu_frame(composite)
                     self.layer_manager.set_output_gpu_hook(_output_gpu_hook_fn)
 
+                    def _layer_slice_hook_fn(slice_frames, _om=self.output_manager,
+                                             _p=self):
+                        _om.update_gpu_layer_slices(slice_frames)
+                        # Selection stream: encode the selected slice's composite
+                        # frame into last_selection_jpeg for /api/preview/selection/stream.
+                        ov = _p._selection_slice_id
+                        if ov and _p._selection_subscriber_count > 0:
+                            if ov in slice_frames and _p._selection_downscaler is not None:
+                                # Slice has layers — encode its composite
+                                result = _p._selection_downscaler.encode(slice_frames[ov])
+                                if result is not None:
+                                    _p.last_selection_jpeg = result
+                                    with _p._selection_frame_cond:
+                                        _p._selection_frame_cond.notify_all()
+                            else:
+                                # Slice selected but no layers assigned → show main output
+                                if _p.last_preview_jpeg is not None:
+                                    _p.last_selection_jpeg = _p.last_preview_jpeg
+                                    with _p._selection_frame_cond:
+                                        _p._selection_frame_cond.notify_all()
+                    self.layer_manager.set_output_layer_slice_hook(_layer_slice_hook_fn)
+
                 logger.debug(f"✅ Output Manager initialized for {self.player_name}")
             except Exception as e:
                 logger.error(f"Output Manager initialization failed: {e}", exc_info=True)
@@ -492,6 +528,10 @@ class Player:
                     '%s: GPU preview downscaler %dx%d q=%d',
                     self.player_name, pw, ph, quality,
                 )
+                # Selection stream downscaler — same resolution/quality as preview.
+                # Independent instance so the ring buffer state doesn't collide.
+                if not self.enable_artnet:
+                    self._selection_downscaler = PreviewDownscaler(pw, ph, quality)
 
             # Fullscreen downscaler — canvas-resolution triple-buffer ring.
             # Only for the video player (artnet player has no fullscreen endpoint).
@@ -543,6 +583,8 @@ class Player:
                 result = self._preview_downscaler.encode(composite)
             if self._mjpeg_subscriber_count > 0 and result is not None:
                 self.last_preview_jpeg = result
+                with self._preview_frame_cond:
+                    self._preview_frame_cond.notify_all()
             # Feed VirtualOutput instances with the small raw frame (~2 ms download)
             raw = self._preview_downscaler.last_raw
             if raw is not None and self.output_manager is not None:
@@ -564,6 +606,17 @@ class Player:
                 fs_result = self._fullscreen_downscaler.encode(composite)
             if self._fullscreen_subscriber_count > 0 and fs_result is not None:
                 self.last_fullscreen_jpeg = fs_result
+                with self._fullscreen_frame_cond:
+                    self._fullscreen_frame_cond.notify_all()
+
+        # Selection stream fallback: when no slice is selected, mirror the
+        # full composite so the selection/stream endpoint always has content.
+        if (self._selection_slice_id is None
+                and self._selection_subscriber_count > 0
+                and self.last_preview_jpeg is not None):
+            self.last_selection_jpeg = self.last_preview_jpeg
+            with self._selection_frame_cond:
+                self._selection_frame_cond.notify_all()
 
     def _on_transition_gpu_frame(self, gpu_frame) -> None:
         """Pure-GPU transition hook — no CPU round-trips.

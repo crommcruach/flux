@@ -187,6 +187,35 @@ def _build_debug(sub):
     s.add_parser('status', help='Show current log level and debug modules', formatter_class=_Fmt)
 
 
+def _build_layer(sub):
+    p = sub.add_parser('layer', help='List and route layers to output slices', formatter_class=_Fmt)
+    s = p.add_subparsers(dest='action', metavar='ACTION')
+    s.required = True
+
+    ls = s.add_parser('list', help='List layers for the active clip', formatter_class=_Fmt)
+    _add_player(ls)
+    _add_json(ls)
+
+    rt = s.add_parser('route', help='Route layer(s) to one or more output slices', formatter_class=_Fmt,
+                      description='Assign the layer to named output slices.\n'
+                                  'Multiple slice IDs can be provided.\n'
+                                  'Adds to existing routing (non-destructive).')
+    rt.add_argument('layer_id', type=int, help='Layer ID (0 = base layer)')
+    rt.add_argument('slices', nargs='+', metavar='SLICE_ID',
+                    help='One or more slice IDs to route to')
+    rt.add_argument('--bypass', action='store_true',
+                    help='Exclude layer from main composite (route to slice only)')
+    _add_player(rt)
+
+    ur = s.add_parser('unroute', help='Remove slice routing from a layer', formatter_class=_Fmt,
+                      description='Remove specific slice IDs from a layer\'s routing.\n'
+                                  'Omit SLICE_ID to clear all routing.')
+    ur.add_argument('layer_id', type=int, help='Layer ID')
+    ur.add_argument('slices', nargs='*', metavar='SLICE_ID',
+                    help='Slice IDs to remove (omit = clear all)')
+    _add_player(ur)
+
+
 def _build_output(sub):
     p = sub.add_parser('output', help='Manage video outputs (display, virtual, …)', formatter_class=_Fmt)
     s = p.add_subparsers(dest='action', metavar='ACTION')
@@ -258,6 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
     _build_debug(sub)
     _build_perf(sub)
     _build_output(sub)
+    _build_layer(sub)
 
     return parser
 

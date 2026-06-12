@@ -363,7 +363,14 @@ def register_info_routes(app, player_manager, api=None, config=None):
                 _player._mjpeg_subscriber_count += 1
             try:
                 while True:
-                    player = player_manager.player
+                    _p = player_manager.player
+                    cond = getattr(_p, '_preview_frame_cond', None) if _p else None
+                    if cond is not None:
+                        with cond:
+                            cond.wait(timeout=frame_delay)
+                    else:
+                        time.sleep(frame_delay)
+                    player = _p
                     if player is not None and slice_cfg is not None:
                         # Slice preview: crop the raw preview frame on-the-fly
                         raw = None
@@ -379,7 +386,6 @@ def register_info_routes(app, player_manager, api=None, config=None):
                         api.stream_traffic['preview']['frames'] += 1
                         yield (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    time.sleep(frame_delay)
             finally:
                 if _player and hasattr(_player, '_mjpeg_subscriber_count'):
                     _player._mjpeg_subscriber_count = max(0, _player._mjpeg_subscriber_count - 1)
@@ -387,6 +393,67 @@ def register_info_routes(app, player_manager, api=None, config=None):
         return Response(generate_frames(),
                        mimetype='multipart/x-mixed-replace; boundary=frame')
     
+    @app.route('/api/preview/selection', methods=['POST'])
+    def preview_selection_set():
+        """Set (or clear) the slice whose sub-composite the selection stream shows.
+
+        POST  {"slice_id": "MySlice"}  — isolate that slice's assigned layers.
+        POST  {"slice_id": null}        — restore full composite fallback.
+        """
+        from flask import request
+        player_obj = player_manager.get_player('video')
+        if not player_obj:
+            return jsonify({'success': False, 'error': 'Video player not available'}), 404
+        data = request.get_json(silent=True) or {}
+        slice_id = data.get('slice_id') or None
+        player_obj._selection_slice_id = slice_id
+        return jsonify({'success': True, 'slice_id': slice_id})
+
+    @app.route('/api/preview/selection/stream')
+    def preview_selection_stream():
+        """MJPEG stream for the output-settings canvas.
+
+        Shows only the layers assigned to the currently selected slice when a
+        slice is active; otherwise mirrors the full composite preview.
+        Completely independent from /api/preview/stream so player.html is unaffected.
+        """
+        from flask import Response
+        import time
+
+        cfg = config if config else {}
+        preview_config = cfg.get('video', {}).get('preview_stream', {}).get('video', {})
+        stream_fps = preview_config.get('fps', 30)
+        frame_delay = 1.0 / stream_fps
+
+        def generate_frames():
+            _player = player_manager.get_player('video')
+            if _player and hasattr(_player, '_selection_subscriber_count'):
+                _player._selection_subscriber_count += 1
+            try:
+                while True:
+                    _p = player_manager.get_player('video')
+                    cond = getattr(_p, '_selection_frame_cond', None) if _p else None
+                    if cond is not None:
+                        with cond:
+                            cond.wait(timeout=frame_delay)
+                    else:
+                        time.sleep(frame_delay)
+                    player = _p
+                    frame_bytes = getattr(player, 'last_selection_jpeg', None) if player else None
+                    # Fallback to full composite while selection jpeg is not yet populated
+                    if frame_bytes is None and player is not None:
+                        frame_bytes = getattr(player, 'last_preview_jpeg', None)
+                    if frame_bytes is not None:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            finally:
+                if _player and hasattr(_player, '_selection_subscriber_count'):
+                    _player._selection_subscriber_count = max(
+                        0, _player._selection_subscriber_count - 1)
+
+        return Response(generate_frames(),
+                        mimetype='multipart/x-mixed-replace; boundary=frame')
+
     @app.route('/api/preview/artnet/stream')
     def preview_artnet_stream():
         """MJPEG Stream des Art-Net Players."""
@@ -405,12 +472,18 @@ def register_info_routes(app, player_manager, api=None, config=None):
                 _player._mjpeg_subscriber_count += 1
             try:
                 while True:
-                    player = player_manager.artnet_player
+                    _p = player_manager.artnet_player
+                    cond = getattr(_p, '_preview_frame_cond', None) if _p else None
+                    if cond is not None:
+                        with cond:
+                            cond.wait(timeout=frame_delay)
+                    else:
+                        time.sleep(frame_delay)
+                    player = _p
                     frame_bytes = getattr(player, 'last_preview_jpeg', None) if player else None
                     if frame_bytes is not None:
                         yield (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    time.sleep(frame_delay)
             finally:
                 if _player and hasattr(_player, '_mjpeg_subscriber_count'):
                     _player._mjpeg_subscriber_count = max(0, _player._mjpeg_subscriber_count - 1)
@@ -442,7 +515,14 @@ def register_info_routes(app, player_manager, api=None, config=None):
             try:
                 while True:
                     try:
-                        player = player_manager.artnet_player if player_type == 'artnet' else player_manager.player
+                        _p = player_manager.artnet_player if player_type == 'artnet' else player_manager.player
+                        cond = getattr(_p, '_fullscreen_frame_cond', None) if _p else None
+                        if cond is not None:
+                            with cond:
+                                cond.wait(timeout=frame_delay)
+                        else:
+                            time.sleep(frame_delay)
+                        player = _p
 
                         # Fast path: GPU downscaler pre-encoded the JPEG on the
                         # player thread via the triple-buffer ring — no CPU download.
@@ -453,7 +533,6 @@ def register_info_routes(app, player_manager, api=None, config=None):
                             api.stream_traffic['fullscreen']['frames'] += 1
                             yield (b'--frame\r\n'
                                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                        time.sleep(frame_delay)
 
                     except Exception as e:
                         logger.debug('fullscreen_stream error: %s', e)
@@ -642,7 +721,7 @@ def register_console_command_routes(app, player, rest_api, video_dir, data_dir, 
                     sys.stdout = io.StringIO()
                     sys.stderr = io.StringIO()
                     
-                    cli_handler = CLIHandler(player, None, rest_api, video_dir, data_dir, config)
+                    cli_handler = CLIHandler(player, rest_api, video_dir, data_dir, config)
                     continue_loop, new_player = cli_handler.execute_command(command, args)
                     result_container['continue_loop'] = continue_loop
                     result_container['new_player'] = new_player
@@ -662,7 +741,6 @@ def register_console_command_routes(app, player, rest_api, video_dir, data_dir, 
             cmd_thread.join(timeout=10.0)  # Warte max 10 Sekunden
             
             # Update player reference wenn ersetzt
-            # Note: dmx_controller removed - player update handled by PlayerManager
             
             return jsonify({
                 "status": "success",

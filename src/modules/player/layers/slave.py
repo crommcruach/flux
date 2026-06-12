@@ -73,6 +73,24 @@ def render_slave_layer(
         if not hasattr(layer, '_slave_next_time'):
             layer._slave_next_time = now
             layer._slave_cached_frame = None
+            layer._slave_raw_frame = None
+
+        # Dirty re-render: effect parameters changed while the source is FPS-throttled
+        # (e.g. paused video).  Re-apply effects to the stored raw frame without
+        # advancing the source so the change is visible on the current frame.
+        if (
+            getattr(layer, '_slave_effects_dirty', False)
+            and getattr(layer, '_slave_raw_frame', None) is not None
+            and now < layer._slave_next_time
+            and layer._slave_cached_frame is not None
+        ):
+            layer._slave_effects_dirty = False
+            new_frame = apply_effects_fn(layer, layer._slave_raw_frame, player_name)
+            if isinstance(new_frame, np.ndarray) and new_frame.ndim == 3 and new_frame.shape[2] == 4:
+                new_frame = np.ascontiguousarray(new_frame[:, :, :3])
+            if hasattr(layer._slave_cached_frame, 'texture'):
+                get_texture_pool_fn().release(layer._slave_cached_frame)
+            layer._slave_cached_frame = new_frame
 
         if now >= layer._slave_next_time or layer._slave_cached_frame is None:
             # Time to advance — fetch a new frame.
@@ -89,6 +107,7 @@ def render_slave_layer(
                     logger,
                     f"🔁 Layer {layer.layer_id} reached end, auto-reset (slave loop)"
                 )
+                layer._play_count += 1
                 layer.source.reset()
                 overlay_frame, _ = layer.source.get_next_frame()
 
@@ -111,6 +130,11 @@ def render_slave_layer(
                 layer._slave_next_time = now + 1.0
                 return layer.layer_id, None
 
+            # Store the raw pre-effects frame so dirty re-renders can
+            # re-apply updated effect parameters without re-decoding the source
+            # (handles paused video or low-FPS throttle intervals).
+            layer._slave_raw_frame = overlay_frame
+            layer._slave_effects_dirty = False
             overlay_frame = apply_effects_fn(layer, overlay_frame, player_name)
 
             # Fix A: strip alpha for numpy fallback so compositor skips the

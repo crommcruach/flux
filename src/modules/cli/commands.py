@@ -41,13 +41,12 @@ class CommandExecutor:
     Handles all playback, configuration, and system commands.
     """
     
-    def __init__(self, player_provider, dmx_controller, video_dir, data_dir, config):
+    def __init__(self, player_provider, video_dir, data_dir, config):
         """
         Initialize command executor.
         
         Args:
             player_provider: Callable that returns current player instance
-            dmx_controller: DMX controller instance (deprecated - now None)
             video_dir: Path to video directory
             data_dir: Path to data directory
             config: Configuration dictionary

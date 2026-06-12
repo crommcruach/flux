@@ -214,6 +214,9 @@ const app = {
         // Then load slices (which will restore output assignments)
         await this.loadFromBackend();
         
+        // Build slice→layer map so the slice list can show which layers feed each slice
+        await this.refreshLayerSliceMap();
+        
         // Load ArtNet routing state (objects + outputs)
         await this.loadArtNetState();
         
@@ -652,11 +655,13 @@ const app = {
                 this.selectedSlice = parentSlice;
                 this.selectedMask = clickedItem;
                 console.log('👆 Clicked on mask:', clickedItem.shape, clickedItem.label, 'in slice:', parentSlice.id);
+                this._postSelectionSlice(parentSlice.id);
             } else {
                 // Clicked on a slice
                 this.selectedSlice = clickedItem;
                 this.selectedMask = null;
                 console.log('✅ Selected slice:', clickedItem.id, clickedItem.label);
+                this._postSelectionSlice(clickedItem.id);
             }
             
             this.isDragging = true;
@@ -666,6 +671,7 @@ const app = {
             console.log('   Available slices:', this.slices.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.width, h: s.height })));
             this.selectedSlice = null;
             this.selectedMask = null;
+            this._postSelectionSlice(null);
         }
 
         console.log('📊 Final selectedSlice:', this.selectedSlice ? this.selectedSlice.id : 'none');
@@ -3543,6 +3549,16 @@ const app = {
         const maskBadge = maskCount > 0 ? 
             `<span style="background: #f44336; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">${maskCount} masks</span>` : '';
         
+        // Layer assignment badges
+        const assignedLayers = (this._layerSliceMap && this._layerSliceMap[slice.id]) || [];
+        const layerBadgesHtml = assignedLayers.length
+            ? `<div style="display:flex; flex-wrap:wrap; gap:3px; margin-top:4px;">
+                 ${assignedLayers.map(l =>
+                   `<span title="Layer ${l.id}" style="background:#2563eb; color:#fff; padding:1px 6px; border-radius:8px; font-size:10px; white-space:nowrap;">🎬 ${l.name}</span>`
+                 ).join('')}
+               </div>`
+            : '';
+        
         // Unassign button (only show if slice is assigned to outputs)
         const unassignBtn = isAssigned ? 
             `<button class="small" onclick="app.unassignSlice('${slice.id}'); event.stopPropagation();" style="padding: 4px 8px; font-size: 10px; background: #FF9800; border-color: #F57C00;" title="Unassign from all outputs">⊗</button>` : '';
@@ -3564,8 +3580,31 @@ const app = {
                 <div class="slice-item-info">
                     <span>${slice.shape} - ${Math.round(slice.width)}×${Math.round(slice.height)}</span>
                 </div>
+                ${layerBadgesHtml}
             </div>
         `;
+    },
+
+    /** Fetch live player layers and build a {sliceId: [{id, name}]} map. */
+    async refreshLayerSliceMap() {
+        try {
+            const resp = await fetch('/api/player/video/layers');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const map = {};
+            for (const layer of (data.layers || [])) {
+                for (const sid of (layer.output_slices || [])) {
+                    if (!map[sid]) map[sid] = [];
+                    map[sid].push({
+                        id: layer.layer_id,
+                        name: layer.name || layer.source_path || `Layer ${layer.layer_id}`,
+                    });
+                }
+            }
+            this._layerSliceMap = map;
+            // Re-render slice list with updated badges (avoid full updateUI)
+            this.updateUI();
+        } catch (_) { /* non-critical */ }
     },
 
     async unassignSlice(sliceId) {
@@ -3607,11 +3646,31 @@ const app = {
         this.updateScreenButtonsStates();
         this.render();
         
+        // Switch selection stream to show only this slice's assigned layers
+        this._postSelectionSlice(slice ? slice.id : null);
+        
         // Defer full UI update to next frame (allows click event to complete)
         requestAnimationFrame(() => {
             this.updateUI();
         });
     },
+
+    _postSelectionSlice(sliceId) {
+        // Toggle which stream is visible (no reconnect — both are always connected)
+        const mainImg = document.getElementById('videoStream');
+        const selImg  = document.getElementById('selectionStream');
+        if (mainImg && selImg) {
+            const showSelection = !!sliceId;
+            mainImg.style.display = showSelection ? 'none' : '';
+            selImg.style.display  = showSelection ? '' : 'none';
+        }
+        fetch('/api/preview/selection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slice_id: sliceId || null }),
+        }).catch(() => {});
+    },
+
 
     selectMask(sliceId, maskId) {
         const slice = this.slices.find(s => s.id === sliceId);

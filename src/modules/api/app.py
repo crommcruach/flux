@@ -22,7 +22,7 @@ from ..core.constants import (
 class RestAPI:
     """REST API server with WebSocket for video player control."""
     
-    def __init__(self, player_manager, dmx_controller, data_dir, video_dir, config=None, replay_manager=None):
+    def __init__(self, player_manager, data_dir, video_dir, config=None, replay_manager=None):
         self.player_manager = player_manager
         self.data_dir = data_dir
         self.video_dir = video_dir
@@ -46,7 +46,6 @@ class RestAPI:
         # Initialize unified command executor
         self.command_executor = CommandExecutor(
             player_provider=lambda: self.player_manager.player,
-            dmx_controller=None,    # DMX input removed
             video_dir=video_dir,
             data_dir=data_dir,
             config=config or {}

@@ -9,7 +9,7 @@ Uniform convention
 ------------------
 Every WGSL shader declares:
 
-    struct Uniforms { data: array<f32, 64> }
+    struct Uniforms { data: array<vec4<f32>, 16> }
     @group(0) @binding(0) var<uniform> u: Uniforms;
 
 The renderer packs the caller's ``uniforms`` dict into 256 bytes (64 × f32):

@@ -71,6 +71,10 @@ class BrightnessContrastEffect(PluginBase):
 
     def update_parameter(self, name, value):
         """Update parameter zur Laufzeit."""
+        # Unwrap range/UID metadata dicts sent by the WebSocket handler
+        if isinstance(value, dict) and '_value' in value:
+            value = value['_value']
+
         if name == 'brightness':
             self.brightness = float(value)
             return True

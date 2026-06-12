@@ -9,19 +9,12 @@ DMX_MAX_UNIVERSES_BEFORE_GAP = 8
 DMX_MAX_CHANNELS_8_UNIVERSES = DMX_CHANNELS_PER_UNIVERSE * DMX_MAX_UNIVERSES_BEFORE_GAP  # 4080
 
 # Video Konstanten
-VIDEO_EXTENSIONS = ('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.gif')
-VIDEO_EXTENSIONS_LIST = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.gif']
-GIF_EXTENSIONS = ('.gif',)
-GIF_EXTENSIONS_LIST = ['.gif']
+VIDEO_EXTENSIONS = ('.mp4', '.avi', '.mov', '.mkv', '.wmv')
+VIDEO_EXTENSIONS_LIST = ['.mp4', '.avi', '.mov', '.mkv', '.wmv']
 
 # Bild Konstanten
-IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp', '.gif')
-IMAGE_EXTENSIONS_LIST = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp', '.gif']
-
-# Cache Konstanten
-CACHE_CHUNK_SIZE = 5 * 1024 * 1024  # 5MB for hash calculation
-CACHE_HASH_LENGTH = 16  # Number of characters for video hash
-CACHE_FILE_EXTENSION = '.msgpack'
+IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp')
+IMAGE_EXTENSIONS_LIST = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp']
 
 # API / Console Konstanten
 CONSOLE_LOG_MAX_LENGTH = 500
@@ -31,7 +24,6 @@ DEFAULT_API_HOST = '0.0.0.0'
 # Pfad Konstanten
 DEFAULT_VIDEO_DIR = 'video'
 DEFAULT_DATA_DIR = 'data'
-DEFAULT_CACHE_DIR = 'cache'
 DEFAULT_POINTS_FILE = 'punkte_export.json'
 
 # Canvas Konstanten

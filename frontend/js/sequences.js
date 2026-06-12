@@ -2001,11 +2001,11 @@ class SequenceManager {
         });
         
         if (effectSequences.length === 0) {
-            console.log(`✅ No sequences found for effect ${pluginId} on clip ${clipId}`);
+            console.log(`✅ No sequences found for effect[${effectIndex}] on clip ${clipId}`);
             return;
         }
         
-        console.log(`🗑️ Found ${effectSequences.length} sequence(s) to delete for effect ${pluginId}`);
+        console.log(`🗑️ Found ${effectSequences.length} sequence(s) to delete for effect[${effectIndex}]`);
         
         // Delete each sequence using existing deleteSequence method
         for (const seq of effectSequences) {
@@ -2013,7 +2013,7 @@ class SequenceManager {
             await this.deleteSequence(true); // skipConfirm=true
         }
         
-        console.log(`✅ Cleanup complete for effect ${pluginId} on clip ${clipId}`);
+        console.log(`✅ Cleanup complete for effect[${effectIndex}] on clip ${clipId}`);
     }
     
     /**

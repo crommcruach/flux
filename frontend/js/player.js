@@ -427,6 +427,7 @@ async function init() {
         setupLayerPanelDropZone(); // Set up layer panel drop zone once
         initializeTransitionMenus(); // Initialize transition menu components
         updatePlaylistButtonStates(); // Set initial button states
+        refreshSliceColorMap(); // Populate slice color map for layer routing badges
 
         // Restore player UI state (active tab, preview visibility)
         if (window.sessionStateManager) {
@@ -4356,13 +4357,19 @@ window.removeEffect = async function(player, index, e) {
             }
             
             // Cleanup sequences for this effect BEFORE deletion
+            // Wrapped in its own try/catch so a sequence cleanup error never
+            // prevents the actual effect DELETE from running.
             if (window.sequenceManager) {
-                if (player === 'clip' && effectToDelete && targetClipId) {
-                    console.log(`🧹 Cleaning up clip effect[${index}] sequences on clip ${targetClipId}`);
-                    await window.sequenceManager.cleanupSequencesForEffect(targetClipId, index, 'clip');
-                } else if ((player === 'video' || player === 'artnet') && effectToDelete) {
-                    console.log(`🧹 Cleaning up ${player} effect[${index}] sequences`);
-                    await window.sequenceManager.cleanupSequencesForEffect(null, index, player);
+                try {
+                    if (player === 'clip' && effectToDelete && targetClipId) {
+                        console.log(`🧹 Cleaning up clip effect[${index}] sequences on clip ${targetClipId}`);
+                        await window.sequenceManager.cleanupSequencesForEffect(targetClipId, index, 'clip');
+                    } else if ((player === 'video' || player === 'artnet') && effectToDelete) {
+                        console.log(`🧹 Cleaning up ${player} effect[${index}] sequences`);
+                        await window.sequenceManager.cleanupSequencesForEffect(null, index, player);
+                    }
+                } catch (seqErr) {
+                    console.warn(`⚠️ Sequence cleanup error (non-fatal, continuing with effect delete):`, seqErr);
                 }
             }
             
@@ -4836,14 +4843,14 @@ function renderParameterControl(param, currentValue, effectIndex, player, plugin
                             }
                         },
                         onDragStart: (handleType) => {
-                            // Pause video only when dragging the value handle (position), not min/max
-                            if (handleType === 'value' && player === 'clip' && selectedClipPlayerType) {
+                            // Pause video only when scrubbing the transport position handle
+                            if (handleType === 'value' && player === 'clip' && selectedClipPlayerType && isTransportPosition) {
                                 pause(selectedClipPlayerType);
                             }
                         },
                         onDragEnd: (handleType) => {
-                            // Resume video only when releasing the value handle
-                            if (handleType === 'value' && player === 'clip' && selectedClipPlayerType) {
+                            // Resume video only when releasing the transport position handle
+                            if (handleType === 'value' && player === 'clip' && selectedClipPlayerType && isTransportPosition) {
                                 play(selectedClipPlayerType);
                             }
                             // Send trim (min/max) to backend only on release, not on every drag move
@@ -6368,11 +6375,21 @@ function renderSelectedClipLayers() {
         }
 
         const opacityPct = Math.round((layer.opacity || 1.0) * 100);
+        const routeSlices = layer.output_slices || [];
+        const bypassMain  = layer.bypass_main || false;
+        const routeBadgesHtml = routeSlices.map(sid => {
+            const col  = (window.sliceColorMap && window.sliceColorMap[sid]) || '#e67e22';
+            const name = (window.sliceNameMap  && window.sliceNameMap[sid])  || sid;
+            return `<span class="layer-route-badge" style="background:${col}" title="→ ${sid}">${name}</span>`;
+        }).join('');
+        const bypassBadge = bypassMain
+            ? `<span class="layer-bypass-badge" title="Bypasses main composite">bypass</span>` : '';
         return `
-            <div class="layer-card ${!isEnabled ? 'disabled' : ''} ${isBaseLayer ? 'base-layer' : ''} ${selectedLayerId === layer.layer_id ? 'selected' : ''}"
+            <div class="layer-card ${!isEnabled ? 'disabled' : ''} ${isBaseLayer ? 'base-layer' : ''} ${selectedLayerId === layer.layer_id ? 'selected' : ''} ${routeSlices.length ? 'layer-routed' : ''}"
                  data-layer-id="${layer.layer_id}"
                  draggable="false"
-                 onclick="toggleLayerSelection(${layer.layer_id}, event)">
+                 onclick="toggleLayerSelection(${layer.layer_id}, event)"
+                 oncontextmenu="showLayerContextMenu(event, '${selectedClipId}', ${layer.layer_id})">
                 <div class="layer-header">
                     <span class="layer-id">
                         ${!isBaseLayer ? '<span class="layer-drag-handle" title="Drag to reorder">☰</span>' : ''}
@@ -6399,6 +6416,7 @@ function renderSelectedClipLayers() {
                 <div class="layer-source" title="${layer.source_path || ''}">
                     ${sourceName}
                 </div>
+                ${(routeBadgesHtml || bypassBadge) ? `<div class="layer-route-badges">${routeBadgesHtml}${bypassBadge}</div>` : ''}
                 <div class="layer-config">
                     <select class="blend-mode-select"
                             onchange="updateClipLayerBlendMode('${selectedClipId}', ${layer.layer_id}, this.value)"
@@ -6431,6 +6449,252 @@ function renderSelectedClipLayers() {
 
     setupLayerDragAndDrop();
 }
+
+// ── Slice color map (populated when slices are loaded) ────────────────────────
+window.sliceColorMap = {};
+window.sliceNameMap  = {};  // {slice_id: human-readable name}
+
+// Preset palette — cycles for up to 10 slices
+const _SLICE_PALETTE = [
+    '#e67e22', '#3498db', '#2ecc71', '#9b59b6',
+    '#e74c3c', '#1abc9c', '#f39c12', '#d35400',
+    '#8e44ad', '#16a085',
+];
+let _slicePaletteIdx = 0;
+
+/**
+ * Fetch slice definitions and populate sliceColorMap.
+ * Called once on init and whenever slices change.
+ */
+async function refreshSliceColorMap() {
+    try {
+        const r = await fetch(`${API_BASE}/api/slices`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const slices = d.slices || {};
+        Object.keys(slices).forEach(sid => {
+            if (!window.sliceColorMap[sid]) {
+                window.sliceColorMap[sid] = slices[sid].color ||
+                    _SLICE_PALETTE[_slicePaletteIdx++ % _SLICE_PALETTE.length];
+            }
+            // Always refresh the name (description) in case it was renamed
+            window.sliceNameMap[sid] = slices[sid].description || sid;
+        });
+    } catch (_) {}
+}
+
+/**
+ * PATCH layer routing fields and update local cache + re-render.
+ */
+async function patchLayerRouting(clipId, layerId, slices, bypassMain) {
+    try {
+        const r = await fetch(`${API_BASE}/api/clips/${clipId}/layers/${layerId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ output_slices: slices, bypass_main: bypassMain }),
+        });
+        const d = await r.json();
+        if (d.success) {
+            if (clipLayers[clipId]) {
+                const layer = clipLayers[clipId].find(l => l.layer_id === layerId);
+                if (layer) { layer.output_slices = slices; layer.bypass_main = bypassMain; }
+            }
+            renderSelectedClipLayers();
+        } else {
+            showToast(`Routing failed: ${d.error || 'unknown error'}`, 'error');
+        }
+    } catch (e) {
+        debug.error('patchLayerRouting error:', e);
+        showToast('Failed to update layer routing', 'error');
+    }
+}
+
+/**
+ * Right-click context menu on a layer card — shows slice routing controls.
+ */
+window.showLayerContextMenu = async function(e, clipId, layerId) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Remove any existing layer context menu
+    document.getElementById('layerContextMenu')?.remove();
+
+    // Ensure slice colors are populated
+    await refreshSliceColorMap();
+
+    // Fetch current slice list
+    let slicesDict = {};
+    try {
+        const r = await fetch(`${API_BASE}/api/slices`);
+        if (r.ok) { const d = await r.json(); slicesDict = d.slices || {}; }
+    } catch (_) {}
+
+    const layer = (clipLayers[clipId] || []).find(l => l.layer_id === layerId);
+    const currentSlices = (layer && layer.output_slices) ? [...layer.output_slices] : [];
+    const bypassMain    = (layer && layer.bypass_main)   || false;
+    const isBaseLayer   = layerId === 0;
+
+    // Detect which player this clip belongs to (uses the global set when a clip is selected)
+    const playerType = selectedClipPlayerType || 'video';
+
+    // Fetch current duration mode for this player
+    let currentDurationMode = 'master';
+    try {
+        const r = await fetch(`${API_BASE}/api/player/${playerType}/layers/duration-mode`);
+        if (r.ok) { const d = await r.json(); currentDurationMode = d.duration_mode || 'master'; }
+    } catch (_) {}
+
+    // Build all layers list for "align-to" and "layer_N" targets
+    const allLayers = (clipLayers[clipId] || []).filter(l => l.source_type !== 'empty' && l.source_path);
+
+    // Build slice toggle rows (exclude system slices)
+    const systemSlices = new Set(['main_canvas']);
+    const sliceItems = Object.keys(slicesDict)
+        .filter(sid => !systemSlices.has(sid))
+        .map(sid => {
+            const active = currentSlices.includes(sid);
+            const col    = window.sliceColorMap[sid] || '#e67e22';
+            const name   = window.sliceNameMap[sid]  || sid;
+            return `<div class="context-menu-item layer-ctx-slice-item ${active ? 'layer-ctx-active' : ''}"
+                         data-action="toggle-slice" data-slice="${sid}">
+                        <span class="layer-ctx-dot" style="background:${col}"></span>
+                        <span>${active ? '✓ ' : ''}${name}</span>
+                    </div>`;
+        }).join('');
+
+    // Build duration mode items (shown for base layer and in the section header)
+    const durationModes = [
+        { mode: 'master',   label: '⏱ Master clip (Layer 0)' },
+        { mode: 'longest',  label: '⏳ Longest clip (all layers)' },
+        { mode: 'shortest', label: '⚡ Shortest clip (any layer)' },
+        ...allLayers.filter(l => l.layer_id > 0).map(l => ({
+            mode: `layer_${l.layer_id}`,
+            label: `📌 Layer ${l.layer_id}: ${(l.source_path || '').split(/[\\/]/).pop() || 'Layer ' + l.layer_id}`
+        }))
+    ];
+    const durationItems = durationModes.map(({ mode, label }) => {
+        const active = currentDurationMode === mode;
+        return `<div class="context-menu-item ${active ? 'layer-ctx-active' : ''}"
+                     data-action="set-duration-mode" data-mode="${mode}">
+                    <span>${active ? '✓ ' : '&nbsp;&nbsp;&nbsp;'}${label}</span>
+                </div>`;
+    }).join('');
+
+    // Build "Align speed to…" items (only for slave layers that have total_frames)
+    let alignItems = '';
+    if (!isBaseLayer) {
+        const targets = allLayers.filter(l => l.layer_id !== layerId);
+        alignItems = targets.length
+            ? targets.map(t => {
+                const tLabel = t.layer_id === 0
+                    ? 'Master (Layer 0)'
+                    : `Layer ${t.layer_id}: ${(t.source_path || '').split(/[\\/]/).pop()}`;
+                return `<div class="context-menu-item" data-action="align-to" data-target="${t.layer_id}">
+                            <span>⇔ Align speed → ${tLabel}</span>
+                        </div>`;
+              }).join('')
+            : '<div class="context-menu-item disabled"><span>No other layers to align to</span></div>';
+    }
+
+    const menu = document.createElement('div');
+    menu.id = 'layerContextMenu';
+    menu.className = 'context-menu layer-context-menu';
+    menu.style.position = 'fixed';
+    menu.innerHTML = `
+        <div class="context-menu-header">Route Layer ${layerId}</div>
+        ${sliceItems || '<div class="context-menu-item disabled"><span>No slices defined</span></div>'}
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item ${bypassMain ? 'layer-ctx-active' : ''}" data-action="toggle-bypass">
+            <span class="layer-ctx-dot" style="background:#888"></span>
+            <span>${bypassMain ? '✓ ' : ''}Bypass main composite</span>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item context-menu-item-danger" data-action="clear-routing">
+            <span>✖ Clear all routing</span>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-header">Clip Duration Mode</div>
+        ${durationItems}
+        ${alignItems ? `<div class="context-menu-separator"></div>
+        <div class="context-menu-header">Align Speed</div>
+        ${alignItems}` : ''}
+    `;
+    document.body.appendChild(menu);
+
+    // Position with viewport clamping
+    const rect = menu.getBoundingClientRect();
+    let px = e.clientX, py = e.clientY;
+    if (px + rect.width  > window.innerWidth)  px = window.innerWidth  - rect.width  - 6;
+    if (py + rect.height > window.innerHeight) py = window.innerHeight - rect.height - 6;
+    menu.style.left = `${px}px`;
+    menu.style.top  = `${py}px`;
+
+    menu.addEventListener('click', async (ev) => {
+        const item = ev.target.closest('.context-menu-item');
+        if (!item || item.classList.contains('disabled')) return;
+        const action = item.dataset.action;
+        if (action === 'toggle-slice') {
+            const sid  = item.dataset.slice;
+            const next = currentSlices.includes(sid)
+                ? currentSlices.filter(s => s !== sid)
+                : [...currentSlices, sid];
+            await patchLayerRouting(clipId, layerId, next, bypassMain);
+        } else if (action === 'toggle-bypass') {
+            await patchLayerRouting(clipId, layerId, currentSlices, !bypassMain);
+        } else if (action === 'clear-routing') {
+            await patchLayerRouting(clipId, layerId, [], false);
+        } else if (action === 'set-duration-mode') {
+            const mode = item.dataset.mode;
+            try {
+                const r = await fetch(`${API_BASE}/api/player/${playerType}/layers/duration-mode`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode })
+                });
+                const d = await r.json();
+                if (d.success) {
+                    const labels = { master: 'Master clip', longest: 'Longest clip', shortest: 'Shortest clip' };
+                    const label = labels[mode] || `Layer ${mode.split('_')[1]}`;
+                    showToast(`Duration mode: ${label}`, 'success');
+                } else {
+                    showToast(`Failed: ${d.error}`, 'error');
+                }
+            } catch (err) {
+                showToast('Error setting duration mode', 'error');
+            }
+        } else if (action === 'align-to') {
+            const targetId = parseInt(item.dataset.target);
+            try {
+                const r = await fetch(
+                    `${API_BASE}/api/player/${playerType}/layers/${layerId}/align-to/${targetId}`,
+                    { method: 'POST' }
+                );
+                const d = await r.json();
+                if (d.success) {
+                    const pct = Math.round(d.speed * 100);
+                    const msg = d.has_transport
+                        ? `Speed set to ${pct}% to match Layer ${targetId}`
+                        : `Speed=${pct}% computed — add a Transport effect to apply it`;
+                    showToast(msg, d.has_transport ? 'success' : 'warning');
+                    // Reload effects panel so Transport speed slider reflects new value
+                    if (selectedLayerClipId) renderClipEffects();
+                } else {
+                    showToast(`Align failed: ${d.error}`, 'error');
+                }
+            } catch (err) {
+                showToast('Error aligning layer speed', 'error');
+            }
+        }
+        menu.remove();
+    });
+
+    // Close on outside click
+    setTimeout(() => {
+        document.addEventListener('click', () => {
+            document.getElementById('layerContextMenu')?.remove();
+        }, { once: true });
+    }, 0);
+};
 
 /**
  * Start inline layer rename (double-click on name)
@@ -6843,6 +7107,17 @@ window.toggleLayerSelection = async function(layerId, event) {
         }
     }
     
+    // Layer 0 is the base/clip layer — its effects are the clip effects.
+    // Clicking it should deselect any higher layer (return to clip view) but never
+    // "select" Layer 0 as an independent layer, which would toggle the FX title.
+    if (layerId === 0) {
+        if (selectedLayerId !== null && selectedLayerId !== 0) {
+            deselectLayer(); // return to clip/base view
+        }
+        // Already in clip view — nothing to do
+        return;
+    }
+
     // Toggle: deselect if already selected, select if not
     if (selectedLayerId === layerId) {
         deselectLayer();

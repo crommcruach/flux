@@ -6,10 +6,7 @@ Video-to-Art-Net DMX Control System mit Web-Interface und Multi-Kanal Unterstüt
 
 ### Video & Content
 - 🎥 **Video Playback** - OpenCV mit Hardware-Beschleunigung (NVDEC/QSV/VAAPI)
-- 🎞️ **GIF Support** - Animated GIFs mit Transparenz und Frame-Timing
-- 🎨 **Script Generator** - Prozedurale Grafiken via Python (Shader-ähnlich)
-- 💾 **RGB Cache** - msgpack-basiertes Caching für schnelle Wiedergabe
-- 🔄 **4-Kanal Video System** - Bis zu 1020 Videos (255 pro Kanal)
+-  **Script Generator** - Prozedurale Grafiken via Python (Shader-ähnlich)
 - 🎬 **Multi-Layer Compositing** - Clip-based Layer-Stack mit Blend Modes (Normal, Multiply, Screen, Overlay, Add, Subtract)
 - 🎨 **Layer Effects** - Individuelle Effect-Chains pro Layer
 - 📊 **Layer Opacity** - 0-100% Transparenz-Kontrolle pro Layer
@@ -283,13 +280,11 @@ Py_artnet/
     }
   },
   "video": {
-    "extensions": [".mp4", ".avi", ".mov", ".mkv", ".wmv", ".gif"],
+    "extensions": [".mp4", ".avi", ".mov", ".mkv", ".wmv"],
     "max_per_channel": 255,
     "default_fps": null,
     "default_brightness": 100,
-    "default_speed": 1.0,
-    "gif_transparency_bg": [0, 0, 0],
-    "gif_respect_frame_timing": true
+    "default_speed": 1.0
   },
   "paths": {
     "video_dir": "video",
@@ -337,16 +332,6 @@ Pro Art-Net Universum kann die Farb-Kanal-Reihenfolge konfiguriert werden. Dies 
 - Die Umordnung erfolgt automatisch bei der Ausgabe
 - Testmuster berücksichtigen die konfigurierte Reihenfolge
 - Bei fehlender Konfiguration wird "RGB" verwendet
-
-## GIF Support
-
-Das System unterstützt animated GIFs mit folgenden Features:
-- **Transparenz-Handling**: Alpha-Channel wird gegen konfigurierbaren Hintergrund gerendert
-- **Variable Frame-Timing**: Original GIF-Frame-Delays werden respektiert
-- **RGB-Cache**: GIFs werden wie Videos gecacht für schnellere Wiedergabe
-- **Konfiguration**:
-  - `gif_transparency_bg`: RGB-Werte für Transparenz-Hintergrund (Standard: [0,0,0])
-  - `gif_respect_frame_timing`: Variable Frame-Delays aktivieren (Standard: true)
 
 ## Generator Plugins (v2.3.7+)
 

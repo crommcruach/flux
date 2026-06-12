@@ -654,6 +654,113 @@ def _cmd_perf_disable(args: Namespace):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# layer
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _cmd_layer_list(args: Namespace):
+    pid = getattr(args, 'player', 'video') or 'video'
+    r = api_call('GET', f'/api/player/{pid}/layers')
+    if not _ok(r):
+        print_status('error', r.get('error', 'failed'))
+        return
+    layers = r.get('layers', [])
+    if not layers:
+        print(f"[{pid}] No layers loaded")
+        return
+    if getattr(args, 'json', False):
+        print(json.dumps(layers, indent=2))
+        return
+    rows = []
+    for l in layers:
+        slices = ', '.join(l.get('output_slices', [])) or '—'
+        bypass = '✓' if l.get('bypass_main') else ''
+        rows.append((
+            str(l.get('layer_id', '?')),
+            l.get('name') or l.get('source_path', '?').split('/')[-1].split('\\')[-1],
+            l.get('blend_mode', 'normal'),
+            f"{round(l.get('opacity', 1.0) * 100)}%",
+            '✓' if l.get('enabled', True) else '✗',
+            slices,
+            bypass,
+        ))
+    print_table(
+        headers=[f'ID [{pid}]', 'Name/Source', 'Blend', 'Opacity', 'On', 'Slices', 'Bypass'],
+        rows=rows,
+    )
+
+
+def _cmd_layer_route(args: Namespace):
+    """Assign a layer to one or more slices (adds to existing routing)."""
+    pid = getattr(args, 'player', 'video') or 'video'
+    layer_id = args.layer_id
+    slice_ids = args.slices  # list of slice IDs
+    bypass = getattr(args, 'bypass', False)
+
+    # Need the current clip_id to patch the layer in the registry
+    r_cur = api_call('GET', f'/api/player/{pid}/clip/current')
+    if not _ok(r_cur) or not r_cur.get('clip_id'):
+        print_status('error', f"[{pid}] No clip loaded — load a clip first")
+        return
+    clip_id = r_cur['clip_id']
+
+    # Fetch current layer routing so we can merge (not overwrite) slices
+    r_layers = api_call('GET', f'/api/player/{pid}/layers')
+    current_slices: list = []
+    if _ok(r_layers):
+        for lyr in r_layers.get('layers', []):
+            if lyr.get('layer_id') == layer_id:
+                current_slices = lyr.get('output_slices', [])
+                break
+
+    # Merge new slice IDs with existing ones (de-duplicate)
+    merged = list(dict.fromkeys(current_slices + slice_ids))
+
+    r = api_call('PATCH', f'/api/clips/{clip_id}/layers/{layer_id}',
+                 data={'output_slices': merged, 'bypass_main': bypass})
+    if _ok(r):
+        slices_str = ', '.join(merged)
+        print_status('success', f"[{pid}] Layer {layer_id} routed to: {slices_str}"
+                                 + (' (bypass main)' if bypass else ''))
+    else:
+        print_status('error', r.get('error', 'failed'))
+
+
+def _cmd_layer_unroute(args: Namespace):
+    """Remove slice routing from a layer (clears all or specific slices)."""
+    pid = getattr(args, 'player', 'video') or 'video'
+    layer_id = args.layer_id
+    slice_ids = getattr(args, 'slices', [])  # empty = clear all
+
+    r_cur = api_call('GET', f'/api/player/{pid}/clip/current')
+    if not _ok(r_cur) or not r_cur.get('clip_id'):
+        print_status('error', f"[{pid}] No clip loaded")
+        return
+    clip_id = r_cur['clip_id']
+
+    if slice_ids:
+        # Remove only the named slices — keep the rest
+        r_layers = api_call('GET', f'/api/player/{pid}/layers')
+        remaining: list = []
+        if _ok(r_layers):
+            for lyr in r_layers.get('layers', []):
+                if lyr.get('layer_id') == layer_id:
+                    remaining = [s for s in lyr.get('output_slices', []) if s not in slice_ids]
+                    break
+    else:
+        remaining = []
+
+    r = api_call('PATCH', f'/api/clips/{clip_id}/layers/{layer_id}',
+                 data={'output_slices': remaining, 'bypass_main': False})
+    if _ok(r):
+        if remaining:
+            print_status('success', f"[{pid}] Layer {layer_id} routing reduced to: {', '.join(remaining)}")
+        else:
+            print_status('success', f"[{pid}] Layer {layer_id} routing cleared")
+    else:
+        print_status('error', r.get('error', 'failed'))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # output
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -803,6 +910,10 @@ _DISPATCH: dict[tuple, Callable] = {
     ('output', 'start'):   _cmd_output_start,
     ('output', 'stop'):    _cmd_output_stop,
     ('output', 'restart'): _cmd_output_restart,
+
+    ('layer', 'list'):    _cmd_layer_list,
+    ('layer', 'route'):   _cmd_layer_route,
+    ('layer', 'unroute'): _cmd_layer_unroute,
 }
 
 

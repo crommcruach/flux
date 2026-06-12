@@ -62,6 +62,12 @@ class LayerManager:
         # Set via Player.update_resolution() when user changes settings.
         self.autosize_mode: str = 'stretch'
 
+        # Layer duration mode — controls when the composite clip ends:
+        #   'master'  (default) stop when layer 0 completes one pass
+        #   'longest' loop master until all slave layers have played through once
+        #   'loop'    all layers loop indefinitely (manual stop only)
+        self.layer_duration_mode: str = 'master'
+
         # ─── Phase 2: Thread pools for parallel loading and rendering ─────────
         # _render_lock protects self.layers list during swap and property updates
         self._render_lock = threading.RLock()
@@ -116,6 +122,13 @@ class LayerManager:
         # transitions have a frame ready to use even without a CPU download.
         # Set via set_transition_gpu_hook().
         self._transition_gpu_hook = None
+
+        # ─── Layer-slice sub-compositor hook ─────────────────────────────────
+        # Optional callback fired after blend_enc.finish() with a dict
+        # {slice_id: GPUFrame} containing the fully-composited sub-frames for
+        # each slice group.  GPUFrames are live in VRAM; the compositor releases
+        # them after the call returns.  Set via set_output_layer_slice_hook().
+        self._output_layer_slice_hook = None
 
         # ─── Tap system (spec §8) ────────────────────────────────────────────
         # Formal per-frame layer capture at defined pipeline stages.
@@ -204,7 +217,7 @@ class LayerManager:
         resolved_player_name = self.player.player_name if self.player and hasattr(self.player, 'player_name') else (player_name or 'video')
 
         abs_path = clip_data['absolute_path']
-        video_extensions = tuple(self.config.get('extensions', ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.gif']))
+        video_extensions = tuple(self.config.get('extensions', ['.mp4', '.avi', '.mov', '.mkv', '.wmv']))
 
         # Resolve relative base path against video_dir when the direct check fails.
         # This handles clips whose absolute_path was stored without the video_dir
@@ -331,6 +344,8 @@ class LayerManager:
 
                 new_layer = Layer(layer_id, source, blend_mode, opacity, layer_clip_id)
                 new_layer.enabled = enabled
+                new_layer.output_slices = layer_def.get('output_slices', [])
+                new_layer.bypass_main = layer_def.get('bypass_main', False)
                 new_layers.append(new_layer)
                 logger.debug(f"📐 Layer {layer_id} loaded: opacity={opacity}%, blend={blend_mode}, enabled={enabled}")
 
@@ -676,6 +691,15 @@ class LayerManager:
         Pass None to disable.
         """
         self._transition_gpu_hook = callback
+
+    def set_output_layer_slice_hook(self, callback) -> None:
+        """Register a callback fired with {slice_id: GPUFrame} sub-compositor
+        results after blend_enc.finish().  The compositor releases those frames
+        after the call returns — the callback must not hold references to them.
+
+        Pass None to disable.
+        """
+        self._output_layer_slice_hook = callback
 
     # ─── Tap API (spec §8) ────────────────────────────────────────────────────
 

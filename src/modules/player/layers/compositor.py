@@ -28,6 +28,7 @@ import cv2
 from concurrent.futures import as_completed
 from ...core.logger import get_logger
 from ...gpu import get_texture_pool, get_renderer, load_shader, BLEND_MODES, get_device
+from ...gpu.hap_texture import get_hap_texture_pool
 from .slave import render_slave_layer
 
 logger = get_logger(__name__)
@@ -322,67 +323,123 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
     else:
         preprocess_transport_callback(layers_snap[0])
 
-    if profiler:
-        with profiler.profile_stage('source_decode'):
-            master_frame, source_delay = layers_snap[0].source.get_next_frame()
+    # When layer 0 is disabled, skip source decode and use a black GPU frame
+    # as the base.  Slave layers still composite on top of it normally.
+    _layer0_enabled = getattr(layers_snap[0], 'enabled', True)
+
+    if not _layer0_enabled:
+        master_frame = get_texture_pool().acquire(mgr.canvas_width, mgr.canvas_height)
+        # pool.acquire() returns a texture cleared to black (rgba=0,0,0,1 from
+        # the render pass clear_value in renderer.py) — no explicit fill needed.
+        source_delay = 0.0
     else:
-        master_frame, source_delay = layers_snap[0].source.get_next_frame()
-
-    if master_frame is None:
-        return None, source_delay
-
-    # Upload numpy frame to GPU immediately after decode, before any effects.
-    # This gives source_upload its own profiler slot and ensures clip_effects
-    # only measures shader execution — not the PCIe/UMA bus transfer cost.
-    if isinstance(master_frame, np.ndarray):
-        _h, _w = master_frame.shape[:2]
         if profiler:
-            with profiler.profile_stage('source_upload'):
+            with profiler.profile_stage('source_decode'):
+                master_frame, source_delay = layers_snap[0].source.get_next_frame()
+        else:
+            master_frame, source_delay = layers_snap[0].source.get_next_frame()
+
+        if master_frame is None:
+            # ── Layer duration mode ───────────────────────────────────────────────
+            # 'master'   (default) — EOF on layer 0 ends the clip (existing behaviour)
+            # 'longest'  — loop master until every slave has completed ≥ 1 pass
+            # 'shortest' — master EOF always ends (slaves can also trigger early end)
+            # 'layer_N'  — loop master until layer N has completed ≥ 1 pass
+            duration_mode = getattr(mgr, 'layer_duration_mode', 'master')
+            should_loop_master = False
+
+            if duration_mode == 'longest':
+                active_slaves_snap = [l for l in layers_snap[1:] if l.enabled and l.opacity > 0]
+                if active_slaves_snap and not all(getattr(l, '_play_count', 0) >= 1 for l in active_slaves_snap):
+                    should_loop_master = True   # some slaves not yet done → loop master
+            elif duration_mode.startswith('layer_'):
+                try:
+                    target_layer_id = int(duration_mode.split('_', 1)[1])
+                    target = next((l for l in layers_snap if l.layer_id == target_layer_id), None)
+                    if target and getattr(target, '_play_count', 0) < 1:
+                        should_loop_master = True
+                except (ValueError, IndexError):
+                    pass
+
+            if should_loop_master:
+                layers_snap[0].source.reset()
+                if profiler:
+                    with profiler.profile_stage('source_decode'):
+                        master_frame, source_delay = layers_snap[0].source.get_next_frame()
+                else:
+                    master_frame, source_delay = layers_snap[0].source.get_next_frame()
+
+            if master_frame is None:
+                return None, source_delay
+
+        # Upload frame to GPU immediately after decode, before any effects.
+        # HAP path: DXT memoryview → BC1/BC3 texture → passthrough → rgba8unorm GPUFrame.
+        # Numpy path: kept for GeneratorSource / DummySource (non-video sources).
+        if isinstance(master_frame, memoryview):
+            # Zero-copy HAP upload: no CPU decompression, hardware decompresses on sample.
+            _src0 = layers_snap[0].source
+            _hap_pool = get_hap_texture_pool()
+            _hap_tex = _hap_pool.acquire(_src0.width, _src0.height, _src0.dxt_variant)
+            _gf = get_texture_pool().acquire(_src0.width, _src0.height)
+            if profiler:
+                with profiler.profile_stage('source_upload'):
+                    _hap_tex.upload(master_frame)
+                    _hap_tex.decode_to(_gf, get_renderer())
+            else:
+                _hap_tex.upload(master_frame)
+                _hap_tex.decode_to(_gf, get_renderer())
+            _hap_pool.release(_hap_tex)
+            master_frame = _gf
+        elif isinstance(master_frame, np.ndarray):
+            _h, _w = master_frame.shape[:2]
+            if profiler:
+                with profiler.profile_stage('source_upload'):
+                    _gf = get_texture_pool().acquire(_w, _h)
+                    _gf.upload(master_frame)
+                    master_frame = _gf
+            else:
                 _gf = get_texture_pool().acquire(_w, _h)
                 _gf.upload(master_frame)
                 master_frame = _gf
-        else:
-            _gf = get_texture_pool().acquire(_w, _h)
-            _gf.upload(master_frame)
-            master_frame = _gf
 
-    # ─── Autosize scale pass ──────────────────────────────────────────────────
-    # Apply the player's autosize mode to scale the master frame to canvas size.
-    # Skipped when the frame is already canvas-sized and mode is 'stretch'
-    # (the default) to avoid an unnecessary GPU pass every frame.
-    _autosize = getattr(mgr, 'autosize_mode', 'stretch')
-    _cw, _ch = mgr.canvas_width, mgr.canvas_height
-    _fw, _fh = master_frame.width, master_frame.height
-    if _fw != _cw or _fh != _ch or _autosize not in ('stretch', None):
-        _src_rect, _dst_rect = _compute_scale_rects(
-            _autosize or 'stretch', _fw, _fh, _cw, _ch
-        )
-        _scale_out = get_texture_pool().acquire(_cw, _ch)
-        _, _, _scale_src = _get_compositor_shaders()
-        _do_scale = lambda: get_renderer().render(
-            wgsl_source=_scale_src,
-            target=_scale_out,
-            uniforms={
-                'src_x0': _src_rect[0], 'src_y0': _src_rect[1],
-                'src_x1': _src_rect[2], 'src_y1': _src_rect[3],
-                'dst_x0': _dst_rect[0], 'dst_y0': _dst_rect[1],
-                'dst_x1': _dst_rect[2], 'dst_y1': _dst_rect[3],
-            },
-            textures=[master_frame],
-        )
-        if profiler:
-            with profiler.profile_stage('autosize_scale'):
+        # ─── Autosize scale pass ──────────────────────────────────────────────────
+        # Apply the player's autosize mode to scale the master frame to canvas size.
+        # Skipped when the frame is already canvas-sized and mode is 'stretch'
+        # (the default) to avoid an unnecessary GPU pass every frame.
+        _autosize = getattr(mgr, 'autosize_mode', 'stretch')
+        _cw, _ch = mgr.canvas_width, mgr.canvas_height
+        _fw, _fh = master_frame.width, master_frame.height
+        if _fw != _cw or _fh != _ch or _autosize not in ('stretch', None):
+            _src_rect, _dst_rect = _compute_scale_rects(
+                _autosize or 'stretch', _fw, _fh, _cw, _ch
+            )
+            _scale_out = get_texture_pool().acquire(_cw, _ch)
+            _, _, _scale_src = _get_compositor_shaders()
+            _do_scale = lambda: get_renderer().render(
+                wgsl_source=_scale_src,
+                target=_scale_out,
+                uniforms={
+                    'src_x0': _src_rect[0], 'src_y0': _src_rect[1],
+                    'src_x1': _src_rect[2], 'src_y1': _src_rect[3],
+                    'dst_x0': _dst_rect[0], 'dst_y0': _dst_rect[1],
+                    'dst_x1': _dst_rect[2], 'dst_y1': _dst_rect[3],
+                },
+                textures=[master_frame],
+            )
+            if profiler:
+                with profiler.profile_stage('autosize_scale'):
+                    _do_scale()
+            else:
                 _do_scale()
-        else:
-            _do_scale()
-        get_texture_pool().release(master_frame)
-        master_frame = _scale_out
+            get_texture_pool().release(master_frame)
+            master_frame = _scale_out
 
-    if profiler:
-        with profiler.profile_stage('clip_effects'):
+        if profiler:
+            with profiler.profile_stage('clip_effects'):
+                master_frame = _apply_effects(mgr, layers_snap[0], master_frame, player_name, stay_on_gpu=True)
+        else:
             master_frame = _apply_effects(mgr, layers_snap[0], master_frame, player_name, stay_on_gpu=True)
-    else:
-        master_frame = _apply_effects(mgr, layers_snap[0], master_frame, player_name, stay_on_gpu=True)
+
 
     # ─── Single-layer fast path ───────────────────────────────────────────────
     if len(layers_snap) == 1:
@@ -411,6 +468,22 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
 
     # ─── Slave layers: skip invisible ones early ──────────────────────────────
     active_slaves = [l for l in layers_snap[1:] if l.enabled and l.opacity > 0]
+    # Log once when a slave layer is excluded (opacity=0 or disabled), since
+    # this silently prevents layer effects from running.
+    _excluded = [
+        (l.layer_id, f"opacity={l.opacity}", f"enabled={l.enabled}")
+        for l in layers_snap[1:]
+        if not (l.enabled and l.opacity > 0)
+    ]
+    if _excluded:
+        _warn_key = f'_compositor_excluded_warn_{tuple(l.layer_id for l in layers_snap[1:])}'
+        if not getattr(mgr, _warn_key, False):
+            setattr(mgr, _warn_key, True)
+            logger.warning(
+                f"⚠️ [COMPOSITOR] [{getattr(mgr, 'player_name', '')}] "
+                f"Layer(s) excluded from rendering: {_excluded} — "
+                f"layer effects on these layers will NOT be applied"
+            )
     if not active_slaves:
         if master_frame is None:
             return None, source_delay
@@ -468,6 +541,13 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
             "⚠️ Slave layer rendering timed out (0.5s) — compositing available frames only"
         )
 
+    # 'shortest' mode: end clip as soon as any slave completes its first pass
+    _duration_mode = getattr(mgr, 'layer_duration_mode', 'master')
+    if _duration_mode == 'shortest':
+        if any(getattr(l, '_play_count', 0) >= 1 for l in active_slaves):
+            get_texture_pool().release(master_frame)
+            return None, source_delay
+
     if profiler:
         stage_cm = profiler.profile_stage('layer_composition')
         stage_cm.__enter__()
@@ -475,6 +555,8 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
     cur = master_frame
     alt = None
     _deferred_releases = []  # textures to release AFTER blend_enc.finish()
+    _slice_cur: dict = {}    # per-slice sub-compositor cur textures
+    _slice_alt: dict = {}    # per-slice sub-compositor alt textures
     composite = None
     result = None
 
@@ -486,6 +568,18 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
         canvas_w, canvas_h = mgr.canvas_width, mgr.canvas_height
 
         blend_enc = get_device().create_command_encoder()
+
+        # ── Per-slice ping-pong pairs ─────────────────────────────────────────
+        # Collect all slice IDs referenced by active layers this frame.
+        # Allocate one ping-pong pair per slice; initialized transparently by
+        # the pool (first frame uses empty-black baseline from pool.acquire()).
+        for _sl in layers_snap[1:]:
+            if not _sl.enabled or _sl.opacity <= 0:
+                continue
+            for _sid in getattr(_sl, 'output_slices', []):
+                if _sid not in _slice_cur:
+                    _slice_cur[_sid] = pool.acquire(canvas_w, canvas_h)
+                    _slice_alt[_sid] = None
 
         if mgr._tap_configs:
             _fire_layer_processed_tap(mgr, layers_snap[0], cur, encoder=blend_enc)
@@ -499,10 +593,37 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
             if overlay is None:
                 continue
 
-            # Slave returns GPUFrame (stay_on_gpu=True) or numpy fallback.
+            # Slave returns GPUFrame (stay_on_gpu=True), HAP memoryview, or numpy fallback.
             slave_owns_tex = hasattr(overlay, 'texture')
+            _hap_slave_tex = None  # track HAP-decoded GPUFrame for deferred release
             if slave_owns_tex:
                 ov_h2, ov_w2 = overlay.height, overlay.width
+            elif isinstance(overlay, memoryview):
+                # HAP DXT frame from slave VideoSource — decode to rgba8unorm GPUFrame
+                _sl = next((l for l in layers_snap if l.layer_id == layer.layer_id), None)
+                if _sl is not None and hasattr(_sl.source, 'dxt_variant'):
+                    _sl_src = _sl.source
+                    _h_pool = get_hap_texture_pool()
+                    _h_tex = _h_pool.acquire(_sl_src.width, _sl_src.height, _sl_src.dxt_variant)
+                    _h_tex.upload(overlay)
+                    overlay = pool.acquire(_sl_src.width, _sl_src.height)
+                    _h_tex.decode_to(overlay, renderer)
+                    _h_pool.release(_h_tex)
+                    # Apply layer effects to the decoded GPUFrame.
+                    # Effects were skipped in slave.py because HAP arrives as a
+                    # memoryview; now that we have a real GPUFrame we can run the
+                    # GPU shader chain (brightness_contrast, transform, etc.).
+                    _fx_out = _apply_effects(mgr, layer, overlay, player_name, stay_on_gpu=True)
+                    if _fx_out is not None and _fx_out is not overlay:
+                        # Effects returned a new GPUFrame — release the intermediate
+                        # decode target and track the new one for deferred release.
+                        pool.release(overlay)
+                        overlay = _fx_out
+                    _hap_slave_tex = overlay  # remember to release after blend
+                    slave_owns_tex = True
+                    ov_h2, ov_w2 = overlay.height, overlay.width
+                else:
+                    continue  # cannot decode without source metadata
             else:
                 # numpy fallback (e.g. GPU context error): alpha already stripped
                 # by slave.py (Fix A); ensure contiguity.
@@ -572,20 +693,43 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
             try:
                 if mgr._tap_configs:
                     _fire_layer_processed_tap(mgr, layer, layer_tex, encoder=blend_enc)
+
                 blend_mode = BLEND_MODES.get(getattr(layer, 'blend_mode', 'normal'), 0)
-                if alt is None:
-                    alt = pool.acquire(canvas_w, canvas_h)
-                renderer.render(
-                    wgsl_source=blend_src,
-                    target=alt,
-                    uniforms={'opacity': layer.opacity / 100.0, 'mode': blend_mode},
-                    textures={'base': (0, cur), 'overlay': (1, layer_tex)},
-                    encoder=blend_enc,
-                )
-                if mgr._tap_configs:
-                    _fire_composite_after_n_tap(mgr, slave_blend_n, alt, encoder=blend_enc)
-                slave_blend_n += 1
-                cur, alt = alt, cur   # ping-pong: freshly-written becomes new source
+
+                # ── Sub-compositor: blend layer_tex into each assigned slice ──
+                _layer_slices = getattr(layer, 'output_slices', [])
+                for _sid in _layer_slices:
+                    if _sid not in _slice_cur:
+                        continue  # slice appeared after allocation (race)
+                    _s_cur = _slice_cur[_sid]
+                    _s_alt = _slice_alt[_sid]
+                    if _s_alt is None:
+                        _s_alt = pool.acquire(canvas_w, canvas_h)
+                    renderer.render(
+                        wgsl_source=blend_src,
+                        target=_s_alt,
+                        uniforms={'opacity': layer.opacity / 100.0, 'mode': blend_mode},
+                        textures={'base': (0, _s_cur), 'overlay': (1, layer_tex)},
+                        encoder=blend_enc,
+                    )
+                    _slice_cur[_sid], _slice_alt[_sid] = _s_alt, _s_cur
+
+                # ── Skip main composite when layer is bypass-only ─────────────
+                _bypass = getattr(layer, 'bypass_main', False) and bool(_layer_slices)
+                if not _bypass:
+                    if alt is None:
+                        alt = pool.acquire(canvas_w, canvas_h)
+                    renderer.render(
+                        wgsl_source=blend_src,
+                        target=alt,
+                        uniforms={'opacity': layer.opacity / 100.0, 'mode': blend_mode},
+                        textures={'base': (0, cur), 'overlay': (1, layer_tex)},
+                        encoder=blend_enc,
+                    )
+                    if mgr._tap_configs:
+                        _fire_composite_after_n_tap(mgr, slave_blend_n, alt, encoder=blend_enc)
+                    slave_blend_n += 1
+                    cur, alt = alt, cur   # ping-pong: freshly-written becomes new source
             finally:
                 if release_layer_tex:
                     # Defer release until after blend_enc.finish().
@@ -594,11 +738,30 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
                     # still recorded as RESOURCE in the current encoder → wgpu
                     # ValidationError (conflicting usages within usage scope).
                     _deferred_releases.append(layer_tex)
+                if _hap_slave_tex is not None:
+                    # HAP-decoded intermediate GPUFrame — not owned by the slave,
+                    # must be returned to pool after the blend is submitted.
+                    _deferred_releases.append(_hap_slave_tex)
 
         get_device().queue.submit([blend_enc.finish()])
         for _t in _deferred_releases:
             pool.release(_t)
         _deferred_releases.clear()
+
+        # ── Fire slice sub-compositor hook ────────────────────────────────────
+        if _slice_cur and mgr._output_layer_slice_hook is not None:
+            try:
+                mgr._output_layer_slice_hook(_slice_cur)
+            except Exception as _e:
+                logger.error('Layer-slice hook error: %s', _e)
+        # Release slice ping-pong pairs
+        for _tex in _slice_cur.values():
+            pool.release(_tex)
+        for _tex in _slice_alt.values():
+            if _tex is not None:
+                pool.release(_tex)
+        _slice_cur.clear()
+        _slice_alt.clear()
 
         if alt is not None:
             pool.release(alt)
@@ -669,6 +832,12 @@ def composite_layers(mgr, preprocess_transport_callback, player_name: str = "Pla
             _cleanup_pool.release(composite)
         for _t in _deferred_releases:
             _cleanup_pool.release(_t)
+        # Release any slice ping-pong pairs allocated before the exception.
+        for _tex in _slice_cur.values():
+            _cleanup_pool.release(_tex)
+        for _tex in _slice_alt.values():
+            if _tex is not None:
+                _cleanup_pool.release(_tex)
         # Also release any tap frames acquired inside blend_enc before the
         # exception.  These are tracked by tap_registry but NOT in
         # _deferred_releases, so they would otherwise stay in pool._in_use

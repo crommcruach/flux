@@ -7,7 +7,6 @@ flask[async]>=3.0.0
 flask-cors>=4.0.0
 flask-socketio>=5.3.0
 python-socketio>=5.11.0
-msgpack>=1.0.0
 Pillow>=10.0.0
 aiortc>=1.6.0
 av>=10.0.0  # Video processing & audio decoding (FFmpeg bindings)

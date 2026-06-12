@@ -151,6 +151,8 @@ class BlendModeEffect(PluginBase):
     
     def update_parameter(self, name: str, value) -> bool:
         """Update a single parameter"""
+        if isinstance(value, dict) and '_value' in value:
+            value = value['_value']
         if name in [p['name'] for p in self.PARAMETERS]:
             self.parameters[name] = value
             return True

@@ -308,7 +308,55 @@ def register_files_api(app, video_dir, config=None):
             }), 500
     
     # ==================== THUMBNAIL ENDPOINTS ====================
-    
+
+    @app.route('/api/files/thumbnail/update', methods=['POST'])
+    def update_thumbnail():
+        """Force-regenerate a thumbnail from the current live frame.
+
+        Body:
+            file_path: relative video path (same as used in GET thumbnail)
+            player_id: ignored (kept for API compatibility)
+        """
+        try:
+            data = request.json or {}
+            file_path = data.get('file_path', '')
+            if not file_path:
+                return jsonify({'success': False, 'error': 'file_path required'}), 400
+
+            # Resolve to absolute path
+            full_path = None
+            for source_path in get_video_sources():
+                potential_path = os.path.join(source_path, file_path)
+                if os.path.exists(potential_path):
+                    full_path = potential_path
+                    break
+
+            if not full_path:
+                return jsonify({'success': False, 'error': 'File not found'}), 404
+
+            # Clip folder → use original.mov
+            if os.path.isdir(full_path):
+                original = os.path.join(full_path, 'original.mov')
+                if os.path.exists(original):
+                    full_path = original
+                else:
+                    return jsonify({'success': False, 'error': 'No original.mov in clip folder'}), 404
+
+            thumbnail_path = thumbnail_gen.generate_thumbnail(full_path, async_mode=False)
+            if not thumbnail_path or not os.path.exists(thumbnail_path):
+                return jsonify({'success': False, 'error': 'Thumbnail generation failed'}), 500
+
+            import time as _time
+            return jsonify({
+                'success': True,
+                'file_path': file_path,
+                'timestamp': int(_time.time() * 1000),
+            })
+
+        except Exception as e:
+            logger.error(f"Error updating thumbnail: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     @app.route('/api/files/thumbnail/<path:file_path>', methods=['GET'])
     def get_thumbnail(file_path):
         """

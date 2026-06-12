@@ -5,33 +5,51 @@
 import { FilesTab } from '/js/components/files-tab.js';
 
 // State
-let selectedFormat = 'hap_alpha';
-let availableFormats = [];
 let canvasSize = {width: 60, height: 300};
 let filesTab = null;
-let selectedFiles = new Set(); // Track selected files
-let usePatternMode = false; // Toggle between browser and pattern mode
-let pollTimers = {}; // Active conversion status poll timers
+let selectedFiles = new Set();
+let usePatternMode = false;
+let pollTimers = {};
+
+/** Return the currently selected preset names (standard + custom). */
+function getSelectedPresets() {
+    const presets = [];
+    document.querySelectorAll('.preset-cb:checked').forEach(cb => presets.push(cb.value));
+    return presets;
+}
+
+/** Return the current DXT variant ('bc1' or 'bc3'). */
+function getDxtVariant() {
+    const radio = document.querySelector('input[name="dxt-variant"]:checked');
+    return radio ? radio.value : 'bc1';
+}
+
+/** Return custom resolution list (empty if unchecked or invalid). */
+function getCustomResolutions() {
+    if (!document.getElementById('preset-custom')?.checked) return [];
+    const w = parseInt(document.getElementById('custom-width')?.value, 10);
+    const h = parseInt(document.getElementById('custom-height')?.value, 10);
+    if (!w || !h || w < 4 || h < 4) return [];
+    const name = document.getElementById('custom-name')?.value.trim() || `custom_${w}x${h}`;
+    return [{ name, width: w, height: h }];
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-    // Load menu bar
     const menuResponse = await fetch('menu-bar.html');
     document.getElementById('menu-bar-container').innerHTML = await menuResponse.text();
 
-    // Check converter status first
     await checkConverterStatus();
-    
-    // Load formats
-    await loadFormats();
-    
-    // Initialize file browser
     await initializeFileBrowser();
-    
-    // Setup drop zone
     setupDropZone();
-    
-    // Event listeners
+
+    // Custom checkbox toggle
+    document.getElementById('preset-custom')?.addEventListener('change', e => {
+        const inputs = document.getElementById('custom-resolution-inputs');
+        if (e.target.checked) inputs?.classList.remove('d-none');
+        else inputs?.classList.add('d-none');
+    });
+
     document.getElementById('start-conversion-btn').addEventListener('click', startConversion);
     document.getElementById('clear-selection-btn').addEventListener('click', clearSelection);
     document.getElementById('use-pattern-btn').addEventListener('click', togglePatternMode);
@@ -186,6 +204,10 @@ async function handleLocalFiles(files) {
 async function uploadFile(file) {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('presets', JSON.stringify(getSelectedPresets()));
+    formData.append('dxt_variant', getDxtVariant());
+    const custom = getCustomResolutions();
+    if (custom.length) formData.append('custom_resolutions', JSON.stringify(custom));
     
     const response = await fetch('/api/converter/upload', {
         method: 'POST',
@@ -349,10 +371,9 @@ async function checkConverterStatus() {
     try {
         const response = await fetch('/api/converter/status');
         const data = await response.json();
-        
-        if (!data.success || !data.ffmpeg_available) {
-            // Show installation instructions
-            showFFmpegInstallationGuide();
+
+        if (!data.success || !data.available) {
+            showConverterUnavailableAlert(data.error || 'Unknown error');
             document.getElementById('start-conversion-btn').disabled = true;
         }
     } catch (error) {
@@ -361,68 +382,22 @@ async function checkConverterStatus() {
     }
 }
 
-function showFFmpegInstallationGuide() {
+function showConverterUnavailableAlert(errorMsg) {
     const guide = document.createElement('div');
     guide.className = 'alert alert-warning alert-dismissible fade show';
     guide.innerHTML = `
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        <h5><i class="bi bi-exclamation-triangle"></i> FFmpeg Not Found</h5>
-        <p class="mb-2">FFmpeg is required for video conversion. Please install it:</p>
-        <div class="bg-dark p-3 rounded mb-3">
-            <code style="color: #0f0;">winget install Gyan.FFmpeg</code>
-        </div>
-        <p class="mb-2"><strong>Steps:</strong></p>
-        <ol class="mb-2">
-            <li>Open PowerShell as Administrator</li>
-            <li>Run the command above</li>
-            <li>Close and reopen PowerShell to refresh PATH</li>
-            <li>Verify with: <code>ffmpeg -version</code></li>
-            <li>Restart the Flux server</li>
-        </ol>
-        <p class="mb-0 small">
-            <strong>Alternative:</strong> Download manually from 
-            <a href="https://ffmpeg.org/download.html" target="_blank">ffmpeg.org/download.html</a>
-        </p>
+        <h5><i class="bi bi-exclamation-triangle"></i> Converter Unavailable</h5>
+        <p class="mb-2">${errorMsg}</p>
+        <p class="mb-0 small">Ensure <strong>imagecodecs</strong> is installed:
+            <code>pip install imagecodecs</code></p>
     `;
-    
-    // Insert at top of card body
     const cardBody = document.querySelector('.card-body');
     cardBody.insertBefore(guide, cardBody.firstChild);
 }
 
 async function loadFormats() {
-    try {
-        const response = await fetch('/api/converter/formats');
-        const data = await response.json();
-        availableFormats = data.formats;
-        
-        const container = document.getElementById('format-cards');
-        container.innerHTML = '';
-        
-        data.formats.forEach(format => {
-            const card = document.createElement('div');
-            card.className = 'col-md-3 mb-3';
-            card.innerHTML = `
-                <div class="card format-card ${format.id === selectedFormat ? 'selected' : ''}" 
-                     data-format="${format.id}">
-                    <div class="card-body text-center">
-                        <h5>${format.name}</h5>
-                        <p class="small mb-0">${format.description}</p>
-                    </div>
-                </div>
-            `;
-            container.appendChild(card);
-            
-            card.querySelector('.format-card').addEventListener('click', () => {
-                document.querySelectorAll('.format-card').forEach(c => c.classList.remove('selected'));
-                card.querySelector('.format-card').classList.add('selected');
-                selectedFormat = format.id;
-            });
-        });
-    } catch (error) {
-        console.error('Error loading formats:', error);
-        showToast('Error loading formats: ' + error.message, 'danger');
-    }
+    // No-op: format is now always HAP_NPY, shown as static UI
 }
 
 
@@ -458,8 +433,16 @@ async function startConversion() {
         await convertMultipleFiles(filesToConvert);
         return;
     }
-    
+
     const outputDir = document.getElementById('output-dir').value.trim();
+    const presets = getSelectedPresets();
+    const dxtVariant = getDxtVariant();
+    const customResolutions = getCustomResolutions();
+
+    if (presets.length === 0 && customResolutions.length === 0) {
+        showToast('Please select at least one resolution preset.', 'warning');
+        return;
+    }
     
     // Show progress section
     document.getElementById('progress-section').classList.add('active');
@@ -475,15 +458,18 @@ async function startConversion() {
         const requestBody = {
             input_pattern: inputPattern,
             output_dir: outputDir,
-            format: selectedFormat,
+            presets,
+            dxt_variant: dxtVariant,
+            custom_resolutions: customResolutions,
         };
         
         console.log('Sending conversion request:', requestBody);
         
-        const response = await fetch('/api/converter/batch', {
+        // Use start endpoint for pattern mode (converts all matching files)
+        const response = await fetch('/api/converter/convert/start', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify({ source_path: inputPattern, presets, dxt_variant: dxtVariant, custom_resolutions: customResolutions })
         });
         
         const data = await response.json();
@@ -520,6 +506,14 @@ async function startConversion() {
 }
 
 async function convertMultipleFiles(files) {
+    const presets = getSelectedPresets();
+    const dxtVariant = getDxtVariant();
+    const customResolutions = getCustomResolutions();
+
+    if (presets.length === 0 && customResolutions.length === 0) {
+        showToast('Please select at least one resolution preset.', 'warning');
+        return;
+    }
     // Show progress section
     document.getElementById('progress-section').classList.add('active');
     document.getElementById('results-summary').classList.add('d-none');
@@ -545,7 +539,12 @@ async function convertMultipleFiles(files) {
                 const response = await fetch('/api/converter/convert/start', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ source_path: filePath })
+                    body: JSON.stringify({
+                        source_path: filePath,
+                        presets,
+                        dxt_variant: dxtVariant,
+                        custom_resolutions: customResolutions,
+                    })
                 });
                 
                 const data = await response.json();

@@ -393,6 +393,129 @@ def register_layer_routes(app, player_manager, config):
             import traceback
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
-    
-    
+
+
+    @app.route('/api/player/<player_id>/layers/duration-mode', methods=['GET', 'PATCH'])
+    def layer_duration_mode(player_id):
+        """
+        GET  → return current duration mode for this player's layer stack.
+        PATCH → set it.
+
+        Valid modes:
+            'master'    stop when layer 0 completes one pass (default)
+            'longest'   loop master until all slave layers have completed ≥ 1 pass
+            'shortest'  stop as soon as any layer completes one pass
+            'layer_N'   loop master until layer N has completed ≥ 1 pass (N = layer_id int)
+        """
+        VALID_PREFIXES = {'master', 'longest', 'shortest'}
+        player = player_manager.get_player(player_id)
+        if not player:
+            return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+
+        if request.method == 'GET':
+            mode = getattr(player.layer_manager, 'layer_duration_mode', 'master')
+            return jsonify({"success": True, "player_id": player_id, "duration_mode": mode}), 200
+
+        # PATCH
+        data = request.get_json() or {}
+        mode = data.get('mode', '')
+        if not isinstance(mode, str):
+            return jsonify({"success": False, "error": "mode must be a string"}), 400
+        valid = mode in VALID_PREFIXES or (mode.startswith('layer_') and mode[6:].isdigit())
+        if not valid:
+            return jsonify({"success": False,
+                            "error": f"Invalid mode '{mode}'. Use master/longest/shortest/layer_N"}), 400
+
+        player.layer_manager.layer_duration_mode = mode
+        # Reset play-count on all slave layers so the new mode starts fresh
+        for lyr in player.layers[1:]:
+            lyr._play_count = 0
+        logger.debug(f"⏱ [{player_id}] layer_duration_mode → {mode}")
+        return jsonify({"success": True, "player_id": player_id, "duration_mode": mode}), 200
+
+
+    @app.route('/api/player/<player_id>/layers/<int:layer_id>/align-to/<int:target_layer_id>', methods=['POST'])
+    def align_layer_to(player_id, layer_id, target_layer_id):
+        """
+        Compute and apply the Transport speed multiplier needed to make
+        *layer_id* finish at the same time as *target_layer_id*.
+
+        Both layers must have total_frames > 0 on their source.
+        The speed is written to the Transport effect of *layer_id* (added
+        automatically if missing).  The computed value is also returned so
+        the UI can update the speed slider without a round-trip.
+
+        Returns:
+            {success, player_id, layer_id, target_layer_id, speed, total_frames, target_total_frames}
+        """
+        try:
+            player = player_manager.get_player(player_id)
+            if not player:
+                return jsonify({"success": False, "error": f"Player '{player_id}' not found"}), 404
+
+            layer = player.get_layer(layer_id)
+            target = player.get_layer(target_layer_id)
+            if not layer:
+                return jsonify({"success": False, "error": f"Layer {layer_id} not found"}), 404
+            if not target:
+                return jsonify({"success": False, "error": f"Target layer {target_layer_id} not found"}), 404
+
+            src_frames = getattr(layer.source, 'total_frames', 0)
+            tgt_frames = getattr(target.source, 'total_frames', 0)
+            if not src_frames or not tgt_frames:
+                return jsonify({"success": False,
+                                "error": "Both layers need total_frames > 0 (video or finite generator)"}), 400
+
+            src_fps = getattr(layer.source, 'fps', 30.0) or 30.0
+            tgt_fps = getattr(target.source, 'fps', 30.0) or 30.0
+
+            # speed = (src_duration / tgt_duration)
+            # src_duration  = src_frames / src_fps   seconds this layer takes at 1×
+            # tgt_duration  = tgt_frames / tgt_fps   seconds the target takes
+            src_duration = src_frames / src_fps
+            tgt_duration = tgt_frames / tgt_fps
+            speed = round(src_duration / tgt_duration, 4)
+
+            # Apply to Transport effect on the layer (create one if absent)
+            transport_effect = next(
+                (e for e in layer.effects if e.get('id') == 'transport' and e.get('instance')), None
+            )
+            if transport_effect:
+                transport_effect['instance'].update_parameter('speed', speed)
+                # Persist to effect config dict too
+                transport_effect.setdefault('config', {})['speed'] = speed
+                # Also update clip registry so reloads (e.g. on opacity change) use the aligned speed
+                layer_clip_id = getattr(layer, 'clip_id', None)
+                if layer_clip_id:
+                    registry_effects = clip_registry.get_clip_effects(layer_clip_id)
+                    for reg_effect in registry_effects:
+                        if reg_effect.get('plugin_id') == 'transport':
+                            reg_effect.setdefault('parameters', {})['speed'] = speed
+                            break
+            else:
+                logger.warning(
+                    f"⚠️ [{player_id}] Layer {layer_id} has no Transport effect — "
+                    f"speed={speed} computed but not applied (add Transport first)"
+                )
+
+            logger.debug(
+                f"⇔ [{player_id}] align layer {layer_id} ({src_frames}fr@{src_fps}fps) "
+                f"→ layer {target_layer_id} ({tgt_frames}fr@{tgt_fps}fps): speed={speed}"
+            )
+            return jsonify({
+                "success": True,
+                "player_id": player_id,
+                "layer_id": layer_id,
+                "target_layer_id": target_layer_id,
+                "speed": speed,
+                "total_frames": src_frames,
+                "target_total_frames": tgt_frames,
+                "has_transport": transport_effect is not None,
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Error aligning layer {layer_id} to {target_layer_id}: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
+
     logger.debug("✅ Layer API routes registered")

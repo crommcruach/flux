@@ -339,7 +339,7 @@ def register_unified_routes(app, player_manager, config, socketio=None, playlist
     # ========================================
     # CLIP EFFECTS
     # ========================================
-    
+
     @app.route('/api/player/<player_id>/clip/<clip_id>/effects', methods=['GET'])
     def get_clip_effects(player_id, clip_id):
         """Returns all effects of a clip with live parameters from active instances."""

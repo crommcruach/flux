@@ -18,10 +18,77 @@
     <div class="converter-container">
         <div class="card">
             <div class="card-body">
-                <!-- Step 1: Format Selection -->
+                <!-- Step 1: Resolution & Format Selection -->
                 <div class="mb-4">
-                    <h5>1. Select Output Format</h5>
-                    <div class="row" id="format-cards"></div>
+                    <h5>1. Select Resolutions &amp; Format</h5>
+
+                    <!-- Resolution Presets -->
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Output Resolutions</label>
+                        <div class="d-flex flex-wrap gap-3" id="preset-checkboxes">
+                            <div class="form-check">
+                                <input class="form-check-input preset-cb" type="checkbox" value="720p" id="preset-720p" checked>
+                                <label class="form-check-label" for="preset-720p">720p <small class="text-muted">(1280×720)</small></label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input preset-cb" type="checkbox" value="1080p" id="preset-1080p" checked>
+                                <label class="form-check-label" for="preset-1080p">1080p <small class="text-muted">(1920×1080)</small></label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input preset-cb" type="checkbox" value="1440p" id="preset-1440p" checked>
+                                <label class="form-check-label" for="preset-1440p">1440p <small class="text-muted">(2560×1440)</small></label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input preset-cb" type="checkbox" value="2160p" id="preset-2160p" checked>
+                                <label class="form-check-label" for="preset-2160p">4K <small class="text-muted">(3840×2160)</small></label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="preset-custom">
+                                <label class="form-check-label" for="preset-custom">Custom</label>
+                            </div>
+                        </div>
+
+                        <!-- Custom resolution inputs (hidden until Custom is checked) -->
+                        <div class="mt-2 d-none" id="custom-resolution-inputs">
+                            <div class="row g-2 align-items-end" style="max-width: 420px;">
+                                <div class="col">
+                                    <label class="form-label small mb-1">Width (px)</label>
+                                    <input type="number" class="form-control form-control-sm" id="custom-width"
+                                           placeholder="e.g. 1920" min="4" step="4">
+                                </div>
+                                <div class="col">
+                                    <label class="form-label small mb-1">Height (px)</label>
+                                    <input type="number" class="form-control form-control-sm" id="custom-height"
+                                           placeholder="e.g. 1080" min="4" step="4">
+                                </div>
+                                <div class="col-auto">
+                                    <label class="form-label small mb-1">Name</label>
+                                    <input type="text" class="form-control form-control-sm" id="custom-name"
+                                           placeholder="e.g. my_res" style="width: 100px;">
+                                </div>
+                            </div>
+                            <small class="text-muted">Dimensions are auto-snapped to the nearest multiple of 4.</small>
+                        </div>
+                    </div>
+
+                    <!-- DXT Variant -->
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">Compression</label>
+                        <div class="d-flex gap-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="dxt-variant" id="dxt-bc1" value="bc1" checked>
+                                <label class="form-check-label" for="dxt-bc1">
+                                    BC1 (RGB) <small class="text-muted">— 6:1, no alpha</small>
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="dxt-variant" id="dxt-bc3" value="bc3">
+                                <label class="form-check-label" for="dxt-bc3">
+                                    BC3 (RGBA) <small class="text-muted">— 3:1, with alpha</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Step 2: File Selection -->
